@@ -3896,6 +3896,20 @@ select.tw-select-arrow {
 </div>
 @endif
 
+{{-- ══ CLEAN-URL SCRIPT (strip ?job=46 from address bar on load) ══ --}}
+<script>
+    (function () {
+        // Pure client-side: just rewrites the address bar in place so the
+        // URL shows /director/job/management instead of ?job=46 — no
+        // navigation, no reload, so it never touches the View Details
+        // modal that the server already opened on this page load.
+        if (window.location.search.indexOf('job=') !== -1) {
+            var cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, '', cleanUrl);
+        }
+    })();
+</script>
+
 {{-- ══ ROW HOVER TOOLTIP + DEADLINE-OVERLAY TOOLTIP SCRIPT ══ --}}
 <script>
 (function () {

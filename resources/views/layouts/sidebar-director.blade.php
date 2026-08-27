@@ -13,6 +13,11 @@
     @livewireStyles
 
     <style>
+        /* ── Disable Livewire wire:navigate top progress bar (nprogress) ── */
+        #nprogress {
+            display: none !important;
+        }
+
         [x-cloak] { display: none !important; }
         .no-scrollbar {
             -ms-overflow-style: none;
@@ -22,6 +27,12 @@
             overscroll-behavior-y: contain;
         }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+
+        /* ── Mobile viewport height fix ── */
+        .dir-app-shell {
+            height: 100vh;
+            height: 100dvh;
+        }
 
         /* ── Topbar bell (all screen sizes) ── */
         .dir-topbar-bell {
@@ -50,29 +61,16 @@
             border: none !important;
         }
 
-        .bell-badge {
-            pointer-events: none;
-            transition: transform 0.15s ease;
+        .bell-badge { pointer-events: none; }
+        .dir-notif-item {
+            cursor: pointer;
+            position: relative;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
         }
-        /* ── Smooth ambient pulse ring around the unread badge ──
-           Purely additive/decorative: a soft expanding ring behind the
-           badge dot so new-notification state reads as "alive" without
-           being distracting (slow, subtle, no color harshness). */
-        .bell-badge::after {
-            content: '';
-            position: absolute;
-            inset: -3px;
-            border-radius: 9999px;
-            background: rgba(239, 68, 68, 0.45);
-            z-index: -1;
-            animation: dir-badge-pulse 2.2s ease-out infinite;
-        }
-        @keyframes dir-badge-pulse {
-            0%   { transform: scale(1);   opacity: 0.55; }
-            70%  { transform: scale(1.9); opacity: 0; }
-            100% { transform: scale(1.9); opacity: 0; }
-        }
-        .dir-notif-item { cursor: pointer; position: relative; }
 
         .dir-notif-close-wrap {
             position: relative;
@@ -111,6 +109,86 @@
         .dir-notif-close-wrap:hover .dir-notif-close-tip { opacity: 1; }
         @media (max-width: 1023px) {
             .dir-notif-close-tip { display: none !important; }
+        }
+
+        /* ── Delete icon (only shown once notif is 30+ days old) ──
+           Sits at the end of the time row, next to the timestamp.
+           Red icon by default so it's visible right away once it
+           appears (not just on hover), with a slightly deeper red +
+           light-red bg on hover for feedback. */
+        .dir-notif-delete-btn {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 7px;
+            border: none;
+            background: transparent;
+            color: #DC2626;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background-color .15s ease, color .15s ease;
+        }
+        .dir-notif-delete-btn:hover {
+            background: #FDE8E8;
+            color: #B91C1C;
+        }
+        .dir-notif-delete-btn i { font-size: .95rem; pointer-events: none; }
+
+        .dir-notif-delete-tooltip {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            right: 0;
+            background: #DC2626;
+            color: #fff;
+            font-size: .62rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            padding: 4px 8px;
+            border-radius: 6px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(2px);
+            transition: opacity .12s ease, transform .12s ease;
+            z-index: 10;
+        }
+        .dir-notif-delete-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            right: 7px;
+            border: 4px solid transparent;
+            border-top-color: #DC2626;
+        }
+        .dir-notif-delete-btn:hover .dir-notif-delete-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ── Read/Unread section divider ─────────────────────────── */
+        .dir-notif-divider {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px 6px;
+        }
+        .dir-notif-divider::before,
+        .dir-notif-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #ECE2F8;
+        }
+        .dir-notif-divider-label {
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #B9A6C7;
+            white-space: nowrap;
         }
 
         /* ════════════════════════════════════════════════════════
@@ -171,19 +249,65 @@
 
         .dir-nav-link {
             position: relative;
-            transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+            transition: background-color 0.2s ease, transform 0.15s ease;
         }
         .dir-nav-link:not(.is-active):hover {
-            background: #FAFAFC;
+            background: #FAF6FE;
         }
         .dir-nav-link:not(.is-active):hover .dir-nav-icon {
             transform: scale(1.07);
         }
         .dir-nav-link.is-active {
-            background: #FAFAFC;
-            border: 1px solid #E8E0F0; /* overridden per-link via inline border-color */
+            background: #F3EBFA;
+            border: 1px solid #E0CFEE;
         }
-        .dir-nav-icon { transition: transform 0.2s ease; }
+        .dir-nav-icon { transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease; }
+
+        /* ── Color-coded nav icons — each destination gets its own accent
+           so the sidebar can be scanned by color, not just by label. ── */
+        .dir-nav-icon.clr-dashboard    { background: #DBEAFE !important; color: #2563EB !important; }
+        .dir-nav-icon.clr-coordinator  { background: #FDEBD3 !important; color: #B45309 !important; }
+        .dir-nav-icon.clr-event        { background: #DCFCE7 !important; color: #16A34A !important; }
+        .dir-nav-icon.clr-job          { background: #DBEAFE !important; color: #0284C7 !important; }
+        .dir-nav-icon.clr-chat         { background: #FCE7F3 !important; color: #DB2777 !important; }
+
+        .dir-nav-link.is-active .dir-nav-icon {
+            background: #FFFFFF !important;
+            color: #7A3F91 !important;
+        }
+
+        /* ── Bell "sonar" alert — two staggered rings ping out from the
+           badge dot like a radar sweep, runs continuously while there is
+           at least one unread notification. The second ring is delayed
+           half a cycle behind the first so a new ring is always mid-fade
+           somewhere, instead of one plain ring blinking on/off. ── */
+        .dir-bell-wave {
+            position: absolute;
+            inset: -6px;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        .dir-bell-wave::before,
+        .dir-bell-wave::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 2px solid #DC2626;
+            opacity: 0;
+        }
+        .dir-bell-wave.is-active::before {
+            animation: dir-bell-sonar 1.8s cubic-bezier(.25,.6,.4,1) infinite;
+        }
+        .dir-bell-wave.is-active::after {
+            animation: dir-bell-sonar 1.8s cubic-bezier(.25,.6,.4,1) infinite;
+            animation-delay: 0.9s;
+        }
+        @keyframes dir-bell-sonar {
+            0%   { transform: scale(0.6) rotate(0deg);   opacity: 0.6; border-color: #DC2626; }
+            60%  { transform: scale(1.4) rotate(20deg);  opacity: 0.18; border-color: #F87171; }
+            100% { transform: scale(1.9) rotate(35deg);  opacity: 0;   border-color: #F87171; }
+        }
 
         .dir-collapsible-text {
             opacity: 1;
@@ -430,6 +554,12 @@
     <script>
     // ─────────────────────────────────────────────────────────────────────────
     //  LOGOUT-IN-PROGRESS FLAG
+    //  Set to true the instant the Logout button is clicked (before the
+    //  POST /logout request is even sent). Every 419-handling path below
+    //  checks this flag first and bails out silently if it's true — because
+    //  once we're logging out, a 419 is EXPECTED (session is being killed)
+    //  and should never trigger the session-expired modal or any fallback
+    //  page content, soft or raw.
     // ─────────────────────────────────────────────────────────────────────────
     window.__dirLoggingOut = false;
 
@@ -444,6 +574,17 @@
 
     // ─────────────────────────────────────────────────────────────────────────
     //  SESSION / CSRF EXPIRED (419) — SOFT RECOVERY
+    //  Instead of letting Livewire swap in Laravel's raw "Page Expired" HTML
+    //  (which looks like the whole app broke), we intercept the failed
+    //  request, suppress the default full-page replace, and show a small
+    //  branded modal asking the user to refresh. Clicking refresh does a
+    //  normal location.reload(), which mints a fresh session + CSRF token.
+    //
+    //  EXCEPTION: if the user is actively logging out (__dirLoggingOut),
+    //  we suppress this entirely — a 419 during logout is expected (the
+    //  session was just destroyed server-side) and should not surface
+    //  anything to the user, since they're already being redirected to
+    //  the login page.
     // ─────────────────────────────────────────────────────────────────────────
     window.__dirShowSessionExpired = function () {
         if (window.__dirLoggingOut) return;
@@ -457,6 +598,9 @@
         Livewire.hook('request', function ({ fail }) {
             fail(({ status, preventDefault }) => {
                 if (status === 419) {
+                    // Stop Livewire from dumping the raw expired-page HTML
+                    // into the DOM — show our own modal instead (unless
+                    // we're logging out, in which case show nothing).
                     preventDefault();
                     window.__dirShowSessionExpired();
                 }
@@ -464,12 +608,22 @@
         });
     });
 
+    // Fallback for older Livewire versions / plain fetch-based failures
+    // that don't go through the hook above (defensive double-cover).
     window.addEventListener('livewire:navigate:failed', function () {
         window.__dirShowSessionExpired();
     });
 
     // ─────────────────────────────────────────────────────────────────────────
     //  STOP ALL BACKGROUND POLLING ON LOGOUT
+    //  Fired from the logout <form>'s @submit handler, BEFORE the POST
+    //  request is sent. This kills the Alpine-store notification poll
+    //  (_pollTimer) immediately so no stale-session fetch can race the
+    //  logout request and trip a 419. Combined with the __dirLoggingOut
+    //  flag above (which mutes any 419 handling that still slips through
+    //  from the Livewire wire:poll on dir-notif-poller), this closes
+    //  the race condition that caused "This page has expired" to flash
+    //  right before the redirect to /login.
     // ─────────────────────────────────────────────────────────────────────────
     window.addEventListener('stop-dir-polling', function () {
         window.__dirLoggingOut = true;
@@ -495,11 +649,41 @@
         'director.director/messenger':     '/director/messenger',
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  PER-ICON COLOR MAP (each notif type gets its own color)
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__dirIconColors = {
+        'comments':        { bg: '#FCE7F3', color: '#DB2777' }, // messages — pink
+        'briefcase':       { bg: '#DBEAFE', color: '#0369A1' }, // job posting — blue
+        'circle-check':    { bg: '#D1FAE5', color: '#059669' }, // activated — green
+        'circle-pause':    { bg: '#FEF3C7', color: '#D97706' }, // deactivated — orange
+        'rotate-left':     { bg: '#DBEAFE', color: '#0284C7' }, // restored — blue
+        'calendar-check':  { bg: '#D1FAE5', color: '#047857' }, // event — green
+        'calendar':        { bg: '#FEE2E2', color: '#DC2626' }, // event rejected — red
+        'calendar-days':   { bg: '#F3EBFA', color: '#7A3F91' }, // new/resubmitted event for review — purple
+        'users-gear':      { bg: '#FDEBD3', color: '#B45309' }, // coordinator — amber
+        'user-plus':       { bg: '#FFE8D1', color: '#B45309' }, // alumni registered — amber
+        'user-group':      { bg: '#FFE8D1', color: '#B45309' }, // alumni — amber
+        'pen-to-square':   { bg: '#EDE9FE', color: '#6D28D9' }, // job updated — violet
+        'trash':           { bg: '#FEE2E2', color: '#DC2626' }, // deleted — red
+        'bell':            { bg: '#F3F4F6', color: '#6B7280' }, // default — gray
+    };
+    window.__dirIconBg = function (icon) {
+        return (window.__dirIconColors[icon] || window.__dirIconColors['bell']).bg;
+    };
+    window.__dirIconColor = function (icon) {
+        return (window.__dirIconColors[icon] || window.__dirIconColors['bell']).color;
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  STORE FACTORY
+    // ─────────────────────────────────────────────────────────────────────────
     window.__makeDirNotifsStore = function () {
         return {
-            open:       false,
-            items:      [],
-            _pollTimer: null,
+            open:        false,
+            items:       [],
+            _pollTimer:  null,
+            deleteToast: { show: false, message: '' },
 
             async init() {
                 if (window.__dirLoggingOut) return;
@@ -523,6 +707,7 @@
 
             async _fetch() {
                 if (window.__dirLoggingOut) return;
+                if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
                 try {
                     var res = await window.fetch('/director/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -535,7 +720,7 @@
                         var raw = await res.json();
                         this.items = this._groupByDay(raw);
                     }
-                } catch (e) {}
+                } catch (e) { /* silently fail */ }
             },
 
             _groupByDay(rows) {
@@ -615,6 +800,11 @@
                                 g.message = g.count + ' alumni update(s) today.';
                             }
 
+                            g.link_route = n.link_route || g.link_route;
+                            g.job_id     = n.job_id     || g.job_id;
+                            g.event_id   = n.event_id   || g.event_id;
+                            g.created_at = g.created_at || n.created_at;
+
                         } else {
                             var entry = Object.assign({}, n, {
                                 count: rowCount,
@@ -644,7 +834,17 @@
                         }
                     });
 
-                return Array.from(map.values());
+                var result = Array.from(map.values());
+
+                // Unread items float to the top (newest first), read items
+                // sit below (also newest first) — mirrors coordinator's
+                // sort so the panel behaves the same way across roles.
+                result.sort(function (a, b) {
+                    if (!!a.read !== !!b.read) return a.read ? 1 : -1;
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
+
+                return result;
             },
 
             get unread() {
@@ -670,7 +870,7 @@
                             }
                         });
                         if (r.status === 419) { window.__dirShowSessionExpired(); return; }
-                    } catch (e) {}
+                    } catch (e) { /* ignore */ }
                 }
             },
 
@@ -686,7 +886,7 @@
                         }
                     });
                     if (r.status === 419) { window.__dirShowSessionExpired(); }
-                } catch (e) {}
+                } catch (e) { /* ignore */ }
             },
 
             async markReadByRoute(routeName) {
@@ -709,13 +909,81 @@
                                 }
                             });
                             if (r.status === 419) { window.__dirShowSessionExpired(); return; }
-                        } catch (e) {}
+                        } catch (e) { /* ignore */ }
                     }
                 }
+            },
+
+            // Deletes a notification MESSAGE only — never the underlying
+            // job, event, or chat data that generated it. This just clears
+            // the row(s) from the `notifications` table so the panel/list
+            // gets shorter; the actual data this notif was about is
+            // untouched.
+            //
+            // Available on every notif now (no age restriction) — purely
+            // a "clean up noise" action, not a moderation action on real
+            // data.
+            async deleteNotif(item) {
+                if (window.__dirLoggingOut) return;
+                var ids = item._ids || [item.id];
+                var self = this;
+                this._deleting = true;
+                this._showDeleteToast('Notification deleted');
+
+                // Give the slide-out leave transition time to play before
+                // actually removing the item from the array — removing it
+                // immediately would skip straight past x-transition:leave.
+                await new Promise(function (resolve) { setTimeout(resolve, 250); });
+                this.items = this.items.filter(function (n) { return n !== item; });
+
+                var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                var failedIds = [];
+
+                for (var i = 0; i < ids.length; i++) {
+                    try {
+                        var res = await window.fetch('/director/notifications/' + ids[i], {
+                            method: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN':     csrf,
+                                'X-Requested-With': 'XMLHttpRequest',
+                            }
+                        });
+                        if (res.status === 419) { window.__dirShowSessionExpired(); }
+                        if (!res.ok) failedIds.push(ids[i]);
+                    } catch (e) {
+                        failedIds.push(ids[i]);
+                    }
+                }
+
+                this._deleting = false;
+
+                // If any delete calls actually failed server-side, put the
+                // item back rather than silently losing it from view while
+                // it still exists in the DB.
+                if (failedIds.length > 0) {
+                    await this._fetch();
+                    this._showDeleteToast('Delete failed, please try again');
+                }
+            },
+
+            // Small self-clearing toast shown at the edge of the notif
+            // panel. Re-triggerable: calling this again while a toast is
+            // already showing resets its timer instead of stacking.
+            _showDeleteToast(message) {
+                var self = this;
+                this.deleteToast.message = message;
+                this.deleteToast.show = true;
+                if (this._toastTimer) clearTimeout(this._toastTimer);
+                this._toastTimer = setTimeout(function () {
+                    self.deleteToast.show = false;
+                }, 2200);
             },
         };
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SAFE ACCESSOR
+    // ─────────────────────────────────────────────────────────────────────────
     window.__safeDirNotifsStore = function () {
         try {
             if (window.Alpine && typeof Alpine.store === 'function') {
@@ -791,19 +1059,6 @@
         }
     });
 
-    document.addEventListener('dir-notif-refresh', function () {
-        if (window.__dirLoggingOut) return;
-        var s = window.__safeDirNotifsStore();
-        if (s) {
-            s._fetch();
-            setTimeout(function () {
-                if (window.__dirLoggingOut) return;
-                var s2 = window.__safeDirNotifsStore();
-                if (s2) s2._fetch();
-            }, 800);
-        }
-    });
-
     // ─────────────────────────────────────────────────────────────────────────
     //  PANEL POSITIONING — desktop only (mobile is handled entirely by CSS, full screen)
     // ─────────────────────────────────────────────────────────────────────────
@@ -834,6 +1089,9 @@
         s.markReadByRoute(routeName);
     };
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  NOTIFICATION EVENT LISTENERS
+    // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstDirNotifListeners) {
         window.__philcstDirNotifListeners = true;
 
@@ -866,7 +1124,7 @@
                     var s2 = window.__safeDirNotifsStore();
                     if (s2) await s2._fetch();
                 }, 600);
-            } catch (e) {}
+            } catch (e) { /* ignore */ }
         }
 
         window.addEventListener('dir-coordinator-updated', function (e) {
@@ -908,6 +1166,7 @@
                 message:    (d.title || 'An event') + ' has been updated.',
                 link_route: 'director.event/management',
                 link_label: 'View Events',
+                event_id:   d.id || null,
                 dedup_key:  'event-management::' + (d.id || Math.floor(Date.now() / 60000)),
             });
         });
@@ -921,6 +1180,7 @@
                 message:    (d.title || 'A job posting') + ' has been updated.',
                 link_route: 'director.job/management',
                 link_label: 'View Jobs',
+                job_id:     d.id || null,
                 dedup_key:  'job-management::' + (d.id || Math.floor(Date.now() / 60000)),
             });
         });
@@ -964,7 +1224,7 @@
     @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
     @open-sidebar.window="sidebarHiddenByModal = false;">
 
-<div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
+<div class="dir-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
     <div
         x-show="open"
@@ -1024,92 +1284,87 @@
             </div>
 
             @php
+                // NOTE: 'pattern' matches the ACTUAL URL path (see routes/web.php),
+                // not the route name — request()->is() matches against the URL path.
                 $sidebarLinks = [
                     [
                         'route'   => 'director.dashboard',
                         'icon'    => 'gauge-high',
                         'label'   => 'Dashboard',
                         'pattern' => 'director/dashboard*',
-                        'color'   => '#7A3F91', // purple (brand default)
+                        'color'   => 'clr-dashboard',
                     ],
                     [
                         'route'   => 'director.coordinator/management',
                         'icon'    => 'users-gear',
                         'label'   => 'Coordinator Management',
                         'pattern' => 'director/coordinator/management*',
-                        'color'   => '#D97706', // amber
+                        'color'   => 'clr-coordinator',
                     ],
                     [
                         'route'   => 'director.event/management',
                         'icon'    => 'calendar-check',
                         'label'   => 'Events Overview',
                         'pattern' => 'director/event/management*',
-                        'color'   => '#059669', // emerald
+                        'color'   => 'clr-event',
                     ],
                     [
                         'route'   => 'director.job/management',
                         'icon'    => 'briefcase',
                         'label'   => 'Jobs Overview',
                         'pattern' => 'director/job/management*',
-                        'color'   => '#0284C7', // sky blue
+                        'color'   => 'clr-job',
                     ],
                     [
                         'route'   => 'director.director/messenger',
                         'icon'    => 'comments',
                         'label'   => 'Chat Room',
                         'pattern' => 'director/messenger*',
-                        'color'   => '#DB2777', // pink/rose
+                        'color'   => 'clr-chat',
                     ],
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
-                @php
-                    $isActive  = request()->is($link['pattern']);
-                    $linkColor = $link['color'] ?? '#7A3F91';
-
-                    // Build a very light tint of the link color for the
-                    // "active" icon-box background ring, so each module's
-                    // active state still reads as that module's color
-                    // instead of falling back to flat purple/white.
-                    $hex = ltrim($linkColor, '#');
-                    if (strlen($hex) === 3) {
-                        $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
-                    }
-                    $r = hexdec(substr($hex, 0, 2));
-                    $g = hexdec(substr($hex, 2, 2));
-                    $b = hexdec(substr($hex, 4, 2));
-                @endphp
+                @php $isActive = request()->is($link['pattern']); @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
                    @click="window.__dirSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
                    class="dir-nav-link {{ $isActive ? 'is-active' : '' }}
-                          flex items-center px-4 py-3 rounded-xl group"
-                   @if($isActive) style="border-color: rgba({{ $r }},{{ $g }},{{ $b }},0.28);" @endif>
+                          flex items-center px-4 py-3 rounded-xl group">
 
-                    <div class="dir-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
-                         style="background-color:{{ $isActive ? '#FFFFFF' : "rgba({$r},{$g},{$b},0.10)" }};
-                                color:{{ $linkColor }};
-                                box-shadow:{{ $isActive ? "0 2px 6px rgba({$r},{$g},{$b},0.25)" : 'none' }};">
+                    <div class="dir-nav-icon {{ $link['color'] }} w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
+                         style="box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
                     </div>
 
-                    <span class="dir-nav-label dir-collapsible-text font-medium tracking-wide flex-1 text-[14px]"
-                          style="color:{{ $isActive ? $linkColor : '#3A3A3A' }};
-                                 font-weight:{{ $isActive ? '700' : '500' }};">
+                    <span class="dir-nav-label dir-collapsible-text font-medium tracking-wide flex-1 text-[14px]
+                                 {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
 
                     @if($isActive)
                         <span class="dir-active-dot dir-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
-                              style="background:{{ $linkColor }};"></span>
+                              style="background:#7A3F91;"></span>
                     @endif
                 </a>
             @endforeach
         </nav>
 
         {{-- ══ BACKGROUND NOTIF POLLER ══ --}}
+        {{--
+            IMPORTANT: this Livewire component is what caused the "This page
+            has expired" flash on logout. Its wire:poll request runs through
+            Livewire's own request pipeline, and can be in-flight (or fire)
+            the instant the session/CSRF token is destroyed by POST /logout,
+            right before the redirect navigates away.
+
+            We stop it from ever making a poll request AGAIN after logout
+            starts by wiring wire:poll to a condition that goes false the
+            moment __dirLoggingOut flips true (see @submit on the logout
+            form below, and the 'stop-dir-polling' listener above).
+        --}}
         <div wire:ignore.self x-data="{ pollingActive: true }" x-on:stop-dir-polling.window="pollingActive = false">
             <template x-if="pollingActive">
                 @livewire('director.director-notif-poller')
@@ -1168,6 +1423,8 @@
                 title="Notifications"
                 aria-label="Open notifications"
                 class="dir-topbar-bell">
+                <span class="dir-bell-wave"
+                      :class="$store.dirNotifs && $store.dirNotifs.unread > 0 ? 'is-active' : ''"></span>
                 <i class="bell-icon fas fa-bell"
                    :class="$store.dirNotifs && $store.dirNotifs.unread > 0 ? 'fa-shake' : ''"
                    style="font-size:20px; color:#7A3F91;
@@ -1198,9 +1455,6 @@
              director dashboard: account card + stat cards + breakdown
              panels) had nowhere for the overflow to go — it was just
              clipped, full stop, with no way to reach what's below the fold.
-             That's exactly the bug in the screenshot: stuck right at "Job
-             Postings" with no way down to the Coordinators/table section
-             below it.
 
              Pages like Manage Coordinator that WANT a fixed-height shell
              with only their own inner table scrolling (header/filters/
@@ -1250,7 +1504,7 @@
 
     {{-- Panel Header --}}
     <div class="flex items-center justify-between px-5 py-4 shrink-0"
-         style="background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+         style="background:#7A3F91;">
         <div class="flex items-center gap-2.5">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center"
                  style="background:rgba(255,255,255,0.14);">
@@ -1298,6 +1552,30 @@
         </span>
     </div>
 
+    {{-- Delete toast — slides in ABOVE the list, inside the panel --}}
+    <div
+        x-show="$store.dirNotifs && $store.dirNotifs.deleteToast.show"
+        x-cloak
+        x-transition:enter="transition ease-out duration-200"
+        x-transition:enter-start="opacity-0 -translate-y-2"
+        x-transition:enter-end="opacity-100 translate-y-0"
+        x-transition:leave="transition ease-in duration-150"
+        x-transition:leave-start="opacity-100 translate-y-0"
+        x-transition:leave-end="opacity-0 -translate-y-2"
+        style="
+            background: #ECFDF3;
+            border-bottom: 1px solid #BBF7D0;
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        ">
+        <i class="fas fa-circle-check" style="font-size:13px; color:#16A34A;"></i>
+        <span style="font-size:12.5px; font-weight:600; color:#15803D;"
+              x-text="$store.dirNotifs ? $store.dirNotifs.deleteToast.message : ''"></span>
+    </div>
+
     {{-- Scrollable notification list --}}
     <div class="dir-notif-list-scroll overflow-y-auto no-scrollbar flex-1" style="max-height: 420px;">
 
@@ -1315,46 +1593,44 @@
         </template>
 
         <template x-if="$store.dirNotifs">
-            <template x-for="notif in $store.dirNotifs.items" :key="notif.id">
+            <template x-for="(notif, notifIdx) in $store.dirNotifs.items" :key="notif.id">
+                <div
+                    x-transition:leave="transition ease-in duration-250"
+                    x-transition:leave-start="opacity-100 translate-x-0"
+                    x-transition:leave-end="opacity-0 translate-x-full"
+                    style="overflow: hidden;">
+                    <div class="dir-notif-divider"
+                         x-show="notif.read && notifIdx > 0 && !$store.dirNotifs.items[notifIdx - 1].read"
+                         x-cloak>
+                        <span class="dir-notif-divider-label">Already Read</span>
+                    </div>
                 <div
                     class="dir-notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
                     :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
+                    oncontextmenu="return false;"
+                    ondragstart="return false;"
                     @click.stop="
                         $store.dirNotifs.markRead(notif);
                         $store.dirNotifs.close();
                         if (notif.link_route) {
-                            const url = window.__dirRouteMap[notif.link_route] || '/director/dashboard';
+                            let url = window.__dirRouteMap[notif.link_route] || '/director/dashboard';
+                            if (notif.link_route === 'director.event/management' && notif.event_id) {
+                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'event=' + encodeURIComponent(notif.event_id);
+                            } else if (notif.link_route === 'director.job/management' && notif.job_id) {
+                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'job=' + encodeURIComponent(notif.job_id);
+                            }
                             window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
                         }
                     ">
 
-                    {{-- Icon — tinted per notification type, matching the sidebar's
-                         per-module color coding (coordinator=amber, event=green,
-                         job=blue, message=pink, alumni=orange, default=purple) --}}
+                    {{-- Icon — colored per notif type --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         :style="{
-                            background: (
-                                notif.icon === 'users-gear' ? 'linear-gradient(135deg,#FDECD2,#FBD9A5)' :
-                                (notif.icon === 'calendar-check' || notif.icon === 'calendar' || notif.icon === 'calendar-days') ? 'linear-gradient(135deg,#D6F2E4,#B7E8CC)' :
-                                notif.icon === 'briefcase' ? 'linear-gradient(135deg,#D3EAFB,#AEDCF7)' :
-                                notif.icon === 'comments' ? 'linear-gradient(135deg,#FBD9E9,#F7B8D6)' :
-                                (notif.icon === 'user-group' || notif.icon === 'user-plus') ? 'linear-gradient(135deg,#FCE6C7,#F8D19A)' :
-                                'linear-gradient(135deg,#EDE9F8,#DDD5F0)'
-                            ),
-                            color: (
-                                notif.icon === 'users-gear' ? '#B45309' :
-                                (notif.icon === 'calendar-check' || notif.icon === 'calendar' || notif.icon === 'calendar-days') ? '#047857' :
-                                notif.icon === 'briefcase' ? '#0369A1' :
-                                notif.icon === 'comments' ? '#BE185D' :
-                                (notif.icon === 'user-group' || notif.icon === 'user-plus') ? '#B45309' :
-                                '#7A3F91'
-                            )
-                         }">
+                         :style="'background:' + window.__dirIconBg(notif.icon) + ';'">
                         <i class="fas"
                            :class="'fa-' + (notif.icon || 'bell')"
-                           style="font-size:15px;"></i>
+                           :style="'font-size:15px;color:' + window.__dirIconColor(notif.icon) + ';'"></i>
                     </div>
 
                     {{-- Content --}}
@@ -1376,13 +1652,13 @@
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
-                                {{-- New Event badge --}}
+                                {{-- New/Resubmitted Event badge --}}
                                 <span
                                     x-show="(notif.icon === 'calendar-days') && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                           background:#7A3F91;">
                                     NEW EVENT
                                 </span>
 
@@ -1392,7 +1668,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#D97706,#B45309);">
+                                           background:#B45309;">
                                     COORDINATOR
                                 </span>
 
@@ -1402,7 +1678,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
+                                           background:#059669;">
                                     EVENT
                                 </span>
 
@@ -1412,7 +1688,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                           background:#0369A1;">
                                     JOB
                                 </span>
 
@@ -1422,7 +1698,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#DB2777,#BE185D);">
+                                           background:#DB2777;">
                                     MESSAGE
                                 </span>
 
@@ -1432,7 +1708,7 @@
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#d97706,#b45309);">
+                                           background:#B45309;">
                                     ALUMNI
                                 </span>
                             </div>
@@ -1441,7 +1717,7 @@
                                   class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
                         </div>
 
-                        <p class="text-[#666666] mt-1 leading-relaxed"
+                        <p class="text-[#333333] mt-1 leading-relaxed"
                            style="font-size:12px;
                                   display:-webkit-box;
                                   -webkit-line-clamp:2;
@@ -1450,27 +1726,40 @@
                            x-text="notif.message">
                         </p>
 
-                        <div class="flex items-center gap-1 mt-2">
-                            <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
-                            <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
-                                  x-text="notif.created_at
-                                      ? new Date(notif.created_at).toLocaleString('en-PH',{
-                                          month:'short',day:'numeric',year:'numeric',
-                                          hour:'2-digit',minute:'2-digit',second:'2-digit'
-                                        })
-                                      : ''">
+                        <div class="flex items-center justify-between gap-1 mt-2">
+                            <span class="flex items-center gap-1">
+                                <i class="fas fa-clock" style="font-size:10px;color:#333333;"></i>
+                                <span style="font-size:11px;color:#333333;font-weight:500;"
+                                      x-text="notif.created_at
+                                          ? new Date(notif.created_at).toLocaleString('en-PH',{
+                                              month:'short',day:'numeric',year:'numeric',
+                                              hour:'2-digit',minute:'2-digit',second:'2-digit'
+                                            })
+                                          : ''">
+                                </span>
                             </span>
+
+                            <button type="button"
+                                    x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
+                                    x-cloak
+                                    class="dir-notif-delete-btn"
+                                    @click.stop="$store.dirNotifs && $store.dirNotifs.deleteNotif(notif)"
+                                    aria-label="Delete notification">
+                                <i class="fas fa-trash-can"></i>
+                                <span class="dir-notif-delete-tooltip">Delete</span>
+                            </button>
                         </div>
                     </div>
 
+                </div>
                 </div>
             </template>
         </template>
     </div>
 
     {{-- Panel Footer --}}
-    <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
-        <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
+    <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FFFFFF;">
+        <p style="font-size:13px;color:#555555;font-weight:500;letter-spacing:0.01em;">
             Click a notification to view and mark as read
         </p>
     </div>

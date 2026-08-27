@@ -2748,6 +2748,20 @@ select.tw-select-arrow {
 
 </div>
 
+{{-- ══ CLEAN-URL SCRIPT (strip ?event=46 from address bar on load) ══ --}}
+<script>
+    (function () {
+        // Pure client-side: just rewrites the address bar in place so the
+        // URL shows /director/event/management instead of ?event=46 — no
+        // navigation, no reload, so it never touches the View Event modal
+        // that the server already opened on this page load via viewEvent().
+        if (window.location.search.indexOf('event=') !== -1) {
+            var cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, '', cleanUrl);
+        }
+    })();
+</script>
+
 <script>
 (function () {
     var tip       = document.getElementById('dir-hover-tip');
