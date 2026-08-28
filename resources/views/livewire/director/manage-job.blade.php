@@ -645,6 +645,29 @@ new class extends Component {
             : [];
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // NEW: keep the "All Colleges" master checkbox in sync when an
+    // individual college checkbox is toggled directly. Without this,
+    // checking "All Colleges" then manually unchecking one college left
+    // the master checkbox still ticked even though the selection was no
+    // longer "all colleges" — misleading state. Re-derives the master
+    // checkbox from the actual selection every time it changes, so it
+    // only ever reads true when every college is truly selected.
+    // ─────────────────────────────────────────────────────────────────
+    public function updatedPostTargetColleges(): void
+    {
+        $allCollegeNames = collect($this->collegesWithDepts)->pluck('name')->toArray();
+        $this->postAllColleges = !empty($allCollegeNames)
+            && empty(array_diff($allCollegeNames, $this->postTargetColleges));
+    }
+
+    public function updatedEditTargetColleges(): void
+    {
+        $allCollegeNames = collect($this->collegesWithDepts)->pluck('name')->toArray();
+        $this->editAllColleges = !empty($allCollegeNames)
+            && empty(array_diff($allCollegeNames, $this->editTargetColleges));
+    }
+
     #[Computed]
     public function jobPostings()
     {
@@ -819,10 +842,10 @@ new class extends Component {
         if (!$deadline) {
             $errors['postDeadline'] = 'Deadline is required.';
         } else {
-            $now          = now('Asia/Manila');
-            $deadlineDate = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->endOfDay();
-            if ($deadlineDate < $now) {
-                $errors['postDeadline'] = 'Deadline must be today or in the future.';
+            $today        = now('Asia/Manila')->startOfDay();
+            $deadlineDate = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->startOfDay();
+            if ($deadlineDate->lte($today)) {
+                $errors['postDeadline'] = 'Deadline must be at least 1 day from today (earliest: ' . $today->copy()->addDay()->format('M d, Y') . ').';
             }
         }
 
@@ -1044,10 +1067,10 @@ new class extends Component {
         if (!$deadline) {
             $errors['editDeadline'] = 'Deadline is required.';
         } else {
-            $now          = now('Asia/Manila');
-            $deadlineDate = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->endOfDay();
-            if ($deadlineDate < $now) {
-                $errors['editDeadline'] = 'Deadline must be today or in the future.';
+            $today        = now('Asia/Manila')->startOfDay();
+            $deadlineDate = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->startOfDay();
+            if ($deadlineDate->lte($today)) {
+                $errors['editDeadline'] = 'Deadline must be at least 1 day from today (earliest: ' . $today->copy()->addDay()->format('M d, Y') . ').';
             }
         }
 
@@ -2416,28 +2439,12 @@ select.tw-select-arrow {
                 wire:loading.attr="disabled"
                 wire:loading.class="opacity-60"
                 wire:target="closePostModal,savePost"
-                class="modal-top-btn relative inline-flex items-center gap-1.5 px-3 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none text-white text-xs font-semibold">
-            <span wire:loading wire:target="closePostModal,savePost"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-            <span wire:loading.remove wire:target="closePostModal,savePost"><i class="fas fa-xmark text-xs"></i></span>
-            <span wire:loading.remove wire:target="closePostModal,savePost">Cancel</span>
-            <span wire:loading wire:target="closePostModal,savePost">Closing…</span>
+                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none">
+            <span wire:loading wire:target="closePostModal"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
+            <span wire:loading.remove wire:target="closePostModal"><i class="fas fa-xmark text-white text-sm"></i></span>
+            <span class="mtip">Close</span>
         </button>
     </div>
-
-    {{-- Validation Errors Banner --}}
-    @if(count($postErrors))
-    <div class="bg-red-50 border-b border-red-200 px-6 lg:px-10 py-2 shrink-0 flex items-start gap-3">
-        <i class="fas fa-triangle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xs"></i>
-        <div class="flex-1 min-w-0">
-            <p class="font-semibold text-red-800 text-xs mb-0.5">Please fix the following:</p>
-            <ul class="text-red-700 text-xs flex flex-wrap gap-x-4 gap-y-0.5">
-                @foreach($postErrors as $err)
-                    <li class="flex items-center gap-1"><span class="text-red-400">&bull;</span>{{ $err }}</li>
-                @endforeach
-            </ul>
-        </div>
-    </div>
-    @endif
 
     {{-- 3-COLUMN BODY --}}
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
@@ -2488,13 +2495,13 @@ select.tw-select-arrow {
                         <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v,false)},syncT(v){$wire.set('postPartnerType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Org Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Name <span class="text-red-500">*</span></label>
                                     <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Acme Corp" maxlength="150"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Org Type <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Type <span class="text-red-500">*</span></label>
                                     <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Private, NGO" maxlength="100"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
@@ -2513,13 +2520,13 @@ select.tw-select-arrow {
                         <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v,false)},syncT(v){$wire.set('postCustomType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Org Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Name <span class="text-red-500">*</span></label>
                                     <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Org Type <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Type <span class="text-red-500">*</span></label>
                                     <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomType'] }}</p>@endif
@@ -2564,60 +2571,6 @@ select.tw-select-arrow {
                             @endforeach
                         </div>
                         @if(isset($postErrors['postTargetColleges']))<p class="text-red-600 text-xs mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postTargetColleges'] }}</p>@endif
-                    </div>
-                </div>
-
-                {{-- Job Photo --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
-                        <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
-                    </div>
-                    <div class="p-3.5">
-                        <div wire:ignore
-                             x-data="{
-                                 preview: null,
-                                 handleFile(e) {
-                                     const f = e.target.files[0];
-                                     if (!f) return;
-                                     const r = new FileReader();
-                                     r.onload = ev => { this.preview = ev.target.result; };
-                                     r.readAsDataURL(f);
-                                 },
-                                 clear() {
-                                     this.preview = null;
-                                     this.$refs.fileInput.value = '';
-                                     $wire.set('postJobImage', null);
-                                 }
-                             }">
-                            <div class="img-upload-zone" :class="preview ? 'has-image' : ''">
-                                <template x-if="preview">
-                                    <div class="relative">
-                                        <img :src="preview" class="img-preview-thumb" alt="Preview">
-                                        <button type="button" @click="clear()"
-                                                class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
-                                            <i class="fas fa-xmark text-[10px]"></i>
-                                        </button>
-                                        <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">PREVIEW</span>
-                                    </div>
-                                </template>
-                                <template x-if="!preview">
-                                    <label class="flex flex-col items-center justify-center gap-1.5 py-5 cursor-pointer w-full">
-                                        <i class="fas fa-cloud-arrow-up text-2xl text-gray-300"></i>
-                                        <p class="font-semibold text-xs text-[#555555]">Click to upload or drag &amp; drop</p>
-                                        <p class="text-[10px] text-[#777777]">JPG, PNG, WebP — max 2MB</p>
-                                        <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                               wire:model="postJobImage" @change="handleFile($event)">
-                                    </label>
-                                </template>
-                            </div>
-                            <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
-                                <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
-                            </div>
-                            @if(isset($postErrors['postJobImage']))
-                                <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobImage'] }}</p>
-                            @endif
-                        </div>
                     </div>
                 </div>
 
@@ -2667,13 +2620,17 @@ select.tw-select-arrow {
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Salary <span class="font-normal normal-case tracking-normal text-[#777777] text-xs">— optional</span></label>
                                 <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000/mo" maxlength="100"
+                                       oninput="window.__eoFormatSalaryInput(this)"
                                        class="w-full px-3.5 py-2.5 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                             </div>
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Deadline <span class="text-red-500">*</span></label>
                                 <input wire:model.defer="postDeadline" type="date"
-                                       min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}"
-                                       class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                       min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
+                                       oninput="window.__eoGuardDeadlineInput(this)"
+                                       onchange="window.__eoGuardDeadlineInput(this)"
+                                       onclick="window.__eoOpenDatePicker(this)"
+                                       class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
                                 @if(isset($postErrors['postDeadline']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                             </div>
                         </div>
@@ -2703,18 +2660,65 @@ select.tw-select-arrow {
         <div class="w-full lg:w-[240px] xl:w-[260px] shrink-0 overflow-y-auto bg-white flex flex-col scroll-c">
             <div class="p-3 space-y-3 flex-1">
 
-                {{-- Default Photo Preview --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                {{-- Job Photo / Photo Preview --}}
+                {{--
+                    NEW: this is now the ONLY photo UI on the Post Job modal — the
+                    separate "Job Photo" upload card that used to sit in the LEFT
+                    column was removed (redundant once this panel became clickable).
+                    Click the image to open the file picker; wired straight to
+                    wire:model="postJobImage" so no more shared Alpine.store is
+                    needed — one x-data block owns the whole upload lifecycle.
+                --}}
+                <div wire:ignore
+                     class="bg-white border-[1.5px] {{ isset($postErrors['postJobImage']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden"
+                     x-data="{
+                         preview: null,
+                         handleFile(e) {
+                             const f = e.target.files[0];
+                             if (!f) return;
+                             const r = new FileReader();
+                             r.onload = ev => { this.preview = ev.target.result; };
+                             r.readAsDataURL(f);
+                         },
+                         clear() {
+                             this.preview = null;
+                             this.$refs.fileInput.value = '';
+                             $wire.set('postJobImage', null);
+                         }
+                     }">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
-                        Default Photo Preview
+                        <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
+                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-3.5">
-                        <div class="rounded-xl overflow-hidden" style="height:100px;">
-                            <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="Default job photo"
-                                 class="w-full h-full object-cover"
-                                 onerror="this.parentElement.style.display='none'">
+                        <label class="block rounded-xl overflow-hidden relative cursor-pointer group" style="height:100px;">
+                            <template x-if="preview">
+                                <img :src="preview" alt="Job photo preview" class="w-full h-full object-cover">
+                            </template>
+                            <template x-if="!preview">
+                                <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="Default job photo"
+                                     class="w-full h-full object-cover">
+                            </template>
+                            <div class="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-center justify-center">
+                                <span class="opacity-0 group-hover:opacity-100 transition text-white text-[10px] font-semibold flex items-center gap-1">
+                                    <i class="fas fa-camera text-[10px]"></i> Click photo to change
+                                </span>
+                            </div>
+                            <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
+                                   wire:model="postJobImage" @change="handleFile($event)">
+                        </label>
+                        <div class="flex items-center justify-between mt-1.5">
+                            <p class="text-[10px] text-[#777777]" x-text="preview ? 'Click photo to change' : 'Default photo if none uploaded — click to change'"></p>
+                            <button type="button" x-show="preview" x-cloak @click="clear()"
+                                    class="text-[10px] text-red-500 font-semibold hover:underline cursor-pointer">Remove</button>
                         </div>
-                        <p class="text-[10px] text-[#777777] mt-1.5 text-center">Default photo if none uploaded</p>
+                        <p class="text-[10px] text-[#777777] mt-0.5">JPG, PNG, WebP — max 2MB</p>
+                        <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
+                            <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                        </div>
+                        @if(isset($postErrors['postJobImage']))
+                            <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobImage'] }}</p>
+                        @endif
                     </div>
                 </div>
 
@@ -2772,10 +2776,10 @@ select.tw-select-arrow {
                         wire:loading.class="opacity-60 cursor-wait"
                         wire:target="closePostModal,savePost"
                         class="w-full px-4 py-2 rounded-xl font-semibold text-sm bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:pointer-events-none flex items-center justify-center gap-1.5">
-                    <span wire:loading wire:target="closePostModal,savePost"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                    <span wire:loading.remove wire:target="closePostModal,savePost"><i class="fas fa-xmark text-[10px]"></i></span>
-                    <span wire:loading wire:target="closePostModal,savePost">Closing…</span>
-                    <span wire:loading.remove wire:target="closePostModal,savePost">Cancel</span>
+                    <span wire:loading wire:target="closePostModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                    <span wire:loading.remove wire:target="closePostModal"><i class="fas fa-xmark text-[10px]"></i></span>
+                    <span wire:loading wire:target="closePostModal">Closing…</span>
+                    <span wire:loading.remove wire:target="closePostModal">Cancel</span>
                 </button>
             </div>
         </div>
@@ -2890,8 +2894,8 @@ select.tw-select-arrow {
                     wire:loading.class="opacity-60"
                     wire:target="closeEditModal,saveEditJob"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none">
-                <span wire:loading wire:target="closeEditModal,saveEditJob"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
-                <span wire:loading.remove wire:target="closeEditModal,saveEditJob"><i class="fas fa-xmark text-white text-sm"></i></span>
+                <span wire:loading wire:target="closeEditModal"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
+                <span wire:loading.remove wire:target="closeEditModal"><i class="fas fa-xmark text-white text-sm"></i></span>
                 <span class="mtip">Close</span>
             </button>
         </div>
@@ -2915,20 +2919,6 @@ select.tw-select-arrow {
     <div class="bg-purple-50 border-b border-purple-200 px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
         <i class="fas fa-eye text-purple-500 flex-shrink-0 text-xs"></i>
         <p class="text-xs text-purple-800"><strong>View Mode:</strong> This job is currently Active. Deactivate it (top-right) first to make changes.</p>
-    </div>
-    @endif
-
-    @if(count($editErrors))
-    <div class="bg-red-50 border-b border-red-200 px-6 py-2 flex-shrink-0 flex items-start gap-3">
-        <i class="fas fa-triangle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xs"></i>
-        <div class="flex-1 min-w-0">
-            <p class="font-semibold text-red-800 text-xs mb-0.5">Please fix the following:</p>
-            <ul class="text-red-700 text-xs flex flex-wrap gap-x-4 gap-y-0.5">
-                @foreach($editErrors as $err)
-                    <li class="flex items-center gap-1"><span class="text-red-400">&bull;</span>{{ $err }}</li>
-                @endforeach
-            </ul>
-        </div>
     </div>
     @endif
 
@@ -3056,7 +3046,7 @@ select.tw-select-arrow {
                         @php $editIsPhilcst = str_contains(strtoupper($editCompanyType ?? ''), 'PHILCST'); @endphp
 
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Organization Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Company Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm">{{ $editCompanyType ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
                                 <select wire:model.live="editCompanyType"
@@ -3204,6 +3194,7 @@ select.tw-select-arrow {
                                 <div x-show="!editMode" class="view-field-display text-sm">{{ $editSalary ?: 'Not disclosed' }}</div>
                                 <div x-show="editMode" x-cloak>
                                     <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25k/mo"
+                                           oninput="window.__eoFormatSalaryInput(this)"
                                            class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
                                 </div>
                             </div>
@@ -3217,8 +3208,11 @@ select.tw-select-arrow {
                                 </div>
                                 <div x-show="editMode" x-cloak>
                                     <input wire:model.defer="editDeadline" type="date"
-                                           min="{{ now()->setTimezone('Asia/Manila')->format('Y-m-d') }}"
-                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                           min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
+                                           oninput="window.__eoGuardDeadlineInput(this)"
+                                           onchange="window.__eoGuardDeadlineInput(this)"
+                                           onclick="window.__eoOpenDatePicker(this)"
+                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDeadline'] }}</p>@endif
                                 </div>
                             </div>
@@ -3343,10 +3337,10 @@ select.tw-select-arrow {
                         wire:loading.class="opacity-60 cursor-wait"
                         wire:target="closeEditModal,saveEditJob"
                         class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:pointer-events-none flex items-center justify-center gap-1.5">
-                    <span wire:loading wire:target="closeEditModal,saveEditJob"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                    <span wire:loading.remove wire:target="closeEditModal,saveEditJob"><i class="fas fa-xmark text-[10px]"></i></span>
-                    <span wire:loading wire:target="closeEditModal,saveEditJob">Closing…</span>
-                    <span wire:loading.remove wire:target="closeEditModal,saveEditJob">Close</span>
+                    <span wire:loading wire:target="closeEditModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                    <span wire:loading.remove wire:target="closeEditModal"><i class="fas fa-xmark text-[10px]"></i></span>
+                    <span wire:loading wire:target="closeEditModal">Closing…</span>
+                    <span wire:loading.remove wire:target="closeEditModal">Close</span>
                 </button>
             </div>
         </div>
@@ -3895,6 +3889,114 @@ select.tw-select-arrow {
     </div>
 </div>
 @endif
+
+{{-- ══ SALARY AUTO-FORMAT + DEADLINE CLICK-TO-OPEN SCRIPTS ══ --}}
+<script>
+(function () {
+    // ── Live salary comma-formatter ──────────────────────────────────
+    // Auto-inserts thousands separators into any run of 4+ digits as the
+    // organizer types, WITHOUT forcing a strict numbers-only field — the
+    // ₱/$ symbol, "/mo", "yearly", "Negotiable", etc. are all left alone.
+    // Only the digit runs get commas; everything else in the string is
+    // untouched and stays exactly where the user typed it.
+    //
+    // Cursor position is preserved by measuring how many digits sit to
+    // the left of the caret before formatting, then walking the newly
+    // formatted string forward that many digits to place the caret back
+    // in the equivalent spot (so typing mid-string doesn't jump the
+    // cursor to the end).
+    function formatDigitRuns(raw) {
+        // Match a whole "number block" — digits AND any commas already
+        // sitting inside them — as ONE unit, not just raw consecutive
+        // digits. Matching digits alone made a comma already inserted
+        // mid-typing act as a hard break, so typing another digit right
+        // after an existing comma (e.g. "4,555" -> "4,5555") re-grouped
+        // only the piece after the comma and left the leading digit(s)
+        // stranded — producing "4,5,555" instead of "45,555".
+        return raw.replace(/[\d,]*\d[\d,]*/g, function (block) {
+            var digitsOnly = block.replace(/,/g, '');
+            if (digitsOnly.length < 4) return block; // too short to need grouping — leave as-is (and un-comma it)
+            return digitsOnly.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        });
+    }
+
+    window.__eoFormatSalaryInput = function (el) {
+        if (!el) return;
+        var raw = el.value;
+        var caret = el.selectionStart == null ? raw.length : el.selectionStart;
+
+        // Count digits strictly before the caret in the RAW string.
+        var digitsBeforeCaret = (raw.slice(0, caret).match(/\d/g) || []).length;
+
+        var formatted = formatDigitRuns(raw);
+        if (formatted === raw) return; // nothing changed, leave caret alone
+
+        el.value = formatted;
+
+        // Walk forward through the formatted string until we've passed
+        // the same number of digits, landing the caret right after them.
+        var seen = 0, pos = 0;
+        if (digitsBeforeCaret > 0) {
+            for (pos = 0; pos < formatted.length; pos++) {
+                if (/\d/.test(formatted[pos])) {
+                    seen++;
+                    if (seen === digitsBeforeCaret) { pos++; break; }
+                }
+            }
+        }
+        el.setSelectionRange(pos, pos);
+
+        // Keep Livewire's deferred model in sync with the formatted value
+        // (wire:model.defer only reads on its own 'input'/'change' event,
+        // and we didn't block that — this just makes sure el.value is
+        // already correct by the time Livewire reads it).
+    };
+
+    // ── Deadline hard guard ─────────────────────────────────────────
+    // The native <input type="date" min="..."> attribute blocks picking
+    // a past/today date from the calendar UI, but some browsers still
+    // let a date get typed in manually (keyboard entry into the M/D/Y
+    // segments) that lands before "min" without the picker stopping it.
+    // This clears the field immediately if that happens, so an invalid
+    // date never sits in the input even before the form is submitted —
+    // the server-side check is still the final source of truth, this is
+    // just an earlier, friendlier catch.
+    window.__eoGuardDeadlineInput = function (el) {
+        if (!el || !el.value) return;
+        var picked = new Date(el.value + 'T00:00:00');
+        if (isNaN(picked.getTime())) return;
+
+        // Earliest allowed deadline is tomorrow, not today — a same-day
+        // deadline would already be expired by end of day.
+        var earliest = new Date();
+        earliest.setHours(0, 0, 0, 0);
+        earliest.setDate(earliest.getDate() + 1);
+
+        if (picked.getTime() < earliest.getTime()) {
+            el.value = '';
+            // Brief visible red flash so it's clear the date got rejected
+            // rather than the field just mysteriously going blank.
+            el.classList.add('border-red-500', 'ring-2', 'ring-red-200');
+            clearTimeout(el._eoDeadlineFlashTimer);
+            el._eoDeadlineFlashTimer = setTimeout(function () {
+                el.classList.remove('border-red-500', 'ring-2', 'ring-red-200');
+            }, 1200);
+        }
+    };
+
+    // ── Click anywhere in the date field to open the picker ────────────
+    // A native <input type="date"> only opens its calendar when you click
+    // the small icon on the right — clicking the text/box area just moves
+    // the text cursor. This makes the WHOLE input act like the icon, so
+    // one click anywhere in the box pops the picker open immediately.
+    window.__eoOpenDatePicker = function (el) {
+        if (!el) return;
+        if (typeof el.showPicker === 'function') {
+            try { el.showPicker(); } catch (e) { /* ignore — e.g. not user-triggered enough for some browsers */ }
+        }
+    };
+})();
+</script>
 
 {{-- ══ CLEAN-URL SCRIPT (strip ?job=46 from address bar on load) ══ --}}
 <script>

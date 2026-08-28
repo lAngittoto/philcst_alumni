@@ -1689,7 +1689,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="window.__coordSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
+                   @click="open = false;"
                    class="coord-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
 

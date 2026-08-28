@@ -28,6 +28,7 @@ new class extends Component {
     public string $filterCollege = '';
 
     public string $myDisplayName = '';
+    public int    $directorId    = 0;
 
     public bool   $showFormModal           = false;
     public bool   $isEditing               = false;
@@ -103,6 +104,7 @@ new class extends Component {
 
         if ($dirRecord) {
             $this->myDisplayName = trim(($dirRecord->first_name ?? '') . ' ' . ($dirRecord->last_name ?? ''));
+            $this->directorId    = (int) $dirRecord->id;
         }
 
         if (! $this->myDisplayName) {
@@ -138,6 +140,54 @@ new class extends Component {
             $this->autoRejectExpiredPendingEvents();
             $this->autoCompleteExpiredEvents();
             Cache::put($cacheKey, true, 60);
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // One-time self-heal: notifs already sitting in the bell as
+        // "New Event for Review" / "Event Resubmitted for Review" from
+        // BEFORE updateDirectorReviewNotif() existed never got their
+        // title flipped to "→ Approved" / "→ Rejected" when they were
+        // acted on — so the bell still shows "→ Pending" for events that
+        // are actually long since decided. Sync those stale rows to the
+        // event's real current status here, once per director per
+        // request-cache window (same pattern as the block above).
+        // ─────────────────────────────────────────────────────────────────
+        $syncCacheKey = 'director_review_notifs_synced_' . $this->directorId;
+        if ($this->directorId && ! Cache::has($syncCacheKey)) {
+            $this->syncStaleReviewNotifTitles();
+            Cache::put($syncCacheKey, true, 60);
+        }
+    }
+
+    private function syncStaleReviewNotifTitles(): void
+    {
+        try {
+            $staleRows = DB::table('director_notifications')
+                ->where('director_id', $this->directorId)
+                ->where('link_route', 'director.event/management')
+                ->whereIn('title', ['New Event for Review', 'Event Resubmitted for Review'])
+                ->whereNotNull('event_id')
+                ->get();
+
+            if ($staleRows->isEmpty()) return;
+
+            $eventIds = $staleRows->pluck('event_id')->unique()->all();
+            $statuses = AdminEvent::withTrashed()->whereIn('id', $eventIds)->pluck('status', 'id');
+
+            foreach ($staleRows as $row) {
+                $status = $statuses[$row->event_id] ?? null;
+                if (!in_array($status, ['APPROVED', 'REJECTED'], true)) continue; // genuinely still pending — leave as-is
+
+                $label = $status === 'APPROVED' ? 'Approved' : 'Rejected';
+
+                DB::table('director_notifications')->where('id', $row->id)->update([
+                    'title'      => $row->title . ' → ' . $label,
+                    'icon'       => $status === 'APPROVED' ? 'calendar-check' : 'calendar',
+                    'updated_at' => now(),
+                ]);
+            }
+        } catch (\Throwable) {
+            // Non-critical — bell just keeps showing the un-synced title until next mount
         }
     }
 
@@ -190,6 +240,51 @@ new class extends Component {
                 ]);
             }
         } catch (\Throwable) {}
+    }
+
+    // ── Keeps the director's OWN "New Event for Review" bell notif in
+    //    sync with the event's outcome, same convention as the job
+    //    posting's "You Posted a Job → Active/Inactive" chain title.
+    //
+    //    The row itself is created elsewhere (when the organizer submits
+    //    or resubmits the event, matched by event_id on
+    //    director_notifications). Here we just find THAT existing row and
+    //    swap its title/message in place — e.g.
+    //    "New Event for Review" -> "New Event for Review → Approved" —
+    //    instead of leaving it stuck reading "for Review" forever after
+    //    the director has already acted on it.
+    private function updateDirectorReviewNotif(int $eventId, string $eventTitle, string $status): void
+    {
+        $directorId = $this->directorId;
+        if (!$directorId || !$eventId) return;
+
+        try {
+            $existing = DB::table('director_notifications')
+                ->where('director_id', $directorId)
+                ->where('link_route', 'director.event/management')
+                ->where('event_id', $eventId)
+                ->first();
+
+            if (!$existing) return; // no submission notif on file — nothing to update
+
+            $prefix = str_contains((string) $existing->title, 'Resubmitted')
+                ? 'Event Resubmitted for Review'
+                : 'New Event for Review';
+
+            DB::table('director_notifications')
+                ->where('id', $existing->id)
+                ->update([
+                    'title'      => $prefix . ' → ' . $status,
+                    'message'    => "\"{$eventTitle}\" has been {$status}.",
+                    'icon'       => $status === 'Approved' ? 'calendar-check' : 'calendar',
+                    'read'       => 0,
+                    'updated_at' => now(),
+                ]);
+
+            $this->dispatch('dir-notif-refresh');
+        } catch (\Throwable) {
+            // Non-critical — don't break the approve/reject action if this fails
+        }
     }
 
     private function autoRejectExpiredPendingEvents(): void
@@ -637,6 +732,8 @@ new class extends Component {
                 $this->approveEventId
             );
 
+            $this->updateDirectorReviewNotif($this->approveEventId, $this->approveEventTitle, 'Approved');
+
             // ── Refresh director bell so approved events clear from pending count ──
             $this->dispatch('dir-notif-refresh');
 
@@ -707,6 +804,8 @@ new class extends Component {
                 'event-management::rejected::' . $this->rejectEventId,
                 $this->rejectEventId
             );
+
+            $this->updateDirectorReviewNotif($this->rejectEventId, $this->rejectEventTitle, 'Rejected');
 
             // ── Refresh director bell so rejected events clear from pending count ──
             $this->dispatch('dir-notif-refresh');

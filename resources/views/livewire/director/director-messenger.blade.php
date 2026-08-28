@@ -66,13 +66,13 @@ new class extends Component {
     // second poll every 3000ms just for typing). Two independent Livewire
     // polling requests fighting for the same request queue is exactly what
     // made sending/clicking feel like it stalls for a beat. Now there is
-    // ONE poll (wire:poll.2500ms.visible) driving a single unifiedPoll()
+    // ONE poll (wire:poll.5000ms.visible) driving a single unifiedPoll()
     // that staggers its heavier steps across ticks, same rhythm as the
     // organizer side, so nothing blocks a user-initiated action.
     public int $pollTick = 0;
 
     // ── Room display name — single source of truth for the header/title ──
-    public string $roomLabel = 'Staff Chat';
+    public string $roomLabel = 'Coordinators';
 
     // ─────────────────────────────────────────────────────────────────────
     // Cache key — MUST match director-notif-poller.blade.php
@@ -377,7 +377,7 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // SINGLE UNIFIED POLL — wire:poll.2500ms.visible
+    // SINGLE UNIFIED POLL — wire:poll.5000ms.visible
     //
     // Replaces the old refreshAll() (8000ms) + refreshTyping() (3000ms)
     // dual-poll setup. Staggering the heavier steps across ticks keeps any
@@ -393,9 +393,20 @@ new class extends Component {
         $this->pingPresence();
         $this->loadTypingIndicators();
 
+        // FIX: skip the message reload (and the full re-render that comes
+        // with it) while the director is mid-edit or has just typed
+        // something that hasn't been sent yet. Reloading messages here
+        // was re-rendering the whole list on top of an in-progress click
+        // (Enter/mouse/emoji taps landing on a row that got swapped out
+        // under the cursor mid-poll) — this is what made those interactions
+        // feel like they "don't work". wire:key on each row (added above)
+        // fixes the morph stability side of it; this stops us from forcing
+        // an unnecessary re-render every ~5s while the user is composing.
+        $isComposing = trim($this->body) !== '' || $this->editingId !== null;
+
         // Notification watermark + message reload are a bit heavier and
         // don't need sub-3s freshness — every other tick (~5s) is plenty.
-        if ($this->pollTick % 2 === 0) {
+        if ($this->pollTick % 2 === 0 && ! $isComposing) {
             $this->checkAndDispatchNewMessageNotifications();
             $this->loadMessages();
             $this->dispatch('chat-scroll-bottom');
@@ -1051,34 +1062,16 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Members (Directors + Coordinators)
+    // Members (Coordinators only — directors are intentionally excluded
+    // from this panel per the "Staff Members" list scope)
     // ─────────────────────────────────────────────────────────────────────
     public function loadMembers(): void
     {
         $q = trim($this->memberSearch);
 
-        $dirQuery = DB::table('director')->whereNull('deleted_at');
-        if ($q !== '') {
-            $dirQuery->where(function ($sub) use ($q) {
-                $sub->where('first_name', 'like', "%{$q}%")
-                    ->orWhere('last_name', 'like', "%{$q}%")
-                    ->orWhereRaw("CONCAT(first_name,' ',last_name) LIKE ?", ["%{$q}%"]);
-            });
-        }
-
         $self = $this;
 
-        $this->directors = $dirQuery
-            ->orderBy('first_name')
-            ->get(['id', 'first_name', 'last_name', 'profile_photo', 'last_seen_at'])
-            ->map(fn ($d) => [
-                'id'        => $d->id,
-                'name'      => trim($d->first_name . ' ' . $d->last_name),
-                'photo'     => $self->resolvePhotoUrl($d->profile_photo ?? null),
-                'is_me'     => $d->id === $self->directorId,
-                'is_online' => isset($d->last_seen_at)
-                                && Carbon::parse($d->last_seen_at)->gte(now()->subMinutes(5)),
-            ])->toArray();
+        $this->directors = [];
 
         $coordQuery = DB::table('organizer')
             ->where('status', 'ACTIVE')
@@ -1224,7 +1217,7 @@ new class extends Component {
        course_code='__director__' marker are untouched, this is purely the
        label shown in the header ($roomLabel).
      - SMOOTHNESS FIX: merged the old dual wire:poll (8000ms refreshAll +
-       3000ms refreshTyping) into a single wire:poll.2500ms.visible calling
+       3000ms refreshTyping) into a single wire:poll.5000ms.visible calling
        unifiedPoll(), which staggers presence/typing (every tick), message
        reload + notif watermark (every other tick), and online counts
        (every 4th tick) — same rhythm as organizer/chat-alumni.blade.php.
@@ -1232,6 +1225,11 @@ new class extends Component {
        feel like they paused.
      ════════════════════════════════════════════════════════════════════════ --}}
 
+
+<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
+     style="height: calc(100vh - 250px); max-width: 1400px;"
+     x-data="{ postNavigating: false }"
+     wire:poll.5000ms.visible="unifiedPoll">
 <style>
     /* ── Shared Job/Event post-preview card — mirrors alumni-side
        messenger.blade.php card design (msgr-post-*) so shared events/jobs
@@ -1346,10 +1344,6 @@ new class extends Component {
     }
 </style>
 
-<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
-     style="height: calc(100vh - 250px); max-width: 1400px;"
-     x-data="{ postNavigating: false }"
-     wire:poll.2500ms.visible="unifiedPoll">
 
     {{-- ── Full-panel loading overlay shown while a shared Job/Event
          "View" link is navigating away, so the click feels instant
@@ -1394,13 +1388,7 @@ new class extends Component {
                     <span class="text-white/30 text-xs hidden sm:inline">·</span>
                     @endif
                     <span class="hidden sm:flex items-center gap-1 text-white/60 text-xs font-semibold">
-                        <i class="fa-solid fa-shield-halved text-[10px]"></i>Directors
-                        <span class="text-white/30">+</span>
                         <i class="fa-solid fa-users text-[10px]"></i>Coordinators
-                    </span>
-                    <span class="text-white/30 text-xs hidden sm:inline">·</span>
-                    <span class="text-white/60 text-xs font-semibold">
-                        <i class="fa-solid fa-lock text-[10px] mr-0.5"></i>Internal Only
                     </span>
                 </div>
             </div>
@@ -1437,21 +1425,29 @@ new class extends Component {
             </div>
 
             {{-- Action buttons --}}
-            <div class="flex items-center gap-1.5 flex-shrink-0">
+            <div class="flex items-center gap-1.5 flex-shrink-0" x-data="{ pressed: null }">
                 <button wire:click="togglePins"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
-                        style="{{ $showPins
+                        wire:loading.attr="disabled"
+                        wire:target="togglePins"
+                        @click="pressed = 'pins'"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
+                        :style="(pressed === 'pins' || {{ $showPins ? 'true' : 'false' }})
                             ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
-                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);' }}">
-                    <i class="fa-solid fa-thumbtack text-xs"></i>
+                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);'">
+                    <i class="fa-solid fa-thumbtack text-xs" wire:loading.remove wire:target="togglePins"></i>
+                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="togglePins"></i>
                     <span class="hidden sm:inline ml-1">Pins</span>
                 </button>
                 <button wire:click="toggleMembers"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition"
-                        style="{{ $showMembers
+                        wire:loading.attr="disabled"
+                        wire:target="toggleMembers"
+                        @click="pressed = 'members'"
+                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
+                        :style="(pressed === 'members' || {{ $showMembers ? 'true' : 'false' }})
                             ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
-                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);' }}">
-                    <i class="fa-solid fa-user-group text-xs"></i>
+                            : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);'">
+                    <i class="fa-solid fa-user-group text-xs" wire:loading.remove wire:target="toggleMembers"></i>
+                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="toggleMembers"></i>
                     <span class="hidden sm:inline ml-1">Members</span>
                 </button>
             </div>
@@ -1494,7 +1490,8 @@ new class extends Component {
                         @endif
 
                         {{-- Message row --}}
-                        <div class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}"
+                        <div wire:key="msg-{{ $msg['id'] }}"
+                             class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}"
                              x-data="{ confirmUnsend: false }"
                              x-ref="row"
                              @click.outside="confirmUnsend = false">
@@ -1998,7 +1995,12 @@ new class extends Component {
                                 wire:keyup.debounce.800ms="pingTyping"
                                 placeholder="Message {{ $roomLabel }}… (@ to mention)"
                                 rows="1"
-                                @keydown.enter="if (!$event.shiftKey) { $event.preventDefault(); $wire.sendMessage(); }"
+                                @keydown.enter="if (!$event.shiftKey) {
+                                    $event.preventDefault();
+                                    if ($event.isComposing) return;
+                                    $wire.body = $event.target.value;
+                                    $wire.sendMessage();
+                                }"
                                 @focus-input.window="$el.focus()"
                                 x-init="
                                     $el.addEventListener('input', function () {
@@ -2048,7 +2050,7 @@ new class extends Component {
                         <p class="text-sm font-semibold text-white flex-1 uppercase tracking-wide">
                             Staff Members
                             <span class="text-xs font-semibold text-white/70 ml-1">
-                                ({{ count($directors) + count($coordinators) }})
+                                ({{ count($coordinators) }})
                             </span>
                             @if($onlineCount > 0)
                             <span class="ml-1 text-xs font-semibold text-emerald-300">· {{ $onlineCount }} online</span>
@@ -2066,55 +2068,7 @@ new class extends Component {
 
                     @if($showMembers)
 
-                        @if(! empty($directors))
                         <div class="px-3 pt-3 pb-1 flex-shrink-0">
-                            <p class="text-xs font-semibold text-[#7a3f91] uppercase tracking-widest mb-2 px-1">
-                                <i class="fa-solid fa-shield-halved text-xs mr-1"></i>Director{{ count($directors) > 1 ? 's' : '' }} — {{ count($directors) }}
-                            </p>
-                            @foreach($directors as $dir)
-                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1
-                                        {{ $dir['is_me'] ? 'bg-[#f3eef8] border border-[#d9c9e8]' : 'border border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa]' }}
-                                        transition-all">
-                                <div class="relative flex-shrink-0">
-                                    <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center
-                                                text-xs font-semibold text-white"
-                                         style="background:#7a3f91;">
-                                        @if($dir['photo'])
-                                            <img src="{{ $dir['photo'] }}"
-                                                 class="w-full h-full object-cover"
-                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-                                                 alt="{{ $dir['name'] }}">
-                                            <span style="display:none">{{ strtoupper(substr($dir['name'], 0, 1)) }}</span>
-                                        @else
-                                            {{ strtoupper(substr($dir['name'], 0, 1)) }}
-                                        @endif
-                                    </div>
-                                    @if($dir['is_online'] || $dir['is_me'])
-                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
-                                    @else
-                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-gray-400 border-2 border-white"></span>
-                                    @endif
-                                </div>
-                                <div class="flex-1 min-w-0">
-                                    <p class="text-xs font-semibold text-[#333333] truncate">
-                                        {{ $dir['name'] }}
-                                        @if($dir['is_me'])
-                                            <span class="text-xs text-[#7a3f91] font-semibold">(You)</span>
-                                        @endif
-                                    </p>
-                                    <p class="text-xs font-medium flex items-center gap-1
-                                              {{ ($dir['is_online'] || $dir['is_me']) ? 'text-emerald-600' : 'text-[#999999]' }}">
-                                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0
-                                                     {{ ($dir['is_online'] || $dir['is_me']) ? 'bg-emerald-400' : 'bg-gray-400' }}"></span>
-                                        {{ ($dir['is_online'] || $dir['is_me']) ? 'Online' : 'Offline' }}
-                                    </p>
-                                </div>
-                            </div>
-                            @endforeach
-                        </div>
-                        @endif
-
-                        <div class="px-3 pt-2 pb-1 flex-shrink-0 border-t border-[#E8E0F0] mt-1">
                             <div class="flex items-center justify-between mb-2 px-1">
                                 <p class="text-xs font-semibold text-[#7a3f91] uppercase tracking-widest">
                                     <i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($coordinators) }}
@@ -2231,7 +2185,7 @@ new class extends Component {
                             @endforeach
                             @endif
 
-                            @if(empty($directors) && empty($coordinators))
+                            @if(empty($coordinators))
                             <div class="flex flex-col items-center justify-center py-10 text-[#999999]">
                                 <i class="fa-solid fa-user-slash text-3xl text-[#E8E0F0] mb-3"></i>
                                 <p class="text-sm font-semibold">No results</p>

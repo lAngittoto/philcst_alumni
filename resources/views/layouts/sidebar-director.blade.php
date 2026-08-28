@@ -675,6 +675,23 @@
         return (window.__dirIconColors[icon] || window.__dirIconColors['bell']).color;
     };
 
+    // Builds the "New Event for Review → <status>" title for an event
+    // submission/resubmission notif — mirrors the job posting's
+    // "You Posted a Job → Active/Inactive" chain title convention.
+    // The backend (manage-event component) overwrites the row's title
+    // in place to "...→ Approved" / "...→ Rejected" once the director
+    // acts on it; until then the row still carries the plain
+    // "New Event for Review" / "Event Resubmitted for Review" wording,
+    // so we append "→ Pending" here purely for display so the status is
+    // always visible, without needing to touch the submission code.
+    window.__dirEventReviewTitle = function (rawTitle, isSubmit) {
+        var base = rawTitle || (isSubmit ? 'New Event for Review' : 'Event Resubmitted for Review');
+        if (base === 'New Event for Review' || base === 'Event Resubmitted for Review') {
+            base += ' \u2192 Pending';
+        }
+        return base;
+    };
+
     // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY
     // ─────────────────────────────────────────────────────────────────────────
@@ -723,12 +740,33 @@
                 } catch (e) { /* silently fail */ }
             },
 
+            // Human-readable step label per underlying job action, used to
+            // build the "You Posted a Job -> Active/Inactive/..." chain
+            // title for a director's own job notifs — mirrors the same
+            // convention already used on the organizer/coordinator bell,
+            // so one job's whole lifecycle collapses into a single row
+            // instead of a separate "Job Posted" / "Job Deactivated" /
+            // "Job Activated" entry for every status change.
+            _jobStepLabel: {
+                'created':     'You Posted a Job',
+                'updated':     'Updated',
+                'activated':   'Active',
+                'deactivated': 'Inactive',
+                'expired':     'Inactive',
+                'deleted':     'Deleted',
+                'restored':    'Restored',
+            },
+
             _groupByDay(rows) {
                 var map = new Map();
+                var jobStepLabel = this._jobStepLabel;
 
+                // Oldest -> newest first so job chains build up in the
+                // order the steps actually happened, THEN we re-sort the
+                // final result newest-first below (same as before).
                 Array.from(rows)
                     .sort(function (a, b) {
-                        return new Date(b.created_at) - new Date(a.created_at);
+                        return new Date(a.created_at) - new Date(b.created_at);
                     })
                     .forEach(function (n) {
                         var day = n.created_at
@@ -753,9 +791,76 @@
                         var isMsgEvent    = rawDedup.startsWith('message-received::') || n.icon === 'comments';
                         var isAlumniEvent = rawDedup.startsWith('alumni-registered::') || rawDedup.startsWith('profile-updated::') || n.icon === 'user-group' || n.icon === 'user-plus';
 
+                        // ── Director's own job notifs: grouped PER JOB (not
+                        //    per day, not per action) so the row always
+                        //    reads "You Posted a Job -> <current status>"
+                        //    instead of a separate entry for every
+                        //    activate/deactivate/update on that same job.
+                        //    dedup_key shape: job-self::{jobId}::{action}::{day}
+                        if (isJobSelfEvent) {
+                            var jparts  = rawDedup.split('::');
+                            var jobId   = jparts.length >= 2 ? jparts[1] : ('noid-' + n.id);
+                            var jaction = jparts.length >= 3 ? jparts[2] : '';
+
+                            var jgroupKey = 'job-self-chain::' + jobId;
+                            var jgroup = map.get(jgroupKey);
+
+                            if (!jgroup) {
+                                jgroup = Object.assign({}, n, {
+                                    count:       1,
+                                    _ids:        [n.id],
+                                    _chainSteps: [],
+                                    job_id:      n.job_id || jobId,
+                                    icon:        'briefcase',
+                                });
+                                map.set(jgroupKey, jgroup);
+                            } else {
+                                jgroup._ids.push(n.id);
+                            }
+
+                            // Append this step (skip consecutive duplicates
+                            // so re-saving the same status twice in a row
+                            // doesn't pad the chain).
+                            var jstepLabel = jobStepLabel[jaction] || (n.title || 'Update');
+                            var jlastStep  = jgroup._chainSteps[jgroup._chainSteps.length - 1];
+                            if (jstepLabel !== jlastStep) {
+                                jgroup._chainSteps.push(jstepLabel);
+                            }
+
+                            // A brand-new job posting goes live immediately —
+                            // there's no separate "activated" action fired
+                            // for it (that only happens later on a manual
+                            // reactivate). Without this the row would sit
+                            // forever as just "You Posted a Job" with no
+                            // visible outcome.
+                            if (jaction === 'created' && jgroup._chainSteps[jgroup._chainSteps.length - 1] !== 'Active') {
+                                jgroup._chainSteps.push('Active');
+                            }
+
+                            // Latest row drives message/link/read state —
+                            // the group always looks/acts like the job's
+                            // most recent status.
+                            jgroup.message    = n.message    || jgroup.message;
+                            jgroup.link_route = n.link_route || jgroup.link_route;
+                            jgroup.read       = n.read;
+                            jgroup.created_at = n.created_at || jgroup.created_at;
+
+                            // Title = "You Posted a Job -> <current status>".
+                            // First step is always the initial post; every
+                            // step after collapses down to just the CURRENT
+                            // status so the row never grows into a long
+                            // replayed history.
+                            var jFirstStep = jgroup._chainSteps[0] || 'You Posted a Job';
+                            var jLastStep  = jgroup._chainSteps[jgroup._chainSteps.length - 1];
+                            jgroup.title = (jLastStep === jFirstStep)
+                                ? jFirstStep
+                                : jFirstStep + ' \u2192 ' + jLastStep;
+
+                            return;
+                        }
+
                         var groupKey;
-                        if      (isJobSelfEvent)   { groupKey = rawDedup; }
-                        else if (isCoordSelfEvent) { groupKey = rawDedup; }
+                        if      (isCoordSelfEvent) { groupKey = rawDedup; }
                         else if (isEventSubmit)    { groupKey = rawDedup; }
                         else if (isEventResubmit)  { groupKey = rawDedup; }
                         else if (isCoordEvent)     { groupKey = 'coordinator_day::' + day; }
@@ -780,9 +885,12 @@
                                 g._ids.push(n.id);
                             }
 
-                            if (isJobSelfEvent || isCoordSelfEvent || isEventSubmit || isEventResubmit) {
-                                g.title   = n.title   || g.title;
+                            if (isCoordSelfEvent || isEventSubmit || isEventResubmit) {
+                                g.title   = (isEventSubmit || isEventResubmit)
+                                    ? window.__dirEventReviewTitle(n.title, isEventSubmit)
+                                    : (n.title || g.title);
                                 g.message = n.message || g.message;
+                                g.icon    = n.icon    || g.icon;
                             } else if (isCoordEvent) {
                                 g.title   = 'Coordinator Updates';
                                 g.message = g.count + ' coordinator update(s) today.';
@@ -803,18 +911,18 @@
                             g.link_route = n.link_route || g.link_route;
                             g.job_id     = n.job_id     || g.job_id;
                             g.event_id   = n.event_id   || g.event_id;
-                            g.created_at = g.created_at || n.created_at;
+                            g.created_at = n.created_at || g.created_at;
 
                         } else {
                             var entry = Object.assign({}, n, {
                                 count: rowCount,
                                 _ids:  Array.isArray(n._ids) ? n._ids.slice() : [n.id],
-                                title: (isJobSelfEvent || isCoordSelfEvent || isEventSubmit || isEventResubmit)
-                                    ? (n.title || (isEventSubmit
-                                        ? 'New Event for Review'
-                                        : isEventResubmit
-                                        ? 'Event Resubmitted for Review'
-                                        : isCoordSelfEvent ? 'Coordinator Update' : 'Job Update'))
+                                title: isEventSubmit
+                                    ? window.__dirEventReviewTitle(n.title, true)
+                                    : isEventResubmit
+                                    ? window.__dirEventReviewTitle(n.title, false)
+                                    : isCoordSelfEvent
+                                    ? (n.title || 'Coordinator Update')
                                     : isMsgEvent
                                     ? (rowCount > 1 ? rowCount + ' New Messages' : (n.title || 'New Message'))
                                     : (isCoordEvent  ? (n.title || 'Coordinator Update')
@@ -823,9 +931,9 @@
                                      : isAlumniEvent ? (n.title || 'Alumni Update')
                                      : n.title),
                                 icon: (isCoordEvent || isCoordSelfEvent) ? 'users-gear'
-                                    : (isEventSubmit || isEventResubmit) ? 'calendar-days'
+                                    : (isEventSubmit || isEventResubmit) ? (n.icon || 'calendar-days')
                                     : isCalEvent    ? 'calendar-check'
-                                    : (isJobEvent || isJobSelfEvent) ? 'briefcase'
+                                    : isJobEvent    ? 'briefcase'
                                     : isMsgEvent    ? 'comments'
                                     : isAlumniEvent ? 'user-group'
                                     : (n.icon || 'bell'),
@@ -1330,7 +1438,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="window.__dirSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
+                   @click="open = false;"
                    class="dir-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
 
