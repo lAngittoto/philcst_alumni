@@ -144,6 +144,50 @@ new class extends Component {
         return $this->redirect(route('director.job/management'), navigate: true);
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Event stat card / mini-tile clicks — same clean-URL + session pattern
+    // as goToAllJobs()/goToActiveJobs() above. Previously these links built
+    // a "?status=pending" query string straight into the event management
+    // URL; now the status is stashed in the session and pulled once by
+    // manage-event.blade.php's mount(), so the address bar always lands on
+    // the plain /director/event/management URL, filter still applied.
+    //
+    //   goToAllEvents()       -> Total Events card / "Manage" link -> no filter
+    //   goToPendingEvents()   -> Pending Events card / mini-tile   -> PENDING
+    //   goToApprovedEvents()  -> Approved mini-tile                -> APPROVED
+    //   goToCompletedEvents() -> Completed mini-tile               -> COMPLETED
+    //   goToRejectedEvents()  -> Rejected mini-tile                -> REJECTED
+    // ─────────────────────────────────────────────────────────────────────
+    public function goToAllEvents()
+    {
+        session()->put('director_event_status', '');
+        return $this->redirect(route('director.event/management'), navigate: true);
+    }
+
+    public function goToPendingEvents()
+    {
+        session()->put('director_event_status', 'pending');
+        return $this->redirect(route('director.event/management'), navigate: true);
+    }
+
+    public function goToApprovedEvents()
+    {
+        session()->put('director_event_status', 'approved');
+        return $this->redirect(route('director.event/management'), navigate: true);
+    }
+
+    public function goToCompletedEvents()
+    {
+        session()->put('director_event_status', 'completed');
+        return $this->redirect(route('director.event/management'), navigate: true);
+    }
+
+    public function goToRejectedEvents()
+    {
+        session()->put('director_event_status', 'rejected');
+        return $this->redirect(route('director.event/management'), navigate: true);
+    }
+
     public function updatingCoordSearch(): void { $this->coordModalPage = 1; }
 
     public function coordPrevPage(): void { if ($this->coordModalPage > 1) $this->coordModalPage--; }
@@ -416,7 +460,7 @@ new class extends Component {
             </button>
 
             {{-- Total Events — clean URL: /director/event/management (no status segment) --}}
-            <a href="{{ route('director.event/management') }}" wire:navigate
+            <button type="button" wire:click="goToAllEvents"
                class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
@@ -437,10 +481,10 @@ new class extends Component {
                 @else
                     <p class="text-[#333333] font-normal mt-1 text-[0.85rem]">No approved events yet</p>
                 @endif
-            </a>
+            </button>
 
-            {{-- Pending Events — clean URL: /director/event/management/pending --}}
-            <a href="{{ route('director.event/management', ['status' => 'pending']) }}" wire:navigate
+            {{-- Pending Events — clean URL: /director/event/management (session-based filter) --}}
+            <button type="button" wire:click="goToPendingEvents"
                class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-amber-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
@@ -461,7 +505,7 @@ new class extends Component {
                 @else
                     <p class="text-[#333333] font-normal mt-1 text-[0.85rem]">All clear</p>
                 @endif
-            </a>
+            </button>
 
             {{-- Job Postings — clean URL, filter pre-set via session (same pattern as Active Coordinators) --}}
             <button type="button" wire:click="goToAllJobs"
@@ -492,10 +536,10 @@ new class extends Component {
             {{-- Events Overview Panel — mini tiles now link to clean filtered URLs --}}
             @php
                 $evtCards = [
-                    ['label'=>'Pending',   'count'=>$pendingEvents,   'icon'=>'fa-hourglass-end',  'bg'=>'bg-amber-50 border-amber-200',     'color'=>'text-amber-700',   'status'=>'pending',   'ctip'=>'View Pending Events'],
-                    ['label'=>'Approved',  'count'=>$approvedEvents,  'icon'=>'fa-calendar-check', 'bg'=>'bg-emerald-50 border-emerald-200', 'color'=>'text-emerald-700', 'status'=>'approved',  'ctip'=>'View Approved Events'],
-                    ['label'=>'Completed', 'count'=>$completedEvents, 'icon'=>'fa-flag-checkered', 'bg'=>'bg-blue-50 border-blue-200',       'color'=>'text-blue-700',    'status'=>'completed', 'ctip'=>'View Completed Events'],
-                    ['label'=>'Rejected',  'count'=>$rejectedEvents,  'icon'=>'fa-circle-xmark',   'bg'=>'bg-red-50 border-red-200',         'color'=>'text-red-700',     'status'=>'rejected',  'ctip'=>'View Rejected Events'],
+                    ['label'=>'Pending',   'count'=>$pendingEvents,   'icon'=>'fa-hourglass-end',  'bg'=>'bg-amber-50 border-amber-200',     'color'=>'text-amber-700',   'status'=>'pending',   'ctip'=>'View Pending Events',   'method'=>'goToPendingEvents'],
+                    ['label'=>'Approved',  'count'=>$approvedEvents,  'icon'=>'fa-calendar-check', 'bg'=>'bg-emerald-50 border-emerald-200', 'color'=>'text-emerald-700', 'status'=>'approved',  'ctip'=>'View Approved Events',  'method'=>'goToApprovedEvents'],
+                    ['label'=>'Completed', 'count'=>$completedEvents, 'icon'=>'fa-flag-checkered', 'bg'=>'bg-blue-50 border-blue-200',       'color'=>'text-blue-700',    'status'=>'completed', 'ctip'=>'View Completed Events', 'method'=>'goToCompletedEvents'],
+                    ['label'=>'Rejected',  'count'=>$rejectedEvents,  'icon'=>'fa-circle-xmark',   'bg'=>'bg-red-50 border-red-200',         'color'=>'text-red-700',     'status'=>'rejected',  'ctip'=>'View Rejected Events',  'method'=>'goToRejectedEvents'],
                 ];
             @endphp
             <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-hidden flex flex-col">
@@ -508,16 +552,16 @@ new class extends Component {
                         </div>
                         <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Events Overview</p>
                     </div>
-                    <a href="{{ route('director.event/management') }}" wire:navigate
+                    <button type="button" wire:click="goToAllEvents"
                        class="text-[.68rem] font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
                         Manage <i class="fas fa-arrow-right text-[10px]"></i>
-                    </a>
+                    </button>
                 </div>
 
                 <div class="p-3 flex-1">
                     <div class="grid grid-cols-2 gap-2">
                         @foreach($evtCards as $card)
-                        <a href="{{ route('director.event/management', ['status' => $card['status']]) }}" wire:navigate
+                        <button type="button" wire:click="{{ $card['method'] }}"
                            class="dir-mini-card dir-mini-tile rounded-xl border {{ $card['bg'] }} block w-full text-left">
                             <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>{{ $card['ctip'] }}</span>
                             <div class="flex items-center gap-1.5 mb-1">
@@ -525,7 +569,7 @@ new class extends Component {
                                 <span class="text-[.68rem] font-bold text-[#333333] uppercase tracking-wide">{{ $card['label'] }}</span>
                             </div>
                             <p class="dir-mini-num font-extrabold leading-none {{ $card['color'] }}">{{ number_format($card['count']) }}</p>
-                        </a>
+                        </button>
                         @endforeach
                     </div>
                 </div>

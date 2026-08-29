@@ -676,6 +676,27 @@
             _pollTimer: null,
             deleteToast: { show: false, message: '' },
 
+            // ── Read-order tracking ─────────────────────────────────────────
+            // The server only tells us true/false for `read` — it has no
+            // "read_at" timestamp we can sort by, and every 3s poll rebuilds
+            // `this.items` from scratch off that same server payload. So on
+            // its own, a just-read notif would just stay wherever its
+            // `created_at` puts it forever, instead of jumping to the top of
+            // the "Already Read" section like every other notif-stack pattern
+            // in this app (latest-read = top of its group). We fix that by
+            // keeping our OWN client-side stamp per notif group, written the
+            // instant markRead()/markAllRead()/markReadByRoute() fires, and
+            // re-applied to every fresh batch _processNotifs() builds — so it
+            // survives re-polls instead of being wiped out by them.
+            _readOrder: {},
+            _readSeq:   0,
+
+            _stampRead(key) {
+                if (!key) return;
+                this._readSeq += 1;
+                this._readOrder[key] = this._readSeq;
+            },
+
             async init() {
                 if (window.__coordLoggingOut) return;
                 await this._fetch();
@@ -1023,12 +1044,36 @@
                     }));
                 });
 
-                // Unread items float to the top (newest first), read items
-                // sit below (also newest first). This guarantees a single,
-                // clean "Already Read" divider point in the rendered list —
+                // Unread items float to the top (newest first). Read items
+                // sit below — but "read" order is the LATEST-READ-FIRST
+                // stack pattern used everywhere else notifs are read in this
+                // app (see coord-notif-poller / director side): the item you
+                // JUST marked read jumps to the very top of the read
+                // section, pushing older-read items down, rather than
+                // staying pinned to its original created_at position. This
+                // guarantees a single, clean "Already Read" divider point —
                 // no unread item can ever appear after a read one.
+                var self = this;
+                result.forEach(function (n) {
+                    // Stable identity per notif GROUP (not per raw row) so
+                    // the same group keeps its read-order rank across every
+                    // 3s re-poll instead of resetting each time.
+                    n._groupKey = (Array.isArray(n._ids) && n._ids.length) ? String(n._ids[0]) : String(n.id);
+                });
                 result.sort(function (a, b) {
                     if (!!a.read !== !!b.read) return a.read ? 1 : -1;
+                    if (a.read) {
+                        var aOrder = self._readOrder[a._groupKey] || 0;
+                        var bOrder = self._readOrder[b._groupKey] || 0;
+                        // Higher _readSeq = read more recently = goes first.
+                        // A read item that arrived from the server as
+                        // already-read (we never stamped it ourselves, e.g.
+                        // read on another device/tab) has no stamp yet —
+                        // falls back to created_at so it doesn't jump ahead
+                        // of items we know for certain were read more
+                        // recently.
+                        if (aOrder !== bOrder) return bOrder - aOrder;
+                    }
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
 
@@ -1046,6 +1091,7 @@
                 if (window.__coordLoggingOut) return;
                 if (item.read) return;
                 item.read = true;
+                this._stampRead(item._groupKey || String(item.id));
                 var ids  = Array.isArray(item._ids) ? item._ids : [item.id];
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
                 for (var i = 0; i < ids.length; i++) {
@@ -1060,11 +1106,31 @@
                         if (r.status === 419) { window.__coordShowSessionExpired(); return; }
                     } catch (e) { /* ignore */ }
                 }
+                // Re-sort immediately so the item jumps to the top of the
+                // read section right away, instead of waiting on the next
+                // 3s poll to visually reorder.
+                var store = this;
+                this.items = this.items.slice().sort(function (a, b) {
+                    if (!!a.read !== !!b.read) return a.read ? 1 : -1;
+                    if (a.read) {
+                        var aOrder = store._readOrder[a._groupKey] || 0;
+                        var bOrder = store._readOrder[b._groupKey] || 0;
+                        if (aOrder !== bOrder) return bOrder - aOrder;
+                    }
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
             },
 
             async markAllRead() {
                 if (window.__coordLoggingOut) return;
-                this.items.forEach(function (n) { n.read = true; });
+                var self = this;
+                // Preserve current top-to-bottom order as the read-order
+                // rank (items already nearer the top stay nearer the top
+                // of the read section), same convention as a single markRead().
+                this.items.forEach(function (n) {
+                    if (!n.read) self._stampRead(n._groupKey || String(n.id));
+                    n.read = true;
+                });
                 try {
                     var r = await window.fetch('/coordinator/notifications/read-all', {
                         method: 'PATCH',
@@ -1079,6 +1145,7 @@
 
             async markReadByRoute(routeName) {
                 if (window.__coordLoggingOut) return;
+                var self = this;
                 var matched = this.items.filter(function (n) {
                     return n.link_route === routeName && !n.read;
                 });
@@ -1086,6 +1153,7 @@
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
                 for (var i = 0; i < matched.length; i++) {
                     matched[i].read = true;
+                    self._stampRead(matched[i]._groupKey || String(matched[i].id));
                     var ids = matched[i]._ids || [matched[i].id];
                     for (var j = 0; j < ids.length; j++) {
                         try {
@@ -1100,6 +1168,15 @@
                         } catch (e) { /* ignore */ }
                     }
                 }
+                this.items = this.items.slice().sort(function (a, b) {
+                    if (!!a.read !== !!b.read) return a.read ? 1 : -1;
+                    if (a.read) {
+                        var aOrder = self._readOrder[a._groupKey] || 0;
+                        var bOrder = self._readOrder[b._groupKey] || 0;
+                        if (aOrder !== bOrder) return bOrder - aOrder;
+                    }
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
             },
 
             // Deletes a notification MESSAGE only — never the underlying

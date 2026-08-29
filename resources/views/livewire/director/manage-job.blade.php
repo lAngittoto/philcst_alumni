@@ -554,7 +554,7 @@ new class extends Component {
         $dedupKey = 'job-management::' . $action . '::' . $job->id;
         $now = now();
 
-        $rows = $targetUserIds->map(function ($uid) use ($dedupKey, $titleMap, $msgMap, $iconMap, $action, $now) {
+        $rows = $targetUserIds->map(function ($uid) use ($dedupKey, $titleMap, $msgMap, $iconMap, $action, $now, $job) {
             return [
                 'user_id'    => $uid,
                 'icon'       => $iconMap[$action],
@@ -563,6 +563,16 @@ new class extends Component {
                 'link_route' => 'organizer.job/management',
                 'link_label' => 'View Jobs',
                 'dedup_key'  => $dedupKey,
+                // ── FIX: this was previously omitted, so every job-management
+                //    notif loaded from the DB (i.e. anything other than the
+                //    same-tab live browser event) had no job_id at all. The
+                //    sidebar's click handler only appends ?highlight_job=...
+                //    when notif.job_id is present, so "View Details" silently
+                //    did nothing for Alumni-Director-posted jobs. Omitted only
+                //    on delete, same convention as the live event above —
+                //    the job row is gone, so a highlight_job deep-link would
+                //    just fail to load anyway.
+                'job_id'     => $action !== 'deleted' ? $job->id : null,
                 'read'       => false,
                 'created_at' => $now,
                 'updated_at' => $now,

@@ -85,12 +85,13 @@ new class extends Component {
     public string $shareEventStatus      = '';
 
     /**
-     * Status filter arrives as a clean query string from the dashboard cards,
-     * e.g. /director/event/management?status=rejected — the route itself
-     * (director.event/management -> Route::view('/event/management', ...))
-     * has no {status} URI segment defined in web.php, so this is NOT a
-     * route-bound parameter. We read it straight off the query string here.
-     * The URL stays exactly as the dashboard built it — nothing rewrites it.
+     * Status filter arrives via the session, not the query string, so the
+     * address bar always shows the plain /director/event/management URL —
+     * same pattern already used by manage-job.blade.php / manage-coordinator
+     * (see dashboard.blade.php's goToPendingEvents() etc.). The dashboard
+     * stat cards/mini-tiles session()->put('director_event_status', ...)
+     * then redirect here; we pull it once (which also clears it), so a
+     * plain refresh afterwards goes back to showing every status.
      */
     public function mount(): void
     {
@@ -118,7 +119,7 @@ new class extends Component {
             'completed' => 'COMPLETED',
         ];
 
-        $incomingStatus = request()->query('status');
+        $incomingStatus = session()->pull('director_event_status');
         if ($incomingStatus && isset($statusMap[strtolower($incomingStatus)])) {
             $this->filterStatus = $statusMap[strtolower($incomingStatus)];
         }

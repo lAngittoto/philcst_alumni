@@ -39,6 +39,12 @@ new #[Layout('app')] class extends Component {
     public int    $jobsExpiring = 0;
     public string $chartJobsSnapshotData = '{}';
 
+    // ── Announcements & News carousel — latest 5 items across approved
+    //    events, job postings, and courses, newest first. Each entry is a
+    //    plain array (not a model) so the blade side stays framework-agnostic:
+    //    ['type', 'icon', 'title', 'subtitle', 'when' (Carbon), 'badge', 'badge_color']
+    public array $announcements = [];
+
     // Role counts for the footer strip
     public int $roleActiveDirectors    = 0;
     public int $roleActiveCoordinators = 0;
@@ -67,6 +73,7 @@ new #[Layout('app')] class extends Component {
         $this->loadEmploymentSnapshot();
         $this->loadEventsSnapshot();
         $this->loadJobsSnapshot();
+        $this->loadAnnouncements();
         $this->loadRoleCounts();
     }
 
@@ -228,6 +235,88 @@ new #[Layout('app')] class extends Component {
             'data'   => [$this->jobsActive, $this->jobsInactive, $this->jobsExpiring],
             'colors' => ['#059669', '#d97706', '#f97316'],
         ]);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Announcements & News — a single merged "live feed" of the 5 most
+    // recent noteworthy things across the system: newly APPROVED events
+    // (ranked by reviewed_at, when the director actually approved it —
+    // NOT created_at/submission time), newly posted jobs (ACTIVE/INACTIVE,
+    // ranked by created_at), and newly added courses (ranked by
+    // created_at). Everything is normalized into the same plain-array
+    // shape so the carousel markup below doesn't need to branch on model
+    // type — it just reads ->type to pick an icon/badge color.
+    //
+    // Capped at 5 total (not 5 per type) — whichever 5 rows are the most
+    // recent overall, mixed freely across the three sources.
+    // ─────────────────────────────────────────────────────────────────────
+    private function loadAnnouncements(): void
+    {
+        $this->announcements = Cache::remember('dashboard_announcements_feed', 60, function () {
+            $items = collect();
+
+            AdminEvent::withoutTrashed()
+                ->where('status', 'APPROVED')
+                ->whereNotNull('reviewed_at')
+                ->orderByDesc('reviewed_at')
+                ->limit(5)
+                ->get(['id', 'title', 'reviewed_at'])
+                ->each(function ($event) use ($items) {
+                    $items->push([
+                        'type'        => 'event',
+                        'icon'        => 'calendar-check',
+                        'badge'       => 'Event Approved',
+                        'badge_color' => '#059669',
+                        'title'       => $event->title ?: 'Untitled Event',
+                        'subtitle'    => 'Approved and now visible to alumni',
+                        'when'        => $event->reviewed_at,
+                    ]);
+                });
+
+            JobPosting::whereIn('status', ['ACTIVE', 'INACTIVE'])
+                ->orderByDesc('created_at')
+                ->limit(5)
+                ->get(['id', 'job_title', 'company_name', 'created_at'])
+                ->each(function ($job) use ($items) {
+                    $items->push([
+                        'type'        => 'job',
+                        'icon'        => 'briefcase',
+                        'badge'       => 'Job Posted',
+                        'badge_color' => '#7a3f91',
+                        'title'       => $job->job_title ?: 'Untitled Job',
+                        'subtitle'    => $job->company_name ?: 'A new opportunity was posted',
+                        'when'        => $job->created_at,
+                    ]);
+                });
+
+            Course::orderByDesc('created_at')
+                ->limit(5)
+                ->get(['id', 'code', 'name', 'created_at'])
+                ->each(function ($course) use ($items) {
+                    $items->push([
+                        'type'        => 'course',
+                        'icon'        => 'book',
+                        'badge'       => 'New Course',
+                        'badge_color' => '#2563eb',
+                        'title'       => $course->code ?: 'New Course',
+                        'subtitle'    => $course->name ?: 'A new course was added',
+                        'when'        => $course->created_at,
+                    ]);
+                });
+
+            return $items
+                ->sortByDesc(fn ($row) => $row['when']?->timestamp ?? 0)
+                ->take(5)
+                ->values()
+                ->map(function ($row) {
+                    $row['when_human'] = $row['when']
+                        ? $row['when']->setTimezone('Asia/Manila')->diffForHumans()
+                        : '';
+                    unset($row['when']); // Carbon instance not needed past this point — keep the array plain/serializable
+                    return $row;
+                })
+                ->toArray();
+        });
     }
 
     private function loadRoleCounts(): void
@@ -462,6 +551,20 @@ new #[Layout('app')] class extends Component {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    max-height: 600px; /* sane fallback before JS syncHeight() takes over */
+}
+.adm-announce-live {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    color: #dc2626; flex-shrink: 0;
+}
+.adm-announce-live-dot {
+    width: 6px; height: 6px; border-radius: 999px; background: #dc2626;
+    animation: adm-live-pulse 1.6s ease-in-out infinite;
+}
+@keyframes adm-live-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: .35; transform: scale(.8); }
 }
 .adm-announce-track {
     display: flex;
@@ -469,32 +572,47 @@ new #[Layout('app')] class extends Component {
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    flex: 1 1 auto;
+    /* select/click affordances intentionally suppressed — this is a
+       display-only "live feed" strip, not a set of clickable cards */
+    user-select: none;
+    cursor: grab;
 }
+.adm-announce-track:active { cursor: grabbing; }
 .adm-announce-track::-webkit-scrollbar { display: none; }
 .adm-announce-slide {
     flex: 0 0 100%;
     scroll-snap-align: start;
-    padding: 28px 20px;
+    padding: 24px 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
-    gap: 8px;
+    gap: 7px;
     min-height: 140px;
+    height: 100%;
+    pointer-events: none; /* whole slide is inert — swiping happens on the track itself */
 }
 .adm-announce-icon {
     width: 44px; height: 44px; border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
     background: linear-gradient(135deg,#7A3F91,#9b59b6);
-    margin-bottom: 4px;
+    margin-bottom: 2px;
 }
 .adm-announce-icon i { color: #fff; font-size: 1.1rem; }
+.adm-announce-badge {
+    display: inline-flex; align-items: center;
+    font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 3px 10px; border-radius: 999px; border: 1px solid;
+}
 .adm-announce-title { font-size: .9rem; font-weight: 700; color: #000000; }
 .adm-announce-desc { font-size: .78rem; color: #666666; font-weight: 500; max-width: 320px; }
+.adm-announce-time { font-size: .7rem; color: #999999; font-weight: 600; margin-top: 2px; }
 .adm-announce-dots {
     display: flex; align-items: center; justify-content: center; gap: 6px;
     padding: 10px 0 14px;
+    flex-shrink: 0;
 }
 .adm-announce-dot {
     width: 6px; height: 6px; border-radius: 999px;
@@ -728,17 +846,35 @@ new #[Layout('app')] class extends Component {
             @endif
         </div>
 
-        {{-- Announcements & News — swipeable carousel (max 5 slides) --}}
-        <div class="adm-announce-card">
+        {{-- Announcements & News — auto-advancing, swipeable "live feed"
+             carousel (max 5 slides, newest first). Deliberately NOT
+             clickable anywhere in this card — pure display, like a small
+             live-TV strip, not a navigation control. --}}
+        <div class="adm-announce-card" id="admAnnounceCard">
             <div class="adm-panel-head">
                 <div>
                     <p class="adm-panel-ttl">Announcements &amp; News</p>
                     <p class="adm-panel-sub">Swipe to see more</p>
                 </div>
+                <span class="adm-announce-live">
+                    <span class="adm-announce-live-dot"></span>Live
+                </span>
             </div>
 
-            <div class="adm-announce-track" id="admAnnounceTrack">
-                {{-- Slide 1 of max 5 — Coming Soon placeholder --}}
+            <div class="adm-announce-track" id="admAnnounceTrack" oncontextmenu="return false;">
+                @forelse($announcements as $item)
+                <div class="adm-announce-slide" draggable="false">
+                    <div class="adm-announce-icon" style="background:linear-gradient(135deg,{{ $item['badge_color'] }},{{ $item['badge_color'] }}cc);">
+                        <i class="fas fa-{{ $item['icon'] }}"></i>
+                    </div>
+                    <span class="adm-announce-badge" style="color:{{ $item['badge_color'] }};border-color:{{ $item['badge_color'] }}33;background:{{ $item['badge_color'] }}14;">
+                        {{ $item['badge'] }}
+                    </span>
+                    <p class="adm-announce-title">{{ $item['title'] }}</p>
+                    <p class="adm-announce-desc">{{ $item['subtitle'] }}</p>
+                    <p class="adm-announce-time">{{ $item['when_human'] }}</p>
+                </div>
+                @empty
                 <div class="adm-announce-slide">
                     <div class="adm-announce-icon">
                         <i class="fas fa-bullhorn"></i>
@@ -746,10 +882,15 @@ new #[Layout('app')] class extends Component {
                     <p class="adm-announce-title">Coming Soon</p>
                     <p class="adm-announce-desc">Announcements and news updates will appear here.</p>
                 </div>
+                @endforelse
             </div>
 
             <div class="adm-announce-dots" id="admAnnounceDots">
-                <span class="adm-announce-dot active" data-idx="0"></span>
+                @forelse($announcements as $idx => $item)
+                    <span class="adm-announce-dot @if($idx === 0) active @endif" data-idx="{{ $idx }}"></span>
+                @empty
+                    <span class="adm-announce-dot active" data-idx="0"></span>
+                @endforelse
             </div>
         </div>
 
@@ -803,7 +944,7 @@ new #[Layout('app')] class extends Component {
         </div>
 
         {{-- Events Snapshot --}}
-        <div wire:click="goToEvents" class="adm-card adm-snap-card">
+        <div id="admEventsSnapCard" wire:click="goToEvents" class="adm-card adm-snap-card">
             <div class="adm-panel-head">
                 <div class="adm-snap-head-text">
                     <p class="adm-panel-ttl">Events</p>
@@ -843,7 +984,7 @@ new #[Layout('app')] class extends Component {
         </div>
 
         {{-- Jobs Snapshot --}}
-        <div wire:click="goToJobs" class="adm-card adm-snap-card">
+        <div id="admJobsSnapCard" wire:click="goToJobs" class="adm-card adm-snap-card">
             <div class="adm-panel-head">
                 <div class="adm-snap-head-text">
                     <p class="adm-panel-ttl">Job Postings</p>
@@ -1041,6 +1182,169 @@ new #[Layout('app')] class extends Component {
                 });
             });
         }
+    });
+})();
+</script>
+
+<script>
+(function(){
+    'use strict';
+
+    // ── Announcements & News — live-feed carousel ──────────────────────
+    // Auto-advances every few seconds through up to 5 slides, newest
+    // first. Manual swipe (touch AND mouse-drag) also works and briefly
+    // pauses auto-advance so it doesn't fight the person's own swipe.
+    // Deliberately has NO click/navigate behavior anywhere — this is a
+    // passive "live show" strip, not a set of links.
+    var AUTO_MS   = 4000;   // time between auto-advances
+    var RESUME_MS = 6000;   // how long a manual swipe pauses auto-advance
+
+    var timer        = null;
+    var resumeTimer  = null;
+    var dragging     = false;
+    var dragStartX   = 0;
+    var dragStartScroll = 0;
+    var boundTrack   = null;
+
+    function track(){ return document.getElementById('admAnnounceTrack'); }
+    function dotsWrap(){ return document.getElementById('admAnnounceDots'); }
+
+    function slideCount(){
+        var t = track();
+        return t ? t.children.length : 0;
+    }
+
+    function currentIndex(){
+        var t = track();
+        if(!t || !t.clientWidth) return 0;
+        return Math.round(t.scrollLeft / t.clientWidth);
+    }
+
+    function goTo(idx){
+        var t = track();
+        if(!t) return;
+        var n = slideCount();
+        if(n <= 0) return;
+        idx = ((idx % n) + n) % n; // wrap both directions
+        t.scrollTo({ left: idx * t.clientWidth, behavior: 'smooth' });
+        syncDots(idx);
+    }
+
+    function syncDots(idx){
+        var dw = dotsWrap();
+        if(!dw) return;
+        var dots = dw.querySelectorAll('.adm-announce-dot');
+        dots.forEach(function(d, i){
+            d.classList.toggle('active', i === idx);
+        });
+    }
+
+    function stopAuto(){
+        if(timer){ clearInterval(timer); timer = null; }
+    }
+
+    function startAuto(){
+        stopAuto();
+        if(slideCount() <= 1) return; // nothing to rotate through
+        timer = setInterval(function(){
+            goTo(currentIndex() + 1);
+        }, AUTO_MS);
+    }
+
+    function pauseThenResume(){
+        stopAuto();
+        if(resumeTimer) clearTimeout(resumeTimer);
+        resumeTimer = setTimeout(startAuto, RESUME_MS);
+    }
+
+    // Track scroll -> keep dots in sync no matter how the scroll happened
+    // (auto-advance, native touch swipe, or the mouse-drag handler below).
+    function onScroll(){
+        syncDots(currentIndex());
+    }
+
+    // ── Mouse-drag swipe support ────────────────────────────────────────
+    // .adm-announce-track already scrolls natively via touch (overflow-x:
+    // auto + scroll-snap) but a plain overflow container does NOT support
+    // click-and-drag scrolling with a mouse — desktop users would have no
+    // way to swipe at all without this.
+    function onPointerDown(e){
+        var t = track();
+        if(!t) return;
+        dragging = true;
+        dragStartX = (e.touches ? e.touches[0].clientX : e.clientX);
+        dragStartScroll = t.scrollLeft;
+        pauseThenResume();
+    }
+    function onPointerMove(e){
+        if(!dragging) return;
+        var t = track();
+        if(!t) return;
+        var x = (e.touches ? e.touches[0].clientX : e.clientX);
+        t.scrollLeft = dragStartScroll - (x - dragStartX);
+    }
+    function onPointerUp(){
+        if(!dragging) return;
+        dragging = false;
+        // Snap to the nearest slide after a drag release.
+        goTo(currentIndex());
+    }
+
+    function bindDots(){
+        var dw = dotsWrap();
+        if(!dw) return;
+        dw.querySelectorAll('.adm-announce-dot').forEach(function(dot){
+            if(dot._admBound) return;
+            dot._admBound = true;
+            dot.style.cursor = 'pointer';
+            dot.addEventListener('click', function(){
+                var idx = parseInt(dot.getAttribute('data-idx'), 10) || 0;
+                goTo(idx);
+                pauseThenResume();
+            });
+        });
+    }
+
+    function bindTrack(){
+        var t = track();
+        if(!t || t === boundTrack) return; // already bound to this exact element
+        boundTrack = t;
+
+        t.addEventListener('scroll', onScroll, { passive: true });
+
+        // Mouse drag (touch already works natively, so only wire mouse events).
+        t.addEventListener('mousedown', onPointerDown);
+        window.addEventListener('mousemove', onPointerMove);
+        window.addEventListener('mouseup', onPointerUp);
+
+        // Any manual touch swipe also pauses/resumes auto-advance.
+        t.addEventListener('touchstart', pauseThenResume, { passive: true });
+
+        // Dots ARE clickable (direct jump-to-slide) — only the slide
+        // CONTENT itself is inert/non-clickable, not the progress dots.
+        bindDots();
+    }
+
+    function init(){
+        bindTrack();
+        syncDots(0);
+        startAuto();
+    }
+
+    if(document.readyState === 'loading'){
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+    // Re-init on every Livewire page swap (wire:navigate) — same
+    // convention as the chart script above, since the DOM (and therefore
+    // the track/dots elements) is fully replaced on navigation.
+    document.addEventListener('livewire:navigated', function(){
+        stopAuto();
+        if(resumeTimer) clearTimeout(resumeTimer);
+        boundTrack = null; // force rebind to the freshly-swapped-in track element
+        requestAnimationFrame(init);
     });
 })();
 </script>

@@ -3696,4 +3696,28 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 })();
 </script>
 
+<script>
+(function () {
+    // ── Clean URL: strip ?highlight_job=ID from the address bar ─────────
+    // Two different callers land here with ?highlight_job=ID in the URL:
+    //   1) sidebar-organizer_blade.php's notification click handler
+    //   2) organizer/chat-alumni.blade.php's shared "View Post" job card
+    // mount() (server-side) already reads and consumes this value on page
+    // load to open the matching job's View/Edit modal — the query string
+    // itself is never needed again after that first render. Left in place,
+    // though, it stays in the address bar and gets carried along on every
+    // refresh/share/bookmark of this page, which is confusing since the
+    // modal isn't what a plain revisit should show.
+    //
+    // history.replaceState swaps the URL in the address bar WITHOUT a
+    // reload and WITHOUT adding a back-button entry — the already-open
+    // modal (opened server-side during this same request) is untouched.
+    if (window.location.search.indexOf('highlight_job') !== -1) {
+        var url = new URL(window.location.href);
+        url.searchParams.delete('highlight_job');
+        window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    }
+})();
+</script>
+
 </div>

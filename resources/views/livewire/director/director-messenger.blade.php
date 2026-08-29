@@ -649,6 +649,14 @@ new class extends Component {
             $isMe      = $m->sender_type === 'director' && $m->sender_id === $self->directorId;
             $isDeleted = !is_null($m->deleted_at);
 
+            // A message is treated as "censored" if the profanity filter
+            // replaced any word with asterisks (our filter always uses runs
+            // of 4+ '*' — see censorProfanity()). Once a message has been
+            // censored, editing or reacting to it is blocked so it can't be
+            // used to slip a bad word back in via an edit, or to draw more
+            // attention to it via reactions.
+            $isCensored = ! $isDeleted && (bool) preg_match('/\*{4,}/', $m->body);
+
             return [
                 'id'             => $m->id,
                 'sender_type'    => $m->sender_type,
@@ -659,6 +667,7 @@ new class extends Component {
                 'post_preview'   => $isDeleted ? null : $self->resolvePostPreview($m->body),
                 'edited'         => ! is_null($m->edited_at),
                 'deleted'        => $isDeleted,
+                'is_censored'    => $isCensored,
                 'is_mine'        => $isMe,
                 'is_director'    => $isDir,
                 'is_coordinator' => $isCoord,
@@ -722,23 +731,46 @@ new class extends Component {
             ]);
         };
 
+        // Common Tagalog/Pangasinan enclitic suffixes/particles that get
+        // glued directly onto a root bad word with no space, e.g.
+        // "boboka" (bobo+ka), "gagoka", "tangamo", "ulolna". Word-boundary
+        // matching alone misses these since there's no non-letter char
+        // between the root and the suffix, so we allow an optional run of
+        // these known suffixes right after the root before requiring a
+        // boundary.
+        $suffixAlt = implode('|', array_map(fn ($s) => preg_quote($s, '/'), [
+            'ka', 'mo', 'na', 'nga', 'po', 'lang', 'din', 'rin',
+            'kayo', 'sila', 'niya', 'nila', 'natin', 'namin',
+        ]));
+
         foreach ($this->profanityList as $word) {
             $wordNorm = $normalize($word);
             // Allow spaces/hyphens/underscores between letters of multi-word
             // entries, and treat non-letter characters as word boundaries.
-            $pattern = '/(?<![\p{L}\p{N}])' . preg_quote($wordNorm, '/') . '(?![\p{L}\p{N}])/iu';
+            // After the root word, optionally allow one glued-on suffix
+            // (e.g. "boboka") before the boundary is enforced.
+            $pattern = '/(?<![\p{L}\p{N}])' . preg_quote($wordNorm, '/')
+                     . '(?:' . $suffixAlt . ')?'
+                     . '(?![\p{L}\p{N}])/iu';
 
-            $text = preg_replace_callback($pattern, function () use ($wordNorm) {
-                return str_repeat('*', max(4, mb_strlen($wordNorm)));
-            }, $text) ?? $text;
-
-            // Also run against a leetspeak-normalized view so "f4ck" etc.
-            // still gets caught even though the ORIGINAL text has digits.
+            // Find match positions against a leetspeak-normalized view of
+            // the CURRENT text (so "f4ck", "b0b0ka" etc. are found too),
+            // then blank out those same character offsets in the ORIGINAL
+            // text. normalize() is a strict 1-for-1 character substitution
+            // (no length change), so offsets line up between the two.
             $textNorm = $normalize($text);
-            if (preg_match($pattern, $textNorm)) {
-                $text = preg_replace_callback($pattern, function ($m) {
-                    return str_repeat('*', max(4, mb_strlen($m[0])));
-                }, $text) ?? $text;
+            if (preg_match_all($pattern, $textNorm, $posMatches, PREG_OFFSET_CAPTURE)) {
+                $chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY);
+                foreach ($posMatches[0] as [$matchStr, $byteOffset]) {
+                    // Convert byte offset (from PREG_OFFSET_CAPTURE) to a
+                    // character offset for safe multibyte indexing.
+                    $charOffset = mb_strlen(substr($textNorm, 0, $byteOffset));
+                    $len        = mb_strlen($matchStr);
+                    for ($i = $charOffset; $i < $charOffset + $len && $i < count($chars); $i++) {
+                        $chars[$i] = '*';
+                    }
+                }
+                $text = implode('', $chars);
             }
         }
 
@@ -837,7 +869,7 @@ new class extends Component {
     public function startEdit(int $id): void
     {
         $msg = collect($this->messages)->firstWhere('id', $id);
-        if (! $msg || ! $msg['is_mine'] || $msg['deleted']) return;
+        if (! $msg || ! $msg['is_mine'] || $msg['deleted'] || ($msg['is_censored'] ?? false)) return;
 
         $this->editingId = $id;
         $this->editBody  = $msg['body'];
@@ -846,6 +878,22 @@ new class extends Component {
     public function saveEdit(): void
     {
         if (! $this->editingId || trim($this->editBody) === '') return;
+
+        // Re-check censorship against the live DB row (not the stale
+        // in-memory $this->messages snapshot) so this can't be bypassed by
+        // opening edit mode and waiting, or by a stale page state.
+        $currentBody = DB::table('chat_messages')
+            ->where('id', $this->editingId)
+            ->where('sender_type', 'director')
+            ->where('sender_id', $this->directorId)
+            ->whereNull('deleted_at')
+            ->value('body');
+
+        if ($currentBody === null || preg_match('/\*{4,}/', $currentBody)) {
+            $this->editingId = null;
+            $this->editBody  = '';
+            return;
+        }
 
         $editedBody = $this->censorProfanity(trim($this->editBody));
 
@@ -876,17 +924,10 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     public function unsend(int $id): void
     {
-        DB::table('chat_messages')
-            ->where('id', $id)
-            ->where('sender_type', 'director')
-            ->where('sender_id', $this->directorId)
-            ->update(['deleted_at' => now()]);
-
-        DB::table('chat_pins')->where('message_id', $id)->delete();
-        DB::table('chat_reactions')->where('message_id', $id)->delete();
-
-        $this->loadMessages();
-        if ($this->showPins) $this->loadPins();
+        // Unsend feature disabled — messages can no longer be removed
+        // by directors. Kept as a no-op stub so any stray wire:click
+        // calls (or an old cached UI) fail silently instead of erroring.
+        return;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -897,7 +938,7 @@ new class extends Component {
         if (! in_array($reaction, ['heart', 'purple', 'like', 'dislike'], true)) return;
 
         $msg = collect($this->messages)->firstWhere('id', $msgId);
-        if (! $msg || $msg['deleted']) return;
+        if (! $msg || $msg['deleted'] || ($msg['is_censored'] ?? false)) return;
 
         $existing = DB::table('chat_reactions')
             ->where('message_id', $msgId)
@@ -1004,7 +1045,7 @@ new class extends Component {
     public function togglePin(int $msgId): void
     {
         $msg = collect($this->messages)->firstWhere('id', $msgId);
-        if (! $msg || $msg['deleted']) return;
+        if (! $msg || $msg['deleted'] || ($msg['is_censored'] ?? false)) return;
 
         if (DB::table('chat_pins')->where('message_id', $msgId)->exists()) {
             DB::table('chat_pins')->where('message_id', $msgId)->delete();
@@ -1029,7 +1070,7 @@ new class extends Component {
     public function setReply(int $id): void
     {
         $msg = collect($this->messages)->firstWhere('id', $id);
-        if (! $msg || $msg['deleted']) return;
+        if (! $msg || $msg['deleted'] || ($msg['is_censored'] ?? false)) return;
 
         $this->replyTo = [
             'id'   => $msg['id'],
@@ -1461,7 +1502,7 @@ new class extends Component {
 
                 {{-- Message list --}}
                 <div id="msg-list"
-                     class="flex-1 overflow-y-auto px-3 py-3 space-y-0 bg-[#fafafa]"
+                     class="flex-1 overflow-y-auto px-3 pt-3 pb-24 space-y-0 bg-[#fafafa]"
                      x-data="{ openMessageId: null }"
                      x-init="$nextTick(() => { $el.scrollTop = $el.scrollHeight; })"
                      @click.outside="openMessageId = null"
@@ -1555,109 +1596,21 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- ── Inline action bar ── --}}
-                                @if(!$msg['deleted'])
+
+
+                                {{-- Bubble + action-bar anchor. The picker below is
+                                     positioned relative to THIS wrapper (which hugs the
+                                     actual rendered bubble/placeholder), so it always
+                                     opens directly under the real message content —
+                                     never overlapping it. --}}
                                 <div class="relative w-full">
-                                <div x-show="openMessageId === {{ $msg['id'] }}"
-                                     x-transition:enter="transition ease-out duration-150"
-                                     x-transition:enter-start="opacity-0 scale-95 translate-y-2"
-                                     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                                     x-transition:leave="transition ease-in duration-100"
-                                     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
-                                     x-transition:leave-end="opacity-0 scale-95 translate-y-2"
-                                     x-cloak
-                                     @click.stop
-                                     class="absolute bottom-full {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} mb-2.5
-                                            flex flex-wrap items-center gap-1.5 bg-white border border-[#E8E0F0]
-                                            rounded-2xl px-3 py-2 shadow-xl z-30 w-max max-w-[90vw]"
-                                     style="box-shadow:0 6px 16px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.06);">
-
-                                    <span class="absolute -bottom-[7px] {{ $msg['is_mine'] ? 'right-5' : 'left-5' }}
-                                                 w-3.5 h-3.5 bg-white border-r border-b border-[#E8E0F0] rotate-45"
-                                          style="box-shadow:2px 2px 4px rgba(0,0,0,.04);"></span>
-
-                                    @foreach(['heart' => '❤️', 'purple' => '💜', 'like' => '👍', 'dislike' => '👎'] as $rk => $re)
-                                    <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
-                                            @click.stop
-                                            class="text-[1.3rem] leading-none transition-transform hover:scale-125 active:scale-110
-                                                   {{ $msg['my_reaction'] === $rk ? 'opacity-100 scale-110' : 'opacity-50 hover:opacity-100' }}"
-                                            title="{{ ucfirst($rk) }}">{{ $re }}</button>
-                                    @endforeach
-
-                                    <span class="w-px h-5 bg-[#E8E0F0] block"></span>
-
-                                    <button wire:click="setReply({{ $msg['id'] }})"
-                                            @click.stop="openMessageId = null"
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
-                                                   hover:text-[#7a3f91] hover:bg-[#f3eef8] transition text-xs font-semibold">
-                                        <i class="fa-solid fa-reply text-xs"></i>
-                                        <span class="hidden sm:inline">Reply</span>
-                                    </button>
-
-                                    <button wire:click="togglePin({{ $msg['id'] }})"
-                                            @click.stop
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
-                                                   {{ $msg['is_pinned']
-                                                        ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
-                                                        : 'text-[#666666] hover:text-amber-600 hover:bg-amber-50' }}">
-                                        <i class="fa-solid fa-thumbtack text-xs"></i>
-                                        <span class="hidden sm:inline">{{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}</span>
-                                    </button>
-
-                                    @if(! empty($msg['reactions']))
-                                    <button wire:click="openReactionsPopup({{ $msg['id'] }})"
-                                            @click.stop
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
-                                                   {{ $reactionsPopupMsgId === $msg['id']
-                                                        ? 'text-[#7a3f91] bg-[#f3eef8]'
-                                                        : 'text-[#666666] hover:text-[#7a3f91] hover:bg-[#f3eef8]' }}">
-                                        <i class="fa-solid fa-face-smile text-xs"></i>
-                                        <span class="hidden sm:inline">Reactions</span>
-                                    </button>
-                                    @endif
-
-                                    @if($msg['is_mine'])
-                                    <span class="w-px h-5 bg-[#E8E0F0] block"></span>
-
-                                    <button wire:click="startEdit({{ $msg['id'] }})"
-                                            @click.stop="openMessageId = null"
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
-                                                   hover:text-blue-600 hover:bg-blue-50 transition text-xs font-semibold">
-                                        <i class="fa-solid fa-pen text-xs"></i>
-                                        <span class="hidden sm:inline">Edit</span>
-                                    </button>
-
-                                    <div x-show="!confirmUnsend">
-                                        <button @click.stop="confirmUnsend = true"
-                                                class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
-                                                       hover:text-red-600 hover:bg-red-50 transition text-xs font-semibold">
-                                            <i class="fa-solid fa-trash-can text-xs"></i>
-                                            <span class="hidden sm:inline">Unsend</span>
-                                        </button>
-                                    </div>
-                                    <div x-show="confirmUnsend" class="flex items-center gap-1">
-                                        <span class="text-xs text-red-600 font-semibold">Unsend?</span>
-                                        <button wire:click="unsend({{ $msg['id'] }})"
-                                                @click.stop
-                                                class="text-xs px-2 py-1 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition">
-                                            Yes
-                                        </button>
-                                        <button @click.stop="confirmUnsend = false"
-                                                class="text-xs px-2 py-1 rounded-lg bg-[#f5f5f5] text-[#666666] font-semibold hover:bg-[#E8E0F0] transition">
-                                            No
-                                        </button>
-                                    </div>
-                                    @endif
-                                </div>
-                                </div>
-                                @endif
 
                                 {{-- ══ DELETED / UNSENT PLACEHOLDER ══ --}}
                                 @if($msg['deleted'])
-                                <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] italic
+                                <div class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-base italic font-semibold
                                             {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}"
-                                     style="background:rgba(0,0,0,0.05); border:1px dashed #d1d5db; color:#9ca3af;">
-                                    <i class="fa-solid fa-ban text-[10px] opacity-60"></i>
+                                     style="background:#f0f0f0; border:1px dashed #c9c9c9; color:#1a1a1a;">
+                                    <i class="fa-solid fa-ban text-sm opacity-70"></i>
                                     <span>
                                         @if($msg['is_mine'])
                                             You unsent a message.
@@ -1667,27 +1620,14 @@ new class extends Component {
                                     </span>
                                 </div>
 
-                                {{-- ══ EDIT MODE ══ --}}
+                                {{-- ══ EDIT MODE ══ (moved to the main compose box below —
+                                     see Input area. Bubble just shows a subtle "editing" hint.) ── --}}
                                 @elseif($editingId === $msg['id'])
-                                <div class="flex flex-col gap-1.5 min-w-[220px]">
-                                    <textarea wire:model="editBody"
-                                              rows="2"
-                                              class="text-sm rounded-lg border border-[#7a3f91] px-3 py-2 resize-none
-                                                     focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/30 w-full bg-white shadow-sm"
-                                              wire:keydown.escape="cancelEdit"></textarea>
-                                    <div class="flex gap-1.5 justify-end">
-                                        <button wire:click="cancelEdit"
-                                                class="text-xs px-3 py-1.5 rounded-lg border border-[#E8E0F0]
-                                                       text-[#666666] hover:bg-[#f5f5f5] transition font-semibold">
-                                            Cancel
-                                        </button>
-                                        <button wire:click="saveEdit"
-                                                class="text-xs px-3 py-1.5 rounded-lg text-white font-semibold
-                                                       hover:opacity-90 transition"
-                                                style="background:#7a3f91;">
-                                            Save
-                                        </button>
-                                    </div>
+                                <div class="px-3.5 py-2.5 rounded-2xl text-sm italic flex items-center gap-2
+                                            {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}"
+                                     style="background:rgba(122,63,145,.08); border:1px dashed #c9a8d9; color:#7a3f91;">
+                                    <i class="fa-solid fa-pen text-xs"></i>
+                                    <span>Editing this message…</span>
                                 </div>
 
                                 {{-- ══ SHARED JOB / EVENT PREVIEW CARD ══
@@ -1704,7 +1644,7 @@ new class extends Component {
                                     $ppIsEvent   = ($pp['type'] ?? 'job') === 'event';
                                     $ppCompleted = $ppIsEvent && ($pp['is_completed'] ?? false);
                                 @endphp
-                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); confirmUnsend = false; $nextTick(() => { if (openMessageId === {{ $msg['id'] }}) $refs.row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); })"
+                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); confirmUnsend = false; $nextTick(() => { if (openMessageId === {{ $msg['id'] }}) $refs.row.scrollIntoView({ block: 'center', behavior: 'smooth' }); })"
                                      class="msgr-post-card cursor-pointer {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
                                     <div class="msgr-post-thumb">
                                         @if($ppAvailable)
@@ -1782,7 +1722,7 @@ new class extends Component {
                                         $safe
                                     );
                                 @endphp
-                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); confirmUnsend = false; $nextTick(() => { if (openMessageId === {{ $msg['id'] }}) $refs.row.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); })"
+                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); confirmUnsend = false; $nextTick(() => { if (openMessageId === {{ $msg['id'] }}) $refs.row.scrollIntoView({ block: 'center', behavior: 'smooth' }); })"
                                      class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words
                                             cursor-pointer select-none transition-opacity active:opacity-80
                                             {{ $msg['is_mine']
@@ -1797,6 +1737,109 @@ new class extends Component {
                                     @endif
                                 </div>
                                 @endif
+
+                                {{-- ── Inline action bar — anchored to the wrapper above,
+                                     so it always opens directly below the actual bubble
+                                     content (never overlapping it). Only shown for
+                                     non-deleted messages. ── --}}
+                                @if(!$msg['deleted'])
+                                <div x-show="openMessageId === {{ $msg['id'] }}"
+                                     x-transition:enter="transition ease-out duration-150"
+                                     x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+                                     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                                     x-transition:leave="transition ease-in duration-100"
+                                     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
+                                     x-transition:leave-end="opacity-0 scale-95 translate-y-2"
+                                     x-cloak
+                                     @click.stop
+                                     class="absolute top-full {{ $msg['is_mine'] ? 'right-0' : 'left-0' }} mt-2.5
+                                            flex flex-wrap items-center gap-1.5 bg-white border border-[#E8E0F0]
+                                            rounded-2xl px-3 py-2 shadow-xl z-30 w-max max-w-[90vw]"
+                                     style="box-shadow:0 6px 16px rgba(0,0,0,.12), 0 2px 4px rgba(0,0,0,.06);">
+
+                                    <span class="absolute -top-[7px] {{ $msg['is_mine'] ? 'right-5' : 'left-5' }}
+                                                 w-3.5 h-3.5 bg-white border-l border-t border-[#E8E0F0] rotate-45"
+                                          style="box-shadow:-2px -2px 4px rgba(0,0,0,.04);"></span>
+
+                                    @foreach(['heart' => '❤️', 'purple' => '💜', 'like' => '👍', 'dislike' => '👎'] as $rk => $re)
+                                    <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
+                                            @click.stop
+                                            @if($msg['is_censored'] ?? false) disabled @endif
+                                            class="text-[1.3rem] leading-none transition-transform
+                                                   {{ ($msg['is_censored'] ?? false)
+                                                        ? 'opacity-25 grayscale cursor-not-allowed'
+                                                        : 'hover:scale-125 active:scale-110 ' . ($msg['my_reaction'] === $rk ? 'opacity-100 scale-110' : 'opacity-50 hover:opacity-100') }}">{{ $re }}</button>
+                                    @endforeach
+
+                                    <span class="w-px h-5 bg-[#E8E0F0] block"></span>
+
+                                    <button wire:click="setReply({{ $msg['id'] }})"
+                                            @click.stop="{{ ($msg['is_censored'] ?? false) ? '' : 'openMessageId = null' }}"
+                                            @if($msg['is_censored'] ?? false) disabled @endif
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
+                                                   {{ ($msg['is_censored'] ?? false)
+                                                        ? 'text-[#bbbbbb] cursor-not-allowed'
+                                                        : 'text-[#666666] hover:text-[#7a3f91] hover:bg-[#f3eef8]' }}">
+                                        <i class="fa-solid fa-reply text-xs"></i>
+                                        <span class="hidden sm:inline">Reply</span>
+                                    </button>
+
+                                    <button wire:click="togglePin({{ $msg['id'] }})"
+                                            @click.stop
+                                            @if($msg['is_censored'] ?? false) disabled @endif
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
+                                                   {{ ($msg['is_censored'] ?? false)
+                                                        ? 'text-[#bbbbbb] cursor-not-allowed'
+                                                        : ($msg['is_pinned']
+                                                            ? 'text-amber-600 bg-amber-50 hover:bg-amber-100'
+                                                            : 'text-[#666666] hover:text-amber-600 hover:bg-amber-50') }}">
+                                        <i class="fa-solid fa-thumbtack text-xs"></i>
+                                        <span class="hidden sm:inline">{{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}</span>
+                                    </button>
+
+                                    @if(! empty($msg['reactions']))
+                                    <button wire:click="openReactionsPopup({{ $msg['id'] }})"
+                                            @click.stop
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
+                                                   {{ $reactionsPopupMsgId === $msg['id']
+                                                        ? 'text-[#7a3f91] bg-[#f3eef8]'
+                                                        : 'text-[#666666] hover:text-[#7a3f91] hover:bg-[#f3eef8]' }}">
+                                        <i class="fa-solid fa-face-smile text-xs"></i>
+                                        <span class="hidden sm:inline">Reactions</span>
+                                    </button>
+                                    @endif
+
+                                    @if($msg['is_mine'])
+                                    <span class="w-px h-5 bg-[#E8E0F0] block"></span>
+
+                                    @if($msg['is_censored'] ?? false)
+                                    <button disabled
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#bbbbbb]
+                                                   cursor-not-allowed text-xs font-semibold">
+                                        <i class="fa-solid fa-pen text-xs"></i>
+                                        <span class="hidden sm:inline">Edit</span>
+                                    </button>
+                                    @else
+                                    <button wire:click="startEdit({{ $msg['id'] }})"
+                                            @click.stop="openMessageId = null; $nextTick(() => window.dispatchEvent(new CustomEvent('focus-input')))"
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
+                                                   hover:text-blue-600 hover:bg-blue-50 transition text-xs font-semibold">
+                                        <i class="fa-solid fa-pen text-xs"></i>
+                                        <span class="hidden sm:inline">Edit</span>
+                                    </button>
+                                    @endif
+
+                                    <button disabled
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#bbbbbb]
+                                                   cursor-not-allowed text-xs font-semibold">
+                                        <i class="fa-solid fa-trash-can text-xs"></i>
+                                        <span class="hidden sm:inline">Unsend</span>
+                                    </button>
+                                    @endif
+                                </div>
+                                @endif
+
+                                </div>{{-- /bubble+action-bar anchor --}}
 
                                 {{-- ── View Reactions Popup ── --}}
                                 @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
@@ -1935,7 +1978,7 @@ new class extends Component {
                 </div>
 
                 {{-- Reply preview bar --}}
-                @if($replyTo)
+                @if($replyTo && !$editingId)
                 <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0">
                     <div class="w-1 h-10 rounded-full flex-shrink-0" style="background:#7a3f91;"></div>
                     <div class="flex-1 min-w-0">
@@ -1946,6 +1989,24 @@ new class extends Component {
                     </div>
                     <button wire:click="clearReply"
                             class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999]
+                                   hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
+                        <i class="fa-solid fa-xmark text-sm"></i>
+                    </button>
+                </div>
+                @endif
+
+                {{-- Editing indicator bar --}}
+                @if($editingId)
+                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-blue-50 flex-shrink-0">
+                    <div class="w-1 h-10 rounded-full flex-shrink-0 bg-blue-500"></div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-xs font-semibold text-blue-700 truncate uppercase tracking-widest">
+                            <i class="fa-solid fa-pen text-[10px] mr-1"></i>Editing message
+                        </p>
+                        <p class="text-xs text-blue-500 truncate">Press Save to update, or Esc to cancel</p>
+                    </div>
+                    <button wire:click="cancelEdit"
+                            class="w-7 h-7 flex items-center justify-center rounded-full text-blue-400
                                    hover:text-red-600 hover:bg-red-50 transition flex-shrink-0">
                         <i class="fa-solid fa-xmark text-sm"></i>
                     </button>
@@ -1989,6 +2050,35 @@ new class extends Component {
 
                     <div class="flex items-end gap-2">
                         <div class="flex-1 relative">
+                            @if($editingId)
+                            <textarea
+                                id="chat-input"
+                                wire:model="editBody"
+                                placeholder="Edit your message…"
+                                rows="1"
+                                wire:keydown.escape="cancelEdit"
+                                @keydown.enter="if (!$event.shiftKey) {
+                                    $event.preventDefault();
+                                    if ($event.isComposing) return;
+                                    $wire.editBody = $event.target.value;
+                                    $wire.saveEdit();
+                                }"
+                                @focus-input.window="$el.focus()"
+                                x-init="
+                                    $el.focus();
+                                    $el.style.height = 'auto';
+                                    $el.style.height = Math.min($el.scrollHeight, 120) + 'px';
+                                    $el.addEventListener('input', function () {
+                                        this.style.height = 'auto';
+                                        this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                                    });
+                                "
+                                class="w-full resize-none rounded-lg border-2 border-blue-500 bg-blue-50/40
+                                       px-4 py-2.5 text-sm leading-relaxed text-[#333333]
+                                       focus:outline-none focus:ring-2 focus:ring-blue-500/30
+                                       transition placeholder-[#999999]"
+                                style="max-height:120px; overflow-y:auto;"></textarea>
+                            @else
                             <textarea
                                 id="chat-input"
                                 wire:model.live.debounce.200ms="body"
@@ -2013,7 +2103,21 @@ new class extends Component {
                                        focus:outline-none focus:ring-2 focus:ring-[#7a3f91]/30
                                        transition placeholder-[#999999]"
                                 style="max-height:120px; overflow-y:auto;"></textarea>
+                            @endif
                         </div>
+
+                        @if($editingId)
+                        <button wire:click="saveEdit" wire:loading.attr="disabled" wire:target="saveEdit"
+                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0
+                                       transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60 bg-blue-600">
+                            <i class="fa-solid fa-check text-base" wire:loading.remove wire:target="saveEdit"></i>
+                            <span class="hidden items-center gap-1" wire:loading.flex wire:target="saveEdit">
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:0ms;animation-duration:800ms;"></span>
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:150ms;animation-duration:800ms;"></span>
+                                <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:300ms;animation-duration:800ms;"></span>
+                            </span>
+                        </button>
+                        @else
                         <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0
                                        transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60"
@@ -2025,13 +2129,20 @@ new class extends Component {
                                 <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:300ms;animation-duration:800ms;"></span>
                             </span>
                         </button>
+                        @endif
                     </div>
 
                     <p class="text-xs text-[#999999] text-center mt-1.5">
-                        <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
-                        <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
-                        <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">@</kbd> mention &nbsp;·&nbsp;
-                        <span class="text-[#E8E0F0]">tap message for actions</span>
+                        @if($editingId)
+                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> save &nbsp;·&nbsp;
+                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
+                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Esc</kbd> cancel
+                        @else
+                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
+                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
+                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">@</kbd> mention &nbsp;·&nbsp;
+                            <span class="text-[#E8E0F0]">tap message for actions</span>
+                        @endif
                     </p>
                 </div>
             </div>
