@@ -450,17 +450,24 @@ new class extends Component {
 .adm-scroll::-webkit-scrollbar-thumb { background: #cccccc; border-radius: 99px; }
 .adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Search / filter loading progress bar (same pattern as Event Organizer / User Management) ── */
-.adm-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
-.adm-filter-progress-bar {
-    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
-    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
-    animation: admFilterProgress 1s ease-in-out infinite;
-}
-@keyframes admFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
+/* ── Table container height — always 58vh, never shrinks or grows regardless of content or flex siblings ── */
+.adm-table-card { display: flex; flex-direction: column; flex: 0 0 58vh !important; min-height: 58vh !important; height: 58vh !important; max-height: 58vh !important; }
 
-/* ── Table container height — locked, no page-level scroll ── */
-.adm-table-card { display: flex; flex-direction: column; min-height: 0; height: 58vh; max-height: 58vh; }
+/* ── Share button tooltip (table rows) — pure CSS hover, no JS dependency ── */
+.adm-share-tip-wrap { position: relative; display: inline-flex; }
+.adm-share-tip-bubble {
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #111111; color: #ffffff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s;
+    z-index: 999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
+}
+.adm-share-tip-bubble::after {
+    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #111111;
+}
+.adm-share-tip-wrap:hover .adm-share-tip-bubble { opacity: 1; }
 
 @media (max-width: 640px) {
     .adm-table-card {
@@ -471,6 +478,21 @@ new class extends Component {
         box-shadow: none !important;
     }
 }
+
+/* ══ Mobile stacked card row ══ */
+.adm-mrow {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    background: #fff;
+    border-bottom: 1px solid #F0ECF5;
+    padding: 12px 14px;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    transition: background .08s ease;
+}
+.adm-mrow:active { background: #F7F4FA; }
 
 select.adm-select-arrow {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23111111' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
@@ -622,15 +644,21 @@ select.adm-select-arrow {
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ── PAGE HEADER ── --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-briefcase text-white text-lg"></i>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-briefcase text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#111111]">Job Postings</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#111111]">Monitor and review all job listings across colleges.</p>
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Job Postings</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                    Monitor and review job listings across
+                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                        <i class="fas fa-building-columns text-[9px]"></i>
+                        all colleges
+                    </span>
+                </p>
             </div>
         </div>
     </div>
@@ -782,7 +810,12 @@ select.adm-select-arrow {
                     wire:target="resetFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
                            bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
@@ -803,28 +836,33 @@ select.adm-select-arrow {
             </select>
         </div>
 
-        {{-- Filtering / searching progress bar --}}
-        <div class="adm-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,filterType,filterCollege">
-            <div class="adm-filter-progress-bar"></div>
-        </div>
-
         {{-- ── TABLE WRAPPER ── --}}
-        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+
+            {{-- Centered loading spinner — mirrors Event Monitoring's table overlay --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
 
             @if($this->jobPostings->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege">
-                <table class="w-full bg-white border-collapse">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage">
+                {{-- ── DESKTOP / TABLET: table view ── --}}
+                <table class="w-full bg-white border-collapse hidden md:table table-fixed">
+                    <colgroup>
+                        <col style="width:32%;"><col style="width:20%;"><col style="width:22%;"><col style="width:14%;"><col style="width:12%;">
+                    </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #e0e0e0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest text-[#111111]">Job Title</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest hidden lg:table-cell text-[#111111]">Coordinator</th>
-                            <th class="px-4 py-3 text-left text-xs font-bold uppercase tracking-widest hidden md:table-cell text-[#111111]">Type</th>
-                            <th class="px-4 py-3 text-center text-xs font-bold uppercase tracking-widest text-[#111111]">Status</th>
-                            <th class="px-4 py-3 text-right text-xs font-bold uppercase tracking-widest w-24 text-[#111111]"></th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Job Title</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Coordinator</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Type</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Action</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-[#f0f0f0]">
+                    <tbody class="divide-y divide-[#F5F5F5]">
                         @foreach($this->jobPostings as $index => $job)
                         @php
                             $isActive         = $job->status === 'ACTIVE';
@@ -840,17 +878,16 @@ select.adm-select-arrow {
                         <tr class="bg-white cursor-pointer transition-colors duration-100 hover:bg-[#f5f0fa]"
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="admjob-row-{{ $job->id }}"
-                            data-admjob-row>
+                            data-adm-row>
 
-                            <td class="px-4 py-3.5 max-w-[230px]">
-                                <p class="font-bold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $job->job_title }}</p>
-                                <p class="text-xs mt-0.5 truncate text-[#111111] font-semibold">{{ $job->company_name }}</p>
-                                <p class="text-xs mt-0.5 text-[#111111]">{{ $job->created_at->diffForHumans() }}</p>
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $job->job_title }}</p>
+                                <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $job->company_name }} &middot; {{ $job->created_at->diffForHumans() }}</p>
                             </td>
 
-                            <td class="px-4 py-3.5 hidden lg:table-cell max-w-[160px]">
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
                                 @if($organizerName)
-                                    <p class="text-sm font-bold text-[#111111] truncate">{{ $organizerName }}</p>
+                                    <p class="text-sm font-semibold text-[#111111] truncate">{{ $organizerName }}</p>
                                     @if($organizerCollege)
                                         <p class="text-xs mt-0.5 text-[#7a3f91] font-semibold truncate">{{ $organizerCollege }}</p>
                                     @endif
@@ -861,37 +898,44 @@ select.adm-select-arrow {
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5 hidden md:table-cell">
-                                <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 whitespace-nowrap">
+                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
+                                <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 whitespace-nowrap">
                                     {{ $job->employment_type }}
                                 </span>
                             </td>
 
-                            <td class="px-4 py-3.5 text-center">
+                            <td class="px-4 sm:px-5 py-4 text-center whitespace-nowrap">
                                 @if($isActive && $isUrgent)
-                                    <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap">
                                         <i class="fas fa-fire text-[9px] mr-1"></i>Expiring
                                     </span>
                                 @elseif($isActive)
-                                    <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
                                         <i class="fas fa-circle-check text-[9px] mr-1"></i>Active
                                     </span>
                                 @else
-                                    <span class="inline-flex items-center text-xs font-bold px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
                                         <i class="fas fa-ban text-[9px] mr-1"></i>Inactive
                                     </span>
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5">
-                                <div class="flex items-center justify-end gap-1.5" @click.stop>
+                            <td class="px-4 sm:px-5 py-4 text-center overflow-visible">
+                                <div class="flex items-center justify-center gap-1.5" @click.stop>
                                     @if($canShare)
-                                        <button wire:click.stop="openShareJobModal({{ $job->id }})"
-                                                data-admjob-action data-tip="Share"
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-bold transition cursor-pointer
-                                                       bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
-                                            <i class="fas fa-share-nodes"></i>
-                                        </button>
+                                        <span class="adm-share-tip-wrap">
+                                            <button wire:click.stop="openShareJobModal({{ $job->id }})"
+                                                    wire:loading.attr="disabled" wire:target="openShareJobModal({{ $job->id }})"
+                                                    data-adm-action
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                           bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareJobModal({{ $job->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareJobModal({{ $job->id }})"></i>
+                                            </button>
+                                            <span class="adm-share-tip-bubble">Share</span>
+                                        </span>
+                                    @else
+                                        <span class="text-xs text-[#bbbbbb]">&mdash;</span>
                                     @endif
                                 </div>
                             </td>
@@ -899,6 +943,58 @@ select.adm-select-arrow {
                         @endforeach
                     </tbody>
                 </table>
+
+                {{-- ── MOBILE: stacked card list ── --}}
+                <div class="block md:hidden">
+                    @foreach($this->jobPostings as $index => $job)
+                    @php
+                        $isActive         = $job->status === 'ACTIVE';
+                        $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
+                        $dl               = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                        $daysLeft         = (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false);
+                        $isUrgent         = $daysLeft <= 7 && !$isDeadlinePassed;
+                        $canShare         = $isActive && !$isDeadlinePassed;
+                    @endphp
+                    <div class="adm-mrow" wire:click="viewJob({{ $job->id }})" wire:key="admjob-mrow-{{ $job->id }}">
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-start justify-between gap-2">
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $job->job_title }}</p>
+                                @if($isActive && $isUrgent)
+                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap flex-shrink-0">
+                                        <i class="fas fa-fire text-[8px] mr-1"></i>Expiring
+                                    </span>
+                                @elseif($isActive)
+                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap flex-shrink-0">
+                                        <i class="fas fa-circle-check text-[8px] mr-1"></i>Active
+                                    </span>
+                                @else
+                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap flex-shrink-0">
+                                        <i class="fas fa-ban text-[8px] mr-1"></i>Inactive
+                                    </span>
+                                @endif
+                            </div>
+                            <p class="text-xs mt-1 text-[#666666]">
+                                {{ $job->company_name }} &middot; {{ $job->employment_type }}
+                            </p>
+                            <div class="flex items-center justify-between mt-2">
+                                <p class="text-xs text-[#7a3f91] font-semibold truncate">
+                                    {{ $job->organizer?->name ?? 'Alumni Director' }}
+                                </p>
+                                @if($canShare)
+                                    <button wire:click.stop="openShareJobModal({{ $job->id }})"
+                                            wire:loading.attr="disabled" wire:target="openShareJobModal({{ $job->id }})"
+                                            aria-label="Share"
+                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer flex-shrink-0
+                                                   bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                        <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareJobModal({{ $job->id }})"></i>
+                                        <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareJobModal({{ $job->id }})"></i>
+                                    </button>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                    @endforeach
+                </div>
             </div>
 
             @else
@@ -1498,13 +1594,13 @@ select.adm-select-arrow {
     var actionTip = document.getElementById('admjob-action-tip');
 
     function bindRows() {
-        document.querySelectorAll('[data-admjob-row]').forEach(function (row) {
+        document.querySelectorAll('[data-adm-row]').forEach(function (row) {
             if (row._admjobTipBound) return;
             row._admjobTipBound = true;
 
             row.addEventListener('mousemove', function (e) {
                 if (!tip) return;
-                var actionWrap = e.target.closest('[data-admjob-action]');
+                var actionWrap = e.target.closest('[data-adm-action]');
                 if (actionWrap) {
                     tip.style.opacity = '0';
                     return;
@@ -1523,7 +1619,7 @@ select.adm-select-arrow {
             });
         });
 
-        document.querySelectorAll('[data-admjob-action]').forEach(function (sw) {
+        document.querySelectorAll('[data-adm-action]').forEach(function (sw) {
             if (sw._admjobActionBound) return;
             sw._admjobActionBound = true;
             sw.addEventListener('mouseenter', function () {
@@ -1562,6 +1658,26 @@ select.adm-select-arrow {
         bindRows();
         bindActionTips();
     });
+    document.addEventListener('livewire:morph', function () {
+        bindRows();
+        bindActionTips();
+    });
+    document.addEventListener('livewire:morphed', function () {
+        bindRows();
+        bindActionTips();
+    });
+
+    // MutationObserver fallback — guarantees rebinding even if the Livewire
+    // lifecycle event names above ever change between versions. Watches the
+    // table body for row swaps caused by filtering/searching/pagination.
+    var admjobTableRoot = document.querySelector('.adm-table-card');
+    if (admjobTableRoot && window.MutationObserver) {
+        var admjobObserver = new MutationObserver(function () {
+            bindRows();
+            bindActionTips();
+        });
+        admjobObserver.observe(admjobTableRoot, { childList: true, subtree: true });
+    }
 
     // ─────────────────────────────────────────────────────────────────
     //  JOB NOTIFICATION BRIDGE

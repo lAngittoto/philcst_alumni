@@ -10,7 +10,6 @@ use App\Models\AuditLog;
 use App\Http\Controllers\AdminEventController;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\DB;
 use App\Models\Alumni;
 
 new class extends Component {
@@ -290,105 +289,6 @@ new class extends Component {
         try { $path = route('upcoming.events', [], false); } catch (\Throwable) { $path = '/upcoming/events'; }
         return $base . $path;
     }
-
-    public function postToBatchChat(): void
-    {
-        abort_unless(auth()->user()->role === 'admin', 403);
-
-        if (!$this->shareEventId) {
-            $this->dispatch('flash-message', type: 'error', message: 'Event not found.');
-            return;
-        }
-
-        $event = AdminEvent::withoutTrashed()->find($this->shareEventId);
-        if (!$event) {
-            $this->dispatch('flash-message', type: 'error', message: 'Event not found.');
-            return;
-        }
-
-        $tp          = $event->target_participants ?? '';
-        $tpParts     = explode(' · Batch ', $tp, 2);
-        $coursesPart = trim($tpParts[0] ?? '');
-        $batchYear   = trim($tpParts[1] ?? '');
-
-        $roomQuery = DB::table('chat_rooms')
-            ->join('courses', 'chat_rooms.course_code', '=', 'courses.code')
-            ->select('chat_rooms.id', 'chat_rooms.course_code', 'chat_rooms.batch');
-
-        if (!empty($batchYear)) {
-            $roomQuery->where('chat_rooms.batch', $batchYear);
-        }
-
-        if ($coursesPart !== 'All Colleges' && !empty($coursesPart)) {
-            $colleges = array_map('trim', explode(',', $coursesPart));
-            $roomQuery->whereIn('courses.college', $colleges);
-        }
-
-        $rooms = $roomQuery->get();
-
-        if ($rooms->isEmpty()) {
-            $this->dispatch('flash-message', type: 'error', message: 'No batch chat rooms found for this event\'s target participants.');
-            return;
-        }
-
-        $isCompleted = $this->shareEventStatus === 'COMPLETED';
-        $eventDatePH = $event->event_date->setTimezone('Asia/Manila');
-        $eventEndPH  = $event->event_end_date?->setTimezone('Asia/Manila');
-        $timeStr     = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
-        $baseUrl     = $this->eventsBaseUrl();
-
-        if ($isCompleted) {
-            $lines = [
-                "🏆 Event Highlights",
-                "━━━━━━━━━━━━━━━━━━━━━━━━",
-                "✅ {$event->title}",
-                "🗓️  {$eventDatePH->format('F d, Y')} · {$timeStr}",
-            ];
-            if ($event->venue)               $lines[] = "📍 {$event->venue}";
-            if ($event->target_participants) $lines[] = "👥 {$event->target_participants}";
-            $lines[] = "━━━━━━━━━━━━━━━━━━━━━━━━";
-            $lines[] = "Thanks to everyone who joined! 🎉 Check the Events page → {$baseUrl}";
-        } else {
-            $lines = [
-                "📢 @everyone — Event Alert!",
-                "",
-                "📅 {$event->title}",
-                "🗓️  {$eventDatePH->format('F d, Y')} · {$timeStr}",
-            ];
-            if ($event->venue)               $lines[] = "📍 {$event->venue}";
-            if ($event->target_participants) $lines[] = "👥 Open for: {$event->target_participants}";
-            $lines[] = "";
-            $lines[] = "Check it out & RSVP on the Events page! 🎉 → {$baseUrl}";
-        }
-
-        $body = implode("\n", $lines);
-
-        foreach ($rooms as $room) {
-            $msgId = DB::table('chat_messages')->insertGetId([
-                'room_id'     => $room->id,
-                'sender_type' => 'admin',
-                'sender_id'   => auth()->id(),
-                'body'        => $body,
-                'reply_to_id' => null,
-                'created_at'  => now(),
-                'updated_at'  => now(),
-            ]);
-
-            if (!$isCompleted) {
-                DB::table('chat_mentions')->insert([
-                    'message_id'   => $msgId,
-                    'mention_type' => 'everyone',
-                    'mentioned_id' => null,
-                    'created_at'   => now(),
-                    'updated_at'   => now(),
-                ]);
-            }
-        }
-
-        $roomCount = $rooms->count();
-        $this->dispatch('flash-message', type: 'success', message: "Event posted to {$roomCount} batch chat(s)! 🎉");
-        $this->closeShareModal();
-    }
 };
 ?>
 
@@ -411,17 +311,39 @@ new class extends Component {
 .adm-scroll::-webkit-scrollbar-thumb { background: #cccccc; border-radius: 99px; }
 .adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
-/* ── Search / filter loading progress bar (same pattern as Event Organizer / User Management) ── */
-.adm-filter-progress-track { height: 2px; width: 100%; overflow: hidden; background: transparent; position: relative; }
-.adm-filter-progress-bar {
-    position: absolute; top: 0; left: 0; height: 100%; width: 40%;
-    border-radius: 99px; background: linear-gradient(135deg,#7a3f91,#9b59b6);
-    animation: admFilterProgress 1s ease-in-out infinite;
+/* ── Close-button tooltip (Share modal) — mirrors .dir-share-close-btn .tip on Manage Event (Director) ── */
+.adm-share-close-btn { position: relative; }
+.adm-share-close-btn .tip {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
 }
-@keyframes admFilterProgress { 0% { left: -40%; } 100% { left: 100%; } }
+.adm-share-close-btn .tip::before {
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
+}
+.adm-share-close-btn:hover .tip { opacity: 1; }
 
-/* ── Table container height — mirrors .dir-table-card on Manage Event (Director) ── */
-.adm-table-card { display: flex; flex-direction: column; min-height: 0; height: 58vh; max-height: 58vh; }
+/* ── Table container height — always 58vh, never shrinks or grows regardless of content or flex siblings ── */
+.adm-table-card { display: flex; flex-direction: column; flex: 0 0 58vh !important; min-height: 58vh !important; height: 58vh !important; max-height: 58vh !important; }
+
+/* ── Share button tooltip (table rows) — pure CSS hover, no JS dependency ── */
+.adm-share-tip-wrap { position: relative; display: inline-flex; }
+.adm-share-tip-bubble {
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    background: #111111; color: #ffffff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s;
+    z-index: 999; box-shadow: 0 4px 14px rgba(0,0,0,.30);
+}
+.adm-share-tip-bubble::after {
+    content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+    border: 5px solid transparent; border-top-color: #111111;
+}
+.adm-share-tip-wrap:hover .adm-share-tip-bubble { opacity: 1; }
 
 @media (max-width: 640px) {
     .adm-table-card {
@@ -521,8 +443,8 @@ select.adm-select-arrow {
     color: #111111;
 }
 .vw-section-title {
-    font-size: 0.7rem;
-    font-weight: 800;
+    font-size: 0.8rem;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: .08em;
     color: #111111;
@@ -653,7 +575,7 @@ select.adm-select-arrow {
     </div>
 
     {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="adm-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
+    <div class="adm-table-card rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
@@ -734,7 +656,12 @@ select.adm-select-arrow {
                     wire:target="resetFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
                            bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
@@ -746,17 +673,18 @@ select.adm-select-arrow {
             </select>
         </div>
 
-        {{-- Filtering / searching progress bar --}}
-        <div class="adm-filter-progress-track flex-shrink-0" wire:loading wire:target="search,filterStatus,filterSort,filterCollege">
-            <div class="adm-filter-progress-bar"></div>
-        </div>
-
         {{-- ── TABLE WRAPPER ── --}}
-        <div class="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+
+            {{-- Centered loading spinner — mirrors Manage Event (Director)'s table overlay --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
 
             @if($this->events->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-60" wire:target="search,filterStatus,filterSort,filterCollege">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
@@ -832,15 +760,20 @@ select.adm-select-arrow {
                                 @endif
                             </td>
 
-                            <td class="px-4 sm:px-5 py-4 text-center">
+                            <td class="px-4 sm:px-5 py-4 text-center overflow-visible">
                                 <div class="flex items-center justify-center gap-1.5" @click.stop>
                                     @if($isApproved || $isCompleted)
-                                        <button wire:click.stop="openShareModal({{ $event->id }})"
-                                                data-adm-action data-tip="Share"
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400">
-                                            <i class="fas fa-share-nodes"></i>
-                                        </button>
+                                        <span class="adm-share-tip-wrap">
+                                            <button wire:click.stop="openShareModal({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
+                                                    data-adm-action
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
+                                                           bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                                <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
+                                            </button>
+                                            <span class="adm-share-tip-bubble">Share</span>
+                                        </span>
                                     @else
                                         <span class="text-xs text-[#bbbbbb]">&mdash;</span>
                                     @endif
@@ -893,10 +826,12 @@ select.adm-select-arrow {
                                 </p>
                                 @if($isApproved || $isCompleted)
                                     <button wire:click.stop="openShareModal({{ $event->id }})"
+                                            wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                             aria-label="Share"
                                             class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer flex-shrink-0
-                                                   bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400">
-                                        <i class="fas fa-share-nodes"></i>
+                                                   bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
+                                        <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
+                                        <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                     </button>
                                 @endif
                             </div>
@@ -1043,9 +978,11 @@ select.adm-select-arrow {
             @if($isApproved || $isCompleted)
                 <div class="relative inline-flex group">
                     <button type="button" wire:click="openShareModal({{ $ev->id }})"
-                            class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20"
+                            wire:loading.attr="disabled" wire:target="openShareModal({{ $ev->id }})"
+                            class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20 disabled:opacity-60 disabled:cursor-wait"
                             aria-label="Share">
-                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <i class="fas fa-share-nodes text-white text-sm" wire:loading.remove wire:target="openShareModal({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="openShareModal({{ $ev->id }})"></i>
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111111] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Share
@@ -1055,9 +992,11 @@ select.adm-select-arrow {
             @endif
             <div class="relative inline-flex group">
                 <button wire:click="closeViewModal" type="button"
-                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20"
+                        wire:loading.attr="disabled" wire:target="closeViewModal"
+                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20 disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm"></i>
+                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeViewModal"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeViewModal"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111111] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Close
@@ -1228,291 +1167,377 @@ select.adm-select-arrow {
 @endif
 
 
-{{-- ══ SHARE EVENT — SLIDE-OVER ══ --}}
+{{-- ══ SHARE EVENT — MODAL ══ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl   = $this->eventsBaseUrl();
-    $shareHost      = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
     $isCompleted    = $shareEventStatus === 'COMPLETED';
     $shTimeDisplay  = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
-    $shDescPreview  = mb_strlen($shareEventDescription) > 160
-        ? mb_substr($shareEventDescription, 0, 160) . '…'
-        : $shareEventDescription;
 
     $fbLines = [];
-    if ($isCompleted) {
-        $fbLines[] = "🏆 Event Highlights: {$shareEventTitle}";
-        $fbLines[] = "🗓️  {$shareEventDate}" . ($shTimeDisplay ? " · {$shTimeDisplay}" : '');
-    } else {
-        $fbLines[] = "📅 Upcoming Event: {$shareEventTitle}";
-        $fbLines[] = "🗓️  {$shareEventDate}" . ($shTimeDisplay ? " · {$shTimeDisplay}" : '');
-    }
-    if ($shareEventVenue)  $fbLines[] = "📍 {$shareEventVenue}" . ($shareEventVenueAddr ? ", {$shareEventVenueAddr}" : '');
-    if ($shareEventTarget) $fbLines[] = $isCompleted ? "👥 {$shareEventTarget}" : "👥 Open for: {$shareEventTarget}";
+    $fbLines[] = $isCompleted ? "EVENT HIGHLIGHTS: " . strtoupper($shareEventTitle) : strtoupper($shareEventTitle);
     $fbLines[] = '';
-    if ($shareEventDescription) {
-        $dPrev = mb_strlen($shareEventDescription) > 200 ? mb_substr($shareEventDescription, 0, 200) . '…' : $shareEventDescription;
-        $fbLines[] = $dPrev;
-        $fbLines[] = '';
-    }
-    $fbLines[] = $isCompleted
-        ? "🎉 Thank you to everyone who attended! See the full recap on the PHILCST Alumni Portal 👇"
-        : "See full details & RSVP on the PHILCST Alumni Portal 👇";
-    $fbLines[]  = $shareBaseUrl;
-    $fbPostText = implode("\n", $fbLines);
+    $fbLines[] = ($isCompleted ? 'Held on ' : 'Happening on ') . $shareEventDate . ($shTimeDisplay ? " · {$shTimeDisplay}" : '');
+    if ($shareEventVenue)  $fbLines[] = "Venue: {$shareEventVenue}" . ($shareEventVenueAddr ? ", {$shareEventVenueAddr}" : '');
+    if ($shareEventTarget) $fbLines[] = ($isCompleted ? 'Attendees: ' : 'Open for: ') . $shareEventTarget;
 
-    $hasRealPhoto = $shareEventPhotoUrl
-        && !str_contains($shareEventPhotoUrl, 'default')
-        && str_contains($shareEventPhotoUrl, '/storage/');
+    if (trim($shareEventDescription) !== '') {
+        $fbLines[] = '';
+        $fbLines[] = 'About This Event:';
+        $fbLines[] = trim($shareEventDescription);
+    }
+
+    $fbLines[] = '';
+    $fbLines[] = $isCompleted
+        ? 'Thank you to everyone who joined! For more updates, visit the PHILCST Alumni Connect portal.'
+        : 'For more information and to RSVP, visit the PHILCST Alumni Connect portal.';
+    $fbLines[] = $shareBaseUrl;
+    $fbLines[] = '#YourFutureStarsHere';
+    $fbPostText = implode("\n", $fbLines);
 @endphp
 
-<div wire:ignore
-     class="fixed inset-0 overflow-hidden"
-     style="z-index:9997;"
+<style>
+@keyframes admPanelIn {
+    from { opacity: 0; transform: scale(.97) translateY(8px); }
+    to   { opacity: 1; transform: none; }
+}
+.adm-share-sheet { animation: admPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
+
+.adm-share-modal-wrapper {
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── Share modal: full screen on mobile, centered card on desktop ── */
+@media (max-width: 767px) {
+    .adm-share-backdrop {
+        padding: 0 !important;
+        align-items: stretch !important;
+        justify-content: stretch !important;
+    }
+    .adm-share-backdrop .adm-share-sheet {
+        border-radius: 0 !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+    }
+}
+
+.adm-share-option-btn {
+    width: 100%; display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; border-radius: 0.75rem;
+    font-weight: 600; font-size: 0.8125rem; color: #fff;
+    cursor: pointer; transition: filter .12s ease-out, transform .1s ease-out; border: none;
+    will-change: transform;
+}
+.adm-share-option-btn:hover  { filter: brightness(0.94); }
+.adm-share-option-btn:active { transform: scale(.97); transition-duration: .05s; }
+.adm-share-option-btn .icon-wrap {
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: rgba(255,255,255,.92);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.adm-share-option-btn .label-text { flex: 1; text-align: left; }
+
+.adm-share-photo-preview {
+    width: 100%;
+    height: 140px;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    position: relative;
+}
+.adm-share-photo-preview img {
+    width: 100%; height: 100%; object-fit: contain;
+}
+.adm-share-photo-preview .dl-badge {
+    position: absolute; bottom: 6px; right: 6px;
+    background: rgba(17,24,39,.75); color: #fff;
+    font-size: 10px; font-weight: 700; letter-spacing: .03em;
+    padding: 3px 8px; border-radius: 999px;
+    display: flex; align-items: center; gap: 4px;
+    pointer-events: none;
+}
+
+.adm-dl-confirm-icon {
+    width: 3rem; height: 3rem; border-radius: 0.9rem;
+    background: #eff6ff; color: #2563eb;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; flex-shrink: 0;
+}
+.adm-dl-confirm-btn {
+    flex: 1; padding: 0.65rem 1rem; border-radius: 0.75rem;
+    font-size: 0.8125rem; font-weight: 700; cursor: pointer;
+    transition: filter .15s, transform .1s; border: none;
+}
+.adm-dl-confirm-btn:active { transform: scale(.97); }
+.adm-dl-confirm-btn.primary { background: #2563eb; color: #fff; }
+.adm-dl-confirm-btn.primary:hover { filter: brightness(0.95); }
+.adm-dl-confirm-btn.secondary { background: #f3f4f6; color: #333333; border: 1px solid #e5e7eb; }
+.adm-dl-confirm-btn.secondary:hover { background: #e5e7eb; }
+</style>
+
+<div id="adm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 adm-share-backdrop"
      x-data="{
-         open: false,
-         copied: false, fbCopied: false, messengerCopied: false, fbCopyFailed: false,
-         fbText:   {{ json_encode($fbPostText) }},
-         baseUrl:  {{ json_encode($shareBaseUrl) }},
-         photoUrl: {{ json_encode($shareEventPhotoUrl) }},
-         hasPhoto: {{ $hasRealPhoto ? 'true' : 'false' }},
-         close() { this.open=false; setTimeout(()=>$wire.closeShareModal(),290); },
-         async copyPlainText(text) {
+         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
+         sharingTo: null,
+         downloading:false,
+         downloaded:false,
+         shareText: {{ json_encode($fbPostText) }},
+         eventTitle: {{ json_encode($shareEventTitle) }},
+         imageUrl:  {{ json_encode($shareEventPhotoUrl) }},
+
+         showDlConfirm: false,
+         pendingTarget: null,
+
+         async buildImageFile() {
+             if (!this.imageUrl) return null;
              try {
-                 if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);}
-                 else{const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');document.body.removeChild(ta);}
-             } catch(e){}
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 return new File([blob], 'event-photo.' + ext, { type: blob.type });
+             } catch (e) { return null; }
          },
-         async copyWithImage(text, imageUrl) {
+
+         async autoCopyCaption() {
              try {
-                 if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write&&imageUrl&&this.hasPhoto){
-                     const htmlContent='<img src=\''+imageUrl+'\' alt=\'Event Photo\' style=\'max-width:600px;display:block;margin-bottom:12px;\'><pre style=\'font-family:inherit;white-space:pre-wrap;\'>'+text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</pre>';
-                     const htmlBlob=new Blob([htmlContent],{type:'text/html'});
-                     const textBlob=new Blob([text],{type:'text/plain'});
-                     await navigator.clipboard.write([new ClipboardItem({'text/html':htmlBlob,'text/plain':textBlob})]);
-                     return true;
+                 if (navigator.clipboard && window.isSecureContext) {
+                     await navigator.clipboard.writeText(this.shareText);
+                 } else {
+                     const ta = document.createElement('textarea');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(ta); ta.focus(); ta.select();
+                     document.execCommand('copy'); document.body.removeChild(ta);
                  }
-             } catch(e){console.warn('Rich copy failed, fallback:',e);}
-             await this.copyPlainText(text);
-             return false;
+                 return true;
+             } catch (e) { return false; }
          },
-         async shareOnFacebook() {
-             const richCopied=await this.copyWithImage(this.fbText,this.photoUrl);
-             this.fbCopied=true; this.fbCopyFailed=!richCopied;
-             const target=this.hasPhoto?this.photoUrl:this.baseUrl;
-             window.open('https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(target),'_blank','width=626,height=436,noopener,noreferrer');
-             setTimeout(()=>{this.fbCopied=false;this.fbCopyFailed=false;},8000);
+
+         async downloadImage() {
+             if (!this.imageUrl) return false;
+             this.downloading = true;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 const url  = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = 'event-photo.' + ext;
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+                 setTimeout(() => URL.revokeObjectURL(url), 4000);
+                 this.downloading = false;
+                 this.downloaded  = true;
+                 setTimeout(() => this.downloaded = false, 4000);
+                 return true;
+             } catch (e) {
+                 this.downloading = false;
+                 return false;
+             }
          },
-         async shareOnMessenger() {
-             await this.copyWithImage(this.fbText,this.photoUrl);
-             this.messengerCopied=true;
-             const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-             if(isMobile){window.location.href='fb-messenger://share/?link='+encodeURIComponent(this.baseUrl);setTimeout(()=>window.open('https://www.messenger.com/','_blank','noopener'),1500);}
-             else{window.open('https://www.messenger.com/','_blank','noopener');}
-             setTimeout(()=>{this.messengerCopied=false;},8000);
+
+         async nativeShare() {
+             this.sharingTo = 'native';
+             try {
+                 const shareData = { title: this.eventTitle, text: this.shareText };
+                 const file = await this.buildImageFile();
+                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                     shareData.files = [file];
+                 }
+                 await navigator.share(shareData);
+             } catch (e) { /* cancelled by user — nothing to do */ }
+             this.sharingTo = null;
          },
-         async copyLinkFn() { await this.copyPlainText(this.baseUrl); this.copied=true; setTimeout(()=>this.copied=false,2500); }
+
+         askShare(target) {
+             if (this.nativeShareSupported) { this.nativeShare(); return; }
+             this.pendingTarget = target;
+             this.showDlConfirm = true;
+         },
+
+         async confirmDownloadThenGo() {
+             await this.downloadImage();
+             this.proceedToTarget();
+         },
+
+         proceedToTarget() {
+             this.showDlConfirm = false;
+             const target = this.pendingTarget;
+             this.pendingTarget = null;
+             if (target === 'facebook') this.openFacebook();
+             else if (target === 'messenger') this.openMessenger();
+         },
+
+         cancelDlConfirm() {
+             this.showDlConfirm = false;
+             this.pendingTarget = null;
+         },
+
+         async openFacebook() {
+             this.sharingTo = 'facebook';
+             const copyOk = await this.autoCopyCaption();
+             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
+             const win = window.open(url, 'philcst_adm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
+                     : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Facebook.'
+             });
+             this.sharingTo = null;
+         },
+
+         async openMessenger() {
+             this.sharingTo = 'messenger';
+             const copyOk = await this.autoCopyCaption();
+             const win = window.open('https://www.messenger.com/new', 'philcst_adm_messenger_share', 'noopener,noreferrer');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
+                     : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Messenger.'
+             });
+             this.sharingTo = null;
+         }
      }"
-     x-init="requestAnimationFrame(()=>{ open=true })"
-     @keydown.escape.window="close()">
+     x-transition:enter="transition ease-out duration-150"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareModal()}">
 
-    <div x-show="open" x-cloak
-         x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
-         x-transition:leave="transition ease-in duration-200"
-         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-         class="absolute inset-0 bg-black/60 backdrop-blur-sm"
-         @click="close()"></div>
+    <div class="adm-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 adm-share-modal-wrapper">
 
-    <div x-show="open" x-cloak
-         x-transition:enter="transition ease-out duration-300"
-         x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
-         x-transition:leave="transition ease-in duration-280"
-         x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
-         class="absolute inset-y-0 right-0 w-full max-w-4xl bg-white shadow-2xl flex flex-col will-change-transform">
-
-        <div class="flex items-center justify-between px-6 py-3.5 border-b border-[#e0e0e0] flex-shrink-0 bg-white">
-            <h2 class="text-base font-bold flex items-center gap-2.5 text-[#111111]">
-                <i class="fas fa-share-nodes text-blue-500 text-sm"></i>
-                <span>Share Event</span>
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold flex items-center gap-2 text-[#111111]">
+                <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
-            <button @click="close()" type="button"
-                    class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#f2f2f2] transition cursor-pointer text-[#111111]">
-                <i class="fas fa-xmark text-base"></i>
+            <button wire:click="closeShareModal" type="button"
+                    wire:loading.attr="disabled" wire:target="closeShareModal"
+                    class="adm-share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                     wire:loading.remove wire:target="closeShareModal">
+                    <path d="M2 2L12 12M12 2L2 12" stroke="#4b5563" stroke-width="2.25" stroke-linecap="round"/>
+                </svg>
+                <i class="fas fa-spinner fa-spin" style="font-size:12px;color:#4b5563;" wire:loading wire:target="closeShareModal"></i>
+                <span class="tip">Close</span>
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            {{-- Preview --}}
-            <div class="flex-1 px-6 py-5 border-b md:border-b-0 md:border-r border-[#e0e0e0] flex flex-col gap-4 overflow-y-auto adm-scroll bg-white">
-                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0 text-[#111111]">Post preview</p>
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto adm-scroll">
+                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0 text-[#111111]">Post Preview</p>
 
-                <div class="rounded-2xl border border-[#e0e0e0] overflow-hidden shadow-sm flex-shrink-0">
-                    @if($shareEventPhotoUrl)
-                    <div class="w-full bg-[#f2f2f2] flex items-center justify-center px-3 pt-3 pb-0">
-                        <img src="{{ $shareEventPhotoUrl }}" alt="{{ $shareEventTitle }}"
-                             class="w-full rounded-lg object-contain" style="max-height:180px; display:block;">
-                    </div>
-                    @endif
-                    <div class="border-b border-[#e0e0e0] px-5 py-4 bg-[#f0f7ff]">
-                        <p class="font-bold text-base leading-tight text-[#111111]">{{ $shareEventTitle }}</p>
-                        <p class="text-sm mt-1 font-bold text-[#111111]">
-                            {{ $shareEventDate }}@if($shTimeDisplay) · {{ $shTimeDisplay }}@endif
-                        </p>
-                        <div class="flex flex-wrap gap-1.5 mt-2">
-                            @if($shareEventVenue)
-                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-[#f2f2f2] text-[#111111]">
-                                <i class="fas fa-location-dot text-[10px]"></i>{{ $shareEventVenue }}
-                            </span>
-                            @endif
-                            @if($shareEventTarget)
-                            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-blue-100 text-blue-700">
-                                <i class="fas fa-users text-[10px]"></i>{{ Str::limit($shareEventTarget, 30) }}
-                            </span>
-                            @endif
-                        </div>
-                    </div>
-                    @if($shDescPreview)
-                    <div class="px-5 py-3.5 border-b border-[#e0e0e0] bg-white">
-                        <p class="text-sm leading-relaxed text-[#111111]">{{ $shDescPreview }}</p>
-                    </div>
-                    @endif
-                    <div class="px-5 py-2.5 flex items-center gap-2 bg-[#f0f7ff]">
-                        <i class="fas fa-globe text-xs text-blue-400"></i>
-                        <span class="text-xs uppercase tracking-wider font-bold text-blue-600">{{ strtoupper($shareHost) }}</span>
-                    </div>
+                @if($shareEventPhotoUrl)
+                <div class="adm-share-photo-preview">
+                    <img src="{{ $shareEventPhotoUrl }}" alt="{{ $shareEventTitle }}"
+                         onerror="this.style.display='none'">
+                    <span class="dl-badge" x-show="downloading || downloaded" x-cloak>
+                        <i class="fas" :class="downloading ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+                        <span x-text="downloading ? 'Downloading…' : 'Downloaded'"></span>
+                    </span>
                 </div>
+                @endif
 
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
-                    <div>
-                        <p class="text-sm font-bold text-blue-800 mb-1">How sharing works</p>
-                        <p class="text-sm text-blue-700 leading-relaxed">Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the event photo + caption to your clipboard and opens the platform. Press <kbd class="bg-blue-100 px-1.5 rounded font-mono text-xs">Ctrl+V</kbd> to paste.</p>
-                    </div>
-                </div>
-
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-users text-blue-600 text-sm flex-shrink-0 mt-0.5"></i>
-                    <div>
-                        <p class="text-sm font-bold text-blue-800">Post to Batch Chats</p>
-                        <p class="text-sm mt-0.5 text-blue-700">
-                            Sends the event caption directly to all target batch chat rooms for
-                            <strong>{{ $shareEventTarget ?: 'all alumni' }}</strong>.
-                        </p>
+                <div class="rounded-xl border border-gray-200 flex-shrink-0">
+                    <div class="px-4 py-3">
+                        <p class="whitespace-pre-wrap leading-relaxed text-[#111111]" style="font-size:clamp(11px,1vw,13px);">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
+                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
                 </div>
             </div>
 
-            {{-- Share buttons --}}
-            <div class="w-full md:w-80 px-6 py-5 flex flex-col gap-3 flex-shrink-0 overflow-y-auto adm-scroll bg-white">
-                <p class="text-xs font-bold uppercase tracking-widest text-[#111111]">Share via</p>
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto adm-scroll">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-[#111111]">Share via</p>
 
-                <div x-show="fbCopied" x-cloak
-                     x-transition:enter="transition ease-out duration-300"
-                     x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
-                     class="rounded-xl px-4 py-3 flex items-start gap-2"
-                     :class="fbCopyFailed ? 'bg-amber-50 border border-amber-300' : 'bg-emerald-50 border border-emerald-300'">
-                    <i class="text-sm mt-0.5 flex-shrink-0 fas"
-                       :class="fbCopyFailed ? 'fa-triangle-exclamation text-amber-500' : 'fa-check text-emerald-600'"></i>
-                    <div>
-                        <p class="text-sm font-bold"
-                           :class="fbCopyFailed ? 'text-amber-800' : 'text-emerald-800'"
-                           x-text="fbCopyFailed ? 'Share dialog opened!' : 'Share dialog opened + clipboard ready!'"></p>
-                        <p class="text-xs mt-0.5"
-                           :class="fbCopyFailed ? 'text-amber-700' : 'text-emerald-700'"
-                           x-text="fbCopyFailed ? 'Caption copied as text only — paste in the post.' : 'Press Ctrl+V to paste the photo + caption!'"></p>
-                    </div>
-                </div>
-
-                <div x-show="messengerCopied" x-cloak
-                     x-transition:enter="transition ease-out duration-300"
-                     x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
-                     class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-2">
-                    <i class="fas fa-check text-blue-600 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-sm font-bold text-blue-800">Messenger opened!</p>
-                        <p class="text-xs text-blue-700 mt-0.5">Press Ctrl+V in chat to paste the photo + caption.</p>
-                    </div>
-                </div>
-
-                <button type="button" @click="shareOnFacebook()"
-                        class="w-full flex items-center gap-4 px-5 py-4 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
-                    <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2">
-                            <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
-                        </svg>
-                    </span>
-                    <span class="flex-1 text-left">
-                        <span class="block font-bold text-sm">Post on Facebook</span>
-                        <span class="block text-xs text-white/70 mt-0.5">Opens share dialog · photo+text copied</span>
-                    </span>
-                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
-                </button>
-
-                <button type="button" @click="shareOnMessenger()"
-                        class="w-full flex items-center gap-4 px-5 py-4 rounded-xl text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group"
-                        style="background:linear-gradient(135deg, #0084FF 0%, #0050D0 100%);">
-                    <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
-                            <defs><linearGradient id="mgr_adm_event" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
-                            <path fill="url(#mgr_adm_event)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
-                        </svg>
-                    </span>
-                    <span class="flex-1 text-left">
-                        <span class="block font-bold text-sm">Send via Messenger</span>
-                        <span class="block text-xs text-white/70 mt-0.5">Opens Messenger · photo+text copied</span>
-                    </span>
-                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
-                </button>
-
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-[#e0e0e0]"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-xs font-bold uppercase tracking-widest bg-white text-[#111111]">or post directly</span>
-                    </div>
-                </div>
-
-                <button type="button"
-                        wire:click="postToBatchChat"
-                        wire:loading.attr="disabled"
-                        wire:target="postToBatchChat"
-                        class="w-full flex items-center gap-4 px-5 py-4 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-blue-200 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-not-allowed bg-blue-50 text-blue-700">
-                    <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-blue-600">
-                        <i class="fas fa-users text-white text-base"></i>
-                    </span>
-                    <span class="flex-1 text-left">
-                        <span wire:loading.remove wire:target="postToBatchChat" class="block font-bold text-sm">Post to Batch Chats</span>
-                        <span wire:loading wire:target="postToBatchChat" class="block font-bold text-sm">
-                            <i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…
+                <template x-if="nativeShareSupported">
+                    <button type="button" @click="nativeShare()" class="adm-share-option-btn" style="background:#7a3f91;">
+                        <span class="icon-wrap">
+                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
                         </span>
-                        <span class="block text-xs mt-0.5 text-blue-600">Sends to all target batch rooms</span>
+                        <span class="label-text text-xs font-semibold">Share</span>
+                    </button>
+                </template>
+
+                <button type="button" @click="askShare('facebook')" :disabled="sharingTo==='facebook'" class="adm-share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
+                        <i class="fas fa-spinner fa-spin text-[#1877F2] text-sm" x-show="sharingTo==='facebook'" x-cloak></i>
+                        <svg x-show="sharingTo!=='facebook'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <i class="fas fa-paper-plane text-sm text-blue-500"></i>
+                    <span class="label-text text-xs font-semibold" x-text="sharingTo==='facebook' ? 'Opening…' : 'Share on Facebook'"></span>
                 </button>
 
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-[#e0e0e0]"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-xs font-bold uppercase tracking-widest bg-white text-[#111111]">or copy link</span>
-                    </div>
+                <button type="button" @click="askShare('messenger')" :disabled="sharingTo==='messenger'" class="adm-share-option-btn" style="background:#0084FF;">
+                    <span class="icon-wrap">
+                        <i class="fas fa-spinner fa-spin text-[#0084FF] text-sm" x-show="sharingTo==='messenger'" x-cloak></i>
+                        <svg x-show="sharingTo!=='messenger'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
+                    </span>
+                    <span class="label-text text-xs font-semibold" x-text="sharingTo==='messenger' ? 'Opening…' : 'Send via Messenger'"></span>
+                </button>
+
+                <p class="text-[10px] text-center text-[#666666]">Sharing highlights is available even after the event.</p>
+            </div>
+        </div>
+
+        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+            <div class="flex items-start gap-2.5">
+                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5 text-[#666666]"></i>
+                <p class="text-xs leading-relaxed text-[#666666]">
+                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
+                    into the Facebook or Messenger window that opens.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ── --}}
+    <div x-show="showDlConfirm" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
+         @click.self="cancelDlConfirm()">
+        <div class="adm-share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+            <div class="flex items-start gap-3">
+                <span class="adm-dl-confirm-icon"><i class="fas fa-image"></i></span>
+                <div class="min-w-0 pt-0.5">
+                    <p class="text-sm font-semibold text-[#111111]">Download the event photo?</p>
+                    <p class="text-xs mt-1 leading-relaxed text-[#666666]">
+                        You'll need to attach a photo to your post. Download it now, or skip if you already have it saved.
+                    </p>
                 </div>
+            </div>
 
-                <button type="button" @click="copyLinkFn()"
-                        class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl border-2 border-[#e0e0e0] hover:border-blue-300 hover:bg-blue-50 font-bold text-sm transition cursor-pointer group bg-white text-[#111111]">
-                    <span class="w-10 h-10 bg-[#f2f2f2] group-hover:bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0 transition">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-blue-500'" class="text-lg"></i>
-                    </span>
-                    <div class="flex-1 text-left min-w-0">
-                        <p class="font-bold text-sm" :class="copied ? 'text-emerald-600' : 'text-blue-600'"
-                           x-text="copied ? '✓ Link copied!' : 'Copy Events Page Link'"></p>
-                        <p class="text-xs font-mono mt-0.5 truncate text-[#111111]">{{ $shareBaseUrl }}</p>
-                    </div>
+            @if($shareEventPhotoUrl)
+            <div class="adm-share-photo-preview" style="height:110px;">
+                <img src="{{ $shareEventPhotoUrl }}" alt="{{ $shareEventTitle }}" onerror="this.style.display='none'">
+            </div>
+            @endif
+
+            <div class="flex items-center gap-2">
+                <button type="button" @click="proceedToTarget()" class="adm-dl-confirm-btn secondary">
+                    Skip
                 </button>
-
-                <button type="button" @click="close()"
-                        class="w-full px-5 py-3 rounded-xl border border-[#e0e0e0] text-sm font-bold hover:bg-[#f2f2f2] transition mt-1 text-[#111111] flex items-center justify-center gap-1.5">
-                    <i class="fas fa-xmark mr-1.5 text-xs"></i> Close
+                <button type="button" @click="confirmDownloadThenGo()" class="adm-dl-confirm-btn primary" :disabled="downloading">
+                    <span x-show="!downloading"><i class="fas fa-download mr-1"></i>Download</span>
+                    <span x-show="downloading" x-cloak><i class="fas fa-spinner fa-spin mr-1"></i>Downloading…</span>
                 </button>
             </div>
         </div>
@@ -1643,6 +1668,26 @@ select.adm-select-arrow {
         bindRows();
         bindActionTips();
     });
+    document.addEventListener('livewire:morph', function () {
+        bindRows();
+        bindActionTips();
+    });
+    document.addEventListener('livewire:morphed', function () {
+        bindRows();
+        bindActionTips();
+    });
+
+    // MutationObserver fallback — guarantees rebinding even if the Livewire
+    // lifecycle event names above ever change between versions. Watches the
+    // table body for row swaps caused by filtering/searching/pagination.
+    var admTableRoot = document.querySelector('.adm-table-card');
+    if (admTableRoot && window.MutationObserver) {
+        var admObserver = new MutationObserver(function () {
+            bindRows();
+            bindActionTips();
+        });
+        admObserver.observe(admTableRoot, { childList: true, subtree: true });
+    }
 
     // ─────────────────────────────────────────────────────────────────
     //  EVENT NOTIFICATION BRIDGE
