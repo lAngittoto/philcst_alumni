@@ -17,7 +17,7 @@ new class extends Component {
     public string $course = '';
     public int    $page   = 1;
 
-    const PER_PAGE = 200;
+    const PER_PAGE = 100;
 
     public function mount(): void
     {
@@ -288,31 +288,6 @@ new class extends Component {
 .yb-adm-scroll::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
 .yb-adm-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .yb-adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-
-/* ── Filtering progress bar (thin animated bar under the filter row,
-     replaces the old blocking overlay — same pattern as the
-     organizer-facing yearbook) ── */
-.yb-adm-filter-progress-track {
-    height: 2px;
-    width: 100%;
-    overflow: hidden;
-    background: transparent;
-    position: relative;
-    flex-shrink: 0;
-}
-.yb-adm-filter-progress-bar {
-    position: absolute;
-    top: 0; left: 0;
-    height: 100%;
-    width: 40%;
-    border-radius: 99px;
-    background: #7A3F91;
-    animation: ybAdmFilterProgress 1s ease-in-out infinite;
-}
-@keyframes ybAdmFilterProgress {
-    0%   { left: -40%; }
-    100% { left: 100%; }
-}
 
 @keyframes ybAdmFadeUp {
     from { opacity: 0; transform: translateY(8px); }
@@ -603,15 +578,16 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- Filtering progress bar — thin animated bar under the filter row,
-             much friendlier on small screens than a blocking overlay. --}}
-        <div class="yb-adm-filter-progress-track" wire:loading wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
-            <div class="yb-adm-filter-progress-bar"></div>
-        </div>
-
         {{-- ── SCROLLABLE CARDS AREA ── --}}
         <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
              x-data="{ showTop: false }">
+
+            {{-- Centered loading spinner — big icon over the table itself,
+                 same pattern as the organizer-facing yearbook. --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
 
             <div id="yb-admin-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
@@ -627,8 +603,11 @@ new class extends Component {
                         <div class="flex items-center gap-2 mb-3 px-1">
                             <span class="yb-adm-section-badge">
                                 <i class="fas fa-bookmark" style="font-size:10px;"></i>
-
                                 {{ $group['courseName'] }}
+                            </span>
+                            <div class="flex-1 h-px" style="background:#D8B4FE;"></div>
+                            <span class="text-xs font-semibold shrink-0" style="color:#c0a0d8;">
+                                {{ $group['members']->count() }} shown
                             </span>
                         </div>
 

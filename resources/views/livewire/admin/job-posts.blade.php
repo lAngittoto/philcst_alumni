@@ -450,6 +450,21 @@ new class extends Component {
 .adm-scroll::-webkit-scrollbar-thumb { background: #cccccc; border-radius: 99px; }
 .adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
+/* ── Close-button tooltip (Share modal) — mirrors Event Monitoring's share modal ── */
+.adm-share-close-btn { position: relative; }
+.adm-share-close-btn .tip {
+    position: absolute; top: calc(100% + 6px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
+}
+.adm-share-close-btn .tip::before {
+    content: ''; position: absolute; bottom: 100%; right: 10px;
+    border: 4px solid transparent; border-bottom-color: #111827;
+}
+.adm-share-close-btn:hover .tip { opacity: 1; }
+
 /* ── Table container height — always 58vh, never shrinks or grows regardless of content or flex siblings ── */
 .adm-table-card { display: flex; flex-direction: column; flex: 0 0 58vh !important; min-height: 58vh !important; height: 58vh !important; max-height: 58vh !important; }
 
@@ -580,8 +595,8 @@ select.adm-select-arrow {
 
 /* Right panel section title */
 .vw-section-title {
-    font-size: 0.7rem;
-    font-weight: 800;
+    font-size: 0.8rem;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: .08em;
     color: #111111;
@@ -741,7 +756,6 @@ select.adm-select-arrow {
                 <option value="">All Statuses</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
-                <option value="EXPIRING">Expiring Soon (≤7 days)</option>
             </select>
 
             <select wire:model.live="filterType"
@@ -1144,9 +1158,11 @@ select.adm-select-arrow {
             @if($vCanShare)
                 <div class="relative inline-flex group">
                     <button type="button" wire:click="openShareJobModal({{ $vj->id }})"
-                            class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20"
+                            wire:loading.attr="disabled" wire:target="openShareJobModal({{ $vj->id }})"
+                            class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20 disabled:opacity-60 disabled:cursor-wait"
                             aria-label="Share">
-                        <i class="fas fa-share-nodes text-white text-sm"></i>
+                        <i class="fas fa-share-nodes text-white text-sm" wire:loading.remove wire:target="openShareJobModal({{ $vj->id }})"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="openShareJobModal({{ $vj->id }})"></i>
                     </button>
                     <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111111] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                         Share
@@ -1156,9 +1172,11 @@ select.adm-select-arrow {
             @endif
             <div class="relative inline-flex group">
                 <button wire:click="closeViewModal" type="button"
-                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20"
+                        wire:loading.attr="disabled" wire:target="closeViewModal"
+                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/20 hover:bg-white/20 disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm"></i>
+                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeViewModal"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeViewModal"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111111] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Close
@@ -1295,242 +1313,238 @@ select.adm-select-arrow {
 @endif
 
 
-{{-- ══ SHARE JOB — SLIDE-OVER ══ --}}
+{{-- ══ SHARE JOB — MODAL ══ --}}
 @if($showShareJobModal)
 @php
     $sjBaseUrl  = $this->jobsBaseUrl();
-    $sjHost     = parse_url(config('app.url'), PHP_URL_HOST) ?? 'alumniphilcst.com';
-    $sjTargets  = $shareJobTarget ? str_replace(',', ', ', $shareJobTarget) : 'All Alumni';
-    $sjDescPrev = mb_strlen($shareJobDescription) > 160 ? mb_substr($shareJobDescription, 0, 160) . '…' : $shareJobDescription;
+
+    $sjTargetParts = $shareJobTarget
+        ? array_values(array_filter(array_map('trim', explode(',', $shareJobTarget))))
+        : [];
+
+    if (empty($sjTargetParts)) {
+        $sjTargets = 'All Alumni';
+    } elseif (count($sjTargetParts) > 2) {
+        $sjTargets = implode(', ', array_slice($sjTargetParts, 0, 2))
+            . ' +' . (count($sjTargetParts) - 2) . ' more';
+    } else {
+        $sjTargets = implode(', ', $sjTargetParts);
+    }
 
     $sjLines   = [];
-    $sjLines[] = "💼 Job Opportunity: {$shareJobTitle}";
-    $sjLines[] = "🏢 {$shareJobCompany}" . ($shareJobLocation ? " · {$shareJobLocation}" : '');
-    $sjLines[] = "⏰ {$shareJobEmpType}" . ($shareJobExpLevel ? " · {$shareJobExpLevel}" : '');
-    if ($shareJobSalary)  $sjLines[] = "💰 {$shareJobSalary}";
-    if ($shareJobTarget)  $sjLines[] = "🎓 For: {$sjTargets}";
-    $sjLines[] = "📅 Apply by: {$shareJobDeadline}";
+    $sjLines[] = strtoupper($shareJobTitle);
     $sjLines[] = '';
-    if ($shareJobDescription) {
-        $dPrev     = mb_strlen($shareJobDescription) > 200 ? mb_substr($shareJobDescription, 0, 200) . '…' : $shareJobDescription;
-        $sjLines[] = $dPrev;
+    $sjLines[] = "Company: {$shareJobCompany}" . ($shareJobLocation ? " · {$shareJobLocation}" : '');
+    $sjLines[] = "{$shareJobEmpType}" . ($shareJobExpLevel ? " · {$shareJobExpLevel}" : '');
+    if ($shareJobSalary)  $sjLines[] = "Salary: {$shareJobSalary}";
+    if ($shareJobTarget)  $sjLines[] = "Open for: {$sjTargets}";
+    $sjLines[] = "Apply by: {$shareJobDeadline}";
+
+    if (trim($shareJobDescription) !== '') {
         $sjLines[] = '';
+        $sjLines[] = 'Job Description:';
+        $sjLines[] = trim($shareJobDescription);
     }
-    $sjLines[] = "See full details & apply on the PHILCST Alumni Portal 👇";
+
+    $sjLines[] = '';
+    $sjLines[] = 'See full details and apply on the PHILCST Alumni Connect portal.';
     $sjLines[] = $sjBaseUrl;
+    $sjLines[] = '#YourFutureStarsHere';
     $sjPostText = implode("\n", $sjLines);
 @endphp
 
-<div wire:ignore
-     class="fixed inset-0 overflow-hidden"
-     style="z-index:9997;"
+<style>
+@keyframes admPanelIn {
+    from { opacity: 0; transform: scale(.97) translateY(8px); }
+    to   { opacity: 1; transform: none; }
+}
+.adm-share-sheet { animation: admPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
+
+.adm-share-modal-wrapper {
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── Share modal: full screen on mobile, centered card on desktop ── */
+@media (max-width: 767px) {
+    .adm-share-backdrop {
+        padding: 0 !important;
+        align-items: stretch !important;
+        justify-content: stretch !important;
+    }
+    .adm-share-backdrop .adm-share-sheet {
+        border-radius: 0 !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+    }
+}
+
+.adm-share-option-btn {
+    width: 100%; display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.75rem 1rem; border-radius: 0.75rem;
+    font-weight: 600; font-size: 0.8125rem; color: #fff;
+    cursor: pointer; transition: filter .12s ease-out, transform .1s ease-out; border: none;
+    will-change: transform;
+}
+.adm-share-option-btn:hover  { filter: brightness(0.94); }
+.adm-share-option-btn:active { transform: scale(.97); transition-duration: .05s; }
+.adm-share-option-btn:disabled { opacity: .7; cursor: wait; }
+.adm-share-option-btn .icon-wrap {
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: rgba(255,255,255,.92);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.adm-share-option-btn .label-text { flex: 1; text-align: left; }
+</style>
+
+<div id="admjob-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 adm-share-backdrop"
      x-data="{
-         open: false,
-         copied: false, fbCopied: false, messengerCopied: false,
-         fbText:  {{ json_encode($sjPostText) }},
-         baseUrl: {{ json_encode($sjBaseUrl) }},
-         close() { this.open=false; setTimeout(()=>$wire.closeShareJobModal(),290); },
+         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
+         sharingTo: null,
+         shareText: {{ json_encode($sjPostText) }},
+         jobTitle:  {{ json_encode($shareJobTitle) }},
+
          async copyText(text) {
              try {
-                 if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);}
-                 else{const ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.focus();ta.select();document.execCommand('copy');document.body.removeChild(ta);}
-             } catch(e){}
+                 if (navigator.clipboard && window.isSecureContext) {
+                     await navigator.clipboard.writeText(text);
+                 } else {
+                     const ta = document.createElement('textarea');
+                     ta.value = text; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(ta); ta.focus(); ta.select();
+                     document.execCommand('copy'); document.body.removeChild(ta);
+                 }
+                 return true;
+             } catch (e) { return false; }
          },
-         async shareOnFacebook() { await this.copyText(this.fbText); this.fbCopied=true; window.open('https://www.facebook.com/','_blank','noopener,noreferrer'); setTimeout(()=>{this.fbCopied=false;},9000); },
-         async shareOnMessenger() { await this.copyText(this.fbText); this.messengerCopied=true; const isMobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent); if(isMobile){window.location.href='fb-messenger://share/?link='+encodeURIComponent(this.baseUrl);setTimeout(()=>window.open('https://www.messenger.com/','_blank','noopener'),1500);}else{window.open('https://www.messenger.com/','_blank','noopener');} setTimeout(()=>{this.messengerCopied=false;},9000); },
-         async copyLinkFn() { await this.copyText(this.baseUrl); this.copied=true; setTimeout(()=>this.copied=false,2500); }
+
+         async nativeShare() {
+             this.sharingTo = 'native';
+             try {
+                 await navigator.share({ title: this.jobTitle, text: this.shareText });
+             } catch (e) { /* cancelled by user — nothing to do */ }
+             this.sharingTo = null;
+         },
+
+         async openFacebook() {
+             this.sharingTo = 'facebook';
+             const copyOk = await this.copyText(this.shareText);
+             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
+             const win = window.open(url, 'philcst_admjob_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
+                     : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Facebook.'
+             });
+             this.sharingTo = null;
+         },
+
+         async openMessenger() {
+             this.sharingTo = 'messenger';
+             const copyOk = await this.copyText(this.shareText);
+             const win = window.open('https://www.messenger.com/new', 'philcst_admjob_messenger_share', 'noopener,noreferrer');
+             if (win) { try { win.focus(); } catch(e) {} }
+             $wire.dispatch('flash-message', {
+                 type: copyOk ? 'success' : 'warning',
+                 message: copyOk
+                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
+                     : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Messenger.'
+             });
+             this.sharingTo = null;
+         }
      }"
-     x-init="requestAnimationFrame(()=>{ open=true })"
-     @keydown.escape.window="close()">
+     x-transition:enter="transition ease-out duration-150"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     @keydown.escape.window="$wire.closeShareJobModal()">
 
-    <div x-show="open" x-cloak
-         x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
-         x-transition:leave="transition ease-in duration-200"
-         x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-         class="absolute inset-0 bg-black/60 backdrop-blur-sm"
-         @click="close()"></div>
+    <div class="adm-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 adm-share-modal-wrapper">
 
-    <div x-show="open" x-cloak
-         x-transition:enter="transition ease-out duration-300"
-         x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
-         x-transition:leave="transition ease-in duration-280"
-         x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
-         class="absolute inset-y-0 right-0 w-full max-w-4xl bg-white shadow-2xl flex flex-col will-change-transform">
-
-        <div class="flex items-center justify-between px-6 py-3.5 border-b border-[#e0e0e0] flex-shrink-0 bg-white">
-            <h2 class="text-base font-bold flex items-center gap-2.5 text-[#111111]">
-                <i class="fas fa-share-nodes text-blue-500 text-sm"></i>
-                <span>Share Job Posting</span>
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
+            <h2 class="text-sm font-semibold flex items-center gap-2 text-[#111111]">
+                <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Job Posting
             </h2>
-            <button @click="close()" type="button"
-                    class="w-8 h-8 rounded-full flex items-center justify-center hover:bg-[#f2f2f2] transition cursor-pointer text-[#111111]">
-                <i class="fas fa-xmark text-base"></i>
+            <button wire:click="closeShareJobModal" type="button"
+                    wire:loading.attr="disabled" wire:target="closeShareJobModal"
+                    class="adm-share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14"
+                     wire:loading.remove wire:target="closeShareJobModal">
+                    <path d="M2 2L12 12M12 2L2 12" stroke="#4b5563" stroke-width="2.25" stroke-linecap="round"/>
+                </svg>
+                <i class="fas fa-spinner fa-spin" style="font-size:12px;color:#4b5563;" wire:loading wire:target="closeShareJobModal"></i>
+                <span class="tip">Close</span>
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            {{-- Preview --}}
-            <div class="flex-1 px-6 py-5 border-b md:border-b-0 md:border-r border-[#e0e0e0] flex flex-col gap-4 overflow-y-auto adm-scroll bg-white">
-                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0 text-[#111111]">Post preview</p>
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto adm-scroll">
+                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0 text-[#111111]">Post Preview</p>
 
-                <div class="rounded-2xl border border-[#e0e0e0] overflow-hidden shadow-sm flex-shrink-0">
-                    <div class="border-b border-[#e0e0e0] px-5 py-4 flex items-start gap-4 bg-[#f0f7ff]">
-                        <div class="w-16 h-16 rounded-xl flex items-center justify-center flex-shrink-0 shadow"
-                             style="background: linear-gradient(135deg,#7a3f91,#5e2f72);">
-                            <i class="fas fa-briefcase text-white text-2xl"></i>
-                        </div>
-                        <div class="flex-1 min-w-0">
-                            <p class="font-bold text-base leading-tight text-[#111111]">{{ $shareJobTitle }}</p>
-                            <p class="text-sm mt-1 font-bold text-[#111111]">{{ $shareJobCompany }}@if($shareJobLocation) · {{ $shareJobLocation }}@endif</p>
-                            <div class="flex flex-wrap gap-1.5 mt-2">
-                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-blue-100 text-blue-700">{{ $shareJobEmpType }}</span>
-                                @if($shareJobTarget)
-                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-[#f2f2f2] text-[#111111]">{{ Str::limit($sjTargets, 30) }}</span>
-                                @endif
-                            </div>
-                        </div>
-                    </div>
-                    @if($sjDescPrev)
-                    <div class="px-5 py-3.5 border-b border-[#e0e0e0] bg-white">
-                        <p class="text-sm leading-relaxed text-[#111111]">{{ $sjDescPrev }}</p>
-                    </div>
-                    @endif
-                    <div class="px-5 py-2.5 flex items-center gap-2 bg-[#f0f7ff]">
-                        <i class="fas fa-globe text-xs text-blue-400"></i>
-                        <span class="text-xs uppercase tracking-wider font-bold text-blue-600">{{ strtoupper($sjHost) }}</span>
-                    </div>
-                </div>
-
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-circle-info text-blue-500 text-sm flex-shrink-0 mt-0.5"></i>
-                    <div>
-                        <p class="text-sm font-bold text-blue-800 mb-1">How sharing works</p>
-                        <p class="text-sm text-blue-700 leading-relaxed">Clicking <strong>Facebook</strong> or <strong>Messenger</strong> copies the post caption to your clipboard and opens the platform. Press <kbd class="bg-blue-100 px-1.5 rounded font-mono text-xs">Ctrl+V</kbd> to paste.</p>
-                    </div>
-                </div>
-
-                <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-start gap-3 flex-shrink-0">
-                    <i class="fas fa-users text-blue-600 text-sm flex-shrink-0 mt-0.5"></i>
-                    <div>
-                        <p class="text-sm font-bold text-blue-800">Post to Staff Channel</p>
-                        <p class="text-sm mt-0.5 text-blue-700">Posts the job directly to the <strong>Directors &amp; Coordinators</strong> chat.
-                            @if($shareJobTarget) Targeting: <strong>{{ $sjTargets }}</strong>.@endif
-                        </p>
+                <div class="rounded-xl border border-gray-200 flex-shrink-0">
+                    <div class="px-4 py-3">
+                        <p class="whitespace-pre-wrap leading-relaxed text-[#111111]" style="font-size:clamp(11px,1vw,13px);">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $sjPostText)) }}</p>
+                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
                 </div>
             </div>
 
-            {{-- Share buttons --}}
-            <div class="w-full md:w-80 px-6 py-5 flex flex-col gap-3 flex-shrink-0 overflow-y-auto adm-scroll bg-white">
-                <p class="text-xs font-bold uppercase tracking-widest text-[#111111]">Share via</p>
+            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto adm-scroll">
+                <p class="text-[10px] font-bold uppercase tracking-widest text-[#111111]">Share via</p>
 
-                <div x-show="fbCopied" x-cloak
-                     x-transition:enter="transition ease-out duration-300"
-                     x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
-                     class="bg-emerald-50 border border-emerald-300 rounded-xl px-4 py-3 flex items-start gap-2">
-                    <i class="fas fa-check text-emerald-600 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-sm font-bold text-emerald-800">Text copied! Facebook is open.</p>
-                        <p class="text-xs text-emerald-700 mt-0.5">Paste with <strong>Ctrl+V</strong> in the post composer.</p>
-                    </div>
-                </div>
-
-                <div x-show="messengerCopied" x-cloak
-                     x-transition:enter="transition ease-out duration-300"
-                     x-transition:enter-start="opacity-0 -translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
-                     class="bg-blue-50 border border-blue-300 rounded-xl px-4 py-3 flex items-start gap-2">
-                    <i class="fas fa-check text-blue-600 text-sm mt-0.5 flex-shrink-0"></i>
-                    <div>
-                        <p class="text-sm font-bold text-blue-800">Text copied! Messenger is open.</p>
-                        <p class="text-xs text-blue-700 mt-0.5">Paste with <strong>Ctrl+V</strong> in any chat.</p>
-                    </div>
-                </div>
-
-                <button type="button" @click="shareOnFacebook()"
-                        class="w-full flex items-center gap-4 px-5 py-4 rounded-xl bg-[#1877F2] hover:bg-[#166fe5] text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group">
-                    <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5" fill="#1877F2">
-                            <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/>
-                        </svg>
-                    </span>
-                    <span class="flex-1 text-left">
-                        <span class="block font-bold text-sm">Post on Facebook</span>
-                        <span class="block text-xs text-white/70 mt-0.5">Copies caption + opens facebook.com</span>
-                    </span>
-                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
-                </button>
-
-                <button type="button" @click="shareOnMessenger()"
-                        class="w-full flex items-center gap-4 px-5 py-4 rounded-xl text-white font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group"
-                        style="background:linear-gradient(135deg, #0084FF 0%, #0050D0 100%);">
-                    <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-5 h-5">
-                            <defs><linearGradient id="mgr_admjob" x1="0%" y1="100%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#00B2FF"/><stop offset="100%" style="stop-color:#006AFF"/></linearGradient></defs>
-                            <path fill="url(#mgr_admjob)" d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
-                        </svg>
-                    </span>
-                    <span class="flex-1 text-left">
-                        <span class="block font-bold text-sm">Send via Messenger</span>
-                        <span class="block text-xs text-white/70 mt-0.5">Copies caption + opens messenger.com</span>
-                    </span>
-                    <i class="fas fa-arrow-up-right-from-square text-white/60 text-sm group-hover:text-white transition"></i>
-                </button>
-
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-[#e0e0e0]"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-xs font-bold uppercase tracking-widest bg-white text-[#111111]">or post to staff</span>
-                    </div>
-                </div>
-
-                <button type="button"
-                        wire:click="postJobToBatchChat"
-                        wire:loading.attr="disabled"
-                        wire:target="postJobToBatchChat"
-                        class="w-full flex items-center gap-4 px-5 py-4 rounded-xl font-bold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-blue-200 hover:border-blue-400 hover:bg-blue-50 disabled:opacity-60 disabled:cursor-not-allowed bg-blue-50 text-blue-700">
-                    <span class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-blue-600">
-                        <i class="fas fa-shield-halved text-white text-base"></i>
-                    </span>
-                    <span class="flex-1 text-left">
-                        <span wire:loading.remove wire:target="postJobToBatchChat" class="block font-bold text-sm">Post to Staff Chat</span>
-                        <span wire:loading wire:target="postJobToBatchChat" class="block font-bold text-sm">
-                            <i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…
+                <template x-if="nativeShareSupported">
+                    <button type="button" @click="nativeShare()" :disabled="sharingTo==='native'" class="adm-share-option-btn" style="background:#7a3f91;">
+                        <span class="icon-wrap">
+                            <i class="fas fa-spinner fa-spin text-[#7a3f91] text-sm" x-show="sharingTo==='native'" x-cloak></i>
+                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm" x-show="sharingTo!=='native'"></i>
                         </span>
-                        <span class="block text-xs mt-0.5 text-blue-600">Directors &amp; Coordinators · caption included</span>
+                        <span class="label-text text-xs font-semibold">Share</span>
+                    </button>
+                </template>
+
+                <button type="button" @click="openFacebook()" :disabled="sharingTo==='facebook'" class="adm-share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
+                        <i class="fas fa-spinner fa-spin text-[#1877F2] text-sm" x-show="sharingTo==='facebook'" x-cloak></i>
+                        <svg x-show="sharingTo!=='facebook'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <i class="fas fa-paper-plane text-sm text-blue-500"></i>
+                    <span class="label-text text-xs font-semibold" x-text="sharingTo==='facebook' ? 'Opening…' : 'Share on Facebook'"></span>
                 </button>
 
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-[#e0e0e0]"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-xs font-bold uppercase tracking-widest bg-white text-[#111111]">or copy link</span>
-                    </div>
-                </div>
-
-                <button type="button" @click="copyLinkFn()"
-                        class="w-full flex items-center gap-4 px-5 py-3.5 rounded-xl border-2 border-[#e0e0e0] hover:border-blue-300 hover:bg-blue-50 font-bold text-sm transition cursor-pointer group bg-white text-[#111111]">
-                    <span class="w-10 h-10 bg-[#f2f2f2] group-hover:bg-blue-100 rounded-xl flex items-center justify-center flex-shrink-0 transition">
-                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy text-blue-500'" class="text-lg"></i>
+                <button type="button" @click="openMessenger()" :disabled="sharingTo==='messenger'" class="adm-share-option-btn" style="background:#0084FF;">
+                    <span class="icon-wrap">
+                        <i class="fas fa-spinner fa-spin text-[#0084FF] text-sm" x-show="sharingTo==='messenger'" x-cloak></i>
+                        <svg x-show="sharingTo!=='messenger'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
                     </span>
-                    <div class="flex-1 text-left min-w-0">
-                        <p class="font-bold text-sm" :class="copied ? 'text-emerald-600' : 'text-blue-600'"
-                           x-text="copied ? '✓ Link copied!' : 'Copy Jobs Page Link'"></p>
-                        <p class="text-xs font-mono mt-0.5 truncate text-[#111111]">{{ $sjBaseUrl }}</p>
-                    </div>
+                    <span class="label-text text-xs font-semibold" x-text="sharingTo==='messenger' ? 'Opening…' : 'Send via Messenger'"></span>
                 </button>
 
-                <button type="button" @click="close()"
-                        class="w-full px-5 py-3 rounded-xl border border-[#e0e0e0] text-sm font-bold hover:bg-[#f2f2f2] transition mt-1 text-[#111111] flex items-center justify-center gap-1.5">
-                    <i class="fas fa-xmark mr-1.5 text-xs"></i> Close
-                </button>
+                <p class="text-[10px] text-center text-[#666666]">Sharing this job is available until its deadline passes.</p>
+            </div>
+        </div>
+
+        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
+            <div class="flex items-start gap-2.5">
+                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5 text-[#666666]"></i>
+                <p class="text-xs leading-relaxed text-[#666666]">
+                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
+                    into the Facebook or Messenger window that opens.
+                </p>
             </div>
         </div>
     </div>
 </div>
 @endif
+
 
 </div>
 
