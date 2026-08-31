@@ -130,16 +130,30 @@ new class extends Component {
         $count   = 0;
 
         foreach ($this->groupedAlumni as $group) {
-            $size = $group['members']->count();
+            $members = $group['members']->values();
+            $offset  = 0;
+            $total   = $members->count();
 
-            if ($count > 0 && ($count + $size) > self::PER_PAGE) {
-                $pages[]  = $current;
-                $current  = [];
-                $count    = 0;
+            while ($offset < $total) {
+                $remaining = self::PER_PAGE - $count;
+                $take      = min($remaining, $total - $offset);
+
+                $current[] = [
+                    'courseCode' => $group['courseCode'],
+                    'courseName' => $group['courseName'],
+                    'sortKey'    => $group['sortKey'],
+                    'members'    => $members->slice($offset, $take)->values(),
+                ];
+
+                $count  += $take;
+                $offset += $take;
+
+                if ($count >= self::PER_PAGE) {
+                    $pages[]  = $current;
+                    $current  = [];
+                    $count    = 0;
+                }
             }
-
-            $current[] = $group;
-            $count    += $size;
         }
 
         if (!empty($current)) $pages[] = $current;
@@ -516,7 +530,7 @@ new class extends Component {
                     @if($course !== '')
                         <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
                     @else
-                        <span>All Courses</span>
+                        <span>All Programs</span>
                     @endif
                 </button>
                 <div x-show="open" x-cloak
@@ -531,7 +545,7 @@ new class extends Component {
                     <button type="button"
                             @click="$wire.set('course', ''); open = false"
                             :class="{ 'sel': $wire.course === '' }"
-                            class="yb-adm-dd-item">All Courses</button>
+                            class="yb-adm-dd-item">All Programs</button>
                     @foreach($this->courses as $c)
                     <button type="button"
                             @click="$wire.set('course', '{{ $c->code }}'); open = false"
@@ -562,15 +576,8 @@ new class extends Component {
                 <span class="hidden sm:inline">Reset</span>
             </button>
 
-            {{-- Found count + spinner ── --}}
+            {{-- Found count ── --}}
             <div class="flex items-center gap-2 ml-auto">
-                <span wire:loading wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
-                    <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
-                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                </span>
                 <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
                       style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
                     {{ number_format($this->totalFiltered) }} found

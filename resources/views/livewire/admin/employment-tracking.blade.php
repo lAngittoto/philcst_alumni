@@ -8,9 +8,24 @@ use Illuminate\Support\Facades\DB;
 new class extends Component {
 
     // ── Global Filters ────────────────────────────────────────────────────────
-    public string $filterBatch   = '';
-    public string $filterCollege = '';
-    public string $filterCourse  = '';
+    // Batch is a FROM/TO range (mirrors the organizer-facing Alumni
+    // Employment table) instead of a single-value dropdown.
+    public string $filterBatchFrom = '';
+    public string $filterBatchTo   = '';
+
+    /** Set while setSingleBatchYear()/clearFilterBatch()/setBatchRange()
+     *  are writing to filterBatchFrom/filterBatchTo directly, so the
+     *  updatedFilterBatchFrom()/updatedFilterBatchTo() hooks below don't
+     *  ALSO fire and refresh a second time in the same request. */
+    private bool $skipBatchHooks = false;
+
+    public string $filterCollege  = '';
+
+    // Programs is a MULTI-SELECT (array of checked course codes) instead
+    // of a single-value dropdown, so several programs can be viewed
+    // together — mirrors the organizer-facing Alumni Employment table.
+    public array  $filterCourses  = [];
+
     public string $filterStatus  = '';
 
     // ── Detail Modal ──────────────────────────────────────────────────────────
@@ -61,6 +76,120 @@ new class extends Component {
         $this->refreshAll();
     }
 
+    /** Toggles a single program/course code in/out of the multi-select
+     *  filter — bound directly to each checkbox item in the Programs
+     *  dropdown. */
+    public function toggleFilterCourse(string $code): void
+    {
+        if (in_array($code, $this->filterCourses, true)) {
+            $this->filterCourses = array_values(array_diff($this->filterCourses, [$code]));
+        } else {
+            $this->filterCourses[] = $code;
+        }
+        $this->refreshAll();
+    }
+
+    /** "All Programs" inside the dropdown — clears the whole multi-select
+     *  in one round-trip. */
+    public function clearFilterCourses(): void
+    {
+        $this->filterCourses = [];
+        $this->refreshAll();
+    }
+
+    /** "Select All" inside the dropdown — checks every program code. */
+    public function selectAllFilterCourses(): void
+    {
+        $this->filterCourses = collect($this->courses)->pluck('code')->toArray();
+        $this->refreshAll();
+    }
+
+    /** True only once BOTH ends of the batch range are set — a half-picked
+     *  range (just From, or just To) never scopes the query. */
+    private function batchRangeIsComplete(): bool
+    {
+        return $this->filterBatchFrom !== '' && $this->filterBatchTo !== '';
+    }
+
+    public function updatedFilterBatchFrom(): void
+    {
+        if ($this->skipBatchHooks) return;
+        $this->normalizeBatchRange();
+        // Don't fire a filter request yet if only "From" is picked — wait
+        // until "To" is also set (or both cleared) so a half-picked range
+        // never triggers a query, and picking From then To doesn't cause
+        // two separate refreshes.
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo === '') {
+            return;
+        }
+        $this->refreshAll();
+    }
+
+    public function updatedFilterBatchTo(): void
+    {
+        if ($this->skipBatchHooks) return;
+        $this->normalizeBatchRange();
+        if ($this->filterBatchTo !== '' && $this->filterBatchFrom === '') {
+            return;
+        }
+        $this->refreshAll();
+    }
+
+    /** If "from" ends up later than "to" (or vice versa), swap them
+     *  instead of silently returning zero rows. */
+    private function normalizeBatchRange(): void
+    {
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== ''
+            && (int)$this->filterBatchFrom > (int)$this->filterBatchTo) {
+            [$this->filterBatchFrom, $this->filterBatchTo] = [$this->filterBatchTo, $this->filterBatchFrom];
+        }
+    }
+
+    /** Single-year quick pick from the default (non-range) Batch Year
+     *  list — sets From and To to the same year in ONE round-trip
+     *  instead of two separate $wire.set() calls. */
+    public function setSingleBatchYear(string $year): void
+    {
+        $this->skipBatchHooks  = true;
+        $this->filterBatchFrom = $year;
+        $this->filterBatchTo   = $year;
+        $this->skipBatchHooks  = false;
+        $this->refreshAll();
+    }
+
+    /** "All Batch Years" — clears both ends of the range in one
+     *  round-trip, same reasoning as setSingleBatchYear() above. */
+    public function clearFilterBatch(): void
+    {
+        $this->skipBatchHooks  = true;
+        $this->filterBatchFrom = '';
+        $this->filterBatchTo   = '';
+        $this->skipBatchHooks  = false;
+        $this->refreshAll();
+    }
+
+    /** Applies a From–To range in ONE round-trip. Bound to the range
+     *  picker's local Alpine state (not wire:model.live on the two
+     *  lists) so picking "From" alone never touches the server at all —
+     *  the request only fires once both ends are chosen. */
+    public function setBatchRange(string $from, string $to): void
+    {
+        $this->skipBatchHooks  = true;
+        $this->filterBatchFrom = $from;
+        $this->filterBatchTo   = $to;
+        $this->skipBatchHooks  = false;
+        $this->normalizeBatchRange();
+        $this->refreshAll();
+    }
+
+    public function resetFilters(): void
+    {
+        $this->filterBatchFrom = '';
+        $this->filterBatchTo   = '';
+        $this->filterCourses   = [];
+        $this->refreshAll();
+    }
+
     private function loadMetaLists(): void
     {
         $this->batches = DB::table('alumni')
@@ -82,12 +211,15 @@ new class extends Component {
     private function baseQ(): \Illuminate\Database\Query\Builder
     {
         $q = DB::table('alumni as a')->whereNull('a.deleted_at');
-        if ($this->filterBatch)   $q->where('a.batch', $this->filterBatch);
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $q->where('a.batch', '>=', $this->filterBatchFrom)
+              ->where('a.batch', '<=', $this->filterBatchTo);
+        }
         if ($this->filterCollege) {
             $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
             $q->whereIn('a.course_code', $codes);
         }
-        if ($this->filterCourse)  $q->where('a.course_code', $this->filterCourse);
+        if (!empty($this->filterCourses)) $q->whereIn('a.course_code', $this->filterCourses);
 
         if ($this->filterStatus === 'not_filled') {
             $q->whereNotExists(function ($sub) {
@@ -182,12 +314,15 @@ new class extends Component {
                         ->whereNull('et.deleted_at');
                 });
 
-            if ($this->filterBatch)   $q->where('a.batch', $this->filterBatch);
+            if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+                $q->where('a.batch', '>=', $this->filterBatchFrom)
+                  ->where('a.batch', '<=', $this->filterBatchTo);
+            }
             if ($this->filterCollege) {
                 $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
                 $q->whereIn('a.course_code', $codes);
             }
-            if ($this->filterCourse)  $q->where('a.course_code', $this->filterCourse);
+            if (!empty($this->filterCourses)) $q->whereIn('a.course_code', $this->filterCourses);
 
             if ($this->filterStatus && $this->filterStatus !== 'not_filled') {
                 $q->whereRaw('1 = 0');
@@ -230,12 +365,15 @@ new class extends Component {
             ->whereNull('a.deleted_at')
             ->whereNull('et.deleted_at');
 
-        if ($this->filterBatch)   $q->where('a.batch', $this->filterBatch);
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $q->where('a.batch', '>=', $this->filterBatchFrom)
+              ->where('a.batch', '<=', $this->filterBatchTo);
+        }
         if ($this->filterCollege) {
             $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
             $q->whereIn('a.course_code', $codes);
         }
-        if ($this->filterCourse)  $q->where('a.course_code', $this->filterCourse);
+        if (!empty($this->filterCourses)) $q->whereIn('a.course_code', $this->filterCourses);
 
         if ($this->filterStatus === 'not_filled') {
             $q->whereRaw('1 = 0');
@@ -370,13 +508,19 @@ new class extends Component {
         $collegeData = $colleges->map(function ($col) {
             $codes = DB::table('courses')->where('college', $col)->pluck('code');
             $base  = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
-            if ($this->filterBatch) $base->where('a.batch', $this->filterBatch);
+            if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+                $base->where('a.batch', '>=', $this->filterBatchFrom)
+                     ->where('a.batch', '<=', $this->filterBatchTo);
+            }
             $total = (clone $base)->count();
             $emp   = DB::table('alumni as a')
                 ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
                 ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
                 ->whereIn('a.course_code', $codes);
-            if ($this->filterBatch) $emp->where('a.batch', $this->filterBatch);
+            if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+                $emp->where('a.batch', '>=', $this->filterBatchFrom)
+                    ->where('a.batch', '<=', $this->filterBatchTo);
+            }
             $employed   = (clone $emp)->where('et.employment_status', 'employed')->count();
             $self_emp   = (clone $emp)->where('et.employment_status', 'self_employed')->count();
             $unemployed = (clone $emp)->where('et.employment_status', 'unemployed')->count();
@@ -395,12 +539,15 @@ new class extends Component {
             ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
             ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
             ->whereIn('et.employment_status', ['employed', 'self_employed']);
-        if ($this->filterBatch)   $courseQ->where('a.batch', $this->filterBatch);
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $courseQ->where('a.batch', '>=', $this->filterBatchFrom)
+                    ->where('a.batch', '<=', $this->filterBatchTo);
+        }
         if ($this->filterCollege) {
             $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
             $courseQ->whereIn('a.course_code', $codes);
         }
-        if ($this->filterCourse) $courseQ->where('a.course_code', $this->filterCourse);
+        if (!empty($this->filterCourses)) $courseQ->whereIn('a.course_code', $this->filterCourses);
         $courseRows = $courseQ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
             ->groupBy('a.course_code')->orderByDesc('cnt')->limit(10)->get();
 
@@ -479,6 +626,59 @@ new class extends Component {
 <style>
 @keyframes admFadeIn  { from { opacity:0; } to { opacity:1; } }
 @keyframes admSlideUp { from { opacity:0; transform: translateY(20px) scale(.98); } to { opacity:1; transform:none; } }
+
+/* ── Dropdown trigger (filters) ── */
+.yb-adm-dd-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+    border: 1px solid #E8E0F0; border-radius: 0.5rem;
+    font-size: 0.875rem; font-weight: 500;
+    background: #fff; color: #333333;
+    cursor: pointer; white-space: nowrap;
+    transition: border-color .15s, box-shadow .15s;
+    outline: none; user-select: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 0.6rem center;
+    background-repeat: no-repeat; background-size: 1.25em 1.25em;
+}
+.yb-adm-dd-btn:hover  { border-color: #c4b5d4; }
+.yb-adm-dd-btn.active { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); color: #7a3f91; }
+.yb-adm-dd-btn:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+
+/* Plain button (no dropdown chevron) — used for Reset */
+.yb-adm-plain-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #E8E0F0; border-radius: 0.5rem;
+    font-size: 0.875rem; font-weight: 500;
+    background: #fff; color: #333333;
+    cursor: pointer; white-space: nowrap;
+    transition: border-color .15s, box-shadow .15s;
+    outline: none; user-select: none;
+}
+.yb-adm-plain-btn:hover { border-color: #c4b5d4; }
+.yb-adm-plain-btn:focus { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+
+/* ── Dropdown panel (filters) ── */
+.yb-adm-dd-panel {
+    position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 224px; overflow-y: auto;
+    background: #fff; border: 1.5px solid #E8E0F0;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
+    z-index: 600; padding: 4px;
+    scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
+}
+.yb-adm-dd-panel::-webkit-scrollbar       { width: 4px; }
+.yb-adm-dd-panel::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
+.yb-adm-dd-item {
+    display: block; width: 100%; padding: 6px 12px;
+    border-radius: 7px; text-align: left;
+    font-size: 12px; font-weight: 600; color: #333333;
+    background: transparent; border: none; cursor: pointer;
+    white-space: nowrap; transition: background .12s, color .12s;
+}
+.yb-adm-dd-item:hover { background: #F5F0FA; color: #7A3F91; }
+.yb-adm-dd-item.sel   { background: #F0E6F8; color: #7A3F91; }
 </style>
 
 @php
@@ -529,6 +729,210 @@ new class extends Component {
             </div>
         </div>
 
+    </div>
+
+    {{-- ── FILTERS ── --}}
+    <div class="flex flex-wrap items-center gap-2.5 flex-shrink-0 bg-white border border-[#E8E0F0] rounded-xl px-3.5 py-2.5">
+        <span class="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-[#7a3f91] mr-1">Filters</span>
+
+        {{-- Batch — FROM/TO range. Default view is a plain year list
+             (click a year, done); "Add Range" swaps to two side-by-side
+             scrollable year lists so a range like 2020–2024 is opt-in
+             rather than always-on. Range is all-or-nothing — picking
+             only From (or only To) doesn't filter anything yet, and the
+             trigger label says so explicitly. --}}
+        @if(count($batches))
+        <div class="relative"
+             x-data="{
+                open: false,
+                rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
+                rangeFrom: '{{ $filterBatchFrom }}',
+                rangeTo: '{{ $filterBatchTo }}',
+                startRange(){ this.rangeFrom='{{ $filterBatchFrom }}'; this.rangeTo='{{ $filterBatchTo }}'; this.rangeMode=true; },
+                pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
+                pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
+                applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.open = false; } }
+             }"
+             @click.outside="open = false">
+            <button type="button"
+                    @click="open = !open"
+                    :class="{ 'active': {{ ($filterBatchFrom !== '' || $filterBatchTo !== '') ? 'true' : 'false' }} }"
+                    class="yb-adm-dd-btn">
+                <span>
+                    @if($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo)
+                        Batch {{ $filterBatchFrom }}–{{ $filterBatchTo }}
+                    @elseif($filterBatchFrom !== '' && $filterBatchTo !== '')
+                        Batch {{ $filterBatchFrom }}
+                    @elseif($filterBatchFrom !== '')
+                        Batch {{ $filterBatchFrom }} → pick end year
+                    @elseif($filterBatchTo !== '')
+                        pick start year → Batch {{ $filterBatchTo }}
+                    @else
+                        All Batches
+                    @endif
+                </span>
+            </button>
+            <div x-show="open" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 x-transition:leave="transition ease-in duration-75"
+                 x-transition:leave-start="opacity-100 scale-100"
+                 x-transition:leave-end="opacity-0 scale-95"
+                 class="yb-adm-dd-panel"
+                 style="min-width:160px;">
+
+                {{-- Default view: plain year list --}}
+                <div x-show="!rangeMode">
+                    <button type="button" @click="$wire.clearFilterBatch(); open = false"
+                            class="yb-adm-dd-item {{ ($filterBatchFrom === '' && $filterBatchTo === '') ? 'sel' : '' }}">
+                        All Batches
+                    </button>
+                    @foreach($batches as $b)
+                        <button type="button" @click="$wire.setSingleBatchYear('{{ $b }}'); open = false"
+                                class="yb-adm-dd-item {{ ($filterBatchFrom == $b && $filterBatchTo == $b) ? 'sel' : '' }}">
+                            Batch {{ $b }}
+                        </button>
+                    @endforeach
+                    <div class="h-px bg-[#E8E0F0] my-1"></div>
+                    <button type="button" @click="startRange()"
+                            class="yb-adm-dd-item font-bold" style="color:#7a3f91;">
+                        <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
+                    </button>
+                </div>
+
+
+                {{-- Range view: two side-by-side scrollable year lists.
+                     Local Alpine state only — nothing sent to the server
+                     until both sides are picked. --}}
+                <div x-show="rangeMode" class="p-1" style="width:210px;">
+                    <div class="flex items-center gap-2 mb-1 px-1">
+                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide" style="color:#7a3f91;" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
+                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide" style="color:#7a3f91;" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
+                    </div>
+                    <div class="flex items-start gap-2 px-1">
+                        <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:150px;">
+                            @foreach($batches as $b)
+                            <button type="button" @click="pickFrom('{{ $b }}')"
+                                    :class="rangeFrom==='{{ $b }}' ? 'font-bold' : ''"
+                                    :style="rangeFrom==='{{ $b }}' ? 'background:#7a3f91;color:#fff;' : 'color:#333333;'"
+                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition-colors">{{ $b }}</button>
+                            @endforeach
+                        </div>
+                        <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:150px;">
+                            @foreach($batches as $b)
+                            <button type="button" @click="pickTo('{{ $b }}')"
+                                    :class="rangeTo==='{{ $b }}' ? 'font-bold' : ''"
+                                    :style="rangeTo==='{{ $b }}' ? 'background:#7a3f91;color:#fff;' : 'color:#333333;'"
+                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition-colors">{{ $b }}</button>
+                            @endforeach
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 mt-2 px-1 pb-1">
+                        <button type="button" @click="rangeMode=false"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                style="color:#333333;border-color:#E8E0F0;">
+                            Back
+                        </button>
+                        <button type="button" @click="$wire.clearFilterBatch(); rangeFrom=''; rangeTo=''; rangeMode=false; open=false;"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                style="color:#7a3f91;border-color:#E8E0F0;">
+                            Clear
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        @endif
+
+        {{-- Programs — MULTI-SELECT with real checkboxes. Checking a box
+             toggles that program in/out of filterCourses via
+             toggleFilterCourse(); the dropdown stays open across clicks
+             so several programs can be checked together. A "Select All"
+             checkbox sits in a sticky header row at the top of the
+             list — tri-state: checked when every program is selected,
+             indeterminate (dash) when some but not all are. --}}
+        @if(count($courses))
+        <div class="relative"
+             x-data="{
+                open: false,
+                selected(){ return Array.isArray($wire.filterCourses) ? $wire.filterCourses : []; },
+                isChecked(code){ return this.selected().includes(code); },
+                count(){ return this.selected().length; }
+             }"
+             wire:key="admin-course-dropdown"
+             @click.outside="open = false">
+            <button type="button" @click="open = !open"
+                    :class="{ 'active': count() > 0 }"
+                    class="yb-adm-dd-btn">
+                <span>
+                    @if(count($filterCourses) === 0)
+                        All Programs
+                    @elseif(count($filterCourses) === 1)
+                        {{ collect($courses)->firstWhere('code', $filterCourses[0])['name'] ?? $filterCourses[0] }}
+                    @else
+                        {{ count($filterCourses) }} Programs
+                    @endif
+                </span>
+            </button>
+            <div x-show="open" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 x-transition:leave="transition ease-in duration-75"
+                 x-transition:leave-start="opacity-100 scale-100"
+                 x-transition:leave-end="opacity-0 scale-95"
+                 class="yb-adm-dd-panel"
+                 style="min-width:230px;">
+                <div class="flex items-center justify-between gap-2 px-2 py-2 border-b sticky -top-1 bg-white z-10" style="border-color:#E8E0F0;">
+                    <label class="flex items-center gap-2 text-xs font-semibold select-none"
+                           :class="count() === 0 ? 'cursor-not-allowed' : 'cursor-pointer'"
+                           style="color:#333333;">
+                        <input type="checkbox"
+                               :checked="count() === {{ count($courses) }}"
+                               :indeterminate="count() > 0 && count() < {{ count($courses) }}"
+                               :disabled="count() === 0"
+                               @change="$event.target.checked ? $wire.selectAllFilterCourses() : $wire.clearFilterCourses()"
+                               class="w-3.5 h-3.5 rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                               style="border-color:#D4C5E8;accent-color:#7a3f91;">
+                        Select All
+                    </label>
+                    <span class="text-xs font-bold select-none" style="color:#7a3f91;" x-show="count() > 0">
+                        <span x-text="count()"></span> selected
+                    </span>
+                </div>
+                <div class="py-1">
+                    @foreach($courses as $c)
+                    <label class="yb-adm-dd-item flex items-center gap-2 {{ in_array($c['code'], $filterCourses, true) ? 'sel' : '' }}" style="cursor:pointer;">
+                        <input type="checkbox" wire:click="toggleFilterCourse('{{ $c['code'] }}')"
+                               :checked="isChecked('{{ $c['code'] }}')"
+                               class="w-3.5 h-3.5 rounded cursor-pointer shrink-0"
+                               style="border-color:#D4C5E8;accent-color:#7a3f91;">
+                        {{ $c['name'] }}
+                    </label>
+                    @endforeach
+                </div>
+            </div>
+        </div>
+        @endif
+
+        {{-- Reset ── --}}
+        <button wire:click="resetFilters"
+                class="yb-adm-plain-btn">
+            <i class="fas fa-rotate-left text-xs"></i>
+            <span class="hidden sm:inline">Reset</span>
+        </button>
+
+        {{-- Spinner ── --}}
+        <div class="flex items-center gap-2 ml-auto">
+            <span wire:loading wire:target="toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,resetFilters">
+                <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
+                     xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                </svg>
+            </span>
+        </div>
     </div>
 
     {{-- ── STAT CARDS (view-only, Emp Rate removed) ── --}}
