@@ -43,8 +43,7 @@ new class extends Component {
     public int $totalFilled     = 0;
     public int $totalEmployed   = 0;
     public int $totalSelf       = 0;
-    public int $totalUnemployed = 0;
-    public int $totalNotFilled  = 0;
+    public int $totalUnemployed = 0;    public int $totalNotFilled  = 0;
     public int $totalLocal      = 0;
     public int $totalAbroad     = 0;
 
@@ -731,210 +730,6 @@ new class extends Component {
 
     </div>
 
-    {{-- ── FILTERS ── --}}
-    <div class="flex flex-wrap items-center gap-2.5 flex-shrink-0 bg-white border border-[#E8E0F0] rounded-xl px-3.5 py-2.5">
-        <span class="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-[#7a3f91] mr-1">Filters</span>
-
-        {{-- Batch — FROM/TO range. Default view is a plain year list
-             (click a year, done); "Add Range" swaps to two side-by-side
-             scrollable year lists so a range like 2020–2024 is opt-in
-             rather than always-on. Range is all-or-nothing — picking
-             only From (or only To) doesn't filter anything yet, and the
-             trigger label says so explicitly. --}}
-        @if(count($batches))
-        <div class="relative"
-             x-data="{
-                open: false,
-                rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
-                rangeFrom: '{{ $filterBatchFrom }}',
-                rangeTo: '{{ $filterBatchTo }}',
-                startRange(){ this.rangeFrom='{{ $filterBatchFrom }}'; this.rangeTo='{{ $filterBatchTo }}'; this.rangeMode=true; },
-                pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
-                pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
-                applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.open = false; } }
-             }"
-             @click.outside="open = false">
-            <button type="button"
-                    @click="open = !open"
-                    :class="{ 'active': {{ ($filterBatchFrom !== '' || $filterBatchTo !== '') ? 'true' : 'false' }} }"
-                    class="yb-adm-dd-btn">
-                <span>
-                    @if($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo)
-                        Batch {{ $filterBatchFrom }}–{{ $filterBatchTo }}
-                    @elseif($filterBatchFrom !== '' && $filterBatchTo !== '')
-                        Batch {{ $filterBatchFrom }}
-                    @elseif($filterBatchFrom !== '')
-                        Batch {{ $filterBatchFrom }} → pick end year
-                    @elseif($filterBatchTo !== '')
-                        pick start year → Batch {{ $filterBatchTo }}
-                    @else
-                        All Batches
-                    @endif
-                </span>
-            </button>
-            <div x-show="open" x-cloak
-                 x-transition:enter="transition ease-out duration-100"
-                 x-transition:enter-start="opacity-0 scale-95"
-                 x-transition:enter-end="opacity-100 scale-100"
-                 x-transition:leave="transition ease-in duration-75"
-                 x-transition:leave-start="opacity-100 scale-100"
-                 x-transition:leave-end="opacity-0 scale-95"
-                 class="yb-adm-dd-panel"
-                 style="min-width:160px;">
-
-                {{-- Default view: plain year list --}}
-                <div x-show="!rangeMode">
-                    <button type="button" @click="$wire.clearFilterBatch(); open = false"
-                            class="yb-adm-dd-item {{ ($filterBatchFrom === '' && $filterBatchTo === '') ? 'sel' : '' }}">
-                        All Batches
-                    </button>
-                    @foreach($batches as $b)
-                        <button type="button" @click="$wire.setSingleBatchYear('{{ $b }}'); open = false"
-                                class="yb-adm-dd-item {{ ($filterBatchFrom == $b && $filterBatchTo == $b) ? 'sel' : '' }}">
-                            Batch {{ $b }}
-                        </button>
-                    @endforeach
-                    <div class="h-px bg-[#E8E0F0] my-1"></div>
-                    <button type="button" @click="startRange()"
-                            class="yb-adm-dd-item font-bold" style="color:#7a3f91;">
-                        <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
-                    </button>
-                </div>
-
-
-                {{-- Range view: two side-by-side scrollable year lists.
-                     Local Alpine state only — nothing sent to the server
-                     until both sides are picked. --}}
-                <div x-show="rangeMode" class="p-1" style="width:210px;">
-                    <div class="flex items-center gap-2 mb-1 px-1">
-                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide" style="color:#7a3f91;" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
-                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide" style="color:#7a3f91;" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
-                    </div>
-                    <div class="flex items-start gap-2 px-1">
-                        <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:150px;">
-                            @foreach($batches as $b)
-                            <button type="button" @click="pickFrom('{{ $b }}')"
-                                    :class="rangeFrom==='{{ $b }}' ? 'font-bold' : ''"
-                                    :style="rangeFrom==='{{ $b }}' ? 'background:#7a3f91;color:#fff;' : 'color:#333333;'"
-                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition-colors">{{ $b }}</button>
-                            @endforeach
-                        </div>
-                        <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:150px;">
-                            @foreach($batches as $b)
-                            <button type="button" @click="pickTo('{{ $b }}')"
-                                    :class="rangeTo==='{{ $b }}' ? 'font-bold' : ''"
-                                    :style="rangeTo==='{{ $b }}' ? 'background:#7a3f91;color:#fff;' : 'color:#333333;'"
-                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-[#F5F0FA] hover:text-[#7A3F91] transition-colors">{{ $b }}</button>
-                            @endforeach
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2 mt-2 px-1 pb-1">
-                        <button type="button" @click="rangeMode=false"
-                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
-                                style="color:#333333;border-color:#E8E0F0;">
-                            Back
-                        </button>
-                        <button type="button" @click="$wire.clearFilterBatch(); rangeFrom=''; rangeTo=''; rangeMode=false; open=false;"
-                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
-                                style="color:#7a3f91;border-color:#E8E0F0;">
-                            Clear
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-        @endif
-
-        {{-- Programs — MULTI-SELECT with real checkboxes. Checking a box
-             toggles that program in/out of filterCourses via
-             toggleFilterCourse(); the dropdown stays open across clicks
-             so several programs can be checked together. A "Select All"
-             checkbox sits in a sticky header row at the top of the
-             list — tri-state: checked when every program is selected,
-             indeterminate (dash) when some but not all are. --}}
-        @if(count($courses))
-        <div class="relative"
-             x-data="{
-                open: false,
-                selected(){ return Array.isArray($wire.filterCourses) ? $wire.filterCourses : []; },
-                isChecked(code){ return this.selected().includes(code); },
-                count(){ return this.selected().length; }
-             }"
-             wire:key="admin-course-dropdown"
-             @click.outside="open = false">
-            <button type="button" @click="open = !open"
-                    :class="{ 'active': count() > 0 }"
-                    class="yb-adm-dd-btn">
-                <span>
-                    @if(count($filterCourses) === 0)
-                        All Programs
-                    @elseif(count($filterCourses) === 1)
-                        {{ collect($courses)->firstWhere('code', $filterCourses[0])['name'] ?? $filterCourses[0] }}
-                    @else
-                        {{ count($filterCourses) }} Programs
-                    @endif
-                </span>
-            </button>
-            <div x-show="open" x-cloak
-                 x-transition:enter="transition ease-out duration-100"
-                 x-transition:enter-start="opacity-0 scale-95"
-                 x-transition:enter-end="opacity-100 scale-100"
-                 x-transition:leave="transition ease-in duration-75"
-                 x-transition:leave-start="opacity-100 scale-100"
-                 x-transition:leave-end="opacity-0 scale-95"
-                 class="yb-adm-dd-panel"
-                 style="min-width:230px;">
-                <div class="flex items-center justify-between gap-2 px-2 py-2 border-b sticky -top-1 bg-white z-10" style="border-color:#E8E0F0;">
-                    <label class="flex items-center gap-2 text-xs font-semibold select-none"
-                           :class="count() === 0 ? 'cursor-not-allowed' : 'cursor-pointer'"
-                           style="color:#333333;">
-                        <input type="checkbox"
-                               :checked="count() === {{ count($courses) }}"
-                               :indeterminate="count() > 0 && count() < {{ count($courses) }}"
-                               :disabled="count() === 0"
-                               @change="$event.target.checked ? $wire.selectAllFilterCourses() : $wire.clearFilterCourses()"
-                               class="w-3.5 h-3.5 rounded cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
-                               style="border-color:#D4C5E8;accent-color:#7a3f91;">
-                        Select All
-                    </label>
-                    <span class="text-xs font-bold select-none" style="color:#7a3f91;" x-show="count() > 0">
-                        <span x-text="count()"></span> selected
-                    </span>
-                </div>
-                <div class="py-1">
-                    @foreach($courses as $c)
-                    <label class="yb-adm-dd-item flex items-center gap-2 {{ in_array($c['code'], $filterCourses, true) ? 'sel' : '' }}" style="cursor:pointer;">
-                        <input type="checkbox" wire:click="toggleFilterCourse('{{ $c['code'] }}')"
-                               :checked="isChecked('{{ $c['code'] }}')"
-                               class="w-3.5 h-3.5 rounded cursor-pointer shrink-0"
-                               style="border-color:#D4C5E8;accent-color:#7a3f91;">
-                        {{ $c['name'] }}
-                    </label>
-                    @endforeach
-                </div>
-            </div>
-        </div>
-        @endif
-
-        {{-- Reset ── --}}
-        <button wire:click="resetFilters"
-                class="yb-adm-plain-btn">
-            <i class="fas fa-rotate-left text-xs"></i>
-            <span class="hidden sm:inline">Reset</span>
-        </button>
-
-        {{-- Spinner ── --}}
-        <div class="flex items-center gap-2 ml-auto">
-            <span wire:loading wire:target="toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,resetFilters">
-                <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
-                     xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                </svg>
-            </span>
-        </div>
-    </div>
-
     {{-- ── STAT CARDS (view-only, Emp Rate removed) ── --}}
     <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0">
 
@@ -1028,7 +823,7 @@ new class extends Component {
 
     </div>
 
-    {{-- ── ROW 1 — Status / Location / Relevance / Unemployed Reason ── --}}
+    {{-- ── ROW 1 — Status / Location / Relevance ── --}}
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0">
 
         <div class="{{ $chartCard }}">
@@ -1071,7 +866,7 @@ new class extends Component {
             <div class="{{ $chartHead }}">
                 <div class="flex items-center gap-2">
                     <div class="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0"></div>
-                    <span class="{{ $chartTtl }}">Unemployed — Why?</span>
+                    <span class="{{ $chartTtl }}">Unemployed</span>
                 </div>
             </div>
             <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
@@ -1851,9 +1646,9 @@ new class extends Component {
         safe(function(){ donut('admChartStatus', d.status); });
         safe(function(){ donut('admChartLocation', d.location); });
         safe(function(){ donut('admChartRelevance', d.relevance); });
-        safe(function(){ donut('admChartUnemployed', d.unemployed); });
         safe(function(){ donut('admChartEmpType',    d.emptype); });
         safe(function(){ donut('admChartEduStatus',  d.edu); });
+        safe(function(){ donut('admChartUnemployed', d.unemployed); });
         safe(function(){ hbar( 'admChartCourse',     d.course); });
         safe(function(){ polar('admChartCareerPath', d.career); });
 

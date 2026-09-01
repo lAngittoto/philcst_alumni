@@ -19,6 +19,12 @@ new class extends Component {
     public string $activeRole   = 'all';
     public string $search       = '';
     public string $activeModal  = '';
+    // Alumni-only status filter: 'all' | 'complete' | 'pending'. Ignored
+    // when activeRole isn't 'alumni'. Driven by the clickable "X complete /
+    // Y pending" text on the Total Alumni stat card, and by the incoming
+    // admin_alumni_filter session value set from the dashboard's
+    // goToAlumni('complete'/'pending') links.
+    public string $statusFilter = 'all';
 
     public string $dFn='', $dMn='', $dLn='', $dSfx='';
     public string $dUsername='', $dEmail='';
@@ -52,6 +58,9 @@ new class extends Component {
         $filter = session()->pull('admin_alumni_filter', '');
         if ($filter) {
             $this->activeRole = 'alumni';
+            if (in_array($filter, ['complete', 'pending'], true)) {
+                $this->statusFilter = $filter;
+            }
         }
         $tab = session()->pull('admin_users_tab', '');
         if ($tab) {
@@ -68,9 +77,17 @@ new class extends Component {
     public function updatingSearch(): void { $this->currentPage = 1; }
 
     public function switchTab(string $r): void {
-        $this->activeRole   = $r;
-        $this->search       = '';
-        $this->currentPage  = 1;
+        $this->activeRole    = $r;
+        $this->search        = '';
+        $this->statusFilter  = 'all';
+        $this->currentPage   = 1;
+    }
+
+    public function setStatusFilter(string $status): void {
+        $this->activeRole    = 'alumni';
+        $this->statusFilter  = in_array($status, ['all', 'complete', 'pending'], true) ? $status : 'all';
+        $this->search        = '';
+        $this->currentPage   = 1;
     }
 
     public function goToPage(int $p): void  { $this->currentPage = $p; }
@@ -147,6 +164,14 @@ new class extends Component {
         $map = ['alumni'=>'alumni','director'=>'director','coordinator'=>'organizer','registrar'=>'registrar'];
         if ($this->activeRole !== 'all' && isset($map[$this->activeRole]))
             $q->where('users.role', $map[$this->activeRole]);
+
+        if ($this->activeRole === 'alumni' && in_array($this->statusFilter, ['complete', 'pending'], true)) {
+            if ($this->statusFilter === 'complete') {
+                $q->whereNotNull('al.password_changed_at');
+            } else {
+                $q->whereNull('al.password_changed_at');
+            }
+        }
 
         if ($this->search) {
             $t = '%'.$this->search.'%';
@@ -821,14 +846,26 @@ select.mu-filter-input.mu-active {
     {{-- KPI STAT CARDS --}}
     @php $s = $this->stats; @endphp
     <div class="mu-stat-grid">
-        <div class="mu-stat-card">
+        <div wire:click="switchTab('alumni')" class="mu-stat-card cursor-pointer">
             <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
                 <i class="fas fa-graduation-cap text-white"></i>
             </div>
             <div class="mu-stat-text">
                 <div class="mu-stat-num">{{ number_format($s['alumni']) }}</div>
                 <div class="mu-stat-lbl">Total Alumni</div>
-                <div class="mu-stat-sub">{{ number_format($s['alumniVerified']) }} complete · {{ number_format($s['alumniPending']) }} pending</div>
+                <div class="mu-stat-sub">
+                    <span wire:click.stop="setStatusFilter('complete')"
+                          class="hover:underline {{ $activeRole==='alumni' && $statusFilter==='complete' ? 'font-bold' : '' }}"
+                          style="{{ $activeRole==='alumni' && $statusFilter==='complete' ? 'color:#059669;' : '' }}">{{ number_format($s['alumniVerified']) }} complete</span>
+                    ·
+                    <span wire:click.stop="setStatusFilter('pending')"
+                          class="hover:underline {{ $activeRole==='alumni' && $statusFilter==='pending' ? 'font-bold' : '' }}"
+                          style="{{ $activeRole==='alumni' && $statusFilter==='pending' ? 'color:#d97706;' : '' }}">{{ number_format($s['alumniPending']) }} pending</span>
+                    @if($activeRole==='alumni' && $statusFilter!=='all')
+                    ·
+                    <span wire:click.stop="setStatusFilter('all')" class="hover:underline" style="color:#7a3f91;">show all</span>
+                    @endif
+                </div>
             </div>
         </div>
         <div class="mu-stat-card">
@@ -888,6 +925,16 @@ select.mu-filter-input.mu-active {
                 @endforeach
             </div>
 
+            @if($activeRole === 'alumni' && $statusFilter !== 'all')
+            <div class="flex items-center gap-1.5 px-2.5 h-[30px] rounded-lg text-xs font-semibold flex-shrink-0"
+                 style="background:{{ $statusFilter==='complete' ? '#ECFDF5' : '#FFF7ED' }};color:{{ $statusFilter==='complete' ? '#059669' : '#d97706' }};border:1px solid {{ $statusFilter==='complete' ? '#A7F3D0' : '#FED7AA' }};">
+                {{ $statusFilter==='complete' ? 'Complete only' : 'Pending only' }}
+                <button wire:click="setStatusFilter('all')" class="ml-0.5 leading-none">
+                    <i class="fas fa-xmark text-[10px]"></i>
+                </button>
+            </div>
+            @endif
+
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -927,7 +974,7 @@ select.mu-filter-input.mu-active {
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#000000;">Identifier</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Role</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Status</th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden xl:table-cell" style="color:#000000;">Joined</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden xl:table-cell" style="color:#000000;">Email</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
@@ -941,6 +988,11 @@ select.mu-filter-input.mu-active {
                             };
                             $roleDisplay = $this->roleLabel($u->role);
                             $roleCss     = $this->roleBadge($u->role);
+                            $rowEmail = match($u->role) {
+                                'alumni'   => (!empty($u->record_email) && !str_contains($u->record_email, '@pending.local')) ? $u->record_email : $u->email,
+                                'director' => $u->director_email ?: $u->email,
+                                default    => $u->email,
+                            };
                         @endphp
                         <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
                             wire:key="mu-row-{{ $u->id }}">
@@ -973,8 +1025,8 @@ select.mu-filter-input.mu-active {
                                 </span>
                             </td>
                             <td class="px-4 py-3.5 text-center hidden xl:table-cell">
-                                <span class="text-sm font-semibold" style="color:#000000;">
-                                    {{ \Carbon\Carbon::parse($u->created_at)->timezone('Asia/Manila')->format('M d, Y') }}
+                                <span class="text-sm font-semibold truncate" style="color:#000000;">
+                                    {{ $rowEmail ?: '—' }}
                                 </span>
                             </td>
                         </tr>

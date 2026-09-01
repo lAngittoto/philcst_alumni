@@ -10,6 +10,7 @@ use App\Models\JobPosting;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 new #[Layout('app')] class extends Component {
 
@@ -250,6 +251,14 @@ new #[Layout('app')] class extends Component {
     // Capped at 5 total (not 5 per type) — whichever 5 rows are the most
     // recent overall, mixed freely across the three sources.
     // ─────────────────────────────────────────────────────────────────────
+    private function jobImageUrl(?string $path): string
+    {
+        if ($path && Storage::disk('public')->exists($path)) {
+            return Storage::url($path);
+        }
+        return asset('storage/job/default-photo-job.jpg');
+    }
+
     private function loadAnnouncements(): void
     {
         $this->announcements = Cache::remember('dashboard_announcements_feed', 60, function () {
@@ -260,7 +269,7 @@ new #[Layout('app')] class extends Component {
                 ->whereNotNull('reviewed_at')
                 ->orderByDesc('reviewed_at')
                 ->limit(5)
-                ->get(['id', 'title', 'reviewed_at'])
+                ->get(['id', 'title', 'reviewed_at', 'photo'])
                 ->each(function ($event) use ($items) {
                     $items->push([
                         'type'        => 'event',
@@ -270,13 +279,14 @@ new #[Layout('app')] class extends Component {
                         'title'       => $event->title ?: 'Untitled Event',
                         'subtitle'    => 'Approved and now visible to alumni',
                         'when'        => $event->reviewed_at,
+                        'image'       => $event->photo_url ?: null,
                     ]);
                 });
 
             JobPosting::whereIn('status', ['ACTIVE', 'INACTIVE'])
                 ->orderByDesc('created_at')
                 ->limit(5)
-                ->get(['id', 'job_title', 'company_name', 'created_at'])
+                ->get(['id', 'job_title', 'company_name', 'created_at', 'job_image'])
                 ->each(function ($job) use ($items) {
                     $items->push([
                         'type'        => 'job',
@@ -286,6 +296,7 @@ new #[Layout('app')] class extends Component {
                         'title'       => $job->job_title ?: 'Untitled Job',
                         'subtitle'    => $job->company_name ?: 'A new opportunity was posted',
                         'when'        => $job->created_at,
+                        'image'       => $this->jobImageUrl($job->job_image ?? null),
                     ]);
                 });
 
@@ -296,11 +307,12 @@ new #[Layout('app')] class extends Component {
                     $items->push([
                         'type'        => 'course',
                         'icon'        => 'book',
-                        'badge'       => 'New Course',
+                        'badge'       => 'New Program',
                         'badge_color' => '#2563eb',
-                        'title'       => $course->code ?: 'New Course',
-                        'subtitle'    => $course->name ?: 'A new course was added',
+                        'title'       => $course->code ?: 'New Program',
+                        'subtitle'    => $course->name ?: 'A new program was added',
                         'when'        => $course->created_at,
+                        'image'       => null,
                     ]);
                 });
 
@@ -458,9 +470,9 @@ new #[Layout('app')] class extends Component {
 }
 
 .adm-panel-col { display: flex; flex-direction: column; gap: 0.75rem; }
-.adm-panel-body-scroll { max-height: 560px; overflow-y: auto; }
+.adm-panel-body-scroll { max-height: 520px; overflow-y: auto; }
 @media (max-width: 1023px) {
-    .adm-panel-body-scroll { max-height: 420px; }
+    .adm-panel-body-scroll { max-height: 400px; }
 }
 
 /* ── Role counts strip — now bigger, more detailed cards ── */
@@ -583,7 +595,7 @@ new #[Layout('app')] class extends Component {
 .adm-announce-slide {
     flex: 0 0 100%;
     scroll-snap-align: start;
-    padding: 24px 20px;
+    padding: 20px 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -606,9 +618,16 @@ new #[Layout('app')] class extends Component {
     font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     padding: 3px 10px; border-radius: 999px; border: 1px solid;
 }
+.adm-announce-img {
+    width: 100%; height: 340px; border-radius: 12px;
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+    background-color: #f2eef7;
+    margin-bottom: 4px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+}
 .adm-announce-title { font-size: .9rem; font-weight: 700; color: #000000; }
-.adm-announce-desc { font-size: .78rem; color: #666666; font-weight: 500; max-width: 320px; }
-.adm-announce-time { font-size: .7rem; color: #999999; font-weight: 600; margin-top: 2px; }
+.adm-announce-desc { font-size: .78rem; color: #333333; font-weight: 500; max-width: 320px; }
+.adm-announce-time { font-size: .7rem; color: #333333; font-weight: 600; margin-top: 2px; }
 .adm-announce-dots {
     display: flex; align-items: center; justify-content: center; gap: 6px;
     padding: 10px 0 14px;
@@ -660,7 +679,7 @@ new #[Layout('app')] class extends Component {
         <div class="adm-stat-text">
             <div class="adm-stat-num">{{ number_format($stats['totalAlumni'] ?? 0) }}</div>
             <div class="adm-stat-lbl">Total Alumni</div>
-            <div class="adm-stat-sub">{{ $stats['totalCourses'] ?? 0 }} courses · {{ $stats['totalAlumni'] > 0 ? round((($stats['complete']??0)/$stats['totalAlumni'])*100) : 0 }}% complete</div>
+            <div class="adm-stat-sub" style="color:#7A3F91;">{{ $stats['totalCourses'] ?? 0 }} programs · {{ $stats['totalAlumni'] > 0 ? round((($stats['complete']??0)/$stats['totalAlumni'])*100) : 0 }}% complete</div>
         </div>
     </div>
 
@@ -672,7 +691,7 @@ new #[Layout('app')] class extends Component {
         <div class="adm-stat-text">
             <div class="adm-stat-num">{{ number_format($stats['complete'] ?? 0) }}</div>
             <div class="adm-stat-lbl">Complete</div>
-            <div class="adm-stat-sub">{{ $stats['totalAlumni'] > 0 ? round((($stats['complete']??0)/$stats['totalAlumni'])*100) : 0 }}% of total</div>
+            <div class="adm-stat-sub" style="color:#059669;">{{ $stats['totalAlumni'] > 0 ? round((($stats['complete']??0)/$stats['totalAlumni'])*100) : 0 }}% of total</div>
         </div>
     </div>
 
@@ -684,7 +703,7 @@ new #[Layout('app')] class extends Component {
         <div class="adm-stat-text">
             <div class="adm-stat-num">{{ number_format($stats['pending'] ?? 0) }}</div>
             <div class="adm-stat-lbl">Pending</div>
-            <div class="adm-stat-sub">{{ $stats['totalAlumni'] > 0 ? round((($stats['pending']??0)/$stats['totalAlumni'])*100) : 0 }}% of total</div>
+            <div class="adm-stat-sub" style="color:#d97706;">{{ $stats['totalAlumni'] > 0 ? round((($stats['pending']??0)/$stats['totalAlumni'])*100) : 0 }}% of total</div>
         </div>
     </div>
 
@@ -696,7 +715,7 @@ new #[Layout('app')] class extends Component {
         <div class="adm-stat-text">
             <div class="adm-stat-num">{{ number_format($stats['thisMonth'] ?? 0) }}</div>
             <div class="adm-stat-lbl">This Month</div>
-            <div class="adm-stat-sub">{{ ($stats['growth'] ?? 0) >= 0 ? '+' : '' }}{{ $stats['growth'] ?? 0 }}% vs last mo.</div>
+            <div class="adm-stat-sub" style="color:#2563eb;">{{ ($stats['growth'] ?? 0) >= 0 ? '+' : '' }}{{ $stats['growth'] ?? 0 }}% vs last mo.</div>
         </div>
     </div>
 
@@ -707,6 +726,54 @@ new #[Layout('app')] class extends Component {
 
     {{-- ── LEFT: Role strip (TOP) + All Courses (BELOW) stacked ── --}}
     <div class="adm-panel-col">
+
+        {{-- Announcements & News — auto-advancing, swipeable "live feed"
+             carousel (max 5 slides, newest first). Deliberately NOT
+             clickable anywhere in this card — pure display, like a small
+             live-TV strip, not a navigation control. --}}
+        <div class="adm-announce-card" id="admAnnounceCard">
+            <div class="adm-panel-head" style="justify-content:flex-end;">
+                <span class="adm-announce-live">
+                    <span class="adm-announce-live-dot"></span>Live
+                </span>
+            </div>
+
+            <div class="adm-announce-track" id="admAnnounceTrack" oncontextmenu="return false;">
+                @forelse($announcements as $item)
+                <div class="adm-announce-slide" draggable="false">
+                    @if(!empty($item['image']))
+                        <div class="adm-announce-img" style="background-image:url('{{ $item['image'] }}');"></div>
+                    @else
+                        <div class="adm-announce-icon" style="background:linear-gradient(135deg,{{ $item['badge_color'] }},{{ $item['badge_color'] }}cc);">
+                            <i class="fas fa-{{ $item['icon'] }}"></i>
+                        </div>
+                        <span class="adm-announce-badge" style="color:{{ $item['badge_color'] }};border-color:{{ $item['badge_color'] }}33;background:{{ $item['badge_color'] }}14;">
+                            {{ $item['badge'] }}
+                        </span>
+                    @endif
+                    <p class="adm-announce-title">{{ $item['title'] }}</p>
+                    <p class="adm-announce-desc">{{ $item['subtitle'] }}</p>
+                    <p class="adm-announce-time">{{ $item['when_human'] }}</p>
+                </div>
+                @empty
+                <div class="adm-announce-slide">
+                    <div class="adm-announce-icon">
+                        <i class="fas fa-bullhorn"></i>
+                    </div>
+                    <p class="adm-announce-title">Coming Soon</p>
+                    <p class="adm-announce-desc">Announcements and news updates will appear here.</p>
+                </div>
+                @endforelse
+            </div>
+
+            <div class="adm-announce-dots" id="admAnnounceDots">
+                @forelse($announcements as $idx => $item)
+                    <span class="adm-announce-dot @if($idx === 0) active @endif" data-idx="{{ $idx }}"></span>
+                @empty
+                    <span class="adm-announce-dot active" data-idx="0"></span>
+                @endforelse
+            </div>
+        </div>
 
         {{-- ── Role counts strip — bigger, more detailed cards ── --}}
         <div class="adm-role-strip">
@@ -788,8 +855,8 @@ new #[Layout('app')] class extends Component {
             <div class="adm-panel-head">
                 <div class="flex items-center gap-2">
                     <div>
-                        <p class="adm-panel-ttl">All Courses</p>
-                        <p class="adm-panel-sub">Alumni count per course</p>
+                        <p class="adm-panel-ttl">All Programs</p>
+                        <p class="adm-panel-sub">Alumni count per program</p>
                     </div>
                 </div>
             </div>
@@ -825,7 +892,7 @@ new #[Layout('app')] class extends Component {
                         <div class="w-10 h-10 rounded-2xl flex items-center justify-center mx-auto mb-2" style="background:#f5eef9;">
                             <i class="fas fa-book text-[#d4aaeb] text-lg"></i>
                         </div>
-                        <p class="text-sm font-semibold" style="color:#000000;">No courses yet</p>
+                        <p class="text-sm font-semibold" style="color:#000000;">No programs yet</p>
                     </div>
                     @endforelse
                 </div>
@@ -834,7 +901,7 @@ new #[Layout('app')] class extends Component {
             @if(count($courseStats) > 0)
             <div class="px-4 py-2 border-t border-[#E8E0F0] bg-white flex items-center justify-between shrink-0">
                 <p class="text-xs font-semibold text-[#7A3F91]">
-                    {{ $stats['totalCourses'] ?? 0 }} courses
+                    {{ $stats['totalCourses'] ?? 0 }} programs
                     @if(count($courseStats) > 4)
                         <span class="text-[#c0a0d8] font-normal">· scroll for more</span>
                     @endif
@@ -844,54 +911,6 @@ new #[Layout('app')] class extends Component {
                 </p>
             </div>
             @endif
-        </div>
-
-        {{-- Announcements & News — auto-advancing, swipeable "live feed"
-             carousel (max 5 slides, newest first). Deliberately NOT
-             clickable anywhere in this card — pure display, like a small
-             live-TV strip, not a navigation control. --}}
-        <div class="adm-announce-card" id="admAnnounceCard">
-            <div class="adm-panel-head">
-                <div>
-                    <p class="adm-panel-ttl">Announcements &amp; News</p>
-                    <p class="adm-panel-sub">Swipe to see more</p>
-                </div>
-                <span class="adm-announce-live">
-                    <span class="adm-announce-live-dot"></span>Live
-                </span>
-            </div>
-
-            <div class="adm-announce-track" id="admAnnounceTrack" oncontextmenu="return false;">
-                @forelse($announcements as $item)
-                <div class="adm-announce-slide" draggable="false">
-                    <div class="adm-announce-icon" style="background:linear-gradient(135deg,{{ $item['badge_color'] }},{{ $item['badge_color'] }}cc);">
-                        <i class="fas fa-{{ $item['icon'] }}"></i>
-                    </div>
-                    <span class="adm-announce-badge" style="color:{{ $item['badge_color'] }};border-color:{{ $item['badge_color'] }}33;background:{{ $item['badge_color'] }}14;">
-                        {{ $item['badge'] }}
-                    </span>
-                    <p class="adm-announce-title">{{ $item['title'] }}</p>
-                    <p class="adm-announce-desc">{{ $item['subtitle'] }}</p>
-                    <p class="adm-announce-time">{{ $item['when_human'] }}</p>
-                </div>
-                @empty
-                <div class="adm-announce-slide">
-                    <div class="adm-announce-icon">
-                        <i class="fas fa-bullhorn"></i>
-                    </div>
-                    <p class="adm-announce-title">Coming Soon</p>
-                    <p class="adm-announce-desc">Announcements and news updates will appear here.</p>
-                </div>
-                @endforelse
-            </div>
-
-            <div class="adm-announce-dots" id="admAnnounceDots">
-                @forelse($announcements as $idx => $item)
-                    <span class="adm-announce-dot @if($idx === 0) active @endif" data-idx="{{ $idx }}"></span>
-                @empty
-                    <span class="adm-announce-dot active" data-idx="0"></span>
-                @endforelse
-            </div>
         </div>
 
     </div>{{-- /adm-panel-col --}}
@@ -916,25 +935,25 @@ new #[Layout('app')] class extends Component {
                     <div wire:click.stop="goToEmployment('employed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Employed</span>
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($empEmployed) }}</p>
-                        <p class="adm-snap-mini-lbl">Employed</p>
+                        <p class="adm-snap-mini-lbl" style="color:#059669;">Employed</p>
                     </div>
                     {{-- Self-Employed --}}
                     <div wire:click.stop="goToEmployment('self_employed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Self-Employed</span>
                         <p class="adm-snap-mini-num" style="color:#2563eb;">{{ number_format($empSelf) }}</p>
-                        <p class="adm-snap-mini-lbl">Self-Employed</p>
+                        <p class="adm-snap-mini-lbl" style="color:#2563eb;">Self-Employed</p>
                     </div>
                     {{-- Unemployed --}}
                     <div wire:click.stop="goToEmployment('unemployed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Unemployed</span>
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($empUnemployed) }}</p>
-                        <p class="adm-snap-mini-lbl">Unemployed</p>
+                        <p class="adm-snap-mini-lbl" style="color:#d97706;">Unemployed</p>
                     </div>
                     {{-- Not Filled --}}
                     <div wire:click.stop="goToEmployment('no_record')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Not Filled</span>
                         <p class="adm-snap-mini-num" style="color:#9ca3af;">{{ number_format($empNotFilled) }}</p>
-                        <p class="adm-snap-mini-lbl">Not Filled</p>
+                        <p class="adm-snap-mini-lbl" style="color:#9ca3af;">Not Filled</p>
                     </div>
                 </div>
                 <p class="text-[.78rem] font-semibold mt-3" style="color:#7A3F91;">
@@ -959,22 +978,22 @@ new #[Layout('app')] class extends Component {
                     <div wire:click.stop="goToEvents('PENDING')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Pending</span>
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($eventsPending) }}</p>
-                        <p class="adm-snap-mini-lbl">Pending</p>
+                        <p class="adm-snap-mini-lbl" style="color:#d97706;">Pending</p>
                     </div>
                     <div wire:click.stop="goToEvents('APPROVED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Approved</span>
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($eventsApproved) }}</p>
-                        <p class="adm-snap-mini-lbl">Approved</p>
+                        <p class="adm-snap-mini-lbl" style="color:#059669;">Approved</p>
                     </div>
                     <div wire:click.stop="goToEvents('COMPLETED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Completed</span>
                         <p class="adm-snap-mini-num" style="color:#16a34a;">{{ number_format($eventsCompleted) }}</p>
-                        <p class="adm-snap-mini-lbl">Completed</p>
+                        <p class="adm-snap-mini-lbl" style="color:#16a34a;">Completed</p>
                     </div>
                     <div wire:click.stop="goToEvents('REJECTED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Rejected</span>
                         <p class="adm-snap-mini-num" style="color:#dc2626;">{{ number_format($eventsRejected) }}</p>
-                        <p class="adm-snap-mini-lbl">Rejected</p>
+                        <p class="adm-snap-mini-lbl" style="color:#dc2626;">Rejected</p>
                     </div>
                 </div>
                 <p class="text-[.78rem] font-semibold mt-3" style="color:#7A3F91;">
@@ -999,22 +1018,22 @@ new #[Layout('app')] class extends Component {
                     <div wire:click.stop="goToJobs('ACTIVE')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Active</span>
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($jobsActive) }}</p>
-                        <p class="adm-snap-mini-lbl">Active</p>
+                        <p class="adm-snap-mini-lbl" style="color:#059669;">Active</p>
                     </div>
                     <div wire:click.stop="goToJobs('INACTIVE')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Inactive</span>
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($jobsInactive) }}</p>
-                        <p class="adm-snap-mini-lbl">Inactive</p>
+                        <p class="adm-snap-mini-lbl" style="color:#d97706;">Inactive</p>
                     </div>
                     <div wire:click.stop="goToJobs('EXPIRING')" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Expiring Soon</span>
                         <p class="adm-snap-mini-num" style="color:#f97316;">{{ number_format($jobsExpiring) }}</p>
-                        <p class="adm-snap-mini-lbl">Expiring Soon</p>
+                        <p class="adm-snap-mini-lbl" style="color:#f97316;">Expiring Soon</p>
                     </div>
                     <div wire:click.stop="goToJobs" class="adm-snap-mini-tile adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View All Postings</span>
                         <p class="adm-snap-mini-num" style="color:#7a3f91;">{{ number_format($jobsTotal) }}</p>
-                        <p class="adm-snap-mini-lbl">Total Postings</p>
+                        <p class="adm-snap-mini-lbl" style="color:#7a3f91;">Total Postings</p>
                     </div>
                 </div>
             </div>
@@ -1196,7 +1215,7 @@ new #[Layout('app')] class extends Component {
     // pauses auto-advance so it doesn't fight the person's own swipe.
     // Deliberately has NO click/navigate behavior anywhere — this is a
     // passive "live show" strip, not a set of links.
-    var AUTO_MS   = 4000;   // time between auto-advances
+    var AUTO_MS   = 10000;  // time between auto-advances
     var RESUME_MS = 6000;   // how long a manual swipe pauses auto-advance
 
     var timer        = null;
@@ -1205,6 +1224,12 @@ new #[Layout('app')] class extends Component {
     var dragStartX   = 0;
     var dragStartScroll = 0;
     var boundTrack   = null;
+    // Active slide is tracked as state rather than re-derived from
+    // scrollLeft on every auto-advance tick. Reading scrollLeft while the
+    // previous smooth-scroll is still animating can return a mid-transition
+    // value, so Math.round(scrollLeft / width) occasionally rounds to the
+    // wrong slide and a step gets skipped (e.g. 5 -> 2 instead of 5 -> 1).
+    var activeIndex  = 0;
 
     function track(){ return document.getElementById('admAnnounceTrack'); }
     function dotsWrap(){ return document.getElementById('admAnnounceDots'); }
@@ -1214,6 +1239,8 @@ new #[Layout('app')] class extends Component {
         return t ? t.children.length : 0;
     }
 
+    // Only used to resync state from the DOM after a manual drag/swipe,
+    // where the user (not goTo) moved scrollLeft.
     function currentIndex(){
         var t = track();
         if(!t || !t.clientWidth) return 0;
@@ -1226,6 +1253,7 @@ new #[Layout('app')] class extends Component {
         var n = slideCount();
         if(n <= 0) return;
         idx = ((idx % n) + n) % n; // wrap both directions
+        activeIndex = idx;
         t.scrollTo({ left: idx * t.clientWidth, behavior: 'smooth' });
         syncDots(idx);
     }
@@ -1247,7 +1275,7 @@ new #[Layout('app')] class extends Component {
         stopAuto();
         if(slideCount() <= 1) return; // nothing to rotate through
         timer = setInterval(function(){
-            goTo(currentIndex() + 1);
+            goTo(activeIndex + 1);
         }, AUTO_MS);
     }
 
@@ -1326,6 +1354,7 @@ new #[Layout('app')] class extends Component {
     }
 
     function init(){
+        activeIndex = 0;
         bindTrack();
         syncDots(0);
         startAuto();
