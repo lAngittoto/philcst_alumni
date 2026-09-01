@@ -79,7 +79,13 @@ new class extends Component {
     public function switchTab(string $r): void {
         $this->activeRole    = $r;
         $this->search        = '';
-        $this->statusFilter  = 'all';
+        // Only reset the alumni status filter when explicitly leaving alumni
+        // via the "Reset"/"Clear Filters" all-tab action. Switching away to
+        // another role tab and back (via the Alumni dropdown) should keep
+        // whatever Complete/Pending/All was previously selected.
+        if ($r === 'all') {
+            $this->statusFilter = 'all';
+        }
         $this->currentPage   = 1;
     }
 
@@ -154,6 +160,15 @@ new class extends Component {
                 DB::raw("COALESCE(org.id_number,'')          as id_number"),
                 DB::raw("COALESCE(org.department,'')         as department"),
                 DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
+                DB::raw("COALESCE(al.first_name,'')          as alumni_first_name"),
+                DB::raw("COALESCE(al.middle_initial,'')      as alumni_middle_name"),
+                DB::raw("COALESCE(al.last_name,'')           as alumni_last_name"),
+                DB::raw("COALESCE(org.first_name,'')         as org_first_name"),
+                DB::raw("COALESCE(org.last_name,'')          as org_last_name"),
+                DB::raw("COALESCE(dir.first_name,'')         as dir_first_name"),
+                DB::raw("COALESCE(dir.middle_name,'')        as dir_middle_name"),
+                DB::raw("COALESCE(dir.last_name,'')          as dir_last_name"),
+                DB::raw("COALESCE(dir.suffix,'')              as dir_suffix"),
             ])
             ->leftJoin('alumni as al', 'al.user_id', '=', 'users.id')
             ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
@@ -623,12 +638,12 @@ new class extends Component {
     transition: border-color .15s, box-shadow .15s;
     color: #000000;
     background: #ffffff;
-    font-size: 0.875rem;
-    padding: 0.5rem 0.75rem;
+    font-size: 0.95rem;
+    padding: 0.55rem 0.8rem;
     border-radius: 0.5rem;
     font-weight: 500;
 }
-.mu-filter-input::placeholder { color: #888888; font-weight: 400; }
+.mu-filter-input::placeholder { color: #595959; font-weight: 400; }
 .mu-filter-input:hover  { border-color: #c4b5d4; }
 .mu-filter-input:focus  { outline: none; border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
 select.mu-filter-input {
@@ -671,11 +686,11 @@ select.mu-filter-input.mu-active {
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
 }
-.mu-stat-icon-lg i { font-size: 1.15rem; }
+.mu-stat-icon-lg i { font-size: 1.3rem; }
 .mu-stat-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.mu-stat-num  { font-size: 1.45rem; font-weight: 800; line-height: 1; letter-spacing: -.01em; color: #000000; }
-.mu-stat-lbl  { font-size: .68rem; font-weight: 700; margin-top: 2px; color: #000000; }
-.mu-stat-sub  { font-size: .62rem; font-weight: 600; margin-top: 1px; color: #000000; }
+.mu-stat-num  { font-size: 1.65rem; font-weight: 800; line-height: 1; letter-spacing: -.01em; color: #000000; }
+.mu-stat-lbl  { font-size: .8rem; font-weight: 700; margin-top: 2px; color: #000000; }
+.mu-stat-sub  { font-size: .75rem; font-weight: 600; margin-top: 1px; color: #000000; }
 
 .mu-table-block {
     display: flex; flex-direction: column;
@@ -726,8 +741,8 @@ select.mu-filter-input.mu-active {
 
 .mu-tab-pill {
     display: inline-flex; align-items: center; gap: 0.375rem;
-    padding: 0.375rem 0.75rem; border-radius: 0.5rem;
-    font-size: 0.8125rem; font-weight: 600;
+    padding: 0.4rem 0.8rem; border-radius: 0.5rem;
+    font-size: 0.9rem; font-weight: 600;
     transition: all .15s; cursor: pointer; white-space: nowrap;
     border: 1px solid transparent;
 }
@@ -764,11 +779,11 @@ select.mu-filter-input.mu-active {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 4px 11px;
+    padding: 4px 12px;
     border-radius: 9999px;
     border-width: 1px;
     border-style: solid;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: .05em;
     text-transform: uppercase;
@@ -824,11 +839,12 @@ select.mu-filter-input.mu-active {
             <p class="text-xs leading-relaxed mt-0.5" style="color:#000000;">Manage all system users across every role</p>
         </div>
         <div class="ml-auto relative" x-data="{tip:false}">
-            <button wire:click="openModal('createDirector')"
+            <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
                     @mouseenter="tip=true" @mouseleave="tip=false"
                     class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
                     style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-user-tie text-white text-base"></i>
+                <span wire:loading wire:target="openModal('createDirector')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas fa-user-tie text-white text-base"></i></span>
             </button>
             <div x-show="tip" x-cloak
                  x-transition:enter="transition ease-out duration-100"
@@ -853,19 +869,7 @@ select.mu-filter-input.mu-active {
             <div class="mu-stat-text">
                 <div class="mu-stat-num">{{ number_format($s['alumni']) }}</div>
                 <div class="mu-stat-lbl">Total Alumni</div>
-                <div class="mu-stat-sub">
-                    <span wire:click.stop="setStatusFilter('complete')"
-                          class="hover:underline {{ $activeRole==='alumni' && $statusFilter==='complete' ? 'font-bold' : '' }}"
-                          style="{{ $activeRole==='alumni' && $statusFilter==='complete' ? 'color:#059669;' : '' }}">{{ number_format($s['alumniVerified']) }} complete</span>
-                    ·
-                    <span wire:click.stop="setStatusFilter('pending')"
-                          class="hover:underline {{ $activeRole==='alumni' && $statusFilter==='pending' ? 'font-bold' : '' }}"
-                          style="{{ $activeRole==='alumni' && $statusFilter==='pending' ? 'color:#d97706;' : '' }}">{{ number_format($s['alumniPending']) }} pending</span>
-                    @if($activeRole==='alumni' && $statusFilter!=='all')
-                    ·
-                    <span wire:click.stop="setStatusFilter('all')" class="hover:underline" style="color:#7a3f91;">show all</span>
-                    @endif
-                </div>
+                <div class="mu-stat-sub">{{ number_format($s['alumniVerified']) }} complete · {{ number_format($s['alumniPending']) }} pending</div>
             </div>
         </div>
         <div class="mu-stat-card">
@@ -905,35 +909,56 @@ select.mu-filter-input.mu-active {
 
         {{-- FILTER BAR --}}
         <div class="mu-table-block-filter flex flex-wrap gap-2 items-center transition-opacity duration-200"
-             wire:loading.class="opacity-60" wire:target="switchTab,search,goToPage,nextPage,previousPage">
+             wire:loading.class="opacity-60" wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage">
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">Filters</div>
 
             <div class="flex gap-1 bg-gray-100 p-0.5 rounded-xl flex-shrink-0">
                 @foreach([
-                    ['all','All','fa-globe'],
-                    ['alumni','Alumni','fa-graduation-cap'],
                     ['director','Directors','fa-user-tie'],
                     ['coordinator','Coordinators','fa-users-gear'],
                     ['registrar','Registrar','fa-user-clock'],
                 ] as [$tab,$lbl,$ico])
+                @if($loop->first)
+                {{-- Alumni tab merged with its All/Complete/Pending status filter:
+                     one pill, not a pill plus a separate dropdown beside it. The
+                     native <select> sits transparently over the whole pill so
+                     clicking anywhere on it opens the picker. A small colored
+                     badge shows the active state (purple=All, green=Complete,
+                     amber=Pending). --}}
+                <div class="relative">
+                    @php
+                        $aBadge = match($statusFilter) {
+                            'complete' => ['Complete', '#059669', '#ECFDF5'],
+                            'pending'  => ['Pending',  '#d97706', '#FFF7ED'],
+                            default    => ['All Alumni', '#7a3f91', '#F3E8FF'],
+                        };
+                    @endphp
+                    <div class="mu-tab-pill {{ $activeRole==='alumni' ? 'mu-tab-active' : 'mu-tab-inactive' }} pr-6">
+                        <i class="fas fa-graduation-cap text-xs"></i>
+                        <span class="hidden sm:inline">Alumni</span>
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-bold border"
+                              style="background:{{ $aBadge[2] }};color:{{ $aBadge[1] }};border-color:{{ $aBadge[1] }};">{{ $aBadge[0] }}</span>
+                        <i class="fas fa-chevron-down text-xs" style="opacity:.7;"></i>
+                    </div>
+                    <select wire:key="alumni-status-select-{{ $activeRole }}-{{ $statusFilter }}"
+                            wire:change="setStatusFilter($event.target.value)"
+                            class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                        <option value="all"      {{ $activeRole==='alumni' ? ($statusFilter==='all'      ? 'selected' : '') : 'selected' }}>All Alumni</option>
+                        <option value="complete" {{ $activeRole==='alumni' && $statusFilter==='complete' ? 'selected' : '' }}>Complete</option>
+                        <option value="pending"  {{ $activeRole==='alumni' && $statusFilter==='pending'  ? 'selected' : '' }}>Pending</option>
+                    </select>
+                </div>
+                @endif
                 <button wire:click="switchTab('{{ $tab }}')"
+                        wire:loading.attr="disabled" wire:target="switchTab('{{ $tab }}')"
                         class="mu-tab-pill {{ $activeRole===$tab ? 'mu-tab-active' : 'mu-tab-inactive' }}">
-                    <i class="fas {{ $ico }} text-xs"></i>
+                    <span wire:loading wire:target="switchTab('{{ $tab }}')"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                    <span wire:loading.remove wire:target="switchTab('{{ $tab }}')"><i class="fas {{ $ico }} text-xs"></i></span>
                     <span class="hidden sm:inline">{{ $lbl }}</span>
                 </button>
                 @endforeach
             </div>
-
-            @if($activeRole === 'alumni' && $statusFilter !== 'all')
-            <div class="flex items-center gap-1.5 px-2.5 h-[30px] rounded-lg text-xs font-semibold flex-shrink-0"
-                 style="background:{{ $statusFilter==='complete' ? '#ECFDF5' : '#FFF7ED' }};color:{{ $statusFilter==='complete' ? '#059669' : '#d97706' }};border:1px solid {{ $statusFilter==='complete' ? '#A7F3D0' : '#FED7AA' }};">
-                {{ $statusFilter==='complete' ? 'Complete only' : 'Pending only' }}
-                <button wire:click="setStatusFilter('all')" class="ml-0.5 leading-none">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </div>
-            @endif
 
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
@@ -946,27 +971,36 @@ select.mu-filter-input.mu-active {
             </div>
 
             <button wire:click="switchTab('all')"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="switchTab('all')"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer"
+                           bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer disabled:pointer-events-none"
                     style="color:#000000;">
-                <i class="fas fa-rotate-left text-sm"></i>
+                <span wire:loading.remove wire:target="switchTab('all')">
+                    <i class="fas fa-rotate-left text-sm"></i>
+                </span>
+                <span wire:loading wire:target="switchTab('all')">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
-        </div>
-
-        {{-- Filtering / searching / paging progress bar --}}
-        <div class="mu-filter-progress-track flex-shrink-0" wire:loading wire:target="switchTab,search,goToPage,nextPage,previousPage">
-            <div class="mu-filter-progress-bar"></div>
         </div>
 
         {{-- TABLE --}}
         @php $pu = $this->users; @endphp
         <div class="relative flex-1 min-h-0 flex flex-col">
 
+            {{-- Centered loading spinner overlay — mirrors Manage Events' table overlay --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
+
             @if($pu->items->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c transition-opacity duration-200" style="background:#fff;"
-                 wire:loading.class="opacity-60 pointer-events-none"
-                 wire:target="switchTab,search,goToPage,nextPage,previousPage">
+                 wire:loading.class="opacity-50 pointer-events-none"
+                 wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage">
                 <table class="w-full bg-white border-collapse">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow:0 1px 0 #E8E0F0;">
                         <tr>
@@ -984,7 +1018,15 @@ select.mu-filter-input.mu-active {
                             $identifier = match($u->role) {
                                 'alumni'    => $u->student_id ?: '—',
                                 'organizer' => $u->id_number  ?: '—',
+                                'director'  => $u->name ?: '—',
                                 default     => $this->adminUsername($u->email, $u->name),
+                            };
+                            $rowDisplayName = match($u->role) {
+                                'alumni'    => trim(implode(' ', array_filter([$u->alumni_first_name, $u->alumni_middle_name, $u->alumni_last_name]))) ?: $u->name,
+                                'organizer' => trim(implode(' ', array_filter([$u->org_first_name, $u->org_last_name]))) ?: $u->name,
+                                'director'  => trim(implode(' ', array_filter([$u->dir_first_name, $u->dir_middle_name, $u->dir_last_name, $u->dir_suffix]))) ?: $u->name,
+                                'admin'     => $this->adminUsername($u->email, $u->name),
+                                default     => $u->name,
                             };
                             $roleDisplay = $this->roleLabel($u->role);
                             $roleCss     = $this->roleBadge($u->role);
@@ -999,12 +1041,12 @@ select.mu-filter-input.mu-active {
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center gap-3">
                                     @unless($u->role === 'registrar')
-                                    <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $u->name }}"
+                                    <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $rowDisplayName }}"
                                          class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                     @endunless
                                     <div class="min-w-0">
                                         <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#000000;">
-                                            {!! $this->highlightText($u->role === 'admin' ? $this->adminUsername($u->email, $u->name) : $u->name) !!}
+                                            {!! $this->highlightText($rowDisplayName) !!}
                                         </p>
                                     </div>
                                 </div>
@@ -1050,9 +1092,11 @@ select.mu-filter-input.mu-active {
                 </div>
                 @if($search)
                 <button wire:click="switchTab('all')"
+                        wire:loading.attr="disabled" wire:target="switchTab('all')"
                         class="px-4 py-2 rounded-xl text-sm font-bold text-white transition cursor-pointer"
                         style="background-color:#7a3f91;">
-                    <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
+                    <span wire:loading wire:target="switchTab('all')"><i class="fas fa-spinner animate-spin mr-1.5 text-xs"></i> Clearing…</span>
+                    <span wire:loading.remove wire:target="switchTab('all')"><i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters</span>
                 </button>
                 @endif
             </div>
@@ -1074,17 +1118,22 @@ select.mu-filter-input.mu-active {
             </p>
             <div class="flex items-center gap-1 flex-wrap py-2">
                 <button wire:click="previousPage"
+                        wire:loading.attr="disabled" wire:target="previousPage,nextPage,goToPage,switchTab,setStatusFilter,search"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if(!$pu->hasPrev) disabled @endif>
-                    <i class="fas fa-chevron-left text-[9px]"></i>
+                    <i class="fas fa-chevron-left text-xs"></i>
                 </button>
 
                 @if($pgStart > 1)
                     <button wire:click="goToPage(1)"
+                            wire:loading.attr="disabled" wire:target="goToPage(1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50">
+                        <span wire:loading wire:target="goToPage(1)"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span wire:loading.remove wire:target="goToPage(1)">1</span>
+                    </button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
 
@@ -1094,24 +1143,33 @@ select.mu-filter-input.mu-active {
                                      bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
                         <button wire:click="goToPage({{ $p }})"
+                                wire:loading.attr="disabled" wire:target="goToPage({{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50">
+                            <span wire:loading wire:target="goToPage({{ $p }})"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                            <span wire:loading.remove wire:target="goToPage({{ $p }})">{{ $p }}</span>
+                        </button>
                     @endif
                 @endfor
 
                 @if($pgEnd < $pu->lastPage)
                     @if($pgEnd < $pu->lastPage - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                     <button wire:click="goToPage({{ $pu->lastPage }})"
+                            wire:loading.attr="disabled" wire:target="goToPage({{ $pu->lastPage }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $pu->lastPage }}</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50">
+                        <span wire:loading wire:target="goToPage({{ $pu->lastPage }})"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span wire:loading.remove wire:target="goToPage({{ $pu->lastPage }})">{{ $pu->lastPage }}</span>
+                    </button>
                 @endif
 
                 <button wire:click="nextPage"
+                        wire:loading.attr="disabled" wire:target="previousPage,nextPage,goToPage,switchTab,setStatusFilter,search"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if(!$pu->hasNext) disabled @endif>
-                    <i class="fas fa-chevron-right text-[9px]"></i>
+                    <i class="fas fa-chevron-right text-xs"></i>
                 </button>
 
                 <span class="hidden sm:inline text-white/80 text-xs font-semibold whitespace-nowrap ml-1">
@@ -1179,9 +1237,10 @@ select.mu-filter-input.mu-active {
                     <p class="text-xs text-white/70 mt-0.5 truncate">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
                 </div>
             </div>
-            <button wire:click="closeModal"
+            <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
                     class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
-                <i class="fa-solid fa-xmark text-base"></i>
+                <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-base"></i></span>
+                <span wire:loading.remove wire:target="closeModal"><i class="fa-solid fa-xmark text-base"></i></span>
             </button>
         </div>
 
@@ -1213,57 +1272,57 @@ select.mu-filter-input.mu-active {
                         @endif
                     </label>
                     @if($canPhoto)
-                    <p class="text-[9px] font-semibold uppercase tracking-wide text-center leading-tight" style="color:#8a8a8a;">Hover to<br>change</p>
+                    <p class="text-xs font-semibold uppercase tracking-wide text-center leading-tight" style="color:#000000;">Hover to<br>change</p>
                     @endif
                     @if($vPhoto)
                     <div class="flex flex-col items-center gap-1 w-14">
                         <button wire:click="savePhoto" wire:loading.attr="disabled" wire:target="savePhoto"
-                                class="w-full px-1.5 py-1 rounded-lg text-[10px] font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
+                                class="w-full px-1.5 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
                                 style="background:#7A3F91;">
                             <span wire:loading wire:target="savePhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                             <span wire:loading.remove wire:target="savePhoto"><i class="fas fa-check text-xs"></i> Save</span>
                         </button>
-                        <button wire:click="$set('vPhoto', null)"
-                                class="w-full px-1.5 py-1 rounded-lg text-[10px] font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition" style="color:#000000;">Cancel</button>
+                        <button wire:click="$set('vPhoto', null)" wire:loading.attr="disabled" wire:target="savePhoto"
+                                class="w-full px-1.5 py-1 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition disabled:opacity-50" style="color:#000000;">Cancel</button>
                     </div>
                     @endif
-                    <div wire:loading wire:target="vPhoto" class="flex items-center gap-1 text-[10px] font-medium" style="color:#7A3F91;">
+                    <div wire:loading wire:target="vPhoto" class="flex items-center gap-1 text-xs font-medium" style="color:#7A3F91;">
                         <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
                     </div>
-                    @error('vPhoto')<p class="text-[10px] text-red-600 text-center flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
+                    @error('vPhoto')<p class="text-xs text-red-600 text-center flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
                 </div>
                 @endunless
 
                 <div class="min-w-0 flex-1">
-                    <p class="text-base font-bold uppercase leading-tight" style="color:#000000;">{{ $headerName }}</p>
+                    <p class="text-lg font-bold uppercase leading-tight" style="color:#000000;">{{ $headerName }}</p>
 
                     @if($isAlumni)
-                        <p class="text-xs font-medium mt-0.5" style="color:#555;">{{ $vd['student_id'] ?: '—' }}</p>
+                        <p class="text-sm font-semibold mt-0.5" style="color:#000000;">{{ $vd['student_id'] ?: '—' }}</p>
                         <div class="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span class="text-xs font-bold" style="color:#000000;">{{ $vd['course_code'] ?: '—' }}</span>
-                            <span style="color:#c9c9c9;">&middot;</span>
-                            <span class="text-xs font-bold" style="color:#000000;">Batch {{ $vd['batch'] ?: '—' }}</span>
-                            <span style="color:#c9c9c9;">&middot;</span>
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border {{ $vStatus === 'VERIFIED' ? 'text-emerald-700 border-emerald-300 bg-emerald-50' : 'text-amber-700 border-amber-300 bg-amber-50' }}">
+                            <span class="text-sm font-bold" style="color:#000000;">{{ $vd['course_code'] ?: '—' }}</span>
+                            <span style="color:#000000;">&middot;</span>
+                            <span class="text-sm font-bold" style="color:#000000;">Batch {{ $vd['batch'] ?: '—' }}</span>
+                            <span style="color:#000000;">&middot;</span>
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border {{ $vStatus === 'VERIFIED' ? 'text-emerald-700 border-emerald-300 bg-emerald-50' : 'text-amber-700 border-amber-300 bg-amber-50' }}">
                                 {{ $vStatus === 'VERIFIED' ? 'COMPLETE' : 'PENDING' }}
                             </span>
                         </div>
                     @else
                         <div class="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $this->roleBadge($vRole) }}">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border {{ $this->roleBadge($vRole) }}">
                                 {{ $this->roleLabel($vRole) }}
                             </span>
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $this->statusBadge($vStatus) }}">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border {{ $this->statusBadge($vStatus) }}">
                                 {{ $vStatus }}
                             </span>
                         </div>
                     @endif
 
                     @unless($isReg)
-                    <p class="text-xs mt-1" style="color:#333;">{{ $headerSub ?: '—' }}</p>
+                    <p class="text-sm mt-1 font-medium" style="color:#000000;">{{ $headerSub ?: '—' }}</p>
                     @endunless
 
-                    <p class="text-[10px] font-semibold mt-1" style="color:#8a8a8a;">
+                    <p class="text-xs font-semibold mt-1" style="color:#000000;">
                         <i class="fa-regular fa-calendar mr-1"></i>
                         Joined {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
                     </p>
@@ -1275,11 +1334,11 @@ select.mu-filter-input.mu-active {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                     <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Student ID</p>
+                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Student ID</p>
                     </div>
                     <div class="p-3">
                         <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Student ID</p>
+                            <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Student ID</p>
                             <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['student_id'] ?: '—' }}</p>
                         </div>
                     </div>
@@ -1287,7 +1346,7 @@ select.mu-filter-input.mu-active {
 
                 <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                     <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Student's Name</p>
+                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Student's Name</p>
                     </div>
                     <div class="p-3 grid grid-cols-2 gap-2">
                         @foreach([
@@ -1297,7 +1356,7 @@ select.mu-filter-input.mu-active {
                             ['Ext.',         $vd['alumni_suffix']      ?? ''],
                         ] as [$lbl,$val])
                         <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
+                            <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
                             <p class="text-xs font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
                         </div>
                         @endforeach
@@ -1308,15 +1367,15 @@ select.mu-filter-input.mu-active {
             {{-- ALUMNI: PROGRAM --}}
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Program</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Program</p>
                 </div>
                 <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Code</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Code</p>
                         <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_code'] ?: '—' }}</p>
                     </div>
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Name</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Name</p>
                         <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_name'] ?: '—' }}</p>
                     </div>
                 </div>
@@ -1327,7 +1386,7 @@ select.mu-filter-input.mu-active {
             @if($isDir)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Director Information</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Director Information</p>
                 </div>
                 <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
                     @foreach([
@@ -1337,7 +1396,7 @@ select.mu-filter-input.mu-active {
                         ['Suffix',      $vd['suffix']      ?? '—'],
                     ] as [$lbl,$val])
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
                         <p class="text-xs font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
@@ -1349,15 +1408,15 @@ select.mu-filter-input.mu-active {
             @if($isOrg)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Coordinator Details</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Coordinator Details</p>
                 </div>
                 <div class="p-3 grid grid-cols-2 gap-2">
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Teacher ID</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Teacher ID</p>
                         <p class="text-xs font-bold font-mono" style="color:#000000;">{{ $vd['id_number'] ?: '—' }}</p>
                     </div>
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">College / Dept</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">College / Dept</p>
                         <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['department'] ?: '—' }}</p>
                     </div>
                 </div>
@@ -1368,17 +1427,17 @@ select.mu-filter-input.mu-active {
             @if($isAdmin)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Account Details</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Account Details</p>
                 </div>
                 <div class="p-3 grid grid-cols-2 gap-2">
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Username</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Username</p>
                         <p class="text-xs font-bold font-mono" style="color:#000000;">
                             {{ $this->adminUsername($vd['email'], $vd['name']) }}
                         </p>
                     </div>
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Role</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Role</p>
                         <p class="text-xs font-semibold" style="color:#000000;">{{ $this->roleLabel($vRole) }}</p>
                     </div>
                 </div>
@@ -1393,7 +1452,7 @@ select.mu-filter-input.mu-active {
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Username</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Username</p>
                 </div>
                 <div class="p-3">
                     <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fef2f2;border:1px solid #fecaca;">
@@ -1455,11 +1514,11 @@ select.mu-filter-input.mu-active {
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Email Address</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Email Address</p>
                 </div>
                 <div class="p-3">
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0] mb-2.5">
-                        <p class="text-[10px] font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Current Email</p>
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Current Email</p>
                         <p class="text-xs font-semibold break-all" style="color:#000000;">
                             @if($ueCurrent)
                                 {{ $ueCurrent }}
@@ -1512,7 +1571,7 @@ select.mu-filter-input.mu-active {
             @if($isReg || $isAdmin)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Change Password</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Change Password</p>
                 </div>
                 <div class="p-3">
                     @if(count($cpErrs))
@@ -1554,20 +1613,26 @@ select.mu-filter-input.mu-active {
             @if($canToggle)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#000000;">Account Status</p>
+                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Account Status</p>
                 </div>
                 <div class="p-3">
                     @if($vStatus === 'ACTIVE')
                     <button wire:click="confirmToggle({{ $vd['id'] }}, 'deactivate')"
-                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90"
+                            wire:loading.attr="disabled" wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"
+                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90 disabled:opacity-50"
                             style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">
-                        <i class="fas fa-ban text-xs"></i> Deactivate Account
+                        <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-ban text-xs"></i></span>
+                        Deactivate Account
                     </button>
                     @else
                     <button wire:click="confirmToggle({{ $vd['id'] }}, 'activate')"
-                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90"
+                            wire:loading.attr="disabled" wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"
+                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90 disabled:opacity-50"
                             style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;">
-                        <i class="fas fa-circle-check text-xs"></i> Activate Account
+                        <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-circle-check text-xs"></i></span>
+                        Activate Account
                     </button>
                     @endif
                 </div>
@@ -1599,9 +1664,10 @@ select.mu-filter-input.mu-active {
                     <p class="text-xs text-white/70 mt-0.5">Fill in the details below</p>
                 </div>
             </div>
-            <button wire:click="closeModal"
+            <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
                     class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-base"></i>
+                <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-base"></i></span>
+                <span wire:loading.remove wire:target="closeModal"><i class="fa-solid fa-xmark text-base"></i></span>
             </button>
         </div>
 
@@ -1619,8 +1685,11 @@ select.mu-filter-input.mu-active {
                     </div>
                 </div>
             </div>
-            <button wire:click="closeModal"
-                    class="w-full py-3 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style="background:#7A3F91;">Done</button>
+            <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
+                    class="w-full py-3 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
+                <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                <span>Done</span>
+            </button>
             @endif
 
             @if(count($dErrs))
@@ -1720,9 +1789,12 @@ select.mu-filter-input.mu-active {
                 </div>
 
                 <div class="flex gap-2 pt-1">
-                    <button type="button" wire:click="closeModal"
-                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50"
-                            style="color:#000000;border-color:#E8E0F0;">Cancel</button>
+                    <button type="button" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,createDirector"
+                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
+                            style="color:#000000;border-color:#E8E0F0;">
+                        <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span>Cancel</span>
+                    </button>
                     <button wire:click="createDirector" wire:loading.attr="disabled" wire:target="createDirector"
                             class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
                             style="background:#7A3F91;">
@@ -1771,9 +1843,12 @@ select.mu-filter-input.mu-active {
                 @endif
             </p>
             <div class="flex gap-2">
-                <button wire:click="closeModal"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50"
-                        style="color:#000000;border-color:#E8E0F0;">Cancel</button>
+                <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,executeToggle"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
+                        style="color:#000000;border-color:#E8E0F0;">
+                    <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                    <span>Cancel</span>
+                </button>
                 <button wire:click="executeToggle" wire:loading.attr="disabled" wire:target="executeToggle"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition flex items-center justify-center gap-2
                                {{ $tAction==='deactivate' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700' }}">

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdminEmploymentTrackingExportController;
 use App\Http\Controllers\AdminNotificationController;
 use App\Http\Controllers\AlumniController;
 use App\Http\Controllers\AlumniInformationController;
@@ -170,6 +171,11 @@ Route::middleware(['auth', 'admin'])->group(function () {
 
     Route::get('/user/management',     fn() => view('admin.alumni-management-wrapper'))   ->name('user.management');
     Route::get('/employment/tracking', fn() => view('admin.employment-tracking-wrapper')) ->name('employment.tracking');
+
+    // ── Employment Tracking: Generate Reports (PDF / Excel / Print export) ─
+    Route::get('/employment/tracking/export', [AdminEmploymentTrackingExportController::class, 'export'])
+        ->name('employment.tracking.export');
+
     Route::get('/yearbook',            fn() => view('admin.yearbook-wrapper'))             ->name('admin.yearbook');
     Route::get('/job/posts',           fn() => view('admin.job-posts-wrapper'))            ->name('job.posts');
     Route::get('/events',              fn() => view('admin.events-wrapper'))               ->name('events');
