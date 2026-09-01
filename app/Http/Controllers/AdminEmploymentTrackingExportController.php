@@ -10,9 +10,11 @@ use Illuminate\Support\Facades\DB;
  * Generate Reports (PDF / Excel / Print) for the Admin "Employment
  * Tracking" table — resources/views/livewire/admin/employment-tracking.blade.php.
  *
- * Mirrors OrganizerAlumniExportController's export flow and query shape,
- * minus the organizer batch/department scoping (admin sees every alumni
- * record, not just their assigned batch/college).
+ * Mirrors the Registrar Employment Tracking export flow/query shape
+ * (search + status + program/course + batch range), minus any
+ * organizer-style batch/department scoping — admin sees every alumni
+ * record. Also accepts a College filter, since the admin dashboard's
+ * Programs list is grouped under Colleges.
  */
 class AdminEmploymentTrackingExportController extends Controller
 {
@@ -23,9 +25,11 @@ class AdminEmploymentTrackingExportController extends Controller
         $search    = trim((string) $request->query('search', ''));
         $batchFrom = trim((string) $request->query('batch_from', ''));
         $batchTo   = trim((string) $request->query('batch_to', ''));
+        $college   = trim((string) $request->query('college', ''));
 
         // Comma-separated lists — mirrors how the on-screen filters are
-        // sent (see the doExport() params in employment-tracking.blade.php).
+        // sent (see the doExport() params wired up in
+        // employment-tracking.blade.php's Generate Reports button).
         $courses = array_values(array_filter(array_map('trim',
             explode(',', (string) $request->query('course', ''))
         )));
@@ -33,8 +37,8 @@ class AdminEmploymentTrackingExportController extends Controller
             explode(',', (string) $request->query('status', ''))
         )));
 
-        $records = $this->buildQuery($search, $batchFrom, $batchTo, $courses, $statuses)->get();
-        $stats   = $this->buildStats($search, $batchFrom, $batchTo, $courses, $statuses);
+        $records = $this->buildQuery($search, $batchFrom, $batchTo, $college, $courses, $statuses)->get();
+        $stats   = $this->buildStats($search, $batchFrom, $batchTo, $college, $courses, $statuses);
 
         $generatedAt = now();
         $formatName  = fn($row) => trim(($row->first_name ?? '') . ' ' . ($row->last_name ?? ''));
@@ -55,15 +59,31 @@ class AdminEmploymentTrackingExportController extends Controller
     }
 
     /**
+     * Resolves a College name into its member course codes. Used both to
+     * scope the main query and to fold a College pick into whichever
+     * course-code list ends up applied.
+     */
+    private function courseCodesForCollege(string $college): array
+    {
+        if ($college === '') return [];
+
+        return DB::table('courses')
+            ->where('college', $college)
+            ->pluck('code')
+            ->all();
+    }
+
+    /**
      * Base alumni + employment_trackings query, filtered the same way as
-     * the Livewire component's with() query (search / status / program /
-     * batch range) — kept in sync so the export always matches what's on
-     * screen.
+     * the Livewire component's baseQ()/empQ() (search / status / college /
+     * program / batch range) — kept in sync so the export always matches
+     * what's on screen.
      */
     private function buildQuery(
         string $search,
         string $batchFrom,
         string $batchTo,
+        string $college,
         array $courses,
         array $statuses,
     ): \Illuminate\Database\Query\Builder {
@@ -102,6 +122,15 @@ class AdminEmploymentTrackingExportController extends Controller
               ->where('a.batch', '<=', $batchTo);
         }
 
+        // College narrows down to that college's course codes; if
+        // specific Programs are ALSO picked, whereIn on $courses below
+        // further narrows within the college (matches baseQ()'s
+        // filterCollege + filterCourses combo on the dashboard).
+        if ($college !== '') {
+            $collegeCourses = $this->courseCodesForCollege($college);
+            $q->whereIn('a.course_code', $collegeCourses);
+        }
+
         if (!empty($courses)) {
             $q->whereIn('a.course_code', $courses);
         }
@@ -131,10 +160,11 @@ class AdminEmploymentTrackingExportController extends Controller
         string $search,
         string $batchFrom,
         string $batchTo,
+        string $college,
         array $courses,
         array $statuses,
     ): array {
-        $base = fn() => $this->buildQuery($search, $batchFrom, $batchTo, $courses, $statuses);
+        $base = fn() => $this->buildQuery($search, $batchFrom, $batchTo, $college, $courses, $statuses);
 
         $totalAlumni = (clone $base())->count();
 
@@ -162,8 +192,21 @@ class AdminEmploymentTrackingExportController extends Controller
             ->whereNull('a.deleted_at')
             ->whereIn('et.employment_status', ['employed', 'self_employed']);
 
+        if ($search !== '') {
+            $s = '%' . $search . '%';
+            $relBase->where(function ($w) use ($s) {
+                $w->where(DB::raw("CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))"), 'like', $s)
+                  ->orWhere('a.student_id', 'like', $s)
+                  ->orWhere('a.email', 'like', $s)
+                  ->orWhere('et.company_name', 'like', $s)
+                  ->orWhere('et.job_title', 'like', $s);
+            });
+        }
         if ($batchFrom !== '' && $batchTo !== '') {
             $relBase->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
+        }
+        if ($college !== '') {
+            $relBase->whereIn('a.course_code', $this->courseCodesForCollege($college));
         }
         if (!empty($courses)) {
             $relBase->whereIn('a.course_code', $courses);
@@ -194,7 +237,7 @@ class AdminEmploymentTrackingExportController extends Controller
      * Plain HTML table wrapped in the Microsoft Office XML namespace so
      * Excel opens it as a real .xls workbook instead of prompting a
      * "format doesn't match extension" warning — same fix already applied
-     * to the Employment Tracking compare-tool export.
+     * to the Registrar Employment Tracking export.
      */
     private function exportExcel($records, callable $formatName, callable $statusLabel, $generatedAt)
     {
