@@ -205,16 +205,25 @@ Route::middleware(['auth', 'admin'])->group(function () {
 // ===================================
 // Logout
 // ===================================
-Route::post('/logout', function () {
+// Accepts both GET and POST. GET is what the admin sidebar's
+// wire:navigate link uses (see sidebar-admin_blade.php) — no CSRF
+// token involved, so nothing can go stale after SPA hops or session
+// expiry, which is what was causing an immediate 419 Page Expired
+// there before. POST is kept too because other portal sidebars
+// (registrar / organizer / director) still submit the old CSRF form —
+// dropping POST entirely broke those with a 405 Method Not Allowed.
+// Once every sidebar is migrated to the GET wire:navigate link, POST
+// can be removed here.
+Route::match(['get', 'post'], '/logout', function () {
     Auth::logout();
     session()->invalidate();
     session()->regenerateToken();
 
     // 303 See Other tells the browser "fetch the redirect target with GET,
     // don't treat it as a resubmittable POST". This stops the browser from
-    // offering to resubmit the /logout POST when the user hits Back later,
-    // which is what caused the native "This page has expired / Confirm
-    // Form Resubmission" prompt right after logging out.
+    // offering to resubmit the /logout request when the user hits Back
+    // later, which is what caused the native "This page has expired /
+    // Confirm Form Resubmission" prompt right after logging out.
     return redirect()->route('login')
         ->setStatusCode(303)
         ->header('Cache-Control', 'no-cache, no-store, must-revalidate')

@@ -1012,45 +1012,55 @@
 
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            {{-- Livewire's wire:navigate SPA transitions on the sidebar
-                 links above don't do a full page reload, so this form's
-                 static @csrf hidden field (rendered once, on first page
-                 load) can go stale relative to the session's current
-                 token after enough wire:navigate hops — causing an
-                 immediate 419 Page Expired the moment Logout is clicked.
-                 Fix: read the freshest token off the <meta
-                 name="csrf-token"> tag (which Livewire keeps current)
-                 right before the form submits, and sync it into the
-                 hidden field first.
+            {{-- Plain wire:navigate link to a GET /logout route — same
+                 pattern as every other sidebar link above. No form, no
+                 CSRF token, so there's nothing that can go stale after
+                 SPA hops or session expiry. This replaced a POST form
+                 whose hidden _token field (and even a JS-synced version
+                 read from the <meta name="csrf-token"> tag) could still
+                 go stale, since wire:navigate never re-renders <head> —
+                 that was the root cause of the immediate 419 Page
+                 Expired on Logout click.
 
-                 Kept as a plain global function (not an inline
-                 statement in @submit) — a raw `var m = ...; if (m) {...}`
-                 sitting directly inside an Alpine directive attribute
-                 fails Alpine's expression parser ("expected expression,
-                 got keyword 'var'"), and because this sidebar renders on
-                 every admin page, that failure was breaking Alpine's
-                 init for the ENTIRE page, not just this form — which is
-                 why filters/charts on pages like Employment Analytics
-                 stopped reacting even though the bug lived here. ── --}}
-            <script>
-                window.__admSyncLogoutCsrf = function (formEl) {
-                    var m = document.querySelector('meta[name=csrf-token]');
-                    if (m) { formEl.querySelector('input[name=_token]').value = m.content; }
-                };
-            </script>
-            <form method="POST" action="{{ route('logout') }}"
-                  x-data
-                  @submit="window.__admSyncLogoutCsrf($el)">
-                @csrf
-                <button type="submit"
-                        title="Logout"
-                        class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
-                               transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-                        style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-                    <i class="fa-solid fa-right-from-bracket mr-2"></i>
-                    <span class="admin-collapsible-text">Logout</span>
-                </button>
-            </form>
+                 loggingOut just swaps the button's content to a
+                 "Logging out" bouncing-dot state on click. The link
+                 still navigates normally right after — this only
+                 changes what's visible in the instant before the
+                 redirect lands. --}}
+            <a href="{{ route('logout') }}"
+               wire:navigate
+               title="Logout"
+               x-data="{ loggingOut: false }"
+               @click="loggingOut = true"
+               class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
+                      transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
+               style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                <template x-if="!loggingOut">
+                    <span class="flex items-center justify-center">
+                        <i class="fa-solid fa-right-from-bracket mr-2"></i>
+                        <span class="admin-collapsible-text">Logout</span>
+                    </span>
+                </template>
+                <template x-if="loggingOut">
+                    <span class="flex items-center justify-center">
+                        <span class="admin-collapsible-text mr-2">Logging out</span>
+                        <span class="inline-flex items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-white inline-block"
+                                  style="animation: admLogoutDotBounce 0.9s infinite ease-in-out; animation-delay: 0s;"></span>
+                            <span class="w-1.5 h-1.5 rounded-full bg-white inline-block"
+                                  style="animation: admLogoutDotBounce 0.9s infinite ease-in-out; animation-delay: 0.15s;"></span>
+                            <span class="w-1.5 h-1.5 rounded-full bg-white inline-block"
+                                  style="animation: admLogoutDotBounce 0.9s infinite ease-in-out; animation-delay: 0.3s;"></span>
+                        </span>
+                    </span>
+                </template>
+            </a>
+            <style>
+                @keyframes admLogoutDotBounce {
+                    0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+                    40% { transform: translateY(-4px); opacity: 1; }
+                }
+            </style>
         </div>
     </aside>
 
