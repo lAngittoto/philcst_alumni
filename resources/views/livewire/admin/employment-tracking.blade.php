@@ -8,9 +8,11 @@ use Illuminate\Support\Facades\DB;
 new class extends Component {
 
     // ── Global Filters ────────────────────────────────────────────────────────
-    // Search box — mirrors the Registrar Employment Tracking dashboard's
-    // search field (name / student ID / company / job title).
-    public string $search = '';
+    // (Removed: a page-wide $search here previously scoped the aggregate
+    // stat cards/charts by name/student ID, which never matched anything
+    // since those are category breakdowns, not lists of people. Search by
+    // name/ID lives on modalSearch below instead, scoped to the actual
+    // alumni list.)
 
     // Batch is a FROM/TO range (mirrors the organizer-facing Alumni
     // Employment table) instead of a single-value dropdown.
@@ -76,14 +78,6 @@ new class extends Component {
             return;
         }
         $this->loadMetaLists();
-        $this->refreshAll();
-    }
-
-    /** Debounced search box (name / student ID / company / job title) —
-     *  scopes cards, charts, AND the exported report, same as every
-     *  other page-level filter here. */
-    public function updatedSearch(): void
-    {
         $this->refreshAll();
     }
 
@@ -223,7 +217,6 @@ new class extends Component {
 
     public function resetFilters(): void
     {
-        $this->search           = '';
         $this->filterBatchFrom  = '';
         $this->filterBatchTo    = '';
         $this->filterCollege    = '';
@@ -258,16 +251,13 @@ new class extends Component {
             })
             ->whereNull('a.deleted_at');
 
-        if ($this->search !== '') {
-            $s = '%' . $this->search . '%';
-            $q->where(function ($w) use ($s) {
-                $w->where(DB::raw("CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))"), 'like', $s)
-                  ->orWhere('a.student_id', 'like', $s)
-                  ->orWhere('a.email', 'like', $s)
-                  ->orWhere('et_s.company_name', 'like', $s)
-                  ->orWhere('et_s.job_title', 'like', $s);
-            });
-        }
+        // NOTE: search is intentionally NOT applied here. baseQ() powers
+        // the aggregate stat cards and charts (Employment Status, Work
+        // Location, etc.) — those are breakdowns by category, not by
+        // person, so a name/student-ID search has nothing to match
+        // against them. Name/ID search only makes sense against an
+        // actual list of individual alumni, which is what modalSearch
+        // (the detail-modal list) is for.
 
         if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
             $q->where('a.batch', '>=', $this->filterBatchFrom)
@@ -501,9 +491,10 @@ new class extends Component {
 
     public function computeStats(): void
     {
-        // baseQ() left-joins employment_trackings (for the search box to
-        // reach company_name/job_title) — count distinct alumni rows so a
-        // stray duplicate tracking row can never inflate this number.
+        // baseQ() left-joins employment_trackings so downstream chart
+        // queries can reach company_name/job_title where needed — count
+        // distinct alumni rows so a stray duplicate tracking row can
+        // never inflate this number.
         $this->totalAlumni     = (clone $this->baseQ())->distinct()->count('a.id');
         $this->totalEmployed   = (clone $this->empQ())->where('et.employment_status', 'employed')->count();
         $this->totalSelf       = (clone $this->empQ())->where('et.employment_status', 'self_employed')->count();
@@ -888,11 +879,20 @@ new class extends Component {
              route. ── --}}
         <div class="relative shrink-0" wire:ignore
              x-data="{
+                // Defensive unwrap: in some Livewire/Alpine hydration
+                // states inside a wire:ignore subtree, $wire.someProp can
+                // resolve to a callable getter instead of its value
+                // (observed as literal '() => {}' leaking into text/URLs
+                // downstream). uw() calls it if it's a function, otherwise
+                // returns it as-is — safe either way.
+                uw(val) {
+                    return (typeof val === 'function') ? val.call(this) : val;
+                },
                 reportSummary() {
-                    var from   = $wire.filterBatchFrom || '';
-                    var to     = $wire.filterBatchTo   || '';
-                    var course = $wire.filterCourses   || [];
-                    var status = $wire.filterStatus    || '';
+                    var from   = this.uw($wire.filterBatchFrom) || '';
+                    var to     = this.uw($wire.filterBatchTo)   || '';
+                    var course = this.uw($wire.filterCourses)   || [];
+                    var status = this.uw($wire.filterStatus)    || '';
                     var parts  = [];
                     if (from !== '' && to !== '') {
                         parts.push('Batch ' + (from === to ? from : from + '–' + to));
@@ -933,7 +933,7 @@ new class extends Component {
                 <div class="ar-report-menu-message">
                     <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
                     <span class="txt" x-text="reportSummary()"></span>
-                    <span class="cnt" x-text="Number($wire.totalAlumni || 0).toLocaleString() + ' alumni in this scope'"></span>
+                    <span class="cnt" x-text="Number(uw($wire.totalAlumni) || 0).toLocaleString() + ' alumni in this scope'"></span>
                 </div>
 
                 <button type="button" @click="$store.admEmpReport.doExport('pdf', $wire)"
@@ -994,19 +994,13 @@ new class extends Component {
         </button>
     </div>
 
-    {{-- ── FILTER BAR — Search, Batch Year range, Programs (College +
-         Program Code merged into one grouped multi-select), Employment
-         Status. Scopes the stat cards, every chart below, AND whatever
-         gets exported via Generate Reports. ── --}}
+    {{-- ── FILTER BAR — Batch Year range, Programs (College + Program
+         Code merged into one grouped multi-select), Employment Status.
+         Scopes the stat cards, every chart below, AND whatever gets
+         exported via Generate Reports. (Name/student-ID search was
+         removed from here — it has no meaningful match against
+         category breakdowns; belongs on a records list instead.) ── --}}
     <div class="flex flex-wrap items-center gap-2.5 flex-shrink-0">
-
-        {{-- Search --}}
-        <div class="relative">
-            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"></i>
-            <input type="text" wire:model.live.debounce.350ms="search"
-                   placeholder="Search name, student ID, company…"
-                   class="{{ $inputBase }} pl-9 w-[230px]">
-        </div>
 
         {{-- Batch Year range --}}
         <div class="relative" x-data="{
@@ -1126,7 +1120,7 @@ new class extends Component {
             <option value="not_filled">Not Filled</option>
         </select>
 
-        @if($search !== '' || $filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses) || $filterStatus !== '')
+        @if($filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses) || $filterStatus !== '')
             <button type="button" wire:click="resetFilters" class="yb-adm-plain-btn">
                 <i class="fa-solid fa-rotate-left text-xs"></i> Reset
             </button>
@@ -2118,6 +2112,11 @@ new class extends Component {
 (function () {
     'use strict';
 
+    // Built from the named route so this never drifts out of sync with
+    // web.php again (previously hardcoded as '/admin/employment-tracking/export',
+    // which didn't match the registered '/employment/tracking/export' path).
+    var ADM_EMP_EXPORT_URL = "{{ route('employment.tracking.export') }}";
+
     function registerAdmEmpReportStore() {
         if (!window.Alpine) return;
         if (window.Alpine.store('admEmpReport')) return;
@@ -2147,9 +2146,10 @@ new class extends Component {
 
             /**
              * The exported report is ALWAYS the current page-level scope
-             * — search + Batch Year range + College + Programs +
-             * Employment Status, whatever is selected at the top of the
-             * dashboard (read straight off $wire).
+             * — Batch Year range + College + Programs + Employment
+             * Status, whatever is selected at the top of the dashboard
+             * (read straight off $wire). Name/ID search does not scope
+             * this — it never scoped the dashboard either.
              */
             async doExport(type, wire) {
                 if (this.exporting) return;
@@ -2178,25 +2178,39 @@ new class extends Component {
 
                 var self = this;
 
+                // Same defensive unwrap as reportSummary() above — some
+                // Livewire/Alpine hydration states resolve $wire.someProp
+                // to a callable getter instead of its value inside a
+                // wire:ignore subtree (observed as literal '() => {}'
+                // leaking into the export URL's query params).
+                var uw = function (val) {
+                    return (typeof val === 'function') ? val.call(wire) : val;
+                };
+
+                var wireCollege    = wire ? uw(wire.filterCollege)    : '';
+                var wireCourses    = wire ? uw(wire.filterCourses)    : [];
+                var wireStatus     = wire ? uw(wire.filterStatus)     : '';
+                var wireBatchFrom  = wire ? uw(wire.filterBatchFrom)  : '';
+                var wireBatchTo    = wire ? uw(wire.filterBatchTo)    : '';
+
                 // filterCourses is a multi-select array — join into a
                 // comma-separated "course" param. Batch range is
                 // all-or-nothing: only send batch_from/batch_to when
                 // BOTH are set, so a half-picked range on screen never
                 // leaks into an export scoped to something never
                 // actually applied.
-                var hasProgram   = wire && Array.isArray(wire.filterCourses) && wire.filterCourses.length > 0;
-                var hasFullRange = wire && wire.filterBatchFrom && wire.filterBatchTo;
+                var hasProgram   = Array.isArray(wireCourses) && wireCourses.length > 0;
+                var hasFullRange = !!(wireBatchFrom && wireBatchTo);
 
                 var params = new URLSearchParams({
                     type:       type,
-                    search:     wire && wire.search ? wire.search : '',
-                    college:    wire && wire.filterCollege ? wire.filterCollege : '',
-                    course:     hasProgram   ? wire.filterCourses.join(',') : '',
-                    status:     wire && wire.filterStatus ? wire.filterStatus : '',
-                    batch_from: hasFullRange ? wire.filterBatchFrom        : '',
-                    batch_to:   hasFullRange ? wire.filterBatchTo          : '',
+                    college:    wireCollege || '',
+                    course:     hasProgram   ? wireCourses.join(',') : '',
+                    status:     wireStatus  || '',
+                    batch_from: hasFullRange ? wireBatchFrom         : '',
+                    batch_to:   hasFullRange ? wireBatchTo           : '',
                 });
-                var url = '/admin/employment-tracking/export?' + params.toString();
+                var url = ADM_EMP_EXPORT_URL + '?' + params.toString();
 
                 try {
                     if (type === 'print') {

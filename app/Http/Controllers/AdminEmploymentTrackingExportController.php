@@ -8,13 +8,23 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Generate Reports (PDF / Excel / Print) for the Admin "Employment
- * Tracking" table — resources/views/livewire/admin/employment-tracking.blade.php.
+ * Tracking" (Employment Analytics) dashboard —
+ * resources/views/livewire/admin/employment-tracking.blade.php.
  *
- * Mirrors the Registrar Employment Tracking export flow/query shape
- * (search + status + program/course + batch range), minus any
- * organizer-style batch/department scoping — admin sees every alumni
- * record. Also accepts a College filter, since the admin dashboard's
- * Programs list is grouped under Colleges.
+ * This is a STATS/CHARTS export, not a per-alumni record listing — it
+ * mirrors every stat card and every chart section on screen (Status,
+ * Location, Relevance, Employment Type, Career Path, Further Education,
+ * Top Courses, By Batch, By College, Unemployed breakdown), scoped by
+ * the same Batch Year range / College / Programs / Employment Status
+ * filters as the dashboard. No alumni names or student IDs appear in
+ * any of the three formats.
+ *
+ * Query shapes below are kept 1:1 with the Livewire component's
+ * baseQ()/empQ()/buildAllCharts() so the exported numbers always match
+ * what's on screen. (Note: the dashboard's $search property was removed
+ * — it scoped stat cards/charts by name/student ID, which never matched
+ * anything since those are category breakdowns, not lists of people —
+ * so this controller no longer accepts a search param either.)
  */
 class AdminEmploymentTrackingExportController extends Controller
 {
@@ -22,7 +32,6 @@ class AdminEmploymentTrackingExportController extends Controller
     {
         $type = $request->query('type', 'pdf');
 
-        $search    = trim((string) $request->query('search', ''));
         $batchFrom = trim((string) $request->query('batch_from', ''));
         $batchTo   = trim((string) $request->query('batch_to', ''));
         $college   = trim((string) $request->query('college', ''));
@@ -36,33 +45,24 @@ class AdminEmploymentTrackingExportController extends Controller
         $statuses = array_values(array_filter(array_map('trim',
             explode(',', (string) $request->query('status', ''))
         )));
+        // The dashboard only ever sends one status value via $filterStatus,
+        // but buildQuery-style filtering supports a list for forward
+        // compatibility — take the first if present.
+        $status = $statuses[0] ?? '';
 
-        $records = $this->buildQuery($search, $batchFrom, $batchTo, $college, $courses, $statuses)->get();
-        $stats   = $this->buildStats($search, $batchFrom, $batchTo, $college, $courses, $statuses);
-
+        $data        = $this->buildChartData($batchFrom, $batchTo, $college, $courses, $status);
         $generatedAt = now();
-        $formatName  = fn($row) => trim(($row->first_name ?? '') . ' ' . ($row->last_name ?? ''));
-        $statusLabel = fn($row) => match ($row->employment_status ?? null) {
-            'employed'      => 'Employed',
-            'self_employed' => 'Self-Employed',
-            'unemployed'    => 'Unemployed',
-            default         => 'Not Filled',
-        };
 
         return match ($type) {
-            'excel' => $this->exportExcel($records, $formatName, $statusLabel, $generatedAt),
-            'print' => view('admin.employment-tracking-print', compact(
-                'records', 'stats', 'generatedAt', 'formatName', 'statusLabel'
-            )),
-            default => $this->exportPdf($records, $stats, $generatedAt, $formatName, $statusLabel),
+            'excel' => $this->exportExcel($data, $generatedAt),
+            'print' => view('admin.employment-tracking-print', [
+                'data'        => $data,
+                'generatedAt' => $generatedAt,
+            ]),
+            default => $this->exportPdf($data, $generatedAt),
         };
     }
 
-    /**
-     * Resolves a College name into its member course codes. Used both to
-     * scope the main query and to fold a College pick into whichever
-     * course-code list ends up applied.
-     */
     private function courseCodesForCollege(string $college): array
     {
         if ($college === '') return [];
@@ -74,203 +74,319 @@ class AdminEmploymentTrackingExportController extends Controller
     }
 
     /**
-     * Base alumni + employment_trackings query, filtered the same way as
-     * the Livewire component's baseQ()/empQ() (search / status / college /
-     * program / batch range) — kept in sync so the export always matches
-     * what's on screen.
+     * Alumni-level base query — batch range / college / program filters
+     * only. Mirrors the Livewire component's baseQ() (minus $search,
+     * which no longer scopes anything here — see class docblock).
      */
-    private function buildQuery(
-        string $search,
-        string $batchFrom,
-        string $batchTo,
-        string $college,
-        array $courses,
-        array $statuses,
-    ): \Illuminate\Database\Query\Builder {
-        $q = DB::table('alumni as a')
-            ->leftJoin('employment_trackings as et', function ($j) {
-                $j->on('a.id', '=', 'et.alumni_id')->whereNull('et.deleted_at');
-            })
-            ->whereNull('a.deleted_at')
-            ->select([
-                'a.id',
-                'a.student_id',
-                'a.first_name',
-                'a.last_name',
-                'a.course_code',
-                'a.course_name',
-                'a.batch',
-                'et.employment_status',
-                'et.company_name',
-                'et.job_title',
-                'et.work_location',
-            ]);
-
-        if ($search !== '') {
-            $s = '%' . $search . '%';
-            $q->where(function ($w) use ($s) {
-                $w->where(DB::raw("CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))"), 'like', $s)
-                  ->orWhere('a.student_id', 'like', $s)
-                  ->orWhere('a.email', 'like', $s)
-                  ->orWhere('et.company_name', 'like', $s)
-                  ->orWhere('et.job_title', 'like', $s);
-            });
-        }
+    private function baseQ(string $batchFrom, string $batchTo, string $college, array $courses): \Illuminate\Database\Query\Builder
+    {
+        $q = DB::table('alumni as a')->whereNull('a.deleted_at');
 
         if ($batchFrom !== '' && $batchTo !== '') {
             $q->where('a.batch', '>=', $batchFrom)
               ->where('a.batch', '<=', $batchTo);
         }
 
-        // College narrows down to that college's course codes; if
-        // specific Programs are ALSO picked, whereIn on $courses below
-        // further narrows within the college (matches baseQ()'s
-        // filterCollege + filterCourses combo on the dashboard).
         if ($college !== '') {
-            $collegeCourses = $this->courseCodesForCollege($college);
-            $q->whereIn('a.course_code', $collegeCourses);
+            $q->whereIn('a.course_code', $this->courseCodesForCollege($college));
         }
 
         if (!empty($courses)) {
             $q->whereIn('a.course_code', $courses);
         }
 
-        if (!empty($statuses)) {
-            $q->where(function ($w) use ($statuses) {
-                foreach ($statuses as $status) {
-                    if ($status === 'not_filled') {
-                        $w->orWhereNull('et.employment_status');
-                    } else {
-                        $w->orWhere('et.employment_status', $status);
-                    }
-                }
-            });
-        }
-
-        return $q->orderByRaw("CASE WHEN et.employment_status IS NULL THEN 1 ELSE 0 END")
-            ->orderBy('a.last_name')
-            ->orderBy('a.id');
+        return $q;
     }
 
     /**
-     * Summary stat cards shown on page 1 of the PDF/Print output — same
-     * ten figures as the on-screen stat cards, scoped by the same filters.
+     * Alumni + employment_trackings join, additionally scoped by
+     * Employment Status — mirrors the Livewire component's empQ().
      */
-    private function buildStats(
-        string $search,
+    private function empQ(string $batchFrom, string $batchTo, string $college, array $courses, string $status): \Illuminate\Database\Query\Builder
+    {
+        $q = $this->baseQ($batchFrom, $batchTo, $college, $courses)
+            ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
+            ->whereNull('et.deleted_at');
+
+        if ($status !== '' && $status !== 'not_filled') {
+            $q->where('et.employment_status', $status);
+        }
+
+        return $q;
+    }
+
+    /**
+     * Builds every stat card figure and every chart's data, scoped by
+     * the given filters. Structure mirrors computeStats() +
+     * buildAllCharts() in the Livewire component so PDF/Print/Excel and
+     * the on-screen dashboard never drift apart.
+     */
+    private function buildChartData(
         string $batchFrom,
         string $batchTo,
         string $college,
         array $courses,
-        array $statuses,
+        string $status,
     ): array {
-        $base = fn() => $this->buildQuery($search, $batchFrom, $batchTo, $college, $courses, $statuses);
+        // ── Summary stat cards ──────────────────────────────────────────
+        $totalAlumni     = (clone $this->baseQ($batchFrom, $batchTo, $college, $courses))->distinct()->count('a.id');
+        $totalEmployed   = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))->where('et.employment_status', 'employed')->count();
+        $totalSelf       = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))->where('et.employment_status', 'self_employed')->count();
+        $totalUnemployed = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))->where('et.employment_status', 'unemployed')->count();
+        $totalFilled     = $totalEmployed + $totalSelf + $totalUnemployed;
+        $totalNotFilled  = max(0, $totalAlumni - $totalFilled);
+        $totalLocal      = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))->where('et.work_location', 'local')->count();
+        $totalAbroad     = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))->where('et.work_location', 'abroad')->count();
 
-        $totalAlumni = (clone $base())->count();
+        $stats = compact(
+            'totalAlumni', 'totalEmployed', 'totalSelf', 'totalUnemployed',
+            'totalNotFilled', 'totalLocal', 'totalAbroad'
+        );
 
-        $withEmp = fn() => (clone $base())->whereNotNull('et.employment_status');
+        // ── Employment Status ───────────────────────────────────────────
+        $statusChart = [
+            'labels' => ['Employed', 'Self-Employed', 'Unemployed', 'Not Filled'],
+            'data'   => [$totalEmployed, $totalSelf, $totalUnemployed, $totalNotFilled],
+        ];
 
-        $totalEmployed   = (clone $withEmp())->where('et.employment_status', 'employed')->count();
-        $totalSelf       = (clone $withEmp())->where('et.employment_status', 'self_employed')->count();
-        $totalUnemployed = (clone $withEmp())->where('et.employment_status', 'unemployed')->count();
-        $totalNotFilled  = max(0, $totalAlumni - $totalEmployed - $totalSelf - $totalUnemployed);
+        // ── Work Location ───────────────────────────────────────────────
+        $locationChart = [
+            'labels' => ['Local', 'Abroad (OFW)'],
+            'data'   => [$totalLocal, $totalAbroad],
+        ];
 
-        $totalLocal = (clone $withEmp())
-            ->whereIn('et.employment_status', ['employed', 'self_employed'])
-            ->where('et.work_location', 'local')->count();
+        // ── Job-Course Relevance ────────────────────────────────────────
+        $relRows = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))
+            ->whereNotNull('et.course_relevance')
+            ->select('et.course_relevance', DB::raw('COUNT(*) as cnt'))
+            ->groupBy('et.course_relevance')
+            ->get()->keyBy('course_relevance');
 
-        $totalOFW = (clone $withEmp())
-            ->whereIn('et.employment_status', ['employed', 'self_employed'])
-            ->where('et.work_location', 'abroad')->count();
+        $relevanceChart = [
+            'labels' => ['Related', 'Partially', 'Not Related'],
+            'data'   => [
+                $relRows->get('yes')->cnt       ?? 0,
+                $relRows->get('partially')->cnt ?? 0,
+                $relRows->get('no')->cnt        ?? 0,
+            ],
+        ];
 
-        // course_relevance isn't selected in buildQuery()'s minimal column
-        // list, so pull the relatedness breakdown with its own query.
-        $relBase = DB::table('alumni as a')
-            ->join('employment_trackings as et', function ($j) {
+        // ── Employment by Batch Year ────────────────────────────────────
+        $batchRows = (clone $this->baseQ($batchFrom, $batchTo, $college, $courses))
+            ->leftJoin('employment_trackings as et', function ($j) {
                 $j->on('a.id', '=', 'et.alumni_id')->whereNull('et.deleted_at');
             })
-            ->whereNull('a.deleted_at')
-            ->whereIn('et.employment_status', ['employed', 'self_employed']);
+            ->select(
+                'a.batch',
+                DB::raw("SUM(CASE WHEN et.employment_status='employed'      THEN 1 ELSE 0 END) as employed"),
+                DB::raw("SUM(CASE WHEN et.employment_status='self_employed' THEN 1 ELSE 0 END) as self_emp"),
+                DB::raw("SUM(CASE WHEN et.employment_status='unemployed'    THEN 1 ELSE 0 END) as unemployed"),
+                DB::raw('COUNT(a.id) as total')
+            )
+            ->groupBy('a.batch')->orderBy('a.batch', 'asc')->get();
 
-        if ($search !== '') {
-            $s = '%' . $search . '%';
-            $relBase->where(function ($w) use ($s) {
-                $w->where(DB::raw("CONCAT(COALESCE(a.first_name,''), ' ', COALESCE(a.last_name,''))"), 'like', $s)
-                  ->orWhere('a.student_id', 'like', $s)
-                  ->orWhere('a.email', 'like', $s)
-                  ->orWhere('et.company_name', 'like', $s)
-                  ->orWhere('et.job_title', 'like', $s);
-            });
-        }
+        $batchChart = [
+            'labels'     => $batchRows->pluck('batch')->values()->all(),
+            'employed'   => $batchRows->pluck('employed')->values()->all(),
+            'self_emp'   => $batchRows->pluck('self_emp')->values()->all(),
+            'unemployed' => $batchRows->pluck('unemployed')->values()->all(),
+            'total'      => $batchRows->pluck('total')->values()->all(),
+        ];
+
+        // ── Employment by College ───────────────────────────────────────
+        $colleges    = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values();
+        $collegeData = $colleges->map(function ($col) use ($batchFrom, $batchTo) {
+            $codes = DB::table('courses')->where('college', $col)->pluck('code');
+            $base  = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
+            if ($batchFrom !== '' && $batchTo !== '') {
+                $base->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
+            }
+            $total = (clone $base)->count();
+
+            $emp = DB::table('alumni as a')
+                ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
+                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
+                ->whereIn('a.course_code', $codes);
+            if ($batchFrom !== '' && $batchTo !== '') {
+                $emp->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
+            }
+            $employed   = (clone $emp)->where('et.employment_status', 'employed')->count();
+            $self_emp   = (clone $emp)->where('et.employment_status', 'self_employed')->count();
+            $unemployed = (clone $emp)->where('et.employment_status', 'unemployed')->count();
+
+            return compact('col', 'total', 'employed', 'self_emp', 'unemployed');
+        });
+
+        $collegeChart = [
+            'labels'     => $collegeData->pluck('col')->values()->all(),
+            'employed'   => $collegeData->pluck('employed')->values()->all(),
+            'self_emp'   => $collegeData->pluck('self_emp')->values()->all(),
+            'unemployed' => $collegeData->pluck('unemployed')->values()->all(),
+            'total'      => $collegeData->pluck('total')->values()->all(),
+        ];
+
+        // ── Top Courses (Employed) ──────────────────────────────────────
+        $courseQ = DB::table('alumni as a')
+            ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
+            ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
+            ->whereIn('et.employment_status', ['employed', 'self_employed']);
         if ($batchFrom !== '' && $batchTo !== '') {
-            $relBase->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
+            $courseQ->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
         }
         if ($college !== '') {
-            $relBase->whereIn('a.course_code', $this->courseCodesForCollege($college));
+            $courseQ->whereIn('a.course_code', $this->courseCodesForCollege($college));
         }
         if (!empty($courses)) {
-            $relBase->whereIn('a.course_code', $courses);
+            $courseQ->whereIn('a.course_code', $courses);
+        }
+        $courseRows = $courseQ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
+            ->groupBy('a.course_code')->orderByDesc('cnt')->limit(10)->get();
+
+        $courseChart = [
+            'labels' => $courseRows->pluck('course_code')->values()->all(),
+            'data'   => $courseRows->pluck('cnt')->values()->all(),
+        ];
+
+        // ── Employment Type ─────────────────────────────────────────────
+        $empTypeRows = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))
+            ->whereNotNull('et.employment_type')
+            ->select('et.employment_type', DB::raw('COUNT(*) as cnt'))
+            ->groupBy('et.employment_type')->get()->keyBy('employment_type');
+
+        $empTypeChart = [
+            'labels' => ['Full-Time', 'Part-Time', 'Contractual', 'Project-Based', 'Internship'],
+            'data'   => [
+                $empTypeRows->get('full_time')->cnt     ?? 0,
+                $empTypeRows->get('part_time')->cnt     ?? 0,
+                $empTypeRows->get('contractual')->cnt   ?? 0,
+                $empTypeRows->get('project_based')->cnt ?? 0,
+                $empTypeRows->get('internship')->cnt    ?? 0,
+            ],
+        ];
+
+        // ── Career Path Labels ──────────────────────────────────────────
+        $cpRows   = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))->whereNotNull('et.career_path')->select('et.career_path')->get();
+        $cpCounts = ['ofw' => 0, 'freelancer' => 0, 'entrepreneur' => 0, 'career_shifter' => 0, 'industry_professional' => 0];
+        foreach ($cpRows as $r) {
+            $arr = json_decode($r->career_path, true) ?? [];
+            foreach ($arr as $v) { if (isset($cpCounts[$v])) $cpCounts[$v]++; }
         }
 
-        $totalRelated    = (clone $relBase)->where('et.course_relevance', 'yes')->count();
-        $totalPartial    = (clone $relBase)->where('et.course_relevance', 'partially')->count();
-        $totalNotRelated = (clone $relBase)->where('et.course_relevance', 'no')->count();
+        $careerPathChart = [
+            'labels' => ['OFW', 'Freelancer', 'Entrepreneur', 'Career Shifter', 'Industry Pro'],
+            'data'   => array_values($cpCounts),
+        ];
 
-        return compact(
-            'totalAlumni', 'totalEmployed', 'totalSelf', 'totalUnemployed', 'totalNotFilled',
-            'totalLocal', 'totalOFW', 'totalRelated', 'totalPartial', 'totalNotRelated'
-        );
+        // ── Further Education ───────────────────────────────────────────
+        $eduRows = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))
+            ->whereNotNull('et.education_status')
+            ->select('et.education_status', DB::raw('COUNT(*) as cnt'))
+            ->groupBy('et.education_status')->get()->keyBy('education_status');
+
+        $eduChart = [
+            'labels' => ['None', 'Pursuing Masteral', 'Pursuing Doctorate'],
+            'data'   => [
+                $eduRows->get('none')->cnt               ?? 0,
+                $eduRows->get('pursuing_masteral')->cnt  ?? 0,
+                $eduRows->get('pursuing_doctorate')->cnt ?? 0,
+            ],
+        ];
+
+        // ── Unemployed Breakdown ────────────────────────────────────────
+        $unRows = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))
+            ->where('et.employment_status', 'unemployed')
+            ->whereNotNull('et.unemployment_status')
+            ->select('et.unemployment_status', DB::raw('COUNT(*) as cnt'))
+            ->groupBy('et.unemployment_status')->get()->keyBy('unemployment_status');
+
+        $unemployedChart = [
+            'labels' => ['Seeking Employment', 'Not Looking'],
+            'data'   => [
+                $unRows->get('seeking_employment')->cnt ?? 0,
+                $unRows->get('not_looking')->cnt        ?? 0,
+            ],
+        ];
+
+        return [
+            'stats'      => $stats,
+            'status'     => $statusChart,
+            'location'   => $locationChart,
+            'relevance'  => $relevanceChart,
+            'batch'      => $batchChart,
+            'college'    => $collegeChart,
+            'course'     => $courseChart,
+            'empType'    => $empTypeChart,
+            'careerPath' => $careerPathChart,
+            'edu'        => $eduChart,
+            'unemployed' => $unemployedChart,
+        ];
     }
 
-    private function exportPdf($records, array $stats, $generatedAt, callable $formatName, callable $statusLabel)
+    private function exportPdf(array $data, $generatedAt)
     {
-        $pdf = Pdf::loadView('admin.employment-tracking-print', compact(
-            'records', 'stats', 'generatedAt', 'formatName', 'statusLabel'
-        ))->setPaper('a4', 'portrait');
+        $pdf = Pdf::loadView('admin.employment-tracking-print', [
+            'data'        => $data,
+            'generatedAt' => $generatedAt,
+        ])->setPaper('a4', 'portrait');
 
-        $filename = 'employment-tracking-' . $generatedAt->format('Y-m-d_His') . '.pdf';
+        $filename = 'employment-analytics-' . $generatedAt->format('Y-m-d_His') . '.pdf';
 
         return $pdf->download($filename);
     }
 
     /**
-     * Plain HTML table wrapped in the Microsoft Office XML namespace so
-     * Excel opens it as a real .xls workbook instead of prompting a
-     * "format doesn't match extension" warning — same fix already applied
-     * to the Registrar Employment Tracking export.
+     * Plain HTML table (one section per chart/stat group) wrapped in the
+     * Microsoft Office XML namespace so Excel opens it as a real .xls
+     * workbook instead of prompting a "format doesn't match extension"
+     * warning — same fix already applied to the Registrar Employment
+     * Tracking export. No per-alumni rows — same stats/charts scope as
+     * PDF/Print.
      */
-    private function exportExcel($records, callable $formatName, callable $statusLabel, $generatedAt)
+    private function exportExcel(array $data, $generatedAt)
     {
-        $filename = 'employment-tracking-' . $generatedAt->format('Y-m-d_His') . '.xls';
+        $filename = 'employment-analytics-' . $generatedAt->format('Y-m-d_His') . '.xls';
 
-        $rowsHtml = '';
-        foreach ($records as $r) {
-            $rowsHtml .= '<tr>'
-                . '<td>' . e(strtoupper($formatName($r))) . '</td>'
-                . '<td>' . e($r->student_id) . '</td>'
-                . '<td>' . e($r->course_code) . '</td>'
-                . '<td>' . e($r->batch) . '</td>'
-                . '<td>' . e($statusLabel($r)) . '</td>'
-                . '<td>' . e($r->company_name ?? '—') . '</td>'
-                . '<td>' . e($r->job_title ?? '—') . '</td>'
-                . '<td>' . e($r->work_location ? ucfirst($r->work_location) : '—') . '</td>'
-                . '</tr>';
-        }
+        $section = function (string $title, array $labels, array $values) {
+            $rows = '';
+            foreach ($labels as $i => $label) {
+                $rows .= '<tr><td>' . e($label) . '</td><td>' . e($values[$i] ?? 0) . '</td></tr>';
+            }
+            return '<table><thead><tr><th colspan="2">' . e($title) . '</th></tr>'
+                . '<tr><th>Category</th><th>Count</th></tr></thead>'
+                . '<tbody>' . $rows . '</tbody></table><br>';
+        };
 
+        $s = $data['stats'];
         $html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" '
             . 'xmlns:x="urn:schemas-microsoft-com:office:excel" '
             . 'xmlns="http://www.w3.org/TR/REC-html40">'
             . '<head><meta charset="utf-8">'
             . '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets>'
-            . '<x:ExcelWorksheet><x:Name>Employment Tracking</x:Name>'
+            . '<x:ExcelWorksheet><x:Name>Employment Analytics</x:Name>'
             . '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>'
             . '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->'
-            . '<style>table{border-collapse:collapse;} th,td{border:1px solid #ccc;padding:4px 8px;font-size:12px;} '
-            . 'th{background:#F5F0FA;font-weight:bold;}</style></head><body>'
-            . '<table><thead><tr>'
-            . '<th>Name</th><th>Student ID</th><th>Program Code</th><th>Batch</th>'
-            . '<th>Employment Status</th><th>Company</th><th>Job Title</th><th>Location</th>'
-            . '</tr></thead><tbody>' . $rowsHtml . '</tbody></table></body></html>';
+            . '<style>table{border-collapse:collapse;margin-bottom:8px;} th,td{border:1px solid #ccc;padding:4px 8px;font-size:12px;} '
+            . 'th{background:#F5F0FA;font-weight:bold;}</style></head><body>';
+
+        $html .= $section('Summary', [
+            'Total Alumni', 'Employed', 'Self-Employed', 'Unemployed', 'Not Filled', 'Local', 'Abroad (OFW)',
+        ], [
+            $s['totalAlumni'], $s['totalEmployed'], $s['totalSelf'], $s['totalUnemployed'],
+            $s['totalNotFilled'], $s['totalLocal'], $s['totalAbroad'],
+        ]);
+
+        $html .= $section('Employment Status', $data['status']['labels'], $data['status']['data']);
+        $html .= $section('Work Location', $data['location']['labels'], $data['location']['data']);
+        $html .= $section('Job-Course Relevance', $data['relevance']['labels'], $data['relevance']['data']);
+        $html .= $section('Employment Type', $data['empType']['labels'], $data['empType']['data']);
+        $html .= $section('Career Path Labels', $data['careerPath']['labels'], $data['careerPath']['data']);
+        $html .= $section('Further Education', $data['edu']['labels'], $data['edu']['data']);
+        $html .= $section('Unemployed Breakdown', $data['unemployed']['labels'], $data['unemployed']['data']);
+        $html .= $section('Top Courses (Employed)', $data['course']['labels'], $data['course']['data']);
+        $html .= $section('Employment by Batch Year (Total)', $data['batch']['labels'], $data['batch']['total']);
+        $html .= $section('Employment by College (Total)', $data['college']['labels'], $data['college']['total']);
+
+        $html .= '</body></html>';
 
         return response($html, 200, [
             'Content-Type'        => 'application/vnd.ms-excel; charset=utf-8',
