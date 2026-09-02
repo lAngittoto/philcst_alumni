@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+\<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
@@ -250,6 +250,12 @@
         </div>
     </div>
 </div>
+
+@if(!empty($filterSummary))
+<p style="font-size:12px;color:#555555;margin:-6px 0 12px;">
+    <strong style="color:#7A3F91;">Report scope:</strong> {{ $filterSummary }}
+</p>
+@endif
 
 {{-- ── Summary stat cards (row 1) ── --}}
 <div class="rp-stats">

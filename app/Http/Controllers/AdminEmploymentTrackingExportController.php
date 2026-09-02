@@ -50,17 +50,70 @@ class AdminEmploymentTrackingExportController extends Controller
         // compatibility — take the first if present.
         $status = $statuses[0] ?? '';
 
-        $data        = $this->buildChartData($batchFrom, $batchTo, $college, $courses, $status);
-        $generatedAt = now();
+        $data          = $this->buildChartData($batchFrom, $batchTo, $college, $courses, $status);
+        $filterSummary = $this->buildFilterSummary($batchFrom, $batchTo, $college, $courses, $status);
+        $generatedAt   = now();
 
         return match ($type) {
-            'excel' => $this->exportExcel($data, $generatedAt),
+            'excel' => $this->exportExcel($data, $filterSummary, $generatedAt),
             'print' => view('admin.employment-tracking-print', [
-                'data'        => $data,
-                'generatedAt' => $generatedAt,
+                'data'          => $data,
+                'filterSummary' => $filterSummary,
+                'generatedAt'   => $generatedAt,
             ]),
-            default => $this->exportPdf($data, $generatedAt),
+            default => $this->exportPdf($data, $filterSummary, $generatedAt),
         };
+    }
+
+    /**
+     * Human-readable summary of the exported scope (Batch Year range /
+     * College / Programs / Employment Status) — same segments and
+     * ordering as activeReportFilterSummary() in the Volt component, so
+     * the exported report's "Report scope" line always matches what the
+     * live dropdown preview showed when the export was requested.
+     */
+    private function buildFilterSummary(
+        string $batchFrom,
+        string $batchTo,
+        string $college,
+        array $courses,
+        string $status,
+    ): string {
+        $parts = [];
+
+        if ($batchFrom !== '' && $batchTo !== '') {
+            $parts[] = $batchFrom === $batchTo
+                ? 'Batch ' . $batchFrom
+                : 'Batch ' . $batchFrom . '–' . $batchTo;
+        } elseif ($batchFrom !== '' || $batchTo !== '') {
+            $parts[] = 'Batch range incomplete (not yet applied)';
+        } else {
+            $parts[] = 'All Batch Years';
+        }
+
+        if ($college !== '') {
+            $parts[] = $college;
+        }
+
+        if (count($courses) === 1) {
+            $parts[] = $courses[0];
+        } elseif (count($courses) > 1) {
+            $parts[] = implode(', ', $courses);
+        } else {
+            $parts[] = 'All Programs';
+        }
+
+        if ($status !== '') {
+            $labels = [
+                'employed'      => 'Employed',
+                'self_employed' => 'Self-Employed',
+                'unemployed'    => 'Unemployed',
+                'not_filled'    => 'Not Filled',
+            ];
+            $parts[] = $labels[$status] ?? $status;
+        }
+
+        return implode(' · ', $parts);
     }
 
     private function courseCodesForCollege(string $college): array
@@ -322,11 +375,12 @@ class AdminEmploymentTrackingExportController extends Controller
         ];
     }
 
-    private function exportPdf(array $data, $generatedAt)
+    private function exportPdf(array $data, string $filterSummary, $generatedAt)
     {
         $pdf = Pdf::loadView('admin.employment-tracking-print', [
-            'data'        => $data,
-            'generatedAt' => $generatedAt,
+            'data'          => $data,
+            'filterSummary' => $filterSummary,
+            'generatedAt'   => $generatedAt,
         ])->setPaper('a4', 'portrait');
 
         $filename = 'employment-analytics-' . $generatedAt->format('Y-m-d_His') . '.pdf';
@@ -342,7 +396,7 @@ class AdminEmploymentTrackingExportController extends Controller
      * Tracking export. No per-alumni rows — same stats/charts scope as
      * PDF/Print.
      */
-    private function exportExcel(array $data, $generatedAt)
+    private function exportExcel(array $data, string $filterSummary, $generatedAt)
     {
         $filename = 'employment-analytics-' . $generatedAt->format('Y-m-d_His') . '.xls';
 
@@ -366,7 +420,8 @@ class AdminEmploymentTrackingExportController extends Controller
             . '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>'
             . '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->'
             . '<style>table{border-collapse:collapse;margin-bottom:8px;} th,td{border:1px solid #ccc;padding:4px 8px;font-size:12px;} '
-            . 'th{background:#F5F0FA;font-weight:bold;}</style></head><body>';
+            . 'th{background:#F5F0FA;font-weight:bold;}</style></head><body>'
+            . '<p style="font-size:12px;color:#555555;margin:0 0 8px;"><strong>Report scope:</strong> ' . e($filterSummary) . '</p>';
 
         $html .= $section('Summary', [
             'Total Alumni', 'Employed', 'Self-Employed', 'Unemployed', 'Not Filled', 'Local', 'Abroad (OFW)',

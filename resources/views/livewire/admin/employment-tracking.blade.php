@@ -3,36 +3,10 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Computed;
 use Illuminate\Support\Facades\DB;
 
 new class extends Component {
-
-    // ── Global Filters ────────────────────────────────────────────────────────
-    // (Removed: a page-wide $search here previously scoped the aggregate
-    // stat cards/charts by name/student ID, which never matched anything
-    // since those are category breakdowns, not lists of people. Search by
-    // name/ID lives on modalSearch below instead, scoped to the actual
-    // alumni list.)
-
-    // Batch is a FROM/TO range (mirrors the organizer-facing Alumni
-    // Employment table) instead of a single-value dropdown.
-    public string $filterBatchFrom = '';
-    public string $filterBatchTo   = '';
-
-    /** Set while setSingleBatchYear()/clearFilterBatch()/setBatchRange()
-     *  are writing to filterBatchFrom/filterBatchTo directly, so the
-     *  updatedFilterBatchFrom()/updatedFilterBatchTo() hooks below don't
-     *  ALSO fire and refresh a second time in the same request. */
-    private bool $skipBatchHooks = false;
-
-    public string $filterCollege  = '';
-
-    // Programs is a MULTI-SELECT (array of checked course codes) instead
-    // of a single-value dropdown, so several programs can be viewed
-    // together — mirrors the organizer-facing Alumni Employment table.
-    public array  $filterCourses  = [];
-
-    public string $filterStatus  = '';
 
     // ── Detail Modal ──────────────────────────────────────────────────────────
     public bool   $modalOpen       = false;
@@ -81,150 +55,6 @@ new class extends Component {
         $this->refreshAll();
     }
 
-    /** Toggles a single program/course code in/out of the multi-select
-     *  filter — bound directly to each checkbox item in the Programs
-     *  dropdown. */
-    public function toggleFilterCourse(string $code): void
-    {
-        if (in_array($code, $this->filterCourses, true)) {
-            $this->filterCourses = array_values(array_diff($this->filterCourses, [$code]));
-        } else {
-            $this->filterCourses[] = $code;
-        }
-        $this->refreshAll();
-    }
-
-    /** "All Programs" inside the dropdown — clears the whole multi-select
-     *  in one round-trip. */
-    public function clearFilterCourses(): void
-    {
-        $this->filterCourses = [];
-        $this->refreshAll();
-    }
-
-    /** "Select All" inside the dropdown — checks every program code. */
-    public function selectAllFilterCourses(): void
-    {
-        $this->filterCourses = collect($this->courses)->pluck('code')->toArray();
-        $this->refreshAll();
-    }
-
-    /** "Select all" under one college's group header, inside the merged
-     *  Programs dropdown — adds every course code belonging to that
-     *  college into the multi-select in one round-trip (existing picks
-     *  from other colleges are kept). */
-    public function selectCollegeCourses(string $college): void
-    {
-        $codesInCollege = collect($this->courses)
-            ->where('college', $college)
-            ->pluck('code')
-            ->all();
-
-        $this->filterCourses = array_values(array_unique(array_merge($this->filterCourses, $codesInCollege)));
-        $this->refreshAll();
-    }
-
-    /** True only once BOTH ends of the batch range are set — a half-picked
-     *  range (just From, or just To) never scopes the query. */
-    private function batchRangeIsComplete(): bool
-    {
-        return $this->filterBatchFrom !== '' && $this->filterBatchTo !== '';
-    }
-
-    public function updatedFilterBatchFrom(): void
-    {
-        if ($this->skipBatchHooks) return;
-        $this->normalizeBatchRange();
-        // Don't fire a filter request yet if only "From" is picked — wait
-        // until "To" is also set (or both cleared) so a half-picked range
-        // never triggers a query, and picking From then To doesn't cause
-        // two separate refreshes.
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo === '') {
-            return;
-        }
-        $this->refreshAll();
-    }
-
-    public function updatedFilterBatchTo(): void
-    {
-        if ($this->skipBatchHooks) return;
-        $this->normalizeBatchRange();
-        if ($this->filterBatchTo !== '' && $this->filterBatchFrom === '') {
-            return;
-        }
-        $this->refreshAll();
-    }
-
-    /** If "from" ends up later than "to" (or vice versa), swap them
-     *  instead of silently returning zero rows. */
-    private function normalizeBatchRange(): void
-    {
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== ''
-            && (int)$this->filterBatchFrom > (int)$this->filterBatchTo) {
-            [$this->filterBatchFrom, $this->filterBatchTo] = [$this->filterBatchTo, $this->filterBatchFrom];
-        }
-    }
-
-    /** Single-year quick pick from the default (non-range) Batch Year
-     *  list — sets From and To to the same year in ONE round-trip
-     *  instead of two separate $wire.set() calls. */
-    public function setSingleBatchYear(string $year): void
-    {
-        $this->skipBatchHooks  = true;
-        $this->filterBatchFrom = $year;
-        $this->filterBatchTo   = $year;
-        $this->skipBatchHooks  = false;
-        $this->refreshAll();
-    }
-
-    /** "All Batch Years" — clears both ends of the range in one
-     *  round-trip, same reasoning as setSingleBatchYear() above. */
-    public function clearFilterBatch(): void
-    {
-        $this->skipBatchHooks  = true;
-        $this->filterBatchFrom = '';
-        $this->filterBatchTo   = '';
-        $this->skipBatchHooks  = false;
-        $this->refreshAll();
-    }
-
-    /** Applies a From–To range in ONE round-trip. Bound to the range
-     *  picker's local Alpine state (not wire:model.live on the two
-     *  lists) so picking "From" alone never touches the server at all —
-     *  the request only fires once both ends are chosen. */
-    public function setBatchRange(string $from, string $to): void
-    {
-        $this->skipBatchHooks  = true;
-        $this->filterBatchFrom = $from;
-        $this->filterBatchTo   = $to;
-        $this->skipBatchHooks  = false;
-        $this->normalizeBatchRange();
-        $this->refreshAll();
-    }
-
-    /** College dropdown — narrows Programs down to that college's course
-     *  codes (combined with filterCourses if any are also picked). */
-    public function updatedFilterCollege(): void
-    {
-        $this->refreshAll();
-    }
-
-    /** Employment Status dropdown. */
-    public function updatedFilterStatus(): void
-    {
-        $this->refreshAll();
-    }
-
-    public function resetFilters(): void
-    {
-        $this->filterBatchFrom  = '';
-        $this->filterBatchTo    = '';
-        $this->filterCollege    = '';
-        $this->filterCourses    = [];
-        $this->filterStatus     = '';
-        $this->refreshAll();
-    }
-
     private function loadMetaLists(): void
     {
         $this->batches = DB::table('alumni')
@@ -259,32 +89,6 @@ new class extends Component {
         // actual list of individual alumni, which is what modalSearch
         // (the detail-modal list) is for.
 
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-            $q->where('a.batch', '>=', $this->filterBatchFrom)
-              ->where('a.batch', '<=', $this->filterBatchTo);
-        }
-        if ($this->filterCollege) {
-            $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
-            $q->whereIn('a.course_code', $codes);
-        }
-        if (!empty($this->filterCourses)) $q->whereIn('a.course_code', $this->filterCourses);
-
-        if ($this->filterStatus === 'not_filled') {
-            $q->whereNotExists(function ($sub) {
-                $sub->from('employment_trackings as et_f')
-                    ->whereColumn('et_f.alumni_id', 'a.id')
-                    ->whereNull('et_f.deleted_at');
-            });
-        } elseif ($this->filterStatus !== '') {
-            $status = $this->filterStatus;
-            $q->whereExists(function ($sub) use ($status) {
-                $sub->from('employment_trackings as et_f')
-                    ->whereColumn('et_f.alumni_id', 'a.id')
-                    ->whereNull('et_f.deleted_at')
-                    ->where('et_f.employment_status', $status);
-            });
-        }
-
         return $q;
     }
 
@@ -293,10 +97,6 @@ new class extends Component {
         $q = (clone $this->baseQ())
             ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
             ->whereNull('et.deleted_at');
-
-        if ($this->filterStatus !== '' && $this->filterStatus !== 'not_filled') {
-            $q->where('et.employment_status', $this->filterStatus);
-        }
 
         return $q;
     }
@@ -362,20 +162,6 @@ new class extends Component {
                         ->whereNull('et.deleted_at');
                 });
 
-            if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-                $q->where('a.batch', '>=', $this->filterBatchFrom)
-                  ->where('a.batch', '<=', $this->filterBatchTo);
-            }
-            if ($this->filterCollege) {
-                $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
-                $q->whereIn('a.course_code', $codes);
-            }
-            if (!empty($this->filterCourses)) $q->whereIn('a.course_code', $this->filterCourses);
-
-            if ($this->filterStatus && $this->filterStatus !== 'not_filled') {
-                $q->whereRaw('1 = 0');
-            }
-
             if ($this->modalBatch)    $q->where('a.batch', $this->modalBatch);
             if ($this->modalSearch) {
                 $s = '%' . $this->modalSearch . '%';
@@ -412,22 +198,6 @@ new class extends Component {
             ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
             ->whereNull('a.deleted_at')
             ->whereNull('et.deleted_at');
-
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-            $q->where('a.batch', '>=', $this->filterBatchFrom)
-              ->where('a.batch', '<=', $this->filterBatchTo);
-        }
-        if ($this->filterCollege) {
-            $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
-            $q->whereIn('a.course_code', $codes);
-        }
-        if (!empty($this->filterCourses)) $q->whereIn('a.course_code', $this->filterCourses);
-
-        if ($this->filterStatus === 'not_filled') {
-            $q->whereRaw('1 = 0');
-        } elseif ($this->filterStatus !== '') {
-            $q->where('et.employment_status', $this->filterStatus);
-        }
 
         if ($this->modalBatch)    $q->where('a.batch', $this->modalBatch);
 
@@ -487,6 +257,42 @@ new class extends Component {
     {
         $this->computeStats();
         $this->buildAllCharts();
+        // Without this unset, activeReportFilterSummary() below (memoized
+        // by #[Computed] for the lifetime of the component instance) could
+        // keep returning the PREVIOUS filter's text after a filter change.
+        // Cheap to recompute, so always drop it here alongside every other
+        // filter-dependent piece of state — mirrors the registrar
+        // Employment Tracking dashboard's refreshDashboard() fix.
+        unset($this->activeReportFilterSummary);
+        // Explicit signal for the chart-refresh JS below (see the
+        // Livewire.on('adm-emp-charts-refresh', ...) listener near the
+        // bottom of this file) — more reliable than the generic
+        // Livewire.hook('commit', ...) fallback it replaces, which could
+        // silently no-op across Livewire version differences and leave
+        // the charts showing stale data after a filter change.
+        $this->dispatch('adm-emp-charts-refresh');
+    }
+
+    /**
+     * Human-readable summary of the CURRENT PAGE-LEVEL filter (Batch Year
+     * range + College + Programs + Employment Status) — used by the
+     * exported PDF/Excel/Print report's "Report scope" line. Always
+     * includes every segment explicitly ("All Batch Years" / "All
+     * Programs" shown rather than silently omitted) so the exported
+     * report's scope line never looks like it's missing something.
+     *
+     * This is the source of truth for what actually gets exported (read
+     * server-side by the export controller via request params built from
+     * the same filter state). The live "Report will include" preview
+     * inside the Generate Reports dropdown mirrors this exact logic
+     * client-side in Alpine instead, since that panel sits inside a
+     * wire:ignore block and Livewire never re-renders Blade `{{ }}`
+     * interpolations inside it after first paint.
+     */
+    #[Computed]
+    public function activeReportFilterSummary(): string
+    {
+        return 'All Batch Years · All Programs';
     }
 
     public function computeStats(): void
@@ -560,19 +366,11 @@ new class extends Component {
         $collegeData = $colleges->map(function ($col) {
             $codes = DB::table('courses')->where('college', $col)->pluck('code');
             $base  = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
-            if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-                $base->where('a.batch', '>=', $this->filterBatchFrom)
-                     ->where('a.batch', '<=', $this->filterBatchTo);
-            }
             $total = (clone $base)->count();
             $emp   = DB::table('alumni as a')
                 ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
                 ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
                 ->whereIn('a.course_code', $codes);
-            if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-                $emp->where('a.batch', '>=', $this->filterBatchFrom)
-                    ->where('a.batch', '<=', $this->filterBatchTo);
-            }
             $employed   = (clone $emp)->where('et.employment_status', 'employed')->count();
             $self_emp   = (clone $emp)->where('et.employment_status', 'self_employed')->count();
             $unemployed = (clone $emp)->where('et.employment_status', 'unemployed')->count();
@@ -591,15 +389,6 @@ new class extends Component {
             ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
             ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
             ->whereIn('et.employment_status', ['employed', 'self_employed']);
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-            $courseQ->where('a.batch', '>=', $this->filterBatchFrom)
-                    ->where('a.batch', '<=', $this->filterBatchTo);
-        }
-        if ($this->filterCollege) {
-            $codes = DB::table('courses')->where('college', $this->filterCollege)->pluck('code');
-            $courseQ->whereIn('a.course_code', $codes);
-        }
-        if (!empty($this->filterCourses)) $courseQ->whereIn('a.course_code', $this->filterCourses);
         $courseRows = $courseQ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
             ->groupBy('a.course_code')->orderByDesc('cnt')->limit(10)->get();
 
@@ -695,7 +484,7 @@ new class extends Component {
 }
 .yb-adm-dd-btn:hover  { border-color: #c4b5d4; }
 .yb-adm-dd-btn.active { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); color: #7a3f91; }
-.yb-adm-dd-btn:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+.yb-adm-dd-btn:focus-visible { outline: 2px solid #7a3f91; outline-offset: 1px; }
 
 /* Plain button (no dropdown chevron) — used for Reset */
 .yb-adm-plain-btn {
@@ -846,7 +635,7 @@ new class extends Component {
     $wireFade      = 'opacity-40 pointer-events-none transition-opacity duration-200';
 @endphp
 
-<div class="flex flex-col h-[90vh] overflow-hidden">
+<div class="flex flex-col h-full min-h-0 overflow-hidden">
 
 {{-- ══ MAIN LAYOUT ══
      Header + filter bar are OUTSIDE the scrolling area (shrink-0, never
@@ -855,7 +644,7 @@ new class extends Component {
      Registrar Employment Tracking dashboard's .emp-page-header-wrap
      pattern: "Header stays fixed in place; only the content below it
      scrolls." ── --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 max-w-screen-2xl mx-auto w-full h-[90vh] overflow-hidden">
+<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 max-w-screen-2xl mx-auto w-full h-full min-h-0 overflow-hidden">
 
     {{-- ── PAGE HEADER ── --}}
     <div class="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
@@ -876,43 +665,41 @@ new class extends Component {
              summary (read reactively off $wire) never get clobbered by a
              Livewire re-render. Mirrors the Registrar Employment
              Tracking dashboard's button 1:1, pointed at the admin export
-             route. ── --}}
+             route.
+
+             Defensive unwrap: inside this wire:ignore subtree,
+             $wire.someProp has been observed resolving to a callable
+             getter instead of its value on this component (Livewire
+             v4) — even though the exact same plain-access pattern
+             works fine on the Registrar Employment Tracking dashboard.
+             Symptom without this: literal '() => {}' leaking into the
+             summary text. window.__admEmpUw() (defined in the small
+             script right below) calls it if it's a function, otherwise
+             returns it as-is — safe either way. Kept as a real global
+             function rather than an x-data method: Livewire v4's
+             expression evaluator errored ("expected expression, got
+             keyword 'var'") when two multi-statement var-using methods
+             lived together in one x-data object literal. ── --}}
+        <script>
+            window.__admEmpUw = function (val, ctx) {
+                return (typeof val === 'function') ? val.call(ctx) : val;
+            };
+
+            // Moved out of x-data entirely — a multi-statement, var-heavy
+            // function body sitting inside an inline x-data object literal
+            // is what triggered "expected expression, got keyword 'var'"
+            // (Alpine's expression parser chokes on it even when only ONE
+            // such method is present, not just when two share an object).
+            // As a plain global function this is just normal JS, so it's
+            // completely safe.
+            window.__admEmpReportSummary = function (ctx, wire) {
+                return 'All Batch Years · All Programs';
+            };
+        </script>
         <div class="relative shrink-0" wire:ignore
              x-data="{
-                // Defensive unwrap: in some Livewire/Alpine hydration
-                // states inside a wire:ignore subtree, $wire.someProp can
-                // resolve to a callable getter instead of its value
-                // (observed as literal '() => {}' leaking into text/URLs
-                // downstream). uw() calls it if it's a function, otherwise
-                // returns it as-is — safe either way.
-                uw(val) {
-                    return (typeof val === 'function') ? val.call(this) : val;
-                },
                 reportSummary() {
-                    var from   = this.uw($wire.filterBatchFrom) || '';
-                    var to     = this.uw($wire.filterBatchTo)   || '';
-                    var course = this.uw($wire.filterCourses)   || [];
-                    var status = this.uw($wire.filterStatus)    || '';
-                    var parts  = [];
-                    if (from !== '' && to !== '') {
-                        parts.push('Batch ' + (from === to ? from : from + '–' + to));
-                    } else if (from !== '' || to !== '') {
-                        parts.push('Batch range incomplete (not yet applied)');
-                    } else {
-                        parts.push('All Batch Years');
-                    }
-                    if (course.length === 1) {
-                        parts.push(course[0]);
-                    } else if (course.length > 1) {
-                        parts.push(course.join(', '));
-                    } else {
-                        parts.push('All Programs');
-                    }
-                    if (status !== '') {
-                        var labels = { employed:'Employed', self_employed:'Self-Employed', unemployed:'Unemployed', not_filled:'Not Filled' };
-                        parts.push(labels[status] || status);
-                    }
-                    return parts.join(' · ');
+                    return window.__admEmpReportSummary(this, $wire);
                 }
              }"
              x-init="window.__admEmpEnsureReportStore && window.__admEmpEnsureReportStore()"
@@ -933,7 +720,6 @@ new class extends Component {
                 <div class="ar-report-menu-message">
                     <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
                     <span class="txt" x-text="reportSummary()"></span>
-                    <span class="cnt" x-text="Number(uw($wire.totalAlumni) || 0).toLocaleString() + ' alumni in this scope'"></span>
                 </div>
 
                 <button type="button" @click="$store.admEmpReport.doExport('pdf', $wire)"
@@ -994,144 +780,30 @@ new class extends Component {
         </button>
     </div>
 
-    {{-- ── FILTER BAR — Batch Year range, Programs (College + Program
-         Code merged into one grouped multi-select), Employment Status.
-         Scopes the stat cards, every chart below, AND whatever gets
-         exported via Generate Reports. (Name/student-ID search was
-         removed from here — it has no meaningful match against
-         category breakdowns; belongs on a records list instead.) ── --}}
-    <div class="flex flex-wrap items-center gap-2.5 flex-shrink-0">
+    {{-- ── SCROLLABLE CONTENT — stat cards, charts, rankings. Header and
+         filter bar above stay put; only this container scrolls. Wrapped
+         in a relative container so the center loading spinner below can
+         float above it without disturbing layout — same pattern as the
+         Registrar Employment Tracking dashboard. ── --}}
+    <div class="relative flex-1 min-h-0">
 
-        {{-- Batch Year range --}}
-        <div class="relative" x-data="{
-                open:false,
-                rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
-                rangeFrom: '{{ $filterBatchFrom }}',
-                rangeTo: '{{ $filterBatchTo }}',
-                startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
-                applyRange(){ if(this.rangeFrom && this.rangeTo){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.open=false; } },
-                selectYear(y){ $wire.setSingleBatchYear(y); this.rangeMode=false; this.open=false; },
-                clearYear(){ $wire.clearFilterBatch(); this.rangeMode=false; this.open=false; }
-             }"
-             @click.outside="open=false">
-            <button type="button" @click="open = !open"
-                    class="yb-adm-dd-btn"
-                    :class="{ 'active': $wire.filterBatchFrom!=='' || $wire.filterBatchTo!=='' }">
-                @if($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo)
-                    Batch {{ $filterBatchFrom }}–{{ $filterBatchTo }}
-                @elseif($filterBatchFrom !== '' && $filterBatchTo !== '')
-                    Batch {{ $filterBatchFrom }}
-                @elseif($filterBatchFrom !== '')
-                    Batch {{ $filterBatchFrom }} → pick end year
-                @elseif($filterBatchTo !== '')
-                    pick start year → Batch {{ $filterBatchTo }}
-                @else
-                    All Batch Years
-                @endif
-            </button>
-
-            <div x-show="open" x-transition class="yb-adm-dd-panel" style="display:none; width:210px;">
-                <button type="button" @click="clearYear()" :class="{'sel': $wire.filterBatchFrom==='' && $wire.filterBatchTo===''}" class="yb-adm-dd-item">All Batch Years</button>
-                <div class="border-t border-[#F0ECF5] my-1"></div>
-                @foreach($batches as $year)
-                    <button type="button" @click="selectYear('{{ $year }}')" :class="{'sel': $wire.filterBatchFrom==='{{ $year }}' && $wire.filterBatchTo==='{{ $year }}'}" class="yb-adm-dd-item">{{ $year }}</button>
-                @endforeach
-                <div class="border-t border-[#F0ECF5] my-1"></div>
-                <div class="px-2 py-1.5">
-                    <p class="text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] mb-1.5">Or pick a range</p>
-                    <div class="flex items-center gap-1.5">
-                        <select x-model="rangeFrom" class="{{ $selectBase }} !max-w-none !text-xs !py-1.5" style="{{ $selectArrow }}">
-                            <option value="">From</option>
-                            @foreach($batches as $year)<option value="{{ $year }}">{{ $year }}</option>@endforeach
-                        </select>
-                        <span class="text-[#999999] text-xs">–</span>
-                        <select x-model="rangeTo" class="{{ $selectBase }} !max-w-none !text-xs !py-1.5" style="{{ $selectArrow }}">
-                            <option value="">To</option>
-                            @foreach($batches as $year)<option value="{{ $year }}">{{ $year }}</option>@endforeach
-                        </select>
-                    </div>
-                    <button type="button" @click="applyRange()" class="w-full mt-2 text-xs font-semibold rounded-lg py-1.5 text-white bg-[#7a3f91] hover:bg-[#6a3580] transition">Apply Range</button>
-                </div>
-            </div>
+    {{-- Center overlay spinner — icon only, no background box, absolutely
+         positioned over the scroll area, so it never competes with any
+         sticky elements below for the top:0 slot inside the scrolling
+         container. Pure overlay: floats on top, layout is completely
+         undisturbed while loading. --}}
+    <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
+         wire:loading wire:target="refreshAll">
+        <div class="flex items-center justify-center" style="margin-top:16px;">
+            <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
         </div>
-
-        {{-- Programs — College + Program Code combined into ONE dropdown.
-             Grouped by college so the college context isn't lost even
-             though there's no separate College select anymore. Checking
-             a college's own "Select all" link adds every course code
-             under that college into the filterCourses multi-select
-             (existing picks from other colleges are kept); individual
-             program checkboxes toggle one code at a time the same way
-             they always did. Sticky "All Programs" reset header row at
-             the TOP of the list, mirrors the Registrar Employment
-             Tracking dropdown's sticky Select-All row. --}}
-        <div class="relative" x-data="{ open:false }" @click.outside="open=false" wire:key="adm-emp-course-dropdown">
-            <button type="button" @click="open = !open" class="yb-adm-dd-btn"
-                    :class="{ 'active': {{ !empty($filterCourses) ? 'true' : 'false' }} }">
-                @if(empty($filterCourses))
-                    All Programs
-                @elseif(count($filterCourses) === 1)
-                    {{ $filterCourses[0] }}
-                @else
-                    {{ count($filterCourses) }} Programs
-                @endif
-            </button>
-            <div x-show="open" x-transition class="yb-adm-dd-panel" style="display:none; width:260px; max-height:320px;">
-                {{-- Sticky header: "All Programs" reset sits at the top,
-                     stays visible while the grouped list below scrolls. --}}
-                <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-1 -mt-1 bg-white z-10 rounded-t-[8px]">
-                    <button type="button" wire:click="clearFilterCourses" class="text-xs font-semibold text-[#333333] hover:text-[#7A3F91] transition">
-                        All Programs
-                    </button>
-                    <span class="text-xs font-bold text-[#7A3F91]" @if(empty($filterCourses)) style="display:none;" @endif>
-                        {{ count($filterCourses) }} selected
-                    </span>
-                </div>
-
-                @php $groupedCourses = collect($courses)->groupBy('college'); @endphp
-                @foreach($groupedCourses as $collegeName => $collegeCourses)
-                    <div class="pt-1.5 first:pt-0.5">
-                        <div class="flex items-center justify-between gap-2 px-2 py-1">
-                            <span class="text-[10px] font-bold uppercase tracking-wide text-[#7A3F91] truncate">{{ $collegeName ?: 'Other' }}</span>
-                            <button type="button" wire:click="selectCollegeCourses('{{ $collegeName }}')" class="text-[10px] font-semibold text-[#999999] hover:text-[#7A3F91] transition shrink-0">
-                                Select all
-                            </button>
-                        </div>
-                        @foreach($collegeCourses as $c)
-                            <label class="yb-adm-dd-item flex items-center gap-2 cursor-pointer" @class(['sel' => in_array($c['code'], $filterCourses)])>
-                                <input type="checkbox" wire:click="toggleFilterCourse('{{ $c['code'] }}')"
-                                       @checked(in_array($c['code'], $filterCourses))
-                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
-                                <span class="truncate">{{ $c['code'] }}</span>
-                            </label>
-                        @endforeach
-                    </div>
-                @endforeach
-            </div>
-        </div>
-
-        {{-- Employment Status --}}
-        <select wire:model.live="filterStatus" style="{{ $selectArrow }}" class="{{ $selectBase }}"
-                @class([$activeSelect => $filterStatus !== ''])>
-            <option value="">All Statuses</option>
-            <option value="employed">Employed</option>
-            <option value="self_employed">Self-Employed</option>
-            <option value="unemployed">Unemployed</option>
-            <option value="not_filled">Not Filled</option>
-        </select>
-
-        @if($filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses) || $filterStatus !== '')
-            <button type="button" wire:click="resetFilters" class="yb-adm-plain-btn">
-                <i class="fa-solid fa-rotate-left text-xs"></i> Reset
-            </button>
-        @endif
     </div>
 
-    {{-- ── SCROLLABLE CONTENT — stat cards, charts, rankings. Header and
-         filter bar above stay put; only this container scrolls. ── --}}
     <div class="flex flex-col gap-4 pb-6 -mr-5 pr-5 sm:-mr-7 sm:pr-7 lg:-mr-10 lg:pr-10 overflow-y-auto overflow-x-hidden flex-1 min-h-0
                 [&::-webkit-scrollbar]:w-[5px] [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-track]:rounded-full
-                [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-[#7a3f91]">
+                [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-[#7a3f91]"
+         wire:loading.class="opacity-40 pointer-events-none" wire:target="refreshAll"
+         style="transition:opacity .2s ease;">
 
     {{-- ── STAT CARDS (view-only, Emp Rate removed) ── --}}
     <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 flex-shrink-0">
@@ -1513,7 +1185,7 @@ new class extends Component {
 
     </div>{{-- /scrollable content container --}}
 
-</div>{{-- /MAIN LAYOUT (header + filter bar + scrollable content; root div closes at end of file) --}}
+    </div>{{-- /relative wrapper for scroll container + overlay spinner --}}
 
 
 {{-- ══ EMPLOYMENT DETAIL MODAL ══ --}}
@@ -2086,20 +1758,31 @@ new class extends Component {
             requestAnimationFrame(initAll);
         });
 
-        if(window.Livewire){
-            Livewire.hook('commit', function(p){
-                var ok = p.succeed || (p.component && p.respond);
-                if(typeof ok==='function'){ ok(function(){ requestAnimationFrame(initAll); }); }
-                else { requestAnimationFrame(initAll); }
-            });
-        } else {
-            document.addEventListener('livewire:initialized', function(){
-                Livewire.hook('commit', function(p){
-                    var ok = p.succeed || function(cb){ cb({}); };
-                    ok(function(){ requestAnimationFrame(initAll); });
-                });
+        // ── Reliable chart refresh ──────────────────────────────────────
+        // Previously this relied ONLY on a generic Livewire.hook('commit', ...)
+        // listener to know when to rebuild the charts. That hook fires for
+        // every commit across the whole app and depends on internal
+        // Livewire plumbing (payload.succeed) that can silently no-op
+        // across version differences — when it did, the charts kept
+        // showing whatever data they were built with at page load, even
+        // though the filters (and the PHP-rendered stat cards) had
+        // already moved on.
+        //
+        // The PHP side now explicitly dispatches an 'adm-emp-charts-refresh'
+        // browser event every time refreshAll() runs (see refreshAll() in
+        // this component). Listening for that exact event is a direct,
+        // guaranteed signal — no guessing based on generic Livewire
+        // internals. Mirrors the fix already applied to the Registrar
+        // Employment Tracking dashboard.
+        function hookAdmChartsRefreshEvent() {
+            if (!window.Livewire) return;
+            Livewire.on('adm-emp-charts-refresh', function () {
+                requestAnimationFrame(initAll);
             });
         }
+
+        if (window.Livewire) { hookAdmChartsRefreshEvent(); }
+        else { document.addEventListener('livewire:initialized', hookAdmChartsRefreshEvent); }
     });
 
 })();
@@ -2178,38 +1861,9 @@ new class extends Component {
 
                 var self = this;
 
-                // Same defensive unwrap as reportSummary() above — some
-                // Livewire/Alpine hydration states resolve $wire.someProp
-                // to a callable getter instead of its value inside a
-                // wire:ignore subtree (observed as literal '() => {}'
-                // leaking into the export URL's query params).
-                var uw = function (val) {
-                    return (typeof val === 'function') ? val.call(wire) : val;
-                };
-
-                var wireCollege    = wire ? uw(wire.filterCollege)    : '';
-                var wireCourses    = wire ? uw(wire.filterCourses)    : [];
-                var wireStatus     = wire ? uw(wire.filterStatus)     : '';
-                var wireBatchFrom  = wire ? uw(wire.filterBatchFrom)  : '';
-                var wireBatchTo    = wire ? uw(wire.filterBatchTo)    : '';
-
-                // filterCourses is a multi-select array — join into a
-                // comma-separated "course" param. Batch range is
-                // all-or-nothing: only send batch_from/batch_to when
-                // BOTH are set, so a half-picked range on screen never
-                // leaks into an export scoped to something never
-                // actually applied.
-                var hasProgram   = Array.isArray(wireCourses) && wireCourses.length > 0;
-                var hasFullRange = !!(wireBatchFrom && wireBatchTo);
-
-                var params = new URLSearchParams({
-                    type:       type,
-                    college:    wireCollege || '',
-                    course:     hasProgram   ? wireCourses.join(',') : '',
-                    status:     wireStatus  || '',
-                    batch_from: hasFullRange ? wireBatchFrom         : '',
-                    batch_to:   hasFullRange ? wireBatchTo           : '',
-                });
+                // Filters removed — the export always covers everything,
+                // so no filter params are sent.
+                var params = new URLSearchParams({ type: type });
                 var url = ADM_EMP_EXPORT_URL + '?' + params.toString();
 
                 try {
@@ -2324,4 +1978,6 @@ new class extends Component {
 })();
 </script>
 
-</div>
+</div>{{-- /modal-level content --}}
+
+</div>{{-- /MAIN LAYOUT root (header + filter bar + scrollable content + modal + hidden data div + scripts) --}}

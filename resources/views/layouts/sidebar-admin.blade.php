@@ -1012,7 +1012,35 @@
 
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            <form method="POST" action="{{ route('logout') }}">
+            {{-- Livewire's wire:navigate SPA transitions on the sidebar
+                 links above don't do a full page reload, so this form's
+                 static @csrf hidden field (rendered once, on first page
+                 load) can go stale relative to the session's current
+                 token after enough wire:navigate hops — causing an
+                 immediate 419 Page Expired the moment Logout is clicked.
+                 Fix: read the freshest token off the <meta
+                 name="csrf-token"> tag (which Livewire keeps current)
+                 right before the form submits, and sync it into the
+                 hidden field first.
+
+                 Kept as a plain global function (not an inline
+                 statement in @submit) — a raw `var m = ...; if (m) {...}`
+                 sitting directly inside an Alpine directive attribute
+                 fails Alpine's expression parser ("expected expression,
+                 got keyword 'var'"), and because this sidebar renders on
+                 every admin page, that failure was breaking Alpine's
+                 init for the ENTIRE page, not just this form — which is
+                 why filters/charts on pages like Employment Analytics
+                 stopped reacting even though the bug lived here. ── --}}
+            <script>
+                window.__admSyncLogoutCsrf = function (formEl) {
+                    var m = document.querySelector('meta[name=csrf-token]');
+                    if (m) { formEl.querySelector('input[name=_token]').value = m.content; }
+                };
+            </script>
+            <form method="POST" action="{{ route('logout') }}"
+                  x-data
+                  @submit="window.__admSyncLogoutCsrf($el)">
                 @csrf
                 <button type="submit"
                         title="Logout"
