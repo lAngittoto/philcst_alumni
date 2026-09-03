@@ -44,6 +44,27 @@ new class extends Component {
     public array $colleges = [];
     public array $courses  = [];
 
+    // ── Page-level filters (Batch + Program) — drive the stat cards,
+    // charts, and rankings below. No search here on purpose: this bar
+    // is aggregate/category filtering, not person lookup (see baseQ()
+    // below for why search lives only in the detail modal). ──────────
+    public string $filterBatchFrom = '';
+    public string $filterBatchTo   = '';
+    // Program filter is multi-select — one or more course codes. Kept as
+    // an array (not a single string) so the checkbox dropdown below can
+    // let admins pick several programs at once; every query site that
+    // used to do a single where() on this now does whereIn() instead.
+    public array $filterCourses    = [];
+
+    // TEMP DEBUG ONLY — bumped on every refreshAll() call, shown in the
+    // debug banner near the top of the view so a refresh is visible
+    // without DevTools. Now mostly moot since filters are read from the
+    // URL query string in mount() (each filter change is a full page
+    // load, so this will only ever show 1 per page view) — kept for now
+    // in case it's still useful while confirming the fix, safe to delete
+    // along with the debug banner afterward.
+    public int $filterRenderNonce = 0;
+
     public function mount(): void
     {
         $user = auth()->user();
@@ -51,6 +72,36 @@ new class extends Component {
             $this->redirect(route('login'));
             return;
         }
+
+        // ── Filters now come from the URL query string (?batch=...&course=...)
+        // instead of Livewire property binding. This is a deliberate fallback
+        // after wire:model.live AND direct $wire.call() from onchange both
+        // failed to ever reach the server in this environment (confirmed via
+        // the debug banner: neither approach ever changed filterBatch/
+        // filterCourse server-side, no matter what was picked in the
+        // dropdown). A plain GET form — no JS, no Livewire commit involved
+        // in submitting the filter change at all — sidesteps whatever is
+        // blocking those two client-side paths entirely: the browser does a
+        // normal full navigation to e.g. /employment/tracking?batch=2024,
+        // and mount() below just reads the values straight off the request.
+        // Batch is now range-capable: ?batch_from=2025&batch_to=2027 (or a
+        // single year submitted as both from AND to — see the "List" mode
+        // panel in the dropdown below, which always fills both). Falls back
+        // to the legacy single ?batch=2025 param so any old bookmarked link
+        // keeps working exactly as before.
+        $legacyBatch = trim((string) request()->query('batch', ''));
+        $this->filterBatchFrom = trim((string) request()->query('batch_from', $legacyBatch));
+        $this->filterBatchTo   = trim((string) request()->query('batch_to', $legacyBatch));
+
+        // Program filter — reads a comma-separated list from ?course=
+        // (e.g. course=BSIT,BSCRIM). Falls back to the old single-value
+        // form transparently: a bookmarked ?course=BSIT link still works,
+        // it just becomes a one-item array. Empty/blank entries dropped.
+        $courseParam = trim((string) request()->query('course', ''));
+        $this->filterCourses = $courseParam === ''
+            ? []
+            : collect(explode(',', $courseParam))->map(fn($c) => trim($c))->filter()->values()->all();
+
         $this->loadMetaLists();
         $this->refreshAll();
     }
@@ -89,7 +140,42 @@ new class extends Component {
         // actual list of individual alumni, which is what modalSearch
         // (the detail-modal list) is for.
 
+        // Page-level Batch + Program filters DO apply here — they scope
+        // the whole dashboard (stat cards, charts, rankings) the same
+        // way the Registrar Employment Tracking dashboard's filter bar
+        // does. Cast defensively: if the alumni.batch column is stored
+        // as an integer rather than a string, comparing against the
+        // <select>'s string value could otherwise silently match zero
+        // rows instead of erroring.
+        $this->applyBatchRange($q, 'a.batch');
+        if (!empty($this->filterCourses)) $q->whereIn('a.course_code', $this->filterCourses);
+
         return $q;
+    }
+
+    /**
+     * Applies the current Batch Year range (From/To) to any query builder
+     * as a whereBetween on the given column — the single source of truth
+     * for batch-range filtering, used by baseQ() and every ad-hoc query
+     * below that builds its own batch condition instead of cloning baseQ().
+     * Casts defensively to string on both sides since alumni.batch may be
+     * stored as an int or a string column depending on the migration.
+     */
+    private function applyBatchRange(\Illuminate\Database\Query\Builder $q, string $column): void
+    {
+        $from = trim($this->filterBatchFrom);
+        $to   = trim($this->filterBatchTo);
+        if ($from === '' && $to === '') return;
+
+        // Only one side filled (shouldn't normally happen — the dropdown
+        // always submits both — but guard anyway) falls back to an exact
+        // match on whichever side IS set.
+        if ($from !== '' && $to !== '') {
+            [$lo, $hi] = $from <= $to ? [$from, $to] : [$to, $from];
+            $q->whereBetween($column, [$lo, $hi]);
+        } else {
+            $q->where($column, (string) ($from !== '' ? $from : $to));
+        }
     }
 
     private function empQ(): \Illuminate\Database\Query\Builder
@@ -257,6 +343,13 @@ new class extends Component {
     {
         $this->computeStats();
         $this->buildAllCharts();
+        // Bump AFTER filterBatch/filterCourse are already settled for this
+        // request (updatedFilterBatch()/updatedFilterCourse()/resetFilters()
+        // all set the property THEN call refreshAll()) — so by the time this
+        // runs, the nonce change and the new filter value land in the SAME
+        // response together, and the <select> elements below get replaced
+        // showing the correct, already-updated selection.
+        $this->filterRenderNonce++;
         // Without this unset, activeReportFilterSummary() below (memoized
         // by #[Computed] for the lifetime of the component instance) could
         // keep returning the PREVIOUS filter's text after a filter change.
@@ -292,7 +385,48 @@ new class extends Component {
     #[Computed]
     public function activeReportFilterSummary(): string
     {
-        return 'All Batch Years · All Programs';
+        $batchPart  = $this->batchFilterLabel();
+        $coursePart = $this->courseFilterLabel();
+        return $batchPart . ' · ' . $coursePart;
+    }
+
+    /**
+     * Human-readable label for the current Program filter — mirrors
+     * batchFilterLabel() below: single source of truth shared by the
+     * report summary and the filter bar button, now that Program
+     * supports selecting several courses at once.
+     */
+    private function courseFilterLabel(): string
+    {
+        if (empty($this->filterCourses)) return 'All Programs';
+        if (count($this->filterCourses) === 1) return $this->courseName($this->filterCourses[0]);
+        return count($this->filterCourses) . ' Programs Selected';
+    }
+
+    private function courseName(string $code): string
+    {
+        foreach ($this->courses as $c) {
+            if ($c['code'] === $code) return $c['name'];
+        }
+        return $code;
+    }
+
+    /**
+     * Human-readable label for the current Batch Year filter, shared by
+     * the report summary above and the filter bar button below so the two
+     * never drift out of sync (e.g. one saying "Batch 2025" while the
+     * other still says "Batch 2025–2027").
+     */
+    private function batchFilterLabel(): string
+    {
+        $from = trim($this->filterBatchFrom);
+        $to   = trim($this->filterBatchTo);
+        if ($from === '' && $to === '') return 'All Batch Years';
+        if ($from !== '' && $to !== '' && $from !== $to) {
+            [$lo, $hi] = $from <= $to ? [$from, $to] : [$to, $from];
+            return 'Batch ' . $lo . '–' . $hi;
+        }
+        return 'Batch ' . ($from !== '' ? $from : $to);
     }
 
     public function computeStats(): void
@@ -365,12 +499,27 @@ new class extends Component {
         $colleges    = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values();
         $collegeData = $colleges->map(function ($col) {
             $codes = DB::table('courses')->where('college', $col)->pluck('code');
-            $base  = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
+            // When a Program filter is active, a college only contributes
+            // rows for the selected program(s) — intersecting the
+            // college's codes with the filtered set still narrows
+            // correctly since course_code is unique per program.
+            if (!empty($this->filterCourses)) {
+                $codes = $codes->intersect($this->filterCourses)->values();
+                if ($codes->isEmpty()) {
+                    return ['col' => $col, 'total' => 0, 'employed' => 0, 'self_emp' => 0, 'unemployed' => 0];
+                }
+            }
+
+            $base = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
+            $this->applyBatchRange($base, 'a.batch');
             $total = (clone $base)->count();
-            $emp   = DB::table('alumni as a')
+
+            $emp = DB::table('alumni as a')
                 ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
                 ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
                 ->whereIn('a.course_code', $codes);
+            $this->applyBatchRange($emp, 'a.batch');
+
             $employed   = (clone $emp)->where('et.employment_status', 'employed')->count();
             $self_emp   = (clone $emp)->where('et.employment_status', 'self_employed')->count();
             $unemployed = (clone $emp)->where('et.employment_status', 'unemployed')->count();
@@ -389,6 +538,8 @@ new class extends Component {
             ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
             ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
             ->whereIn('et.employment_status', ['employed', 'self_employed']);
+        $this->applyBatchRange($courseQ, 'a.batch');
+        if ($this->filterCourses) $courseQ->whereIn('a.course_code', $this->filterCourses);
         $courseRows = $courseQ->select('a.course_code', DB::raw('COUNT(*) as cnt'))
             ->groupBy('a.course_code')->orderByDesc('cnt')->limit(10)->get();
 
@@ -467,6 +618,8 @@ new class extends Component {
 <style>
 @keyframes admFadeIn  { from { opacity:0; } to { opacity:1; } }
 @keyframes admSlideUp { from { opacity:0; transform: translateY(20px) scale(.98); } to { opacity:1; transform:none; } }
+@keyframes admFloat   { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.adm-nodata-icon { animation: admFloat 2.6s ease-in-out infinite; }
 
 /* ── Dropdown trigger (filters) ── */
 .yb-adm-dd-btn {
@@ -478,6 +631,7 @@ new class extends Component {
     cursor: pointer; white-space: nowrap;
     transition: border-color .15s, box-shadow .15s;
     outline: none; user-select: none;
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
     background-repeat: no-repeat; background-size: 1.25em 1.25em;
@@ -485,6 +639,17 @@ new class extends Component {
 .yb-adm-dd-btn:hover  { border-color: #c4b5d4; }
 .yb-adm-dd-btn.active { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); color: #7a3f91; }
 .yb-adm-dd-btn:focus-visible { outline: 2px solid #7a3f91; outline-offset: 1px; }
+
+/* ── Batch Year custom dropdown trigger — same look as .yb-adm-dd-btn but
+     no background-image arrow (this one's a <button> with its own
+     Font Awesome chevron, not a native <select>) and no reserved
+     right-padding for that arrow. ── */
+.yb-adm-dd-btn[type="button"] {
+    padding: 0.5rem 0.75rem;
+    background-image: none;
+}
+
+[x-cloak] { display: none !important; }
 
 /* Plain button (no dropdown chevron) — used for Reset */
 .yb-adm-plain-btn {
@@ -499,6 +664,18 @@ new class extends Component {
 }
 .yb-adm-plain-btn:hover { border-color: #c4b5d4; }
 .yb-adm-plain-btn:focus { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+
+/* ── Purple checkbox — used by the Program multi-select dropdown's
+     "Select All" row and each program row. Plain div, not an <input>,
+     since it's toggled by @click on the wrapping <label> via Alpine. ── */
+.adm-chk {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; flex-shrink: 0;
+    border: 1.5px solid #d4c5e0; border-radius: 4px;
+    background: #fff; color: #fff; font-size: 0.6rem;
+    transition: background-color .12s, border-color .12s;
+}
+.adm-chk-on { background: #7a3f91; border-color: #7a3f91; }
 
 /* ── Generate Reports button (copied styling from Registrar Employment
      Tracking / Alumni Records) ──────────────────────────────────────── */
@@ -635,16 +812,16 @@ new class extends Component {
     $wireFade      = 'opacity-40 pointer-events-none transition-opacity duration-200';
 @endphp
 
-<div class="flex flex-col h-full min-h-0 overflow-hidden">
+<div class="flex flex-col min-h-0">
 
 {{-- ══ MAIN LAYOUT ══
-     Header + filter bar are OUTSIDE the scrolling area (shrink-0, never
-     scrolls away) — only the stat cards / charts / rankings below them
-     scroll, in their own overflow-y-auto container. Mirrors the
-     Registrar Employment Tracking dashboard's .emp-page-header-wrap
-     pattern: "Header stays fixed in place; only the content below it
-     scrolls." ── --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 max-w-screen-2xl mx-auto w-full h-full min-h-0 overflow-hidden">
+     Header and filter bar sit above the stat cards/charts and scroll
+     away together with everything else on the page (previously tried
+     sticky here so the title+filters stayed pinned, but that looked
+     bad in the live layout, so it's back to scrolling normally). ── --}}
+<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 max-w-screen-2xl mx-auto w-full min-h-0">
+
+    <div class="relative flex flex-col gap-4 pb-1 flex-shrink-0">
 
     {{-- ── PAGE HEADER ── --}}
     <div class="flex flex-wrap items-center justify-between gap-3 flex-shrink-0">
@@ -693,7 +870,48 @@ new class extends Component {
             // As a plain global function this is just normal JS, so it's
             // completely safe.
             window.__admEmpReportSummary = function (ctx, wire) {
-                return 'All Batch Years · All Programs';
+                // Read straight off the actual filter <form>'s hidden
+                // inputs instead of $wire — same Livewire v4 quirk noted
+                // above (this whole block sits in wire:ignore) has been
+                // observed returning stale/wrapped values for array
+                // props like filterCourses specifically, even though the
+                // __admEmpUw() function-unwrap trick fixes plain
+                // strings. The hidden inputs are the actual source of
+                // truth the last page navigation submitted, so they're
+                // always correct on a fresh load — no proxy involved.
+                var fromEl = document.querySelector('input[name="batch_from"]');
+                var toEl   = document.querySelector('input[name="batch_to"]');
+                var courseEl = document.querySelector('input[name="course"]');
+                var from = fromEl ? fromEl.value.trim() : '';
+                var to   = toEl   ? toEl.value.trim()   : '';
+                var courses = courseEl && courseEl.value.trim()
+                    ? courseEl.value.trim().split(',').map(function(c){ return c.trim(); }).filter(Boolean)
+                    : [];
+                var batchPart;
+                if (!from && !to) {
+                    batchPart = 'All Batch Years';
+                } else if (from && to && from !== to) {
+                    var lo = from <= to ? from : to;
+                    var hi = from <= to ? to : from;
+                    batchPart = 'Batch ' + lo + '–' + hi;
+                } else {
+                    batchPart = 'Batch ' + (from || to);
+                }
+                var coursePart = window.__admEmpCoursesLabel(courses);
+                return batchPart + ' · ' + coursePart;
+            };
+
+            // Shared label builder for a list of program codes — used by
+            // both the "Report will include" preview above and the
+            // filter bar's Program dropdown button. Shows the actual
+            // codes (e.g. "BSIT, BSCS") instead of a bare count so it's
+            // clear at a glance what's included, but caps at 3 codes
+            // before switching to "+N more" so it never runs long next
+            // to the batch part.
+            window.__admEmpCoursesLabel = function (courses) {
+                if (!courses || courses.length === 0) return 'All Programs';
+                if (courses.length <= 3) return courses.join(', ');
+                return courses.slice(0, 3).join(', ') + ' +' + (courses.length - 3) + ' more';
             };
         </script>
         <div class="relative shrink-0" wire:ignore
@@ -752,6 +970,359 @@ new class extends Component {
         </div>
     </div>
 
+    {{-- ── FILTER BAR — Batch + Program only (no search: these stat
+         cards/charts are aggregate breakdowns, not a person list — see
+         baseQ() for the full rationale). Selecting a batch or program
+         re-scopes every stat card and chart below via baseQ()/empQ(). ── --}}
+    {{-- Plain HTML GET FORM — deliberately bypasses Livewire entirely for
+         the act of changing a filter. Two different Livewire-native
+         approaches were tried and confirmed (via the debug banner) to
+         never reach the server at all in this environment:
+           1. wire:model.live="filterBatch" on a <select>
+           2. onchange="$wire.call('setFilterBatch', ...)" — a direct JS
+              call, bypassing wire:model entirely
+         Since even a raw $wire.call() never landed, whatever is blocking
+         this is more fundamental than a binding/key mismatch, and further
+         chasing it inside Livewire's client runtime is a dead end.
+
+         This form sidesteps Livewire completely: every control here —
+         including the Batch Year Alpine dropdown below — ultimately calls
+         the one native DOM method that always exists on any plain
+         <form> — this.form.submit() — which the browser turns into an
+         ordinary full-page GET navigation to e.g.
+         /employment/tracking?batch_from=2025&batch_to=2027&course=BSCE.
+         mount() above reads $_GET['batch_from']/['batch_to']/['course']
+         straight off the request and builds the whole dashboard from that
+         on a clean page load. No Livewire commit, no $wire, no
+         onchange-into-JS-runtime step is involved in submitting the
+         filter change — just the browser's own form-submission behavior,
+         which cannot be broken by any Livewire/Alpine wiring issue. The
+         Batch Year control stages its picks in Alpine state (list mode or
+         range mode) and only writes them into the two hidden
+         batch_from/batch_to inputs at the moment of Apply. ── --}}
+    <form method="GET" action="{{ route('employment.tracking') }}"
+          class="flex flex-wrap gap-2 items-center flex-shrink-0 bg-[#F5F5F5] border border-[#E8E0F0] rounded-xl px-3.5 py-2.5">
+
+        <script>
+            // Builds a clean URL on submit: only non-empty fields are
+            // included (no ?course= with nothing after it, no stray
+            // params), so clearing everything navigates to the bare
+            // route instead of ?batch_from=&batch_to=&course=. Called
+            // directly by every control below INSTEAD of form.submit()
+            // — form.submit() bypasses onsubmit entirely per spec, so
+            // an onsubmit handler here would never fire for them.
+            window.__admEmpCleanSubmit = function (form) {
+                var params = new URLSearchParams();
+                Array.prototype.forEach.call(form.elements, function (el) {
+                    if (!el.name) return;
+                    var val = (el.value || '').trim();
+                    if (val !== '') params.set(el.name, val);
+                });
+                var qs = params.toString();
+                window.__admEmpShowFilterLoading();
+                window.location.href = form.action + (qs ? ('?' + qs) : '');
+            };
+
+            // Shared show-spinner helper — called right before every
+            // filter-triggered page navigation (Batch/Program Apply,
+            // Reset). No matching hide: the navigation itself replaces
+            // this DOM a moment later, so there's nothing to clean up.
+            window.__admEmpShowFilterLoading = function () {
+                var el = document.getElementById('admEmpFilterLoading');
+                if (el) el.style.display = 'flex';
+            };
+
+            // ── Reset-on-refresh: the server already used
+            // batch_from/batch_to/course from the URL to render THIS
+            // page (that's how picking a filter works — a real
+            // navigation so the server sees it). Immediately after
+            // that render, replace the URL with the bare route so it
+            // never carries filter params going forward. This means a
+            // plain refresh (F5) always hits the clean URL and comes
+            // back showing All Batches / All Programs, while the
+            // filter controls above still work exactly the same (each
+            // pick still does its own full navigation with params,
+            // which is what actually applies the filter). replaceState
+            // only swaps the address bar — it does not reload or
+            // re-render, so nothing about the just-rendered filtered
+            // view changes.
+            if (window.location.search) {
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+        </script>
+
+        <div class="flex items-center gap-2 px-1 h-[38px] shrink-0 font-semibold text-sm uppercase tracking-wide"
+             style="color:#7a3f91;">
+            Filters
+        </div>
+
+        {{-- ── Batch Year custom dropdown — List mode (scrollable single-year
+             list + "Add Range" at the bottom) and Range mode (From/To two-
+             column picker). Still a plain GET <form> underneath: the panel
+             only stages `batchFrom`/`batchTo` in Alpine state and writes
+             them into the two hidden inputs below on Apply, then calls
+             this.form.submit() — same native-submit mechanism as every
+             other filter here, so it inherits the same "always reaches the
+             server" guarantee documented above. Nothing changes about how
+             the form is submitted, only how the value is picked. ── --}}
+        <input type="hidden" name="batch_from" x-ref="battFromInput" value="{{ $filterBatchFrom }}">
+        <input type="hidden" name="batch_to"   x-ref="battToInput"   value="{{ $filterBatchTo }}">
+
+        <div class="relative shrink-0"
+             x-data="{
+                open: false,
+                mode: (@js($filterBatchFrom) && @js($filterBatchTo) && @js($filterBatchFrom) !== @js($filterBatchTo)) ? 'range' : 'list',
+                from: @js($filterBatchFrom),
+                to: @js($filterBatchTo),
+                rFrom: @js($filterBatchFrom ?: null),
+                rTo: @js($filterBatchTo ?: null),
+                pickYear(y) {
+                    this.from = String(y); this.to = String(y);
+                    this.apply();
+                },
+                clearAll() {
+                    this.from = ''; this.to = ''; this.rFrom = null; this.rTo = null; this.mode = 'list';
+                    this.apply();
+                },
+                startRange() {
+                    this.mode = 'range';
+                    this.rFrom = this.from || null;
+                    this.rTo   = this.to || null;
+                },
+                backToList() { this.mode = 'list'; },
+                applyRange() {
+                    if (!this.rFrom || !this.rTo) return;
+                    this.from = String(this.rFrom); this.to = String(this.rTo);
+                    this.apply();
+                },
+                apply() {
+                    this.$refs.battFromInput.value = this.from;
+                    this.$refs.battToInput.value   = this.to;
+                    this.open = false;
+                    window.__admEmpCleanSubmit(this.$el.closest('form'));
+                },
+                label() {
+                    if (!this.from && !this.to) return 'All Batch Years';
+                    if (this.from && this.to && this.from !== this.to) {
+                        var lo = this.from <= this.to ? this.from : this.to;
+                        var hi = this.from <= this.to ? this.to   : this.from;
+                        return 'Batch ' + lo + '–' + hi;
+                    }
+                    return 'Batch ' + (this.from || this.to);
+                }
+             }"
+             @click.outside="open = false">
+
+            <button type="button" @click="open = !open"
+                    class="yb-adm-dd-btn flex items-center gap-2"
+                    :class="open ? 'active' : ''"
+                    style="min-width:150px;">
+                <i class="fa-regular fa-calendar text-[0.8rem]"></i>
+                <span x-text="label()"></span>
+                <i class="fa-solid fa-chevron-down text-[0.65rem] ml-auto transition-transform duration-150" :class="open ? 'rotate-180' : ''"></i>
+            </button>
+
+            <div x-show="open" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 class="absolute left-0 top-[calc(100%+6px)] z-30 w-[220px] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
+
+                {{-- ── LIST MODE ── --}}
+                <template x-if="mode === 'list'">
+                    <div>
+                        <button type="button" @click="clearAll()"
+                                class="w-full text-left px-3.5 py-2 text-[0.82rem] font-semibold"
+                                :class="(!from && !to) ? 'bg-[#7a3f91]/10 text-[#7a3f91]' : 'text-[#333333] hover:bg-[#faf7fc]'">
+                            All Batch Years
+                        </button>
+                        <div class="max-h-[128px] overflow-y-auto border-t border-[#F0EAF5]">
+                            @foreach($batches as $b)
+                            <button type="button" @click="pickYear('{{ $b }}')"
+                                    class="w-full text-left px-3.5 py-1.5 text-[0.82rem] font-medium"
+                                    :class="(from === '{{ $b }}' && to === '{{ $b }}') ? 'bg-[#7a3f91]/10 text-[#7a3f91] font-semibold' : 'text-[#333333] hover:bg-[#faf7fc]'">
+                                {{ $b }}
+                            </button>
+                            @endforeach
+                        </div>
+                        <button type="button" @click="startRange()"
+                                class="w-full text-left px-3.5 py-2 text-[0.82rem] font-semibold text-[#7a3f91] border-t border-[#F0EAF5] hover:bg-[#faf7fc]">
+                            <i class="fa-solid fa-plus text-[0.7rem] mr-1.5"></i>Add Range
+                        </button>
+                    </div>
+                </template>
+
+                {{-- ── RANGE MODE ── --}}
+                <template x-if="mode === 'range'">
+                    <div>
+                        <div class="px-3.5 pt-2.5 pb-1.5 text-[0.72rem] font-bold uppercase tracking-wide text-[#7a3f91]"
+                             x-text="rFrom && rTo ? ('Batch ' + (rFrom <= rTo ? rFrom : rTo) + '–' + (rFrom <= rTo ? rTo : rFrom)) : 'Select a range'"></div>
+                        <div class="grid grid-cols-2 border-t border-[#F0EAF5]">
+                            <div class="border-r border-[#F0EAF5]">
+                                <div class="px-3 pt-2 pb-1 text-[0.68rem] font-bold uppercase tracking-wide text-[#999999]">From: <span x-text="rFrom || '—'"></span></div>
+                                <div class="max-h-[104px] overflow-y-auto">
+                                    @foreach($batches as $b)
+                                    <button type="button" @click="rFrom = '{{ $b }}'"
+                                            class="w-full text-left px-3 py-1.5 text-[0.8rem]"
+                                            :class="rFrom === '{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333] hover:bg-[#faf7fc] font-medium'">
+                                        {{ $b }}
+                                    </button>
+                                    @endforeach
+                                </div>
+                            </div>
+                            <div>
+                                <div class="px-3 pt-2 pb-1 text-[0.68rem] font-bold uppercase tracking-wide text-[#999999]">To: <span x-text="rTo || '—'"></span></div>
+                                <div class="max-h-[104px] overflow-y-auto">
+                                    @foreach($batches as $b)
+                                    <button type="button" @click="rTo = '{{ $b }}'"
+                                            class="w-full text-left px-3 py-1.5 text-[0.8rem]"
+                                            :class="rTo === '{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333] hover:bg-[#faf7fc] font-medium'">
+                                        {{ $b }}
+                                    </button>
+                                    @endforeach
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 px-3 py-2 border-t border-[#F0EAF5]">
+                            <button type="button" @click="backToList()"
+                                    class="text-[0.78rem] font-semibold text-[#666666] hover:text-[#333333]">
+                                Back to List
+                            </button>
+                            <button type="button" @click="applyRange()"
+                                    :disabled="!rFrom || !rTo"
+                                    class="ml-auto text-[0.78rem] font-bold text-[#7a3f91] disabled:opacity-30 disabled:cursor-not-allowed hover:text-[#5f3172]">
+                                Apply
+                            </button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        {{-- ── Program filter — multi-select checkbox dropdown (was a
+             plain single-value <select>). Same plain-GET-form mechanism
+             as the Batch dropdown above: picks are staged in Alpine
+             state and only written into the hidden `course` input (as a
+             comma-joined list, e.g. "BSIT,BSCRIM") at the moment of
+             Apply, then this.form.submit()-equivalent navigates so the
+             server sees it via mount(). ── --}}
+        <input type="hidden" name="course" x-ref="courseInput" value="{{ implode(',', $filterCourses) }}">
+
+        <div class="relative shrink-0"
+             x-data="{
+                open: false,
+                selected: @js($filterCourses),
+                allCodes: @js(collect($courses)->pluck('code')->values()),
+                toggle(code) {
+                    var i = this.selected.indexOf(code);
+                    if (i === -1) this.selected.push(code); else this.selected.splice(i, 1);
+                },
+                toggleAll() {
+                    this.selected = this.isAllSelected() ? [] : this.allCodes.slice();
+                },
+                isAllSelected() {
+                    return this.allCodes.length > 0 && this.selected.length === this.allCodes.length;
+                },
+                apply() {
+                    this.$refs.courseInput.value = this.selected.join(',');
+                    this.open = false;
+                    window.__admEmpCleanSubmit(this.$el.closest('form'));
+                },
+                clearAll() {
+                    this.selected = [];
+                },
+                label() {
+                    return window.__admEmpCoursesLabel(this.selected);
+                }
+             }"
+             @click.outside="open = false">
+
+            <button type="button" @click="open = !open"
+                    class="yb-adm-dd-btn flex items-center gap-2"
+                    :class="open ? 'active' : ''"
+                    style="min-width:200px; max-width:260px;">
+                <i class="fa-solid fa-graduation-cap text-[0.8rem]"></i>
+                <span class="truncate" x-text="label()"></span>
+                <i class="fa-solid fa-chevron-down text-[0.65rem] ml-auto transition-transform duration-150" :class="open ? 'rotate-180' : ''"></i>
+            </button>
+
+            <div x-show="open" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 class="absolute left-0 top-[calc(100%+6px)] z-30 w-[260px] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
+
+                <label class="flex items-center gap-2.5 px-3.5 py-2 text-[0.82rem] font-semibold text-[#333333] hover:bg-[#faf7fc] cursor-pointer border-b border-[#F0EAF5]">
+                    <span class="adm-chk" :class="isAllSelected() ? 'adm-chk-on' : ''" @click.prevent="toggleAll()">
+                        <i class="fa-solid fa-check" x-show="isAllSelected()" x-cloak></i>
+                    </span>
+                    Select All
+                </label>
+
+                <div class="max-h-[220px] overflow-y-auto">
+                    @foreach($courses as $c)
+                    <label class="flex items-center gap-2.5 px-3.5 py-1.5 text-[0.8rem] font-medium text-[#333333] hover:bg-[#faf7fc] cursor-pointer">
+                        <span class="adm-chk" :class="selected.includes('{{ $c['code'] }}') ? 'adm-chk-on' : ''" @click.prevent="toggle('{{ $c['code'] }}')">
+                            <i class="fa-solid fa-check" x-show="selected.includes('{{ $c['code'] }}')" x-cloak></i>
+                        </span>
+                        <span class="truncate">{{ $c['name'] }}</span>
+                    </label>
+                    @endforeach
+                </div>
+
+                <div class="flex items-center gap-2 px-3 py-2 border-t border-[#F0EAF5]">
+                    <button type="button" @click="clearAll()"
+                            class="text-[0.78rem] font-semibold text-[#666666] hover:text-[#333333]">
+                        Clear
+                    </button>
+                    <button type="button" @click="apply()"
+                            class="ml-auto text-[0.78rem] font-bold text-[#7a3f91] hover:text-[#5f3172]">
+                        Apply
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {{-- Reset — a plain link back to the bare route (no query string
+             at all), which is itself a full page navigation, so it
+             always lands with both filters genuinely empty. ── --}}
+        <a href="{{ route('employment.tracking') }}"
+           onclick="window.__admEmpShowFilterLoading()"
+           class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                  bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer no-underline"
+           style="color:#333333;">
+            <i class="fas fa-rotate-left text-sm"></i>
+            <span class="hidden sm:inline">Reset</span>
+        </a>
+    </form>
+
+    {{-- ══ FILTER-CHANGE LOADING OVERLAY — shown the instant a filter
+         pick (Batch/Program Apply) or Reset triggers its full-page
+         navigation, since the browser needs a moment to actually load
+         the new URL and there's otherwise a blank/unresponsive-feeling
+         gap right after clicking. Same big plain spinner icon as the
+         Admin Yearbook page's centered loading state. Absolutely
+         positioned against the header+filter wrapper (which is
+         `relative`) and anchored to its bottom edge with `top:100%`,
+         then stretched way past the bottom (`bottom:-2000px`) so the
+         frosted backdrop covers the ENTIRE rest of the page below the
+         filter bar — stat cards, every chart row, everything — not
+         just a fixed-height sliver. A plain height like 260px only
+         covered the stat-cards row and left the charts below it
+         uncovered/visible, which is the "kalahati" problem. The
+         translucent blurred white background keeps the purple spinner
+         icon visible against whatever colorful content is underneath.
+         Triggered from __admEmpCleanSubmit() (used by every filter
+         control) and the Reset link's onclick above — both do a real
+         page navigation right after, so there's no matching "hide"
+         call needed; the next page load simply replaces this whole
+         DOM. ── --}}
+    <div id="admEmpFilterLoading" class="absolute left-0 right-0 z-30 flex items-start justify-center" style="top:100%; bottom:-2000px; padding-top:80px; display:none; background:rgba(255,255,255,.85); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);">
+        <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+    </div>
+
+    </div>{{-- /header + filter bar wrapper --}}
+
     {{-- ══ FLASH TOAST — mirrors the Registrar Employment Tracking
          export toast (info while generating, success/error after). ══ --}}
     <div x-data="{
@@ -785,7 +1356,7 @@ new class extends Component {
          in a relative container so the center loading spinner below can
          float above it without disturbing layout — same pattern as the
          Registrar Employment Tracking dashboard. ── --}}
-    <div class="relative flex-1 min-h-0">
+    <div class="relative">
 
     {{-- Center overlay spinner — icon only, no background box, absolutely
          positioned over the scroll area, so it never competes with any
@@ -799,9 +1370,13 @@ new class extends Component {
         </div>
     </div>
 
-    <div class="flex flex-col gap-4 pb-6 -mr-5 pr-5 sm:-mr-7 sm:pr-7 lg:-mr-10 lg:pr-10 overflow-y-auto overflow-x-hidden flex-1 min-h-0
-                [&::-webkit-scrollbar]:w-[5px] [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-track]:rounded-full
-                [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb:hover]:bg-[#7a3f91]"
+    {{-- Content now flows naturally in the page instead of scrolling in
+         its own inner container — the page itself is the scroll parent
+         (see notes above), so this is a plain block, not flex-1/
+         overflow-y-auto anymore. Horizontal clipping/padding classes
+         kept since some inner elements (dropdowns etc.) still rely on
+         the negative-margin/padding trick for their own scrollbars. ── --}}
+    <div class="flex flex-col gap-4 pb-6"
          wire:loading.class="opacity-40 pointer-events-none" wire:target="refreshAll"
          style="transition:opacity .2s ease;">
 
@@ -908,8 +1483,12 @@ new class extends Component {
                     <span class="{{ $chartTtl }}">Employment Status</span>
                 </div>
             </div>
-            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+            <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
                 <canvas id="admChartStatus"></canvas>
+                <div id="admChartStatusNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
+                    <i class="fa-solid fa-chart-pie text-[1.8rem] adm-nodata-icon" style="color:#7a3f91; opacity:.35;"></i>
+                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
+                </div>
             </div>
         </div>
 
@@ -920,8 +1499,12 @@ new class extends Component {
                     <span class="{{ $chartTtl }}">Work Location</span>
                 </div>
             </div>
-            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+            <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
                 <canvas id="admChartLocation"></canvas>
+                <div id="admChartLocationNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
+                    <i class="fa-solid fa-earth-americas text-[1.8rem] adm-nodata-icon" style="color:#e879f9; opacity:.4;"></i>
+                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
+                </div>
             </div>
         </div>
 
@@ -932,8 +1515,12 @@ new class extends Component {
                     <span class="{{ $chartTtl }}">Job-Course Relevance</span>
                 </div>
             </div>
-            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+            <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
                 <canvas id="admChartRelevance"></canvas>
+                <div id="admChartRelevanceNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
+                    <i class="fa-solid fa-bullseye text-[1.8rem] adm-nodata-icon" style="color:#10b981; opacity:.35;"></i>
+                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
+                </div>
             </div>
         </div>
 
@@ -947,7 +1534,7 @@ new class extends Component {
             <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
                 <canvas id="admChartUnemployed"></canvas>
                 <div id="admChartUnemployedNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
-                    <i class="fa-solid fa-circle-info text-[1.8rem] opacity-25"></i>
+                    <i class="fa-solid fa-circle-info text-[1.8rem] adm-nodata-icon" style="color:#f59e0b; opacity:.4;"></i>
                     <p class="text-[0.8rem] font-semibold opacity-60">No unemployment data yet</p>
                 </div>
             </div>
@@ -965,8 +1552,12 @@ new class extends Component {
                     <span class="{{ $chartTtl }}">Employment Type</span>
                 </div>
             </div>
-            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+            <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
                 <canvas id="admChartEmpType"></canvas>
+                <div id="admChartEmpTypeNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
+                    <i class="fa-solid fa-briefcase text-[1.8rem] adm-nodata-icon" style="color:#a855f7; opacity:.35;"></i>
+                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
+                </div>
             </div>
         </div>
 
@@ -977,8 +1568,12 @@ new class extends Component {
                     <span class="{{ $chartTtl }}">Career Path Labels</span>
                 </div>
             </div>
-            <div class="p-4" style="height:220px;" wire:ignore>
+            <div class="p-4 relative" style="height:220px;" wire:ignore>
                 <canvas id="admChartCareerPath"></canvas>
+                <div id="admChartCareerPathNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
+                    <i class="fa-solid fa-route text-[1.8rem] adm-nodata-icon" style="color:#14b8a6; opacity:.35;"></i>
+                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
+                </div>
             </div>
         </div>
 
@@ -989,8 +1584,12 @@ new class extends Component {
                     <span class="{{ $chartTtl }}">Further Education</span>
                 </div>
             </div>
-            <div class="p-4 flex items-center justify-center" style="height:220px;" wire:ignore>
+            <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
                 <canvas id="admChartEduStatus"></canvas>
+                <div id="admChartEduStatusNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
+                    <i class="fa-solid fa-graduation-cap text-[1.8rem] adm-nodata-icon" style="color:#3b82f6; opacity:.4;"></i>
+                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
+                </div>
             </div>
         </div>
 
@@ -1450,45 +2049,29 @@ new class extends Component {
     function donut(id, data){
         if(!data || !data.labels) return;
         var empty = allZero(data.data);
+
+        // Toggle canvas visibility BEFORE touching the chart, then always
+        // destroy+recreate below rather than mutating an existing chart's
+        // data in place. Previously, when a filter change moved a chart
+        // from "no data" to "has data" (or vice versa), an in-place
+        // existing.update('active') call could run while the canvas still
+        // measured 0×0 (display:none from the PREVIOUS empty state) —
+        // Chart.js computes doughnut segment geometry from the canvas's
+        // size at update time, so a doughnut updated while hidden can
+        // render with wrong/garbled proportions once shown again, even
+        // though the underlying data was correct. Always rebuilding fresh
+        // on a canvas whose visibility is already correct sidesteps that
+        // class of bug entirely, at the cost of a cheap re-render.
         toggleNoData(id, empty);
         if(empty){ kill(id); return; }
         var c = document.getElementById(id); if(!c) return;
 
-        // Ask Chart.js itself (not just our local registry) whether this
-        // canvas already has a live chart attached. Two overlapping
-        // initAll() calls (e.g. from a fast double-commit) can otherwise
-        // race: both see registry[id] as unset and both try to create a
-        // new Chart on the same canvas, which throws "Canvas is already
-        // in use". Chart.getChart() is Chart.js's own source of truth.
-        var existing = (typeof Chart !== 'undefined' && Chart.getChart) ? Chart.getChart(c) : null;
-
-        if(existing){
-            registry[id] = existing;
-            existing.data.labels = data.labels;
-            existing.data.datasets[0].data = data.data;
-            existing.data.datasets[0].backgroundColor = data.colors;
-            existing.update('active');
-            return;
-        }
-
-        if(registry[id]){
-            // Our registry thinks a chart exists but Chart.js doesn't know
-            // about it anymore (already destroyed elsewhere) — drop the
-            // stale reference before creating a fresh one.
-            delete registry[id];
-        }
-
-        // Belt-and-suspenders: even though Chart.getChart(c) returned
-        // nothing above, Livewire's DOM morphing can occasionally leave a
-        // canvas element marked as "in use" internally by Chart.js without
-        // a live entry in Chart.getChart()'s registry (e.g. when the
-        // canvas node itself gets replaced/recreated mid-render). Calling
-        // kill(id) here is a no-op if the canvas is genuinely free, but it
-        // guarantees any lingering instance tied to this element is torn
-        // down before we ever call "new Chart()" — this is what fixes the
-        // "Canvas is already in use" crash that donut() alone didn't guard
-        // against (unlike hbar()/polar()/groupedBar(), which already kill()
-        // unconditionally before creating).
+        // Always tear down any existing instance (registry or Chart.js's
+        // own registry — Livewire's DOM morphing can occasionally leave a
+        // canvas element marked "in use" internally without a live entry
+        // in our local registry) before creating a fresh one. This also
+        // still prevents the "Canvas is already in use" crash from two
+        // overlapping initAll() runs racing on the same canvas.
         kill(id);
 
         var opts = {
@@ -1533,6 +2116,9 @@ new class extends Component {
 
     function polar(id, data){
         if(!data || !data.labels) return;
+        var empty = allZero(data.data);
+        toggleNoData(id, empty);
+        if(empty){ kill(id); return; }
         var c = document.getElementById(id); if(!c) return;
         kill(id);
         registry[id] = new Chart(c, {
@@ -1829,9 +2415,9 @@ new class extends Component {
 
             /**
              * The exported report is ALWAYS the current page-level scope
-             * — Batch Year range + College + Programs + Employment
-             * Status, whatever is selected at the top of the dashboard
-             * (read straight off $wire). Name/ID search does not scope
+             * — Batch Year range + Program(s), whatever is selected at
+             * the top of the dashboard (read straight off $wire, same
+             * as reportSummary() above). Name/ID search does not scope
              * this — it never scoped the dashboard either.
              */
             async doExport(type, wire) {
@@ -1861,9 +2447,26 @@ new class extends Component {
 
                 var self = this;
 
-                // Filters removed — the export always covers everything,
-                // so no filter params are sent.
-                var params = new URLSearchParams({ type: type });
+                // Read straight off the filter <form>'s hidden inputs —
+                // same reasoning as __admEmpReportSummary() above, this
+                // sidesteps the $wire array-proxy quirk entirely and is
+                // guaranteed to match whatever the last page navigation
+                // actually applied.
+                var fromEl2   = document.querySelector('input[name="batch_from"]');
+                var toEl2     = document.querySelector('input[name="batch_to"]');
+                var courseEl2 = document.querySelector('input[name="course"]');
+                var from    = fromEl2 ? fromEl2.value.trim() : '';
+                var to      = toEl2   ? toEl2.value.trim()   : '';
+                var courses = courseEl2 && courseEl2.value.trim()
+                    ? courseEl2.value.trim().split(',').map(function(c){ return c.trim(); }).filter(Boolean)
+                    : [];
+
+                var paramObj = { type: type };
+                if (from) paramObj.batch_from = from;
+                if (to)   paramObj.batch_to   = to;
+                if (courses.length) paramObj.course = courses.join(',');
+
+                var params = new URLSearchParams(paramObj);
                 var url = ADM_EMP_EXPORT_URL + '?' + params.toString();
 
                 try {
