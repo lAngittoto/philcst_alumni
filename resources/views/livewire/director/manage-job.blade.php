@@ -342,11 +342,39 @@ new class extends Component {
         $dedupKey = 'job-self::' . $job->id . '::' . $action . '::' . now()->format('Y-m-d');
         $role     = auth()->user()?->role;
 
+        // ── Director posting a job: notify BOTH the director's own bell
+        //    AND the Admin bell, in the SAME request, right when the job
+        //    row is written. This is what keeps the Admin notification
+        //    timestamp in sync with the jobs table "posted X ago" —
+        //    previously only director_notifications got written here,
+        //    so Admin only ever found out later (from a separate poller
+        //    elsewhere), which is why the bell timestamp lagged behind
+        //    the table by several minutes. ──
         if ($role === 'director' && $this->directorId) {
             $this->writeDirectorNotif($dedupKey, $notifTitle, $message);
+
+            if ($action === 'created') {
+                // Matches the Admin sidebar's job-posted:: convention —
+                // one row per job, never grouped, badge shows "NEW JOB".
+                $this->writeAdminNotif(
+                    'job-posted::' . $job->id,
+                    'New Job Posting',
+                    $title . ($job->company_name ? ' at ' . $job->company_name : '') . ' — Posted by: Alumni Director'
+                );
+            } else {
+                // Everything else (updated/activated/deactivated/etc.)
+                // falls into the generic grouped "Job Posting Update"
+                // bucket the Admin sidebar already collapses per job.
+                $this->writeAdminNotif(
+                    'job-updated::' . $job->id,
+                    'Job Posting Update',
+                    $job->job_title . ' has been updated.'
+                );
+            }
             return;
         }
 
+        // Admin posting themselves — just the one bell.
         $this->writeAdminNotif($dedupKey, $notifTitle, $message);
     }
 
@@ -395,35 +423,36 @@ new class extends Component {
 
     private function writeAdminNotif(string $dedupKey, string $notifTitle, string $message): void
     {
-        $userId = auth()->id();
-        if (!$userId) return;
-
+        // admin_notifications is a single GLOBAL feed shared by every
+        // admin account — there is no user_id column on this table (see
+        // the migration: id, icon, title, message, link_route,
+        // link_label, dedup_key, read, read_at, timestamps only), unlike
+        // director_notifications which IS scoped per director_id. So
+        // this just writes one row that every admin sees, with no user
+        // resolution needed at all.
         try {
             $exists = DB::table('admin_notifications')
-                ->where('user_id', $userId)
                 ->where('dedup_key', $dedupKey)
                 ->exists();
 
             if ($exists) {
                 DB::table('admin_notifications')
-                    ->where('user_id', $userId)
                     ->where('dedup_key', $dedupKey)
                     ->update([
                         'title'      => $notifTitle,
                         'message'    => $message,
                         'read'       => 0,
+                        'read_at'    => null,
                         'updated_at' => now(),
                     ]);
             } else {
                 DB::table('admin_notifications')->insert([
-                    'user_id'     => $userId,
                     'icon'        => 'briefcase',
                     'title'       => $notifTitle,
                     'message'     => $message,
                     'link_route'  => 'admin.job/management',
                     'link_label'  => 'View Jobs',
                     'dedup_key'   => $dedupKey,
-                    'count'       => 1,
                     'read'        => 0,
                     'created_at'  => now(),
                     'updated_at'  => now(),

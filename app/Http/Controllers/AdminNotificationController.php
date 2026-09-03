@@ -108,4 +108,30 @@ class AdminNotificationController extends Controller
 
         return response()->json(['status' => 'ok']);
     }
+
+    /**
+     * DELETE /admin/notifications/{notification}
+     *
+     * Tinatawag ng deleteNotif() sa layout JS — pero DAPAT lang ito
+     * i-call ng frontend kapag 30+ days na ang notification (enforced
+     * client-side via x-show sa delete button). Dinodoble-check din
+     * dito server-side para hindi ma-bypass sa pamamagitan ng direct
+     * fetch/curl call sa endpoint na ito.
+     *
+     * Nagde-delete lang ng notification MESSAGE row mismo — hindi
+     * hinahawakan yung underlying record (user, job post, event, atbp)
+     * na pinagmulan ng notification na ito.
+     */
+    public function destroy(AdminNotification $notification)
+    {
+        if ($notification->created_at && $notification->created_at->diffInDays(now()) < 30) {
+            return response()->json([
+                'message' => 'Notification is not yet eligible for deletion.',
+            ], 422);
+        }
+
+        $notification->delete();
+
+        return response()->json(['status' => 'deleted']);
+    }
 }

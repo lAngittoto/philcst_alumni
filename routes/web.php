@@ -200,6 +200,7 @@ Route::middleware(['auth', 'admin'])->group(function () {
     Route::post('/admin/notifications',                      [AdminNotificationController::class, 'store'])      ->name('admin.notifications.store');
     Route::patch('/admin/notifications/read-all',            [AdminNotificationController::class, 'markAllRead'])->name('admin.notifications.read-all');
     Route::patch('/admin/notifications/{notification}/read', [AdminNotificationController::class, 'markRead'])   ->name('admin.notifications.read');
+    Route::delete('/admin/notifications/{notification}',     [AdminNotificationController::class, 'destroy'])    ->name('admin.notifications.destroy');
 });
 
 // ===================================

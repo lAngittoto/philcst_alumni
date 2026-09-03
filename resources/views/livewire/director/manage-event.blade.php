@@ -288,6 +288,62 @@ new class extends Component {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // NOTIFY ADMIN — real-time, direct DB insert, one row PER EVENT.
+    //
+    // admin_notifications is a single GLOBAL feed shared by every admin
+    // account (no user_id column — see the migration: id, icon, title,
+    // message, link_route, link_label, dedup_key, read, read_at,
+    // timestamps only).
+    //
+    // Uses a STABLE dedup_key per event ('event-status::{id}') rather
+    // than a per-action key — so Approved -> Completed updates the SAME
+    // row in place instead of stacking a second "Event Completed" row
+    // next to "Event Approved". One notification per event, its content
+    // just morphs as the event's status changes — same convention as
+    // updateDirectorReviewNotif() above and notifyOrganizerEvent()'s
+    // event_id matching.
+    // ─────────────────────────────────────────────────────────────────────
+    private function writeAdminEventNotif(int $eventId, string $icon, string $notifTitle, string $message): void
+    {
+        $dedupKey = 'event-status::' . $eventId;
+
+        try {
+            $exists = DB::table('admin_notifications')
+                ->where('dedup_key', $dedupKey)
+                ->exists();
+
+            if ($exists) {
+                DB::table('admin_notifications')
+                    ->where('dedup_key', $dedupKey)
+                    ->update([
+                        'icon'       => $icon,
+                        'title'      => $notifTitle,
+                        'message'    => $message,
+                        'read'       => 0,
+                        'read_at'    => null,
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                DB::table('admin_notifications')->insert([
+                    'icon'        => $icon,
+                    'title'       => $notifTitle,
+                    'message'     => $message,
+                    'link_route'  => 'events',
+                    'link_label'  => 'View Events',
+                    'dedup_key'   => $dedupKey,
+                    'read'        => 0,
+                    'created_at'  => now(),
+                    'updated_at'  => now(),
+                ]);
+            }
+
+            $this->dispatch('admin-notif-refresh');
+        } catch (\Throwable) {
+            // Non-critical — don't break the approve/complete action if this fails
+        }
+    }
+
     private function autoRejectExpiredPendingEvents(): void
     {
         $now = \Carbon\Carbon::now('UTC');
@@ -359,6 +415,19 @@ new class extends Component {
         if ($affected->isEmpty()) return;
 
         $query()->update(['status' => 'COMPLETED']);
+
+        // ── Notify admin per event — this UPDATES the same row the
+        //    approval created (matched on event-status::{id}), morphing
+        //    "Event Approved" into "Event Completed" in place rather
+        //    than adding a second notification for the same event. ──
+        foreach ($affected as $event) {
+            $this->writeAdminEventNotif(
+                (int) $event->id,
+                'circle-check',
+                'Event Completed',
+                "\"{$event->title}\" has been completed."
+            );
+        }
     }
 
     public function updatingSearch(): void        { $this->resetPage(); }
@@ -738,12 +807,16 @@ new class extends Component {
             // ── Refresh director bell so approved events clear from pending count ──
             $this->dispatch('dir-notif-refresh');
 
-            // ── Notify admin: forwarded via the admin events page's JS bridge ──
-            $this->dispatch('admin-event-approved-notify', [
-                'id'        => $this->approveEventId,
-                'title'     => $this->approveEventTitle,
-                'submitter' => $event->organizer->name ?? 'Alumni Director',
-            ]);
+            // ── Notify admin: real-time, direct DB insert (same request
+            //    as the approval), one row per event that will later
+            //    morph into "Event Completed" instead of stacking a
+            //    second row when the event finishes. ──
+            $this->writeAdminEventNotif(
+                $this->approveEventId,
+                'calendar-check',
+                'Event Approved',
+                "{$this->approveEventTitle} was approved — Submitted by: " . ($event->organizer->name ?? 'Alumni Director') . '.'
+            );
 
             $this->dispatch('flash-message', type: 'success', message: "'{$this->approveEventTitle}' approved!");
             $this->dispatch('event-management-updated', id: $this->approveEventId, title: $this->approveEventTitle, action: 'approved');

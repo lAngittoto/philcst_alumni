@@ -37,23 +37,52 @@
             box-shadow: none !important;
         }
         .bell-badge { pointer-events: none; }
-        .admin-notif-item { cursor: pointer; position: relative; }
-        .admin-notif-hover-label {
-            pointer-events: none;
-            position: fixed;
-            background: rgba(0,0,0,0.82);
-            color: #fff;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-            padding: 4px 10px;
-            border-radius: 20px;
-            opacity: 0;
-            transition: opacity 0.15s ease;
-            white-space: nowrap;
-            z-index: 99999;
+
+        /* ── Ripple / expanding wave effect for unread indicators ──
+           Used on the bell badge count AND the per-notification red
+           dot. Rather than a ::before that inherits the parent's exact
+           box shape (which broke for .bell-badge, since it's
+           min-width-based and can be oblong once it holds "99+"), this
+           renders a separate small ABSOLUTE, perfectly circular layer
+           centered directly behind the badge/dot via a fixed size +
+           top/left/transform centering — independent of whatever shape
+           or size the parent element itself ends up being. */
+        .notif-ripple {
+            position: relative;
         }
-        .admin-notif-item:hover .admin-notif-hover-label { opacity: 1; }
+        .notif-ripple::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 18px;
+            height: 18px;
+            margin-top: -9px;
+            margin-left: -9px;
+            border-radius: 999px;
+            background: #EF4444;
+            opacity: 0.6;
+            animation: notifRippleWave 1.8s ease-out infinite;
+            pointer-events: none;
+            z-index: -1;
+        }
+        @keyframes notifRippleWave {
+            0%   { transform: scale(1);    opacity: 0.55; }
+            70%  { transform: scale(2.2);  opacity: 0; }
+            100% { transform: scale(2.2);  opacity: 0; }
+        }
+        .admin-notif-item { cursor: pointer; position: relative; }
+
+        /* Disable text selection/copy inside the notif panel — header
+           label, item titles, messages, timestamps, footer hint.
+           Buttons/links still clickable, just no text selection. */
+        .admin-notif-no-select,
+        .admin-notif-no-select * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
 
         .admin-notif-close-wrap {
             position: relative;
@@ -92,6 +121,81 @@
         .admin-notif-close-wrap:hover .admin-notif-close-tip { opacity: 1; }
         @media (max-width: 1023px) {
             .admin-notif-close-tip { display: none !important; }
+        }
+
+        /* ── Delete button (30+ days old notifs only) ── */
+        .admin-notif-delete-btn {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 8px;
+            border: none;
+            background: transparent;
+            color: #DC2626;
+            cursor: pointer;
+            flex-shrink: 0;
+            transition: background-color .15s ease, color .15s ease;
+        }
+        .admin-notif-delete-btn:hover {
+            background: #FDE8E8;
+            color: #B91C1C;
+        }
+        .admin-notif-delete-btn i { font-size: .85rem; pointer-events: none; }
+        .admin-notif-delete-tooltip {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            right: 0;
+            background: #DC2626;
+            color: #fff;
+            font-size: .62rem;
+            font-weight: 600;
+            letter-spacing: .02em;
+            padding: 4px 8px;
+            border-radius: 6px;
+            white-space: nowrap;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(2px);
+            transition: opacity .12s ease, transform .12s ease;
+            z-index: 10;
+        }
+        .admin-notif-delete-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            right: 7px;
+            border: 4px solid transparent;
+            border-top-color: #DC2626;
+        }
+        .admin-notif-delete-btn:hover .admin-notif-delete-tooltip {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ── Read/Unread section divider ─────────────────────────── */
+        .admin-notif-divider {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px 6px;
+        }
+        .admin-notif-divider::before,
+        .admin-notif-divider::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: #E8E0F0;
+        }
+        .admin-notif-divider-label {
+            font-size: .64rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: #B9A6C7;
+            white-space: nowrap;
         }
 
         /* ════════════════════════════════════════════════════════
@@ -141,7 +245,7 @@
             font-size: 10.5px;
             font-weight: 800;
             letter-spacing: 0.16em;
-            color: #9A8AA8;
+            color: #333333;
         }
         .admin-collapse-icon-btn {
             display: flex;
@@ -228,6 +332,8 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            _deleting:  false,
+            deleteToast: { show: false, message: '' },
 
             async init() {
                 await this._fetch();
@@ -237,10 +343,16 @@
             _startPolling() {
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
-                this._pollTimer = setInterval(function () { self._fetch(); }, 10000);
+                // 1.5s so a new job posting (or any admin notif) lands in
+                // the bell almost the instant it's written to the DB —
+                // was 10000ms, which is what made the bell lag behind the
+                // jobs table by several seconds even after the write
+                // itself became real-time.
+                this._pollTimer = setInterval(function () { self._fetch(); }, 1500);
             },
 
             async _fetch() {
+                if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
                 try {
                     var res = await window.fetch('/admin/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -287,24 +399,32 @@
                             n.icon === 'book-open'
                         );
 
-                        // NEW JOB POST — dedup prefix: job-posted::
+                        // NEW JOB POST — dedup prefix: job-posted:: (separate row per job, never grouped)
                         var isNewJobEvent = rawDedup.startsWith('job-posted::');
 
-                        // Job edits/updates — dedup prefix: job-management::
-                        var isJobUpdateEvent = (
-                            rawDedup.startsWith('job-management::') ||
-                            (!isNewJobEvent && n.icon === 'briefcase')
-                        );
+                        // EVENT APPROVED / COMPLETED — dedup prefix: event-status::
+                        // One row PER EVENT that morphs in place: created as
+                        // "Event Approved", later updated (same dedup_key,
+                        // same row) to "Event Completed" when the event's
+                        // date passes. Never grouped/collapsed. Badge is
+                        // decided by the row's current title/icon rather
+                        // than by a fixed dedup suffix, since the same row
+                        // can represent either state depending on when you
+                        // look at it.
+                        //
+                        // Legacy prefixes (event-approved:: / event-completed::)
+                        // are still recognized for any older rows already in
+                        // the table before this morph-in-place change.
+                        var isEventStatusRow = rawDedup.startsWith('event-status::');
+                        var isApprovedEvent = isEventStatusRow
+                            ? (n.title === 'Event Approved')
+                            : rawDedup.startsWith('event-approved::');
+                        var isCompletedEvent = isEventStatusRow
+                            ? (n.title === 'Event Completed')
+                            : rawDedup.startsWith('event-completed::');
 
-                        // EVENT APPROVED — dedup prefix: event-approved::
-                        var isApprovedEvent = rawDedup.startsWith('event-approved::');
-
-                        var isEventEvent = (
-                            rawDedup.startsWith('event-management::') ||
-                            rawDedup.startsWith('event-announced::')  ||
-                            n.icon === 'calendar-check' ||
-                            n.icon === 'calendar'
-                        );
+                        // COURSE — capped at 2 rows a day (AM / PM slot), dedup_key already
+                        // encodes course::{day}::{am|pm} so the map naturally caps it.
                         var isCourseEvent = (
                             rawDedup.startsWith('course::') ||
                             (n.icon === 'clipboard-list' && n.title === 'Course Update')
@@ -320,10 +440,9 @@
                         else if (isEmploymentEvent)  { groupKey = 'employment_day::' + day; }
                         else if (isYearbookEvent)    { groupKey = 'yearbook_day::' + day; }
                         else if (isNewJobEvent)      { groupKey = rawDedup; }
-                        else if (isJobUpdateEvent)   { groupKey = 'job_update_day::' + day; }
                         else if (isApprovedEvent)    { groupKey = rawDedup; }
-                        else if (isEventEvent)       { groupKey = 'event_day::' + day; }
-                        else if (isCourseEvent)      { groupKey = 'course_day::' + day; }
+                        else if (isCompletedEvent)   { groupKey = rawDedup; }
+                        else if (isCourseEvent)      { groupKey = rawDedup; }           // dedup_key already caps to 2/day
                         else { groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id); }
 
                         if (map.has(groupKey)) {
@@ -336,8 +455,6 @@
                             if (isUserEvent)         { g.title = 'User Management Update'; }
                             else if (isEmploymentEvent)  { g.title = 'Employment Tracking Update'; }
                             else if (isYearbookEvent)    { g.title = 'Yearbook Update'; }
-                            else if (isJobUpdateEvent)   { g.title = 'Job Posting Update'; }
-                            else if (isEventEvent)       { g.title = 'Event Update'; }
                             else if (isCourseEvent)      { g.title = 'Course Update'; }
                         } else {
                             map.set(groupKey, Object.assign({}, n, {
@@ -351,9 +468,8 @@
                                      : isEmploymentEvent   ? (n.title || 'Employment Tracking Update')
                                      : isYearbookEvent     ? (n.title || 'Yearbook Update')
                                      : isNewJobEvent       ? (n.title || 'New Job Posting')
-                                     : isJobUpdateEvent    ? (n.title || 'Job Posting Update')
                                      : isApprovedEvent     ? (n.title || 'Event Approved')
-                                     : isEventEvent        ? (n.title || 'Event Update')
+                                     : isCompletedEvent    ? (n.title || 'Event Completed')
                                      : isCourseEvent       ? (n.title || 'Course Update')
                                      : n.title,
                                 icon:  isUserCreatedEvent  ? 'user-tie'
@@ -364,18 +480,18 @@
                                      : isEmploymentEvent   ? 'chart-line'
                                      : isYearbookEvent     ? 'book-open'
                                      : isNewJobEvent       ? 'briefcase'
-                                     : isJobUpdateEvent    ? 'briefcase'
                                      : isApprovedEvent     ? 'calendar-check'
-                                     : isEventEvent        ? 'calendar-check'
+                                     : isCompletedEvent    ? 'circle-check'
                                      : isCourseEvent       ? 'clipboard-list'
                                      : (n.icon || 'bell'),
                                 // Carry flags so the template knows what kind of row this is
-                                _isNewJob:        isNewJobEvent,
-                                _isApprovedEvent: isApprovedEvent,
-                                _isUserCreated:   isUserCreatedEvent,
-                                _isUserToggled:   isUserToggledEvent,
-                                _isUserEmail:     isUserEmailEvent,
-                                _isUserUsername:  isUserUsernameEvent,
+                                _isNewJob:         isNewJobEvent,
+                                _isApprovedEvent:  isApprovedEvent,
+                                _isCompletedEvent: isCompletedEvent,
+                                _isUserCreated:    isUserCreatedEvent,
+                                _isUserToggled:    isUserToggledEvent,
+                                _isUserEmail:      isUserEmailEvent,
+                                _isUserUsername:   isUserUsernameEvent,
                             }));
                         }
                     });
@@ -386,7 +502,13 @@
                 return this.items.filter(function (n) { return !n.read; }).length;
             },
 
-            toggle() { this.open = !this.open; },
+            toggle() {
+                this.open = !this.open;
+                // Fetch immediately on open — don't wait for the next
+                // 1.5s poll tick, so anything posted a split-second ago
+                // is guaranteed visible the moment the panel appears.
+                if (this.open) this._fetch();
+            },
             close()  { this.open = false; },
 
             async markRead(item) {
@@ -420,27 +542,59 @@
                 } catch (e) { /* ignore */ }
             },
 
-            async markReadByRoute(routeName) {
-                var matched = this.items.filter(function (n) {
-                    return n.link_route === routeName && !n.read;
-                });
-                if (matched.length === 0) return;
+            // Deletes a notification MESSAGE only — never the underlying
+            // record that generated it. Only ever called for notifs that
+            // are 30+ days old (enforced by the x-show on the delete
+            // button in the markup), so this is purely a "clean up old
+            // noise" action, not a moderation action on real data.
+            async deleteNotif(item) {
+                var ids = item._ids || [item.id];
+                var self = this;
+                this._deleting = true;
+                this._showDeleteToast('Notification deleted');
+
+                // Give the slide-out leave transition time to play before
+                // actually removing the item from the array.
+                await new Promise(function (resolve) { setTimeout(resolve, 250); });
+                this.items = this.items.filter(function (n) { return n !== item; });
+
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                for (var i = 0; i < matched.length; i++) {
-                    matched[i].read = true;
-                    var ids = matched[i]._ids || [matched[i].id];
-                    for (var j = 0; j < ids.length; j++) {
-                        try {
-                            await window.fetch('/admin/notifications/' + ids[j] + '/read', {
-                                method: 'PATCH',
-                                headers: {
-                                    'X-CSRF-TOKEN':     csrf,
-                                    'X-Requested-With': 'XMLHttpRequest',
-                                }
-                            });
-                        } catch (e) { /* ignore */ }
+                var failedIds = [];
+
+                for (var i = 0; i < ids.length; i++) {
+                    try {
+                        var res = await window.fetch('/admin/notifications/' + ids[i], {
+                            method: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN':     csrf,
+                                'X-Requested-With': 'XMLHttpRequest',
+                            }
+                        });
+                        if (!res.ok) failedIds.push(ids[i]);
+                    } catch (e) {
+                        failedIds.push(ids[i]);
                     }
                 }
+
+                this._deleting = false;
+
+                if (failedIds.length > 0) {
+                    await this._fetch();
+                    this._showDeleteToast('Delete failed, please try again');
+                }
+            },
+
+            // Small self-clearing toast shown at the edge of the notif
+            // panel. Re-triggerable: calling this again while a toast is
+            // already showing resets its timer instead of stacking.
+            _showDeleteToast(message) {
+                var self = this;
+                this.deleteToast.message = message;
+                this.deleteToast.show = true;
+                if (this._toastTimer) clearTimeout(this._toastTimer);
+                this._toastTimer = setTimeout(function () {
+                    self.deleteToast.show = false;
+                }, 1200);
             },
         };
     };
@@ -488,10 +642,51 @@
     });
 
     // PATH D — livewire:navigated
+    //
+    // FIX: this used to unconditionally clear + restart the poller (or
+    // even create a brand-new one) on every single wire:navigate hop,
+    // with no check on WHERE we navigated to. Two bugs came from that:
+    //
+    //   1. Navigating away from the admin portal entirely (e.g. after
+    //      logout, or — if an Alpine store ever survives across a role
+    //      switch — into a Director/Organizer page) would still find
+    //      #admin-bell-btn missing, but the code didn't check for that:
+    //      it called s.init() anyway, which kicks off _fetch() +
+    //      _startPolling() against /admin/notifications using whatever
+    //      session happens to be active at that moment. If a fresh
+    //      login (as a DIFFERENT account) landed in the same 150ms
+    //      window, this stray poll could interfere with the new
+    //      session and boot it back out — the exact "log in, instantly
+    //      logged out" bug.
+    //
+    //   2. The bare 150ms setTimeout meant the poller could still be
+    //      alive and ticking during that gap even when we're mid-
+    //      logout, since wire:navigate doesn't tear down window-scoped
+    //      JS state.
+    //
+    // Now: only (re)start the poller if we've actually landed on an
+    // admin page (#admin-bell-btn or #admin-bell-btn-mobile present in
+    // the DOM). Anywhere else, tear the store down completely so it
+    // can't keep firing requests in the background.
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
+
+            var onAdminPage = !!(document.getElementById('admin-bell-btn') || document.getElementById('admin-bell-btn-mobile'));
             var s = Alpine.store('adminNotifs');
+
+            if (!onAdminPage) {
+                // Left the admin portal (logout, role switch, or any
+                // other page) — fully stop and drop the store so
+                // nothing keeps polling in the background.
+                if (s) {
+                    if (s._pollTimer) clearInterval(s._pollTimer);
+                    s._pollTimer = null;
+                    s.open = false;
+                }
+                return;
+            }
+
             if (s) {
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
@@ -544,27 +739,6 @@
         if (s && s.open) positionAdminPanel();
     });
 
-    // Cursor-following tooltip
-    document.addEventListener('mousemove', function (e) {
-        var target = e.target;
-        if (!target || typeof target.closest !== 'function') return;
-        var item = target.closest('.admin-notif-item');
-        if (!item) return;
-        var label = item.querySelector('.admin-notif-hover-label');
-        if (!label) return;
-        label.style.left = (e.clientX + 14) + 'px';
-        label.style.top  = (e.clientY + 14) + 'px';
-    });
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  SIDEBAR SMART MARK-READ
-    // ─────────────────────────────────────────────────────────────────────────
-    window.__adminSidebarNotifsMarkRead = function (routeName) {
-        var s = window.__safeAdminNotifsStore();
-        if (!s) return;
-        s.markReadByRoute(routeName);
-    };
-
     // ─────────────────────────────────────────────────────────────────────────
     //  TIMESTAMP HELPER — "Today, 5:07 PM" vs "Jun 23, 5:07 PM"
     // ─────────────────────────────────────────────────────────────────────────
@@ -590,9 +764,10 @@
     //  user-toggled:: = activate / deactivate   → separate row per action
     //  user-email::   = alumni email updated    → separate row per update
     //
-    //  job-posted::   = brand-new job post      → separate row per job
-    //  job-management:: = edits/updates         → grouped by day
-    //  event-approved:: = event approved        → separate row per event
+    //  job-posted::      = brand-new job post      → separate row per job (only job trigger — no "edit" notif)
+    //  event-approved::  = event approved           → separate row per event
+    //  event-completed:: = event marked completed   → separate row per event
+    //  course::{day}::{am|pm} = course changes       → capped at 2 rows a day (matches chat's cap)
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstAdminNotifListeners) {
         window.__philcstAdminNotifListeners = true;
@@ -763,19 +938,6 @@
             });
         });
 
-        // ── job UPDATE (edits only — NOT new posts) ─────────────────────────
-        window.addEventListener('admin-job-updated', function (e) {
-            var d = _adminDetail(e);
-            _saveAdminNotif({
-                icon:       'briefcase',
-                title:      'Job Posting Update',
-                message:    (d.title || 'A job posting') + ' has been updated.',
-                link_route: 'job.posts',
-                link_label: 'View Jobs',
-                dedup_key:  'job-management::' + (d.id || Math.floor(Date.now() / 60000)),
-            });
-        });
-
         // ── NEW JOB POST ─────────────────────────────────────────────────────
         window.addEventListener('__admin-job-posted-rich', function (e) {
             var d = e.detail;
@@ -809,29 +971,35 @@
             });
         });
 
-        // ── event (generic updates) ──────────────────────────────────────────
-        window.addEventListener('admin-event-updated', function (e) {
-            var d = _adminDetail(e);
+        // ── EVENT COMPLETED ──────────────────────────────────────────────────
+        window.addEventListener('__admin-event-completed-rich', function (e) {
+            var d = e.detail;
+            if (!d || !d.id) return;
             _saveAdminNotif({
-                icon:       'calendar-check',
-                title:      'Event Update',
-                message:    (d.title || 'An event') + ' has been updated.',
+                icon:       'circle-check',
+                title:      'Event Completed',
+                message:    d.message,
                 link_route: 'events',
                 link_label: 'View Events',
-                dedup_key:  'event-management::' + (d.id || Math.floor(Date.now() / 60000)),
+                dedup_key:  'event-completed::' + d.id,
             });
         });
 
-        // ── course ────────────────────────────────────────────────────────────
+        // ── course — capped at 2 notifications a day ─────────────────────────
+        // dedup_key groups by DAY + slot (AM/PM half), so no matter how many
+        // course edits happen, only up to 2 rows land in the bell per day.
         window.addEventListener('admin-course-updated', function (e) {
             var d = _adminDetail(e);
+            var now  = new Date();
+            var day  = now.toISOString().slice(0, 10);
+            var slot = now.getHours() < 12 ? 'am' : 'pm';
             _saveAdminNotif({
                 icon:       'clipboard-list',
                 title:      'Course Update',
                 message:    _courseChangeMessage(d),
                 link_route: 'course',
                 link_label: 'View Courses',
-                dedup_key:  'course::' + (d.id || Math.floor(Date.now() / 60000)),
+                dedup_key:  'course::' + day + '::' + slot,
             });
         });
 
@@ -984,7 +1152,6 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="window.__adminSidebarNotifsMarkRead('{{ $link['route'] }}')"
                    class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
                           {{ $isActive
                               ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
@@ -998,7 +1165,7 @@
 
                     <span class="admin-collapsible-text font-medium tracking-wide flex-1
                                  {{ $isActive ? 'font-semibold' : 'text-[#333333]' }}"
-                          style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}">
+                          style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}{{ $link['route'] === 'employment.tracking' ? 'font-size:13.5px;' : '' }}">
                         {{ $link['label'] }}
                     </span>
 
@@ -1009,6 +1176,22 @@
                 </a>
             @endforeach
         </nav>
+
+        {{-- Admin notification poller — mounted here (not <head>) so it
+             renders as part of the sidebar's own Livewire tree. On mount
+             it preloads existing admin_notifications straight into the
+             JS store, so the bell already has data on the very first
+             paint instead of waiting for the client-side poll's first
+             tick. Wrapped in the same "kill it before logout" guard as
+             the organizer sidebar's coord-notif-poller, so it can't keep
+             firing requests into a session that's about to be destroyed
+             — see the logout link's @click below, which dispatches
+             'stop-admin-polling' before the wire:navigate hop starts. --}}
+        <div wire:ignore.self x-data="{ pollingActive: true }" x-on:stop-admin-polling.window="pollingActive = false">
+            <template x-if="pollingActive">
+                @livewire('admin.admin-notif-poller')
+            </template>
+        </div>
 
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
@@ -1031,7 +1214,33 @@
                wire:navigate
                title="Logout"
                x-data="{ loggingOut: false }"
-               @click="loggingOut = true"
+               @click="
+                   loggingOut = true;
+                   /* Stop the admin notif poller RIGHT NOW, before the
+                      wire:navigate hop even starts. Without this, the
+                      setInterval poll timer survives the SPA navigation
+                      (wire:navigate never fully reloads the page/JS
+                      context) and keeps firing /admin/notifications
+                      requests using the about-to-be-invalidated session.
+                      If you log back in as a different account fast
+                      enough, one of those stale in-flight requests can
+                      land after the new session is established and
+                      knock it back out — which is what caused the
+                      'log in as X, instantly logged out again' bug.
+                      Also dispatches stop-admin-polling, which unmounts
+                      the admin-notif-poller Livewire component entirely
+                      (its own wire:poll can't be reached by a plain
+                      JS clearInterval, since it's driven by Livewire's
+                      own request cycle, not a setInterval we control). */
+                   window.dispatchEvent(new CustomEvent('stop-admin-polling'));
+                   if (window.__safeAdminNotifsStore) {
+                       var s = window.__safeAdminNotifsStore();
+                       if (s) {
+                           if (s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
+                           s.open = false;
+                       }
+                   }
+               "
                class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
                       transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
                style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
@@ -1117,7 +1326,7 @@
                     x-transition:enter="transition ease-out duration-200"
                     x-transition:enter-start="opacity-0 scale-0"
                     x-transition:enter-end="opacity-100 scale-100"
-                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
+                    class="notif-ripple bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
                            bg-red-500 text-white text-[9px] font-black
                            flex items-center justify-center px-1 leading-none
                            shadow-md ring-2 ring-white"
@@ -1154,7 +1363,7 @@
                     x-transition:enter="transition ease-out duration-200"
                     x-transition:enter-start="opacity-0 scale-0"
                     x-transition:enter-end="opacity-100 scale-100"
-                    class="bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
+                    class="notif-ripple bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
                            bg-red-500 text-white text-[9px] font-black
                            flex items-center justify-center px-1 leading-none
                            shadow-md ring-2 ring-white"
@@ -1190,8 +1399,14 @@
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
     x-transition:leave-end="opacity-0 scale-95 -translate-y-2"
     @click.stop
-    class="bg-white rounded-2xl border border-[#E8E0F0] flex flex-col overflow-hidden"
+    @contextmenu.prevent
+    @copy.prevent
+    class="bg-white rounded-2xl border border-[#E8E0F0] flex flex-col overflow-hidden admin-notif-no-select"
     style="
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
         position: fixed;
         top: 88px;
         left: 12px;
@@ -1238,6 +1453,40 @@
         </div>
     </div>
 
+    {{-- Sub-header --}}
+    <div class="flex items-center justify-between px-[18px] py-[9px] border-b border-[#E0D8ED] shrink-0" style="background:#FFFFFF;">
+        <span style="font-size:11px; font-weight:600; color:#7A3F91; letter-spacing:0.1em; text-transform:uppercase;">Recent Activity</span>
+        <span x-show="$store.adminNotifs && $store.adminNotifs.items.length > 0"
+              x-cloak
+              style="font-size:11px; font-weight:700; color:#7A3F91; background:#F0E9F6; padding:2px 9px; border-radius:999px;"
+              x-text="$store.adminNotifs ? $store.adminNotifs.items.length : 0">
+        </span>
+    </div>
+
+    {{-- Delete toast — appears right below Recent Activity, quick fade --}}
+    <div
+        x-show="$store.adminNotifs && $store.adminNotifs.deleteToast.show"
+        x-cloak
+        x-transition:enter="transition ease-out duration-150"
+        x-transition:enter-start="opacity-0 -translate-y-2"
+        x-transition:enter-end="opacity-100 translate-y-0"
+        x-transition:leave="transition ease-in duration-100"
+        x-transition:leave-start="opacity-100 translate-y-0"
+        x-transition:leave-end="opacity-0 -translate-y-2"
+        style="
+            background: #ECFDF3;
+            border-bottom: 1px solid #BBF7D0;
+            padding: 10px 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        ">
+        <i class="fas fa-circle-check" style="font-size:13px; color:#16A34A;"></i>
+        <span style="font-size:12.5px; font-weight:600; color:#15803D;"
+              x-text="$store.adminNotifs ? $store.adminNotifs.deleteToast.message : ''"></span>
+    </div>
+
     {{-- Scrollable notification list --}}
     <div class="admin-notif-list-scroll overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
 
@@ -1247,15 +1496,25 @@
                      style="background:#F5F5F5;">
                     <i class="fas fa-bell-slash" style="font-size:28px;color:#D1D5DB;"></i>
                 </div>
-                <p class="font-bold text-[#888888]" style="font-size:15px;">No notifications yet</p>
-                <p class="text-[#BBBBBB] mt-2 leading-relaxed" style="font-size:13px;">
+                <p class="font-bold text-[#333333]" style="font-size:15px;">No notifications yet</p>
+                <p class="text-[#555555] mt-2 leading-relaxed" style="font-size:13px;">
                     User, employment, yearbook, job,<br>event, and course updates will appear here.
                 </p>
             </div>
         </template>
 
         <template x-if="$store.adminNotifs">
-            <template x-for="notif in $store.adminNotifs.items" :key="notif.id">
+            <template x-for="(notif, notifIdx) in $store.adminNotifs.items" :key="notif.id">
+                <div
+                    x-transition:leave="transition ease-in duration-250"
+                    x-transition:leave-start="opacity-100 translate-x-0"
+                    x-transition:leave-end="opacity-0 translate-x-full"
+                    style="overflow: hidden;">
+                    <div class="admin-notif-divider"
+                         x-show="notif.read && notifIdx > 0 && !$store.adminNotifs.items[notifIdx - 1].read"
+                         x-cloak>
+                        <span class="admin-notif-divider-label">Already Read</span>
+                    </div>
                 <div
                     class="admin-notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
@@ -1304,6 +1563,7 @@
                                     x-show="Number(notif.count) > 1
                                             && !notif._isNewJob
                                             && !notif._isApprovedEvent
+                                            && !notif._isCompletedEvent
                                             && !notif._isUserCreated
                                             && !notif._isUserToggled
                                             && !notif._isUserEmail
@@ -1386,14 +1646,14 @@
                                     APPROVED
                                 </span>
 
-                                {{-- JOB UPDATE badge (blue) --}}
+                                {{-- COMPLETED EVENT badge (teal) --}}
                                 <span
-                                    x-show="notif.icon === 'briefcase' && !notif._isNewJob && !notif.read"
+                                    x-show="notif._isCompletedEvent && !notif.read"
                                     x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                     style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
-                                    JOB
+                                           background:linear-gradient(135deg,#0d9488,#0f766e);">
+                                    COMPLETED
                                 </span>
 
                                 {{-- User badge (generic grouped) --}}
@@ -1426,16 +1686,6 @@
                                     YEARBOOK
                                 </span>
 
-                                {{-- Event badge (generic) --}}
-                                <span
-                                    x-show="notif.icon === 'calendar-check' && !notif._isApprovedEvent && !notif.read"
-                                    x-cloak
-                                    class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
-                                    EVENT
-                                </span>
-
                                 {{-- Course badge --}}
                                 <span
                                     x-show="notif.icon === 'clipboard-list' && notif.title === 'Course Update' && !notif.read"
@@ -1448,10 +1698,10 @@
                             </div>
 
                             <span x-show="!notif.read" x-cloak
-                                  class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
+                                  class="notif-ripple w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
                         </div>
 
-                        <p class="text-[#666666] mt-1 leading-relaxed"
+                        <p class="text-[#333333] mt-1 leading-relaxed"
                            style="font-size:12px;
                                   display:-webkit-box;
                                   -webkit-line-clamp:2;
@@ -1460,18 +1710,28 @@
                            x-text="notif.message">
                         </p>
 
-                        {{-- Timestamp --}}
-                        <div class="flex items-center gap-1 mt-2">
-                            <i class="fas fa-clock" style="font-size:10px;color:#CCCCCC;"></i>
-                            <span style="font-size:11px;color:#AAAAAA;font-weight:500;"
-                                  x-text="window.__adminFormatNotifTime(notif.created_at)">
+                        {{-- Timestamp + delete (delete only shows once notif is 30+ days old) --}}
+                        <div class="flex items-center justify-between gap-1 mt-2">
+                            <span class="flex items-center gap-1">
+                                <i class="fas fa-clock" style="font-size:10px;color:#333333;"></i>
+                                <span style="font-size:11px;color:#333333;font-weight:500;"
+                                      x-text="window.__adminFormatNotifTime(notif.created_at)">
+                                </span>
                             </span>
+
+                            <button type="button"
+                                    class="admin-notif-delete-btn"
+                                    x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
+                                    x-cloak
+                                    @click.stop="$store.adminNotifs && $store.adminNotifs.deleteNotif(notif)"
+                                    aria-label="Delete notification">
+                                <i class="fas fa-trash-can"></i>
+                                <span class="admin-notif-delete-tooltip">Delete</span>
+                            </button>
                         </div>
                     </div>
 
-                    <span class="admin-notif-hover-label">
-                        <i class="fas fa-eye" style="font-size:10px;margin-right:5px;"></i>View Details
-                    </span>
+                </div>
                 </div>
             </template>
         </template>
@@ -1479,7 +1739,8 @@
 
     {{-- Panel Footer --}}
     <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
-        <p style="font-size:11px;color:#BBBBBB;font-weight:500;">
+        <p style="font-size:13px;color:#333333;font-weight:600;
+                  -webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;">
             Click a notification to view and mark as read
         </p>
     </div>

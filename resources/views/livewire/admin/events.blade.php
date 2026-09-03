@@ -77,7 +77,9 @@ new class extends Component {
     private function autoCompleteExpiredEvents(): void
     {
         $now = \Carbon\Carbon::now('UTC');
-        AdminEvent::withoutTrashed()
+
+        $expiring = AdminEvent::withoutTrashed()
+            ->with('organizer:id,name')
             ->where('status', 'APPROVED')
             ->where(function ($q) use ($now) {
                 $q->where(function ($sub) use ($now) {
@@ -88,13 +90,31 @@ new class extends Component {
                         ->where('event_date', '<=', $now);
                 });
             })
+            ->get(['id', 'title', 'organizer_id']);
+
+        if ($expiring->isEmpty()) {
+            return;
+        }
+
+        AdminEvent::withoutTrashed()
+            ->whereIn('id', $expiring->pluck('id'))
             ->update(['status' => 'COMPLETED']);
+
+        // Fire a completion notify event per event — bridge script below
+        // forwards each one to the admin notification store.
+        foreach ($expiring as $event) {
+            $this->dispatch('admin-event-completed-notify', [
+                'id'    => $event->id,
+                'title' => $event->title,
+            ]);
+        }
     }
 
     /**
-     * Fire admin-event-pending-notify / admin-event-approved-notify browser
-     * events for recently submitted (PENDING) and recently approved
-     * (APPROVED) events so the sidebar bell picks them up.
+     * Fire admin-event-approved-notify browser events for recently approved
+     * (APPROVED) events so the sidebar bell picks them up. Admin only cares
+     * about approvals and completions — pending submissions no longer
+     * trigger a bell notification.
      *
      * Mirrors job-posts.blade.php's dispatchJobNotifications() pattern:
      * the frontend bridge script (bottom of this file) listens for these
@@ -105,22 +125,6 @@ new class extends Component {
     private function dispatchEventNotifications(): void
     {
         try {
-            // ── New submissions awaiting review ─────────────────────────────
-            $recentPending = AdminEvent::withoutTrashed()
-                ->with('organizer:id,name')
-                ->where('status', 'PENDING')
-                ->where('created_at', '>=', now('Asia/Manila')->subHours(24))
-                ->orderBy('created_at', 'desc')
-                ->get(['id', 'title', 'organizer_id', 'created_at']);
-
-            foreach ($recentPending as $event) {
-                $this->dispatch('admin-event-pending-notify', [
-                    'id'        => $event->id,
-                    'title'     => $event->title,
-                    'submitter' => $event->organizer?->name ?? 'Alumni Director',
-                ]);
-            }
-
             // ── Recently approved events ─────────────────────────────────────
             $recentApproved = AdminEvent::withoutTrashed()
                 ->with('organizer:id,name')
@@ -1693,13 +1697,16 @@ select.adm-select-arrow {
     //  EVENT NOTIFICATION BRIDGE
     //
     //  Mirrors job-posts.blade.php's notification bridge pattern exactly:
-    //  Listens for the Livewire-dispatched 'admin-event-pending-notify' and
-    //  'admin-event-approved-notify' events, dedups via sessionStorage so
-    //  we don't re-fire on every filter change / Livewire re-render, then
-    //  forwards a rich payload ("Event Title — Submitted by: Name") to
-    //  admin.blade.php's notification store via __admin-event-pending-rich
-    //  / __admin-event-approved-rich, which persists it server-side with
-    //  its own dedup_key (event-pending::{id} / event-approved::{id}).
+    //  Listens for the Livewire-dispatched 'admin-event-approved-notify'
+    //  and 'admin-event-completed-notify' events, dedups via
+    //  sessionStorage so we don't re-fire on every filter change /
+    //  Livewire re-render, then forwards a rich payload to
+    //  admin.blade.php's notification store via __admin-event-approved-rich
+    //  / __admin-event-completed-rich, which persists it server-side with
+    //  its own dedup_key (event-approved::{id} / event-completed::{id}).
+    //
+    //  Admin only cares about approvals and completions — new/pending
+    //  submissions no longer trigger a bell notification.
     // ─────────────────────────────────────────────────────────────────
     var EVT_NOTIF_STORE_KEY = 'admevt_notified_ids';
 
@@ -1725,25 +1732,6 @@ select.adm-select-arrow {
         return _evtGetNotifiedIds().indexOf(key) !== -1;
     }
 
-    // ── New event submitted (PENDING) ──────────────────────────────────
-    document.addEventListener('admin-event-pending-notify', function (e) {
-        var d = e.detail;
-        if (!d) return;
-        var payload = Array.isArray(d) ? d[0] : d;
-        if (!payload || !payload.id) return;
-
-        var key = 'pending-' + payload.id;
-        if (_evtIsAlreadyNotified(key)) return;
-        _evtAddNotifiedId(key);
-
-        var message = (payload.title || 'A new event')
-            + ' — Submitted by: ' + (payload.submitter || 'Alumni Director');
-
-        window.dispatchEvent(new CustomEvent('__admin-event-pending-rich', {
-            detail: { id: payload.id, message: message }
-        }));
-    });
-
     // ── Event approved (APPROVED) ───────────────────────────────────────
     document.addEventListener('admin-event-approved-notify', function (e) {
         var d = e.detail;
@@ -1759,6 +1747,24 @@ select.adm-select-arrow {
             + ' was approved — Submitted by: ' + (payload.submitter || 'Alumni Director');
 
         window.dispatchEvent(new CustomEvent('__admin-event-approved-rich', {
+            detail: { id: payload.id, message: message }
+        }));
+    });
+
+    // ── Event completed (COMPLETED) ───────────────────────────────────────
+    document.addEventListener('admin-event-completed-notify', function (e) {
+        var d = e.detail;
+        if (!d) return;
+        var payload = Array.isArray(d) ? d[0] : d;
+        if (!payload || !payload.id) return;
+
+        var key = 'completed-' + payload.id;
+        if (_evtIsAlreadyNotified(key)) return;
+        _evtAddNotifiedId(key);
+
+        var message = (payload.title || 'An event') + ' has been completed successfully.';
+
+        window.dispatchEvent(new CustomEvent('__admin-event-completed-rich', {
             detail: { id: payload.id, message: message }
         }));
     });

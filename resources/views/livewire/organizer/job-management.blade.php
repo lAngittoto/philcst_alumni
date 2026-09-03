@@ -176,6 +176,57 @@ new class extends Component {
         } catch (\Throwable) {}
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // NOTIFY ADMIN — real-time, same request as the job insert.
+    //
+    // Mirrors the director side's writeAdminNotif() (manage-job_blade.php)
+    // so an organizer's job post shows up in the Admin bell at the exact
+    // moment it's saved — not several minutes later from a separate
+    // poller.
+    //
+    // admin_notifications is a single GLOBAL feed shared by every admin
+    // account — there is no user_id column on this table (per the
+    // migration: id, icon, title, message, link_route, link_label,
+    // dedup_key, read, read_at, timestamps only). So this writes one
+    // row that every admin sees, with no per-user resolution needed.
+    // ─────────────────────────────────────────────────────────────────────
+    private function writeAdminNotif(string $dedupKey, string $notifTitle, string $message): void
+    {
+        try {
+            $exists = DB::table('admin_notifications')
+                ->where('dedup_key', $dedupKey)
+                ->exists();
+
+            if ($exists) {
+                DB::table('admin_notifications')
+                    ->where('dedup_key', $dedupKey)
+                    ->update([
+                        'title'      => $notifTitle,
+                        'message'    => $message,
+                        'read'       => 0,
+                        'read_at'    => null,
+                        'updated_at' => now(),
+                    ]);
+            } else {
+                DB::table('admin_notifications')->insert([
+                    'icon'        => 'briefcase',
+                    'title'       => $notifTitle,
+                    'message'     => $message,
+                    'link_route'  => 'admin.job/posts',
+                    'link_label'  => 'View Jobs',
+                    'dedup_key'   => $dedupKey,
+                    'read'        => 0,
+                    'created_at'  => now(),
+                    'updated_at'  => now(),
+                ]);
+            }
+
+            $this->dispatch('admin-notif-refresh');
+        } catch (\Throwable) {
+            // Non-critical — don't break the main action if this fails
+        }
+    }
+
     private function storeJobImage($imageFile, string $existingPath = ''): ?string
     {
         if ($imageFile && $imageFile instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
@@ -598,6 +649,19 @@ public function closePostModal(): void
 
         // ── NOTIFY SELF (organizer sidebar notif — grouped ×N per day client-side) ──
         $this->dispatch('job-self-action', action: 'created', id: $job->id, title: $job->job_title);
+
+        // ── NOTIFY ADMIN — real-time, written in this same request so the
+        //    Admin bell timestamp matches the jobs table "posted X ago"
+        //    exactly. dedup_key uses job-posted:: to match the format the
+        //    Admin sidebar's client-side grouping already expects (one
+        //    row per job, never collapsed). ──
+        $this->writeAdminNotif(
+            dedupKey:   'job-posted::' . $job->id,
+            notifTitle: 'New Job Posting',
+            message:    $job->job_title
+                        . ($job->company_name ? ' at ' . $job->company_name : '')
+                        . ' — Posted by: ' . $this->organizerName(),
+        );
 
     $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
         $this->showPostModal = false;
