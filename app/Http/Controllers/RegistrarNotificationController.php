@@ -62,14 +62,14 @@ class RegistrarNotificationController extends Controller
             'alumni_name'  => ['nullable', 'string', 'max:255'],
         ]);
 
-        $today    = Carbon::today();
+        $today    = Carbon::now('Asia/Manila')->startOfDay();
         $dedupKey = $data['dedup_key'] ?? substr($data['message'], 0, 40);
         $newIds   = array_values(array_unique(array_map('intval', $data['alumni_ids'] ?? [])));
 
         return DB::transaction(function () use ($data, $today, $dedupKey, $newIds) {
             $existing = RegistrarNotification::where('title', $data['title'])
                 ->where('dedup_key', $dedupKey)
-                ->whereDate('created_at', $today)
+                ->where('created_at', '>=', $today)
                 ->latest('updated_at')
                 ->lockForUpdate()
                 ->first();

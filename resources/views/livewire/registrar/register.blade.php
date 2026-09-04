@@ -373,18 +373,29 @@ public function closeImportModal(): void
             $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($path);
             $reader->setReadDataOnly(true);
             $reader->setReadEmptyCells(false);
+
+            // Only load the first sheet — avoids parsing every tab in the
+            // workbook when the user's file happens to have several.
+            $sheetNames = $reader->listWorksheetNames($path);
+            if (!empty($sheetNames)) {
+                $reader->setLoadSheetsOnly([$sheetNames[0]]);
+            }
+
             $sheet      = $reader->load($path)->getActiveSheet();
-            $rows       = [];
             $highestRow = $sheet->getHighestDataRow();
             $highestCol = $sheet->getHighestDataColumn();
 
-            foreach ($sheet->getRowIterator(1, $highestRow) as $row) {
-                $rd = [];
-                $ci = $row->getCellIterator('A', $highestCol);
-                $ci->setIterateOnlyExistingCells(false);
-                foreach ($ci as $cell) $rd[] = $cell->getValue();
-                $rows[] = $rd;
-            }
+            // toArray() pulls the whole used range in one pass — far fewer
+            // function calls than iterating row-by-row/cell-by-cell, which
+            // matters once files run into the thousands of rows.
+            $rows = $sheet->rangeToArray(
+                'A1:' . $highestCol . $highestRow,
+                null,   // nullValue
+                true,   // calculateFormulas (irrelevant, data-only reader)
+                false,  // formatData — skip formatting for speed
+                false   // returnCellRef
+            );
+
             return $rows;
         } catch (\Exception $e) {
             throw new \Exception('Excel parse failed: ' . $e->getMessage());
@@ -539,24 +550,21 @@ public function closeImportModal(): void
             $this->importStatus = 'Importing...';
             $now = now()->toDateTimeString();
 
-            $hashedPasswords = [];
-            foreach ($jobs as $job) {
-                $plain = $this->generateTempPassword($job['sid'], $job['lastName']);
-                $hashedPasswords[$job['sid']] = password_hash($plain, PASSWORD_BCRYPT, ['cost' => 4]);
-            }
-
             $insertedStudentIds = [];
 
-            DB::transaction(function () use ($jobs, $now, $hashedPasswords, &$insertedStudentIds) {
+            DB::transaction(function () use ($jobs, $now, &$insertedStudentIds) {
                 foreach (array_chunk($jobs, 500) as $chunkIdx => $chunk) {
+                    // Hash passwords per-chunk (not all up front) so we start
+                    // inserting sooner and never hold every hash in memory at once.
                     $userRows    = [];
                     $loginEmails = [];
                     foreach ($chunk as $job) {
+                        $plain = $this->generateTempPassword($job['sid'], $job['lastName']);
                         $userRows[]    = [
                             'name'       => $job['fullName'],
                             'role'       => 'alumni',
                             'email'      => $job['email'],
-                            'password'   => $hashedPasswords[$job['sid']],
+                            'password'   => password_hash($plain, PASSWORD_BCRYPT, ['cost' => 4]),
                             'created_at' => $now,
                             'updated_at' => $now,
                         ];
@@ -622,9 +630,14 @@ public function closeImportModal(): void
             // real Alumni.id — that's what the notification panel's
             // "highlight this alumni in the table" feature needs; the
             // student_id itself won't match against Alumni.id there.
-            $insertedIds = !empty($insertedStudentIds)
-                ? Alumni::whereIn('student_id', $insertedStudentIds)->pluck('id')->all()
-                : [];
+            // Chunked to keep each WHERE IN(...) query small even for large imports.
+            $insertedIds = [];
+            foreach (array_chunk($insertedStudentIds, 1000) as $idChunk) {
+                $insertedIds = array_merge(
+                    $insertedIds,
+                    Alumni::whereIn('student_id', $idChunk)->pluck('id')->all()
+                );
+            }
 
             $this->importProgress = $this->importTotal;
             $this->importStatus   = 'Done';
@@ -645,9 +658,25 @@ public function closeImportModal(): void
 };
 ?>
 
-<div>
+<div id="reg-page-root">
 
 <style>
+    /* ══ Disable text selection across the page (no "drag-select" highlighting) ══
+       Inputs and textareas stay selectable so users can still select/copy what they type. */
+    #reg-page-root {
+        user-select: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+    }
+    #reg-page-root input,
+    #reg-page-root textarea {
+        user-select: text;
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+    }
+
     /* ══ FLOATING LABEL INPUTS ══ */
     .fl-group { position: relative; }
 
@@ -1327,7 +1356,7 @@ public function closeImportModal(): void
             </div>
             <div>
                 <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Register Alumni</h1>
-                <p class="text-[#666666] text-xs sm:text-sm font-normal">Add new alumni to the system with their details and credentials</p>
+                <p class="text-xs sm:text-sm font-normal" style="color:#7A3F91;">Add new alumni to the system with their details and credentials</p>
             </div>
         </div>
 
@@ -1383,15 +1412,22 @@ public function closeImportModal(): void
                     <form wire:submit="registerAlumni" class="p-5 sm:p-7 space-y-5 pb-7"
                           x-data="{
                               fieldStale(key) { return ($wire.fieldErrors || []).includes(key); },
+                              isValidEmail(value) {
+                                  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+                              },
                               allFilled() {
                                   return $wire.regFirstName.trim() !== '' && $wire.regLastName.trim() !== ''
                                       && $wire.regMiddleInitial.trim() !== '' && $wire.regStudentId.trim() !== ''
-                                      && $wire.regCourseCode !== '' && $wire.regYear !== '' && $wire.regEmail.trim() !== '';
+                                      && $wire.regCourseCode !== '' && $wire.regYear !== ''
+                                      && this.isValidEmail($wire.regEmail);
                               },
                               get isDisabled() {
                                   return !!$wire.submitting || !this.allFilled() || ($wire.fieldErrors || []).length > 0;
                               },
                               get tooltip() {
+                                  if ($wire.regEmail.trim() !== '' && !this.isValidEmail($wire.regEmail)) {
+                                      return 'Please enter a valid email address (e.g. name@gmail.com)';
+                                  }
                                   if (!this.allFilled()) return 'Please fill up all required fields *';
                                   return this.isDisabled ? 'Please fix the highlighted field(s) marked in red' : '';
                               }
@@ -1839,7 +1875,8 @@ public function closeImportModal(): void
 @if($showImportModal)
 <div class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:px-4"
      style="background:rgba(27,6,46,0.60);backdrop-filter:blur(4px);"
-     @keydown.escape.window="@if($importStep !== 'processing') $wire.closeImportModal() @endif">
+     x-data="{ importStep: @js($importStep) }"
+     @keydown.escape.window="if (importStep !== 'processing') { $wire.closeImportModal() }">
 
     <div class="import-modal-box">
 
@@ -1989,7 +2026,7 @@ public function closeImportModal(): void
                     @if($importTotal > 0)
                         Importing Records {{ number_format($importProgress) }} / {{ number_format($importTotal) }}
                     @else
-                        Uploading File...
+                        Importing File...
                     @endif
                 </p>
                 <p class="text-base font-medium mb-1 text-[#888888] break-all px-4">{{ $importFileName }}</p>

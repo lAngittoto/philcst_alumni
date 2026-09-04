@@ -4,6 +4,7 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Renderless;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use App\Models\Alumni;
@@ -852,6 +853,7 @@ new class extends Component {
         }
     }
 
+    #[Renderless]
     public function uploadAlumniPhoto(): void
     {
         if (!$this->viewingProfileId || !$this->newAlumniPhoto) return;
@@ -876,6 +878,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         }
     }
 
+    #[Renderless]
     public function resetAlumniPhoto(): void
     {
         if (!$this->viewingProfileId) return;
@@ -2424,6 +2427,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                  this.pendingFile = null; this.hasFile = false;
                                  this.saving = false; this.isDefaultPending = false;
                                  this.originalSrc = this.previewSrc;
+                                 document.dispatchEvent(new CustomEvent('photo-save-end'));
                              });
                          },
 async onFileChange(event) {
@@ -2485,6 +2489,7 @@ compressImage(file, maxW, maxH, quality) {
                          savePhoto() {
                              if (this.saving) return;
                              this.saving = true;
+                             document.dispatchEvent(new CustomEvent('photo-save-start'));
                              if (this.isDefaultPending) {
                                  $wire.resetAlumniPhoto();
                              } else if (this.pendingFile) {
@@ -2495,10 +2500,14 @@ compressImage(file, maxW, maxH, quality) {
                                          this.isDefaultPending = false; this.pendingFile = null;
                                          this.previewSrc = this.originalSrc;
                                          if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                         document.dispatchEvent(new CustomEvent('photo-save-end'));
                                      },
                                      () => {}
                                  );
-                             } else { this.saving = false; }
+                             } else {
+                                 this.saving = false;
+                                 document.dispatchEvent(new CustomEvent('photo-save-end'));
+                             }
                          },
                          cancelPhoto() {
                              this.pendingFile = null; this.hasFile = false;
@@ -2571,11 +2580,6 @@ compressImage(file, maxW, maxH, quality) {
                                     </div>
                                 </div>
                             </div>
-
-                            <span x-show="saving" class="inline-flex items-center gap-1.5 font-semibold self-start"
-                                  style="font-size:.72rem;color:#7A3F91;display:none;padding-top:6px;">
-                                <i class="fas fa-spinner fa-spin" style="font-size:10px;"></i> Saving…
-                            </span>
                         </div>
 
                         <p x-show="!hasFile && !saving" class="text-center font-semibold leading-tight select-none"

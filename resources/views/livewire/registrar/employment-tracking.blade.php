@@ -174,6 +174,23 @@ new class extends Component {
         $this->refreshDashboard();
     }
 
+    /**
+     * "Apply" inside the Program dropdown — the dropdown builds its
+     * selection locally (draftCourse, in Alpine) as the registrar checks
+     * boxes, and nothing touches the server until this fires. Replaces
+     * filterCourse wholesale with the draft in ONE Livewire call, same
+     * dedupe/filter guard as updatedFilterCourse().
+     */
+    public function applyFilterCourse(array $codes): void
+    {
+        $this->filterCourse = array_values(array_unique(array_filter(
+            $codes,
+            fn ($c) => $c !== '' && $c !== null
+        )));
+        $this->closeAnyModal();
+        $this->refreshDashboard();
+    }
+
     public function updatedFilterBatchFrom(): void
     {
         if ($this->skipBatchHooks) return;
@@ -1159,14 +1176,23 @@ new class extends Component {
     .ar-dropdown { position: relative; }
     .ar-dropdown-menu {
         position: absolute; top: calc(100% + 4px); left: 0;
-        min-width: 100%; max-height: 220px; overflow-y: auto;
+        min-width: 100%; max-height: none; overflow: visible;
         background: #fff; border: 1.5px solid #E8E0F0;
         border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
         z-index: 500; padding: 4px;
+    }
+    /* Both the default (plain year list) and range (From/To) views have
+       their own internal scroll area(s) with a capped height, and their
+       footer controls ("+ Add Range" / Back to List / Apply) must always
+       stay pinned at the very end, fully visible and clickable — never
+       pushed out by (or double-scrolled against) an outer dropdown
+       scrollbar. So the outer .ar-dropdown-menu itself never scrolls;
+       only the inner year-list div(s) do. */
+    .ar-dropdown-menu .ar-year-scroll {
         scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
     }
-    .ar-dropdown-menu::-webkit-scrollbar { width: 5px; }
-    .ar-dropdown-menu::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+    .ar-dropdown-menu .ar-year-scroll::-webkit-scrollbar { width: 5px; }
+    .ar-dropdown-menu .ar-year-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
     .ar-dropdown-item {
         display: block; width: 100%; padding: 8px 10px; border-radius: 7px;
         font-size: .9rem; font-weight: 600; text-align: left; color: #333;
@@ -1348,46 +1374,15 @@ new class extends Component {
         .emp-pg-btn { min-width:26px; height:26px; padding:0 6px; font-size:.68rem; }
     }
 
-    /* ── "More content below" glow indicator ─────────────────────────────── */
-    .emp-scroll-indicator {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 40px;
-        height: 40px;
-        border: none;
-        background: transparent;
+    /* ── Default cursor rules: only actionable elements show pointer ─────── */
+    button, a, [role="button"], [wire\:click], [x-on\:click], [\@click],
+    .emp-pg-btn, .ar-report-btn, .ar-report-menu-item, [data-tip],
+    input[type="checkbox"], input[type="radio"], select,
+    .card-clickable, canvas {
         cursor: pointer;
     }
-    .emp-scroll-indicator-glow {
-        position: absolute;
-        inset: -6px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(122,63,145,.55) 0%, rgba(122,63,145,0) 70%);
-        animation: empIndicatorGlow 1.8s ease-in-out infinite;
-        pointer-events: none;
-    }
-    .emp-scroll-indicator-btn {
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 34px;
-        height: 34px;
-        border-radius: 50%;
-        background: linear-gradient(135deg,#7A3F91,#9b59b6);
-        color: #fff;
-        box-shadow: 0 2px 10px rgba(122,63,145,.45), 0 0 0 3px rgba(255,255,255,.9);
-        animation: empIndicatorBounce 1.8s ease-in-out infinite;
-        font-size: .8rem;
-    }
-    @keyframes empIndicatorGlow {
-        0%, 100% { opacity:.45; transform:scale(.9); }
-        50%      { opacity:1;   transform:scale(1.15); }
-    }
-    @keyframes empIndicatorBounce {
-        0%, 100% { transform: translateY(0); }
-        50%      { transform: translateY(-4px); }
+    button:disabled, [disabled] {
+        cursor: not-allowed;
     }
 </style>
 
@@ -1407,8 +1402,9 @@ new class extends Component {
      logout footer only). Header stays fixed in place; only the
      content below it scrolls.
 ═══════════════════════════════════════════════════════════ --}}
-<div class="bg-gray-100 flex flex-col relative" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;"
-     x-data="{ showMoreIndicator:true }">
+<div class="bg-gray-100 flex flex-col relative select-none"
+     style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;"
+     oncopy="return false;" oncut="return false;" oncontextmenu="return false;">
 
     {{-- PAGE HEADER — fixed, does not move/scroll away --}}
     <div class="emp-page-header-wrap shrink-0">
@@ -1420,7 +1416,7 @@ new class extends Component {
                 </div>
                 <div>
                     <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
-                    <p class="text-[#333333] text-xs sm:text-sm font-normal mt-0.5">System-wide alumni employment analytics &amp; records</p>
+                    <p class="text-[#7A3F91] text-xs sm:text-sm font-normal mt-0.5">System-wide alumni employment analytics &amp; records</p>
                 </div>
             </div>
 
@@ -1488,7 +1484,6 @@ new class extends Component {
                     <div class="ar-report-menu-message">
                         <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
                         <span class="txt" x-text="reportSummary()"></span>
-                        <span class="cnt" x-text="Number($wire.totalAlumni || 0).toLocaleString() + ' alumni in this scope'"></span>
                     </div>
 
                     <button type="button" @click="$store.empReport.doExport('pdf', $wire)"
@@ -1532,7 +1527,7 @@ new class extends Component {
              filter value can NEVER be mistaken for a click on the
              dashboard cards/charts underneath. ══ --}}
         <div class="emp-filter-bar flex items-center gap-2 mt-3 flex-wrap"
-             wire:loading.class="opacity-60" wire:target="toggleFilterCourse,clearFilterCourse,selectAllFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange"
+             wire:loading.class="opacity-60" wire:target="applyFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters"
              @click.stop>
 
             <span class="ar-filter-label text-sm font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
@@ -1564,17 +1559,13 @@ new class extends Component {
                     },
                     clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
                     startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
-                    pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
-                    pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
-                    rangeApplyTimer: null,
-                    applyRangeIfComplete(){
-                        if(this.rangeFrom!=='' && this.rangeTo!==''){
-                            clearTimeout(this.rangeApplyTimer);
-                            this.rangeApplyTimer = setTimeout(() => {
-                                $wire.setBatchRange(this.rangeFrom, this.rangeTo);
-                                this.close();
-                            }, 200);
-                        }
+                    pickFrom(val){ this.rangeFrom = (this.rangeFrom===val ? '' : val); },
+                    pickTo(val){ this.rangeTo = (this.rangeTo===val ? '' : val); },
+                    get rangeComplete(){ return this.rangeFrom!=='' && this.rangeTo!==''; },
+                    applyRange(){
+                        if(!this.rangeComplete) return;
+                        $wire.setBatchRange(this.rangeFrom, this.rangeTo);
+                        this.close();
                     }
                  }"
                  @click.outside="close()" wire:key="emp-batch-dropdown">
@@ -1600,15 +1591,22 @@ new class extends Component {
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" style="display:none;min-width:190px;" @click.stop>
+                     class="ar-dropdown-menu" :class="{ 'ar-dropdown-menu--range': rangeMode }" style="display:none;min-width:190px;" @click.stop>
 
-                    {{-- Default view: plain year list, exactly like before --}}
+                    {{-- Default view: plain year list, exactly like before.
+                         The year list itself scrolls internally (capped
+                         height) while "Add Range" stays pinned as a footer
+                         row at the very bottom of the dropdown — so it's
+                         always reachable without scrolling down past the
+                         years to find it. --}}
                     <template x-if="!rangeMode">
                         <div>
-                            <button type="button" @click.stop="clearYear()" :class="{'active':$wire.filterBatchFrom==='' && $wire.filterBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
-                            @foreach($this->batchYears as $year)
-                            <button type="button" @click.stop="selectYear('{{ $year }}')" :class="{'active': $wire.filterBatchFrom==='{{ $year }}' && $wire.filterBatchTo==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
-                            @endforeach
+                            <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
+                                <button type="button" @click.stop="clearYear()" :class="{'active':$wire.filterBatchFrom==='' && $wire.filterBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
+                                @foreach($this->batchYears as $year)
+                                <button type="button" @click.stop="selectYear('{{ $year }}')" :class="{'active': $wire.filterBatchFrom==='{{ $year }}' && $wire.filterBatchTo==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
+                                @endforeach
+                            </div>
                             <div class="h-px bg-[#E8E0F0] my-1"></div>
                             <button type="button" @click.stop="startRange()"
                                     class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
@@ -1621,17 +1619,19 @@ new class extends Component {
                          is clicked (no extra click/reopen needed — same
                          dropdown, just swapped view via rangeMode). From/To
                          are held in LOCAL Alpine state only — nothing is
-                         sent to the server while just one side is picked.
-                         The moment both sides have a value, applyRangeIfComplete()
-                         fires ONE Livewire call (setBatchRange) that applies
-                         the whole range at once; normalizeBatchRange() on
-                         the server auto-swaps them if From ends up later
-                         than To. --}}
+                         sent to the server while picking years. Clicking a
+                         year toggles it on/off (click again to deselect).
+                         The Apply button stays disabled until BOTH From and
+                         To have a value (rangeComplete); only then does
+                         applyRange() fire ONE Livewire call (setBatchRange)
+                         that applies the whole range at once and closes the
+                         dropdown. normalizeBatchRange() on the server
+                         auto-swaps From/To if From ends up later than To. --}}
                     <template x-if="rangeMode">
                         <div class="p-2" style="width:220px;">
                             <div class="flex items-center gap-2 mb-1">
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">From</span>
+                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">To</span>
                             </div>
                             <div class="flex items-start gap-2">
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
@@ -1650,9 +1650,11 @@ new class extends Component {
                                         class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
                                     Back to List
                                 </button>
-                                <button type="button" @click.stop="clearYear(); rangeMode=false;"
-                                        class="flex-1 text-xs font-semibold text-[#7A3F91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                    Clear
+                                <button type="button" @click.stop="applyRange()"
+                                        :disabled="!rangeComplete"
+                                        :class="rangeComplete ? 'text-white bg-[#7A3F91] hover:bg-[#6a3580] cursor-pointer' : 'text-[#B9A9C4] bg-[#F3EDF7] cursor-not-allowed'"
+                                        class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                    Apply
                                 </button>
                             </div>
                         </div>
@@ -1660,19 +1662,42 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Program Code — MULTI-SELECT with real checkboxes. Checking
-                 a box toggles that program in/out of filterCourse via
-                 toggleFilterCourse(); the dropdown stays open across
-                 clicks (no auto-close) so the registrar can check several
-                 programs in one go. A "Select All" checkbox lives in a
-                 sticky header row at the TOP of the list (not a footer
-                 button at the bottom) — it's tri-state: checked when every
-                 program is selected, indeterminate (dash) when some but
-                 not all are selected. The trigger label shows the count
-                 once 2+ are picked so the bar doesn't overflow with every
-                 selected code. --}}
+            {{-- Program Code — MULTI-SELECT with real checkboxes, opt-in via
+                 an explicit Apply button (mirrors the Batch Year dropdown's
+                 range picker): checking a box only updates LOCAL Alpine
+                 state (draftCourse) — nothing is sent to the server until
+                 "Apply" fires applyFilterCourse() in ONE Livewire call.
+                 "Clear" wipes the draft locally (no server round-trip)
+                 so the registrar can back out of a half-made selection
+                 without it ever having applied. Re-opening the dropdown
+                 re-syncs draftCourse from the last-applied $wire.filterCourse
+                 every time. "Select All" is tri-state against the draft:
+                 checked when every program is drafted, indeterminate (dash)
+                 when some but not all are. The trigger label (and the "N
+                 selected" count inside the menu) reflect what's actually
+                 applied — $wire.filterCourse — not the in-progress draft,
+                 so the bar never claims a filter is active before Apply is
+                 pressed. --}}
             <div class="ar-dropdown shrink-0"
-                 x-data="{ get open(){ return $store.empFilters.isOpen('course'); }, toggle(){ $store.empFilters.toggle('course'); if(this.open){ this.$nextTick(()=>{ if(this.$refs.courseMenu) this.$refs.courseMenu.scrollTop = 0; }); } }, close(){ $store.empFilters.close('course'); } }"
+                 x-data="{
+                    get open(){ return $store.empFilters.isOpen('course'); },
+                    draftCourse: [],
+                    toggle(){
+                        $store.empFilters.toggle('course');
+                        if(this.open){
+                            this.draftCourse = [...$wire.filterCourse];
+                            this.$nextTick(()=>{ if(this.$refs.courseMenu) this.$refs.courseMenu.scrollTop = 0; });
+                        }
+                    },
+                    close(){ $store.empFilters.close('course'); },
+                    toggleDraft(code){
+                        if(this.draftCourse.includes(code)){ this.draftCourse = this.draftCourse.filter(c => c !== code); }
+                        else { this.draftCourse.push(code); }
+                    },
+                    selectAllDraft(){ this.draftCourse = {{ Js::from(array_values(array_keys($this->courseMap))) }}; },
+                    clearDraft(){ this.draftCourse = []; },
+                    applyDraft(){ $wire.applyFilterCourse(this.draftCourse); this.close(); },
+                 }"
                  @click.outside="close()" wire:key="emp-course-dropdown">
                 <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.filterCourse.length>0,'open':open }" class="ar-dropdown-trigger">
                     <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
@@ -1695,30 +1720,52 @@ new class extends Component {
                     {{-- Header row: "Select All" checkbox sits beside the
                          count, at the TOP of the list (not a footer button
                          at the bottom) — one tap checks/unchecks every
-                         program code at once. --}}
+                         program code in the DRAFT at once. --}}
                     <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-1 -mt-1 bg-white z-10 rounded-t-[8px]">
                         <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
                             <input type="checkbox"
-                                   :checked="$wire.filterCourse.length === {{ count($this->courseMap) }}"
-                                   :indeterminate="$wire.filterCourse.length > 0 && $wire.filterCourse.length < {{ count($this->courseMap) }}"
-                                   @change="$event.target.checked ? $wire.selectAllFilterCourse() : $wire.clearFilterCourse()"
-                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
+                                   :checked="draftCourse.length === {{ count($this->courseMap) }}"
+                                   :indeterminate="draftCourse.length > 0 && draftCourse.length < {{ count($this->courseMap) }}"
+                                   @change="$event.target.checked ? selectAllDraft() : clearDraft()"
+                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
                             Select All
                         </label>
-                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="$wire.filterCourse.length > 0">
-                            <span x-text="$wire.filterCourse.length"></span> selected
+                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="draftCourse.length > 0">
+                            <span x-text="draftCourse.length"></span> selected
                         </span>
                     </div>
 
-                    @foreach($this->courseMap as $code => $name)
-                    <label class="ar-dropdown-item flex items-center gap-2 cursor-pointer select-none"
-                           :class="{'active': $wire.filterCourse.includes('{{ $code }}')}">
-                        <input type="checkbox" wire:click="toggleFilterCourse('{{ $code }}')"
-                               :checked="$wire.filterCourse.includes('{{ $code }}')"
-                               class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
-                        <span>{{ $name }}</span>
-                    </label>
-                    @endforeach
+                    <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
+                        @foreach($this->courseMap as $code => $name)
+                        <label class="ar-dropdown-item flex items-center gap-2 cursor-pointer select-none"
+                               :class="{'active': draftCourse.includes('{{ $code }}')}">
+                            <input type="checkbox" @change="toggleDraft('{{ $code }}')"
+                                   :checked="draftCourse.includes('{{ $code }}')"
+                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
+                            <span>{{ $name }}</span>
+                        </label>
+                        @endforeach
+                    </div>
+
+                    {{-- Footer — Clear (wipes the draft, stays local, no
+                         server call) / Apply (sends the draft in one shot).
+                         Both disabled while the draft is empty — nothing to
+                         clear or apply yet — same visual pattern as the
+                         Batch Range picker's Back to List / Apply pair. --}}
+                    <div class="flex items-center gap-2 mt-2 px-1 pb-1">
+                        <button type="button" @click.stop="clearDraft()"
+                                :disabled="draftCourse.length === 0"
+                                :class="draftCourse.length === 0 ? 'text-[#B9A9C4] bg-[#F9F7FC] cursor-not-allowed' : 'text-[#333333] hover:bg-[#F5F5F5] cursor-pointer'"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                            Clear
+                        </button>
+                        <button type="button" @click.stop="applyDraft()"
+                                :disabled="draftCourse.length === 0"
+                                :class="draftCourse.length === 0 ? 'text-[#B9A9C4] bg-[#F3EDF7] cursor-not-allowed' : 'text-white bg-[#7A3F91] hover:bg-[#6a3580] cursor-pointer'"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                            Apply
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1727,7 +1774,7 @@ new class extends Component {
                     type="button"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
                 <span wire:loading wire:target="clearFilters">
-                    <i class="fas fa-spinner animate-spin text-sm"></i>
+                    <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>
                 </span>
                 <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearFilters"></i>
                 <span class="hidden sm:inline">Reset</span>
@@ -1772,7 +1819,7 @@ new class extends Component {
          inside the scrolling container. Pure overlay: floats on top, table
          layout is completely undisturbed while loading. --}}
     <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
-         wire:loading wire:target="toggleFilterCourse,clearFilterCourse,selectAllFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange">
+         wire:loading wire:target="applyFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
         <div class="flex items-center justify-center" style="margin-top:16px;">
             <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
         </div>
@@ -1781,7 +1828,7 @@ new class extends Component {
 <div class="relative flex-1 h-full overflow-y-auto"
      id="emp-scroll-container"
      style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;"
-     @scroll.passive="showMoreIndicator = ($event.target.scrollHeight - $event.target.scrollTop - $event.target.clientHeight) > 80; sessionStorage.setItem('emp-scroll-pos', $event.target.scrollTop);"
+     @scroll.passive="sessionStorage.setItem('emp-scroll-pos', $event.target.scrollTop);"
      x-init="
         var savedPos = sessionStorage.getItem('emp-scroll-pos');
         if (savedPos !== null) {
@@ -1790,7 +1837,7 @@ new class extends Component {
      ">
 
 <div class="flex flex-col px-3 sm:px-6 py-3 sm:py-4 gap-3 sm:gap-4 max-w-[1920px] mx-auto w-full box-border"
-     wire:loading.class="opacity-40 pointer-events-none" wire:target="toggleFilterCourse,clearFilterCourse,selectAllFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange" style="transition:opacity .2s ease;">
+     wire:loading.class="opacity-40 pointer-events-none" wire:target="applyFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters" style="transition:opacity .2s ease;">
 
     {{-- ── 5 STAT CARDS — Submitted, Employed, Self-Employed, Unemployed,
          No Record. Employed and Self-Employed are shown as their own
@@ -2205,23 +2252,6 @@ new class extends Component {
                     <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">Number of employed, self-employed &amp; unemployed per batch</span>
                 </div>
             </div>
-            <div id="batchNavControls" class="hidden items-center gap-2 shrink-0 ml-2">
-                <button id="batchPrev"
-                        class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91]
-                               cursor-pointer flex items-center justify-center
-                               hover:bg-[#F3E8FF] hover:border-[#7A3F91] transition-all duration-150
-                               disabled:opacity-35 disabled:cursor-not-allowed">
-                    <i class="fa-solid fa-chevron-left" style="font-size:.60rem;"></i>
-                </button>
-                <span id="batchPageInfo" class="text-sm font-semibold text-[#333333] whitespace-nowrap"></span>
-                <button id="batchNext"
-                        class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91]
-                               cursor-pointer flex items-center justify-center
-                               hover:bg-[#F3E8FF] hover:border-[#7A3F91] transition-all duration-150
-                               disabled:opacity-35 disabled:cursor-not-allowed">
-                    <i class="fa-solid fa-chevron-right" style="font-size:.60rem;"></i>
-                </button>
-            </div>
         </div>
         <div class="flex-1 min-h-0 p-[10px]" wire:ignore>
             <canvas id="chartBatch" style="width:100%;height:100%;"></canvas>
@@ -2241,23 +2271,6 @@ new class extends Component {
                     <span class="text-sm sm:text-base font-bold text-[#111111] uppercase tracking-[.04em] leading-tight">Employment Rate Trend per Batch Year</span>
                     <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">% of alumni (employed + self-employed) out of total per batch</span>
                 </div>
-            </div>
-            <div id="trendNavControls" class="hidden items-center gap-2 shrink-0 ml-2">
-                <button id="trendPrev"
-                        class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91]
-                               cursor-pointer flex items-center justify-center
-                               hover:bg-[#F3E8FF] hover:border-[#7A3F91] transition-all duration-150
-                               disabled:opacity-35 disabled:cursor-not-allowed">
-                    <i class="fa-solid fa-chevron-left" style="font-size:.60rem;"></i>
-                </button>
-                <span id="trendPageInfo" class="text-sm font-semibold text-[#333333] whitespace-nowrap"></span>
-                <button id="trendNext"
-                        class="w-7 h-7 rounded-[7px] border border-[#E8E0F0] bg-white text-[#7A3F91]
-                               cursor-pointer flex items-center justify-center
-                               hover:bg-[#F3E8FF] hover:border-[#7A3F91] transition-all duration-150
-                               disabled:opacity-35 disabled:cursor-not-allowed">
-                    <i class="fa-solid fa-chevron-right" style="font-size:.60rem;"></i>
-                </button>
             </div>
         </div>
         <div class="flex-1 min-h-0 px-3 sm:px-4 py-2" wire:ignore>
@@ -2337,26 +2350,8 @@ new class extends Component {
 </div>
 </div>
 
-    {{-- ── "More content below" glow indicator ── --}}
-    <button type="button"
-            x-show="showMoreIndicator"
-            x-transition:enter="transition ease-out duration-200"
-            x-transition:enter-start="opacity-0 translate-y-1"
-            x-transition:enter-end="opacity-100 translate-y-0"
-            x-transition:leave="transition ease-in duration-150"
-            x-transition:leave-start="opacity-100"
-            x-transition:leave-end="opacity-0"
-            @click="$el.closest('.bg-gray-100.flex.flex-col.relative').querySelector('.overflow-y-auto').scrollBy({top:280,behavior:'smooth'})"
-            class="emp-scroll-indicator absolute left-1/2 -translate-x-1/2 z-30"
-            style="bottom:10px;display:none;">
-        <span class="emp-scroll-indicator-glow"></span>
-        <span class="emp-scroll-indicator-btn">
-            <i class="fas fa-chevron-up"></i>
-        </span>
 </div>
-
 </div>
-
 
 {{-- ═══════════════════════════════════════════════════════════
      DETAIL FULL-SCREEN MODAL — read-only drill-down for the

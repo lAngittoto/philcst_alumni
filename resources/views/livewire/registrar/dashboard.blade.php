@@ -484,7 +484,7 @@ new class extends Component {
                 <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalAlumni) }}</p>
                 <p class="text-sm text-[#333333] mt-1 font-normal">Alumni Records</p>
                 @if($this->newThisMonth > 0)
-                    <p class="text-xs text-emerald-600 font-semibold mt-2 flex items-center gap-1">
+                    <p class="text-xs text-[#7A3F91] font-semibold mt-2 flex items-center gap-1">
                         <i class="fas fa-arrow-trend-up text-sm"></i> +{{ $this->newThisMonth }} this month
                     </p>
                 @endif
@@ -515,7 +515,7 @@ new class extends Component {
                     <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
                          style="width:{{ $this->completionRate }}%;"></div>
                 </div>
-                <p class="text-xs text-[#333333] mt-1 font-normal">{{ $this->completionRate }}% completion rate</p>
+                <p class="text-xs text-emerald-600 font-semibold mt-1">{{ $this->completionRate }}% completion rate</p>
             </a>
 
             {{-- Profile Pending --}}

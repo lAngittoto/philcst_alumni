@@ -84,7 +84,8 @@
             border-radius: 12px;
             transition: background-color 0.2s ease, transform 0.15s ease;
         }
-        .reg-nav-link:not(.is-active):hover { background: #F5F5F5; }
+        .reg-nav-link { background-color: transparent; }
+        .reg-nav-link:not(.is-active):hover { background-color: #F5F5F5 !important; }
         .reg-nav-link:not(.is-active):hover .reg-nav-icon { transform: scale(1.05); }
         .reg-nav-link.is-active { background: #7A3F91; }
 
@@ -532,6 +533,10 @@
             background: #2563EB;
             flex-shrink: 0;
             margin-top: 4px;
+            transition: transform 0.15s ease;
+        }
+        .notif-item:hover .notif-unread-dot {
+            transform: scale(1.6);
         }
         .notif-unread-dot::after {
             content: '';
@@ -786,6 +791,20 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  Pause the notification poll while a photo is being saved elsewhere on
+    //  the page (e.g. alumni-records photo upload) — a poll landing mid-save
+    //  competes for one of the browser's 6 concurrent connections and can
+    //  delay the save request by several seconds for no benefit to the user.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__notifPollSuspended = false;
+    document.addEventListener('photo-save-start', function () {
+        window.__notifPollSuspended = true;
+    });
+    document.addEventListener('photo-save-end', function () {
+        window.__notifPollSuspended = false;
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY
     // ─────────────────────────────────────────────────────────────────────────
     window.__makeNotifsStore = function () {
@@ -805,7 +824,10 @@
             _startPolling() {
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
-                this._pollTimer = setInterval(function () { self._fetch(); }, 5000);
+                this._pollTimer = setInterval(function () {
+                    if (window.__notifPollSuspended) return; // paused e.g. during a photo save
+                    self._fetch();
+                }, 5000);
             },
             async _fetch() {
                 if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
@@ -850,9 +872,19 @@
                         var nTimestamp = n.updated_at && new Date(n.updated_at) > new Date(n.created_at)
                             ? n.updated_at
                             : n.created_at;
-                        var day = nTimestamp
-                            ? new Date(nTimestamp).toISOString().slice(0, 10)
-                            : 'unknown';
+                        // Group by LOCAL calendar day, not UTC — toISOString()
+                        // always converts to UTC, which silently shifts any
+                        // timestamp made after 4:00 PM local (midnight PH time
+                        // is UTC+8) back onto the previous day's UTC date,
+                        // merging what should be a fresh day's notification
+                        // into yesterday's group.
+                        var day = 'unknown';
+                        if (nTimestamp) {
+                            var _d = new Date(nTimestamp);
+                            day = _d.getFullYear() + '-'
+                                + String(_d.getMonth() + 1).padStart(2, '0') + '-'
+                                + String(_d.getDate()).padStart(2, '0');
+                        }
 
                         var isChatMsg = (
                             rawDedup.startsWith('chat_msg::') ||
@@ -906,21 +938,40 @@
                                 g.alumni_ids = (g.alumni_ids || []).concat(nAlumniIds)
                                     .filter(function (v, i, arr) { return arr.indexOf(v) === i; });
                             }
-                            if (nName && g._names.indexOf(nName) === -1) {
-                                g._names.push(nName);
+                            // Track each name together with when it happened
+                            // so we can always tell who's most recent, not
+                            // just who was first seen while grouping.
+                            if (nName) {
+                                var existing = g._nameEntries.filter(function (e) { return e.name === nName; })[0];
+                                if (existing) {
+                                    if (nTimestamp && new Date(nTimestamp) > new Date(existing.at)) {
+                                        existing.at = nTimestamp;
+                                    }
+                                } else {
+                                    g._nameEntries.push({ name: nName, at: nTimestamp || n.created_at });
+                                }
                             }
                             if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
                                 g.created_at = nTimestamp;
                             }
+                            // Oldest -> newest, so the most recently
+                            // registered alumnus is always named last —
+                            // e.g. "... and Dwight P. Ramos have been
+                            // registered" when he's the latest arrival.
+                            g._names = g._nameEntries
+                                .slice()
+                                .sort(function (a, b) { return new Date(a.at) - new Date(b.at); })
+                                .map(function (e) { return e.name; });
                             if (isChatMsg) {
                                 var rName = g._roomName || 'group chat';
                                 g.message = g.count + ' new message(s) in ' + rName + '.';
                             } else if (isAlumniEvent) {
                                 // Show every distinct name we actually have,
-                                // e.g. "Fernandos Sal Junios Sr. and Loki M.
-                                // Asgard XIX have been registered..." — falls
-                                // back to the generic count wording only if
-                                // no names came through at all.
+                                // most-recent last, e.g. "Kai K. Sotto II
+                                // and Dwight P. Ramos have been registered
+                                // and are now verified." — falls back to
+                                // the generic count wording only if no
+                                // names came through at all.
                                 g.title = 'New Alumni Registered';
                                 if (g._names.length > 0 && g._names.length >= g.count) {
                                     g.message = (g._names.length === 1
@@ -939,12 +990,13 @@
                             }
                         } else {
                             map.set(groupKey, Object.assign({}, n, {
-                                count:      Number(n.count) || 1,
-                                _ids:       [n.id],
-                                _roomName:  n._roomName || '',
-                                _names:     nName ? [nName] : [],
-                                alumni_ids: nAlumniIds.slice(),
-                                created_at: nTimestamp || n.created_at,
+                                count:       Number(n.count) || 1,
+                                _ids:        [n.id],
+                                _roomName:   n._roomName || '',
+                                _names:      nName ? [nName] : [],
+                                _nameEntries: nName ? [{ name: nName, at: nTimestamp || n.created_at }] : [],
+                                alumni_ids:  nAlumniIds.slice(),
+                                created_at:  nTimestamp || n.created_at,
                                 title: isChatMsg      ? (n.title || 'New Chat Message')
                                      : isAlumniEvent  ? 'New Alumni Registered'
                                      : isImportEvent  ? 'Bulk Import Complete'
@@ -954,7 +1006,17 @@
                             }));
                         }
                     });
-                return Array.from(map.values());
+                // Re-sort the grouped notifications themselves by their
+                // (possibly just-updated) timestamp, newest first. Without
+                // this, a group that absorbs a brand-new member (e.g. Papa
+                // Dwight registering at 11:49 merging into today's "New
+                // Alumni Registered" group) would stay stuck wherever it
+                // first appeared in Map insertion order — e.g. still below
+                // "Bulk Import Complete" — instead of jumping back to the
+                // top where the newest activity belongs.
+                return Array.from(map.values()).sort(function (a, b) {
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
             },
 
             get unread() {
@@ -1848,9 +1910,7 @@
                             </span>
 
                             <button type="button"
-                                    {{-- TEMP TESTING: delete icon forced visible for all notifs.
-                                         Restore before deploy: x-show="notif.created_at && (Date.now() - new Date(notif.created_at).getTime()) >= (30 * 24 * 60 * 60 * 1000)" --}}
-                                    x-show="true"
+                                    x-show="notif.created_at && (Date.now() - new Date(notif.created_at).getTime()) >= (30 * 24 * 60 * 60 * 1000)"
                                     x-cloak
                                     class="notif-delete-btn"
                                     @click.stop="$store.notifs && $store.notifs.deleteNotif(notif)"
