@@ -113,6 +113,19 @@
 
         .reg-nav-link.is-active .reg-nav-icon { background: #FFFFFF; color: #7A3F91 !important; }
 
+        /* ── Strip icon color while navigating ──────────────────────
+           While a link is mid-navigation (spinner showing), the chip
+           drops its clr-* accent color and goes neutral gray — the
+           spinner is the only signal that matters in that moment.
+           Once navigation lands (is-navigating class removed), the
+           chip's original clr-* color returns automatically since
+           this rule no longer applies. !important beats the clr-*
+           background/color rules above regardless of source order. */
+        .reg-nav-link.is-navigating .reg-nav-icon {
+            background: #F0F0F0 !important;
+            color: #9CA3AF !important;
+        }
+
         .reg-nav-label {
             font-weight: 600;
             font-size: 0.9rem;
@@ -128,6 +141,79 @@
             border-radius: 50%;
             background: #fff;
             flex-shrink: 0;
+        }
+
+        /* ── Nav link click spinner ──────────────────────────────
+           Same visual language as the alumni table's loading
+           spinner (fa-spinner fa-spin, brand purple) so the whole
+           app has one consistent "loading" interface instead of a
+           different spinner style per screen.
+           Expanded sidebar: sits exactly where the active dot sits
+           (end of the row), icon stays visible. Collapsed sidebar /
+           mobile: centered on top of the icon chip, icon hidden,
+           since there's no label/dot row to show it in. */
+        .reg-nav-spinner {
+            flex-shrink: 0;
+            margin-left: auto;
+            font-size: 13px;
+            color: #fff;
+            line-height: 1;
+        }
+        .reg-nav-link:not(.is-active) .reg-nav-spinner {
+            color: #7A3F91;
+        }
+
+        /* Two spinner copies are rendered: one inline at the end of
+           the row (next to the label, where the dot sits), one
+           inside the icon chip itself. Only one is ever visible at
+           a time — CSS below toggles which, per breakpoint/state —
+           so the icon-anchored copy is always dead-center on the
+           icon regardless of the link's own padding. */
+        .reg-nav-spinner-icon-anchored { display: none; }
+        .reg-nav-icon { position: relative; }
+
+        /* Icon-only sidebar states: collapsed desktop rail (≥1024px)
+           AND mobile/tablet (<1024px, always icon-only here). Both
+           cases get the exact same treatment — icon-anchored spinner
+           dead-centered on the chip, end-of-row spinner hidden, and
+           the icon itself fully removed from view so nothing peeks
+           out from underneath the spinner. !important on every rule
+           here so nothing else in the sheet can win against it. */
+        .reg-sidebar.is-collapsed .reg-nav-link.is-navigating > .reg-nav-spinner,
+        .reg-nav-link.is-navigating > .reg-nav-spinner {
+            display: none !important;
+        }
+        .reg-sidebar.is-collapsed .reg-nav-link.is-navigating .reg-nav-spinner-icon-anchored,
+        .reg-nav-link.is-navigating .reg-nav-spinner-icon-anchored {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            font-size: 16px !important;
+        }
+        .reg-nav-spinner-icon-anchored .reg-nav-spinner {
+            margin-left: 0;
+        }
+        .reg-sidebar.is-collapsed .reg-nav-link.is-navigating .reg-nav-icon i.fa-solid,
+        .reg-nav-link.is-navigating .reg-nav-icon i.fa-solid {
+            display: none !important;
+        }
+        /* On expanded desktop (not collapsed), the end-of-row spinner
+           is the one that should show, with the icon staying visible —
+           so undo the icon-only treatment above in that one case. */
+        @media (min-width: 1024px) {
+            .reg-sidebar:not(.is-collapsed) .reg-nav-link.is-navigating > .reg-nav-spinner {
+                display: flex !important;
+            }
+            .reg-sidebar:not(.is-collapsed) .reg-nav-link.is-navigating .reg-nav-spinner-icon-anchored {
+                display: none !important;
+            }
+            .reg-sidebar:not(.is-collapsed) .reg-nav-link.is-navigating .reg-nav-icon i.fa-solid {
+                display: inline-block !important;
+            }
         }
 
         .reg-nav-section-row {
@@ -465,6 +551,10 @@
             color: #4D4D4D;
             line-height: 1.45;
             margin-top: 2px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
 
         .notif-time-row {
@@ -473,11 +563,17 @@
             justify-content: space-between;
             gap: 5px;
             margin-top: 6px;
+            padding-right: 72px;
             font-size: .68rem;
             color: #333333;
             font-weight: 600;
+            position: relative;
         }
-        .notif-time-row i { font-size: .62rem; }
+        /* Only the clock icon before the timestamp — NOT the delete
+           button's trash icon, which also lives inside this row but
+           needs to stay large/tappable (see .notif-delete-btn i
+           below, which sets its own much bigger size). */
+        .notif-time-row > span > i.fa-clock { font-size: .62rem; }
 
         /* ── Delete icon (only shown once a notif is 30+ days old) ──
            Sits at the end of the time row, next to the timestamp.
@@ -485,30 +581,39 @@
            sidebar (not just on hover), with a slightly deeper red +
            light-red bg on hover for feedback. */
         .notif-delete-btn {
-            position: relative;
+            position: absolute;
+            right: 0;
+            top: 50%;
+            transform: translateY(-50%);
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 28px;
-            height: 28px;
-            border-radius: 7px;
+            width: 76px !important;
+            height: 76px !important;
+            border-radius: 10px;
             border: none;
             background: transparent;
             color: #DC2626;
             cursor: pointer;
             flex-shrink: 0;
-            transition: background-color .15s ease, color .15s ease;
+            transition: color .15s ease;
         }
         .notif-delete-btn:hover {
-            background: #FDE8E8;
             color: #B91C1C;
         }
-        .notif-delete-btn i { font-size: .95rem; pointer-events: none; }
+        .notif-delete-btn i,
+        .notif-delete-btn i.fa-trash-can,
+        .notif-delete-btn i.fas {
+            font-size: 5.6rem !important;
+            line-height: 1 !important;
+            pointer-events: none;
+        }
 
         .notif-delete-tooltip {
             position: absolute;
-            bottom: calc(100% + 6px);
-            right: 0;
+            bottom: calc(100% - 22px);
+            left: 50%;
+            transform: translate(-50%, 2px);
             background: #DC2626;
             color: #fff;
             font-size: .62rem;
@@ -519,7 +624,6 @@
             white-space: nowrap;
             pointer-events: none;
             opacity: 0;
-            transform: translateY(2px);
             transition: opacity .12s ease, transform .12s ease;
             z-index: 10;
         }
@@ -527,13 +631,43 @@
             content: '';
             position: absolute;
             top: 100%;
-            right: 7px;
+            left: 50%;
+            transform: translateX(-50%);
             border: 4px solid transparent;
             border-top-color: #DC2626;
         }
         .notif-delete-btn:hover .notif-delete-tooltip {
             opacity: 1;
-            transform: translateY(0);
+            transform: translate(-50%, 0);
+        }
+
+        /* ── In-place notif loading overlay ─────────────────────────
+           Same visual language as the alumni table's loading spinner
+           (fa-spinner fa-spin, brand purple) — one consistent loading
+           interface across the app instead of a different spinner
+           style per screen. The item's own content (icon/title/
+           message) blurs out underneath instead of being fully
+           covered by a flat white block, so it still reads as "this
+           item is busy" rather than an empty white gap. ── */
+        .notif-item { position: relative; }
+        .notif-item.is-loading > *:not(.notif-item-loading-overlay) {
+            filter: blur(4px);
+            opacity: 0.5;
+            pointer-events: none;
+            user-select: none;
+        }
+        .notif-item-loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+        }
+        .notif-item-spinner {
+            font-size: 22px;
+            color: #7A3F91;
         }
 
         .notif-divider {
@@ -563,16 +697,27 @@
            room to read notifications comfortably. ── */
         @media (max-width: 1023px) {
             #notif-panel {
-                top: 0 !important;
-                left: 0 !important;
-                right: 0 !important;
-                bottom: 0 !important;
-                width: 100% !important;
-                height: 100% !important;
+                inset: 0 !important;
+                width: 100vw !important;
+                height: 100dvh !important;
                 max-height: 100dvh !important;
                 min-height: 0 !important;
                 border-radius: 0 !important;
                 border: none !important;
+                box-shadow: none !important;
+                /* Full-screen panel: the desktop enter/leave transition
+                   (scale-[0.98] + -translate-y-1) shrinks/shifts the box
+                   just enough to flash a sliver of the page behind it at
+                   the edges when closing. Neutralizing the transform only
+                   (not touching transition timing) keeps Alpine's own
+                   fast leave duration intact — just a plain, quick fade.
+                   Also drop the desktop min-height/height transition —
+                   on a fixed full-screen panel it has nothing useful to
+                   animate and was stacking with the fade, making close
+                   feel like a slow multi-stage "loading" settle instead
+                   of an instant, clean dismiss. */
+                transform: none !important;
+                transition: opacity 150ms ease-out !important;
             }
             #notif-list {
                 max-height: calc(100dvh - 150px) !important;
@@ -585,6 +730,24 @@
                 top: auto !important;
                 bottom: 24px !important;
                 transform: translateX(-50%) !important;
+            }
+
+            /* Delete icon was tiny/hard to tap on mobile — enlarge the
+               tap target and icon size, and give the time row room so
+               it doesn't get squeezed against the timestamp. */
+            .notif-time-row {
+                flex-wrap: nowrap;
+            }
+            .notif-delete-btn {
+                width: 76px !important;
+                height: 76px !important;
+                flex-shrink: 0;
+            }
+            .notif-delete-btn i {
+                font-size: 5.6rem !important;
+            }
+            .notif-delete-tooltip {
+                display: none;
             }
         }
     </style>
@@ -631,7 +794,9 @@
             items:      [],
             _pollTimer: null,
             navigating: false,
+            loadingId:  null,
             markingAll: false,
+            deletingId: null,
             deleteToast: { show: false, message: '' },
             async init() {
                 await this._fetch();
@@ -796,10 +961,17 @@
                 return this.items.filter(function (n) { return !n.read; }).length;
             },
             toggle() { this.open = !this.open; },
-            close()  { this.open = false; },
+            close()  {
+                // Don't let the panel be closed (outside click, etc.)
+                // while a notif click is still navigating/loading — it
+                // should only close once livewire:navigated fires.
+                if (this.navigating) return;
+                this.open = false;
+            },
 
             async markRead(item) {
                 this.navigating = true;
+                this.loadingId  = item.id;
                 var clearedByNav = false;
                 try {
                     if (!item.read) {
@@ -821,11 +993,15 @@
                     clearedByNav = await this.goToTarget(item);
                 } finally {
                     // If goToTarget actually kicked off a navigation, leave
-                    // `navigating` on — it gets cleared once the destination
-                    // page is truly ready (see livewire:navigated listener
-                    // below), so the spinner never drops early and leaves a
-                    // blank gap before content shows up.
-                    if (!clearedByNav) this.navigating = false;
+                    // `navigating` (and `loadingId`) on — cleared once the
+                    // destination page is truly ready (see livewire:navigated
+                    // listener below), so the overlay never drops early and
+                    // the panel never closes/navigates-looking before the
+                    // page is actually ready.
+                    if (!clearedByNav) {
+                        this.navigating = false;
+                        this.loadingId  = null;
+                    }
                 }
             },
 
@@ -868,7 +1044,14 @@
                     }
                 }
 
-                this.close();
+                // ⚠️ FIX: don't close() here anymore. Closing the panel the
+                // instant the click happens made it look like the notif
+                // "did nothing" while the request/navigation was still in
+                // flight. The panel now stays open, showing the in-place
+                // spinner overlay on the clicked item, and only closes once
+                // the destination page has actually landed (SPA case: the
+                // livewire:navigated listener below; hard-nav case: the page
+                // unloads anyway so it doesn't matter).
 
                 // ⚠️ FIX: if the notif points to the SAME route the user is
                 // already sitting on (e.g. clicking a notif while already
@@ -960,11 +1143,15 @@
                 var ids = item._ids || [item.id];
                 var self = this;
                 this._deleting = true;
+                this.deletingId = item.id;
                 this._showDeleteToast('Notification deleted');
 
-                // Give the slide-out leave transition time to play before
-                // actually removing the item from the array — removing it
-                // immediately would skip straight past x-transition:leave.
+                // Show a brief spinner on the item itself so the delete
+                // reads as a deliberate action, not an instant disappear —
+                // then play the slide-out leave transition before actually
+                // removing it from the array.
+                await new Promise(function (resolve) { setTimeout(resolve, 600); });
+                this.deletingId = null;
                 await new Promise(function (resolve) { setTimeout(resolve, 250); });
                 this.items = this.items.filter(function (n) { return n !== item; });
 
@@ -1007,7 +1194,7 @@
                 if (this._toastTimer) clearTimeout(this._toastTimer);
                 this._toastTimer = setTimeout(function () {
                     self.deleteToast.show = false;
-                }, 2200);
+                }, 5000);
             },
         };
     };
@@ -1063,6 +1250,7 @@
             s._pollTimer = null;
             s.open  = false;
             s.navigating = false; // destination page has landed — drop the spinner now, not before
+            s.loadingId  = null;
             s.init();
         } else {
             Alpine.store('notifs', window.__makeNotifsStore());
@@ -1250,9 +1438,12 @@
 <body class="antialiased"
       x-data="{
           sidebarOpen: false,
-          sidebarCollapsed: false,
-          loggingOut: false
-      }">
+          sidebarCollapsed: localStorage.getItem('reg_sidebar_collapsed') === '1',
+          loggingOut: false,
+          navClickedRoute: null
+      }"
+      x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('reg_sidebar_collapsed', val ? '1' : '0'); })"
+      @@livewire:navigated.window="navClickedRoute = null">
 
 
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
@@ -1331,14 +1522,26 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="sidebarOpen = false;"
+                   @click="sidebarOpen = false; navClickedRoute = '{{ $link['route'] }}';"
+                   :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
                     <div class="reg-nav-icon {{ $link['color'] }}">
-                        <i class="fa-solid fa-{{ $link['icon'] }}"></i>
+                        <i class="fa-solid fa-{{ $link['icon'] }}"
+                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
+                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                            <span class="reg-nav-spinner-icon-anchored">
+                                <i class="fas fa-spinner fa-spin reg-nav-spinner"></i>
+                            </span>
+                        </template>
                     </div>
                     <span class="reg-nav-label">{{ $link['label'] }}</span>
+                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                        <i class="fas fa-spinner fa-spin reg-nav-spinner"></i>
+                    </template>
                     @if($isActive)
-                        <span class="reg-nav-dot"></span>
+                        <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
+                            <span class="reg-nav-dot"></span>
+                        </template>
                     @endif
                 </a>
             @endforeach
@@ -1442,11 +1645,11 @@
     x-show="$store.notifs && $store.notifs.open"
     x-cloak
     x-transition:enter="transition ease-out duration-100"
-    x-transition:enter-start="opacity-0 scale-[0.98] -translate-y-1"
-    x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-    x-transition:leave="transition ease-in duration-75"
-    x-transition:leave-start="opacity-100 scale-100 translate-y-0"
-    x-transition:leave-end="opacity-0 scale-[0.98] -translate-y-1"
+    x-transition:enter-start="opacity-0"
+    x-transition:enter-end="opacity-100"
+    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave-start="opacity-100"
+    x-transition:leave-end="opacity-0"
     @click.stop
     @contextmenu.prevent
     @copy.prevent
@@ -1468,6 +1671,7 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+        transition: min-height 0.3s ease, height 0.3s ease;
     ">
 
     {{-- Panel Header --}}
@@ -1539,7 +1743,7 @@
     </div>
 
     {{-- Scrollable list --}}
-    <div id="notif-list" class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px;">
+    <div id="notif-list" class="overflow-y-auto no-scrollbar flex-1" style="max-height: 460px; min-height: 400px;">
 
         <template x-if="$store.notifs && $store.notifs.items.length === 0">
             <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:56px 24px; text-align:center;">
@@ -1574,11 +1778,25 @@
                                : notif.icon === 'file-import' ? 'clr-import'
                                : notif.icon === 'comment-dots' ? 'clr-chat'
                                : 'clr-default')
-                            : ''
+                            : '',
+                        ($store.notifs.navigating && $store.notifs.loadingId === notif.id) ? 'is-loading' : '',
+                        ($store.notifs.deletingId === notif.id) ? 'is-loading' : ''
                     ]"
                     @click.stop="
                         $store.notifs.markRead(notif);
                     ">
+
+                    <template x-if="$store.notifs.navigating && $store.notifs.loadingId === notif.id">
+                        <div class="notif-item-loading-overlay">
+                            <i class="fas fa-spinner fa-spin notif-item-spinner"></i>
+                        </div>
+                    </template>
+
+                    <template x-if="$store.notifs.deletingId === notif.id">
+                        <div class="notif-item-loading-overlay">
+                            <i class="fas fa-spinner fa-spin notif-item-spinner" style="color:#DC2626;"></i>
+                        </div>
+                    </template>
 
                     <div class="notif-icon-wrap"
                          :class="{
@@ -1630,9 +1848,11 @@
                             </span>
 
                             <button type="button"
-                                    class="notif-delete-btn"
-                                    x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
+                                    {{-- TEMP TESTING: delete icon forced visible for all notifs.
+                                         Restore before deploy: x-show="notif.created_at && (Date.now() - new Date(notif.created_at).getTime()) >= (30 * 24 * 60 * 60 * 1000)" --}}
+                                    x-show="true"
                                     x-cloak
+                                    class="notif-delete-btn"
                                     @click.stop="$store.notifs && $store.notifs.deleteNotif(notif)"
                                     aria-label="Delete notification">
                                 <i class="fas fa-trash-can"></i>
@@ -1653,43 +1873,6 @@
         </p>
     </div>
 </div>
-
-{{-- Top loading bar while a clicked notif navigates to its target page. --}}
-<div
-    id="notif-nav-bar"
-    x-data
-    x-show="$store.notifs && $store.notifs.navigating"
-    x-cloak
-    x-transition:enter="transition ease-out duration-100"
-    x-transition:enter-start="opacity-0"
-    x-transition:enter-end="opacity-100"
-    x-transition:leave="transition ease-in duration-150"
-    x-transition:leave-start="opacity-100"
-    x-transition:leave-end="opacity-0"
-    style="
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        height: 3px;
-        z-index: 2147483647 !important;
-        background: #E8D9F2;
-        overflow: hidden;
-    ">
-    <div style="
-            height: 100%;
-            width: 40%;
-            background: #7A3F91;
-            border-radius: 0 3px 3px 0;
-            animation: notif-nav-bar-slide 1s ease-in-out infinite;
-        "></div>
-</div>
-<style>
-    @keyframes notif-nav-bar-slide {
-        0%   { transform: translateX(-100%); }
-        100% { transform: translateX(250%); }
-    }
-</style>
 
 @livewireScripts
 

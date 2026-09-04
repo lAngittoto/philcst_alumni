@@ -390,9 +390,31 @@ new class extends Component {
 
 <div
     @dash-open-alumni.window="$wire.openAlumniModal($event.detail.filter ?? 'all', $event.detail.batch ?? null)"
-    @dash-open-emp.window="$wire.openEmpModal($event.detail.filter ?? '')">
+    @dash-open-emp.window="$wire.openEmpModal($event.detail.filter ?? '')"
+    @contextmenu.prevent
+    @copy.prevent
+    @cut.prevent
+    class="dash-no-select">
 
     <style>
+        /* ── Disable text selection/copy across the whole dashboard ── */
+        .dash-no-select,
+        .dash-no-select * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        /* Inputs/textareas still need to be usable (search boxes, etc.)
+           even though everything else on the page is locked down. */
+        .dash-no-select input,
+        .dash-no-select textarea {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+        }
+
         /* ── Search highlight (matches Alumni Records) ─────────────── */
         mark.ar-hl {
             background: #BFDBFE;
@@ -432,7 +454,7 @@ new class extends Component {
             </div>
             <div>
                 <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Registrar Dashboard</h1>
-                <p class="text-sm text-[#333333] font-normal">{{ now()->format('l, F j, Y') }}</p>
+                <p class="text-sm font-semibold" style="color:#7A3F91;">{{ now()->format('l, F j, Y') }}</p>
             </div>
         </div>
 
@@ -544,7 +566,7 @@ new class extends Component {
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500 text-white border border-blue-500 uppercase">Programs</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
-                <p class="text-sm text-[#333333] mt-1 font-normal">Active Programs</p>
+                <p class="text-sm text-[#333333] mt-1 font-normal">All Programs</p>
                 <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
                     More on Programs <i class="fas fa-chevron-right text-[10px]"></i>
                 </p>
@@ -569,8 +591,8 @@ new class extends Component {
                         <div class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></div>
                         <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Employment Overview</span>
                     </div>
-                    <span class="text-[.68rem] text-[#555555] font-medium flex items-center gap-[3px] pointer-events-none">
-                        <i class="fas fa-hand-pointer"></i> Click slice to view
+                    <span class="text-[.8rem] text-[#555555] font-medium flex items-center gap-[3px] pointer-events-none">
+                        <i class="fas fa-hand-pointer" style="font-size:.78rem;"></i> Click slice to view
                     </span>
                 </div>
                 <div class="p-4 flex flex-col gap-3 flex-1">
@@ -621,13 +643,13 @@ new class extends Component {
             {{-- ── Alumni by Batch Year ── --}}
             @if($this->allBatches->count() > 0)
             <div class="lg:col-span-2 bg-white border border-[#E8E0F0] rounded-[14px] shadow-sm overflow-hidden flex flex-col
-                        cursor-pointer transition-all duration-200 hover:shadow-[0_5px_16px_rgba(122,63,145,.11)] hover:border-[rgba(122,63,145,.28)]">
+                        transition-all duration-200 hover:shadow-[0_5px_16px_rgba(122,63,145,.11)] hover:border-[rgba(122,63,145,.28)]">
                 <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
                     <div class="flex items-center gap-[7px]">
                         <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
                         <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Alumni by Batch Year</span>
-                        <span class="text-[.68rem] text-[#555555] font-medium flex items-center gap-[3px] ml-2 pointer-events-none">
-                            <i class="fas fa-hand-pointer"></i> Click bar to view alumni
+                        <span class="text-[.8rem] text-[#555555] font-medium flex items-center gap-[3px] ml-2 pointer-events-none">
+                            <i class="fas fa-hand-pointer" style="font-size:.78rem;"></i> Click bar to view alumni
                         </span>
                     </div>
                     <div id="dashBatchNavControls" class="hidden items-center gap-2">
@@ -770,7 +792,7 @@ new class extends Component {
                     </span>
                     <input type="text" x-model="q"
                            @input.debounce.300ms="$wire.set('alumniModalSearch', q)"
-                           placeholder="{{ $alumniModalFilter === 'courses' ? 'Search program, name, college…' : 'Search name, ID, program…' }}"
+                           placeholder="{{ $alumniModalFilter === 'courses' ? 'Search program, abbreviation, college…' : 'Search name, ID, program…' }}"
                            class="pl-8 pr-3 py-[7px] border border-[#E0E0E0] rounded-full text-xs bg-white text-gray-900
                                   focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all w-56"
                            autocomplete="off">
@@ -881,8 +903,8 @@ new class extends Component {
                     <table class="w-full border-collapse table-fixed">
                         <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                             <tr class="border-b-2 border-[#E8E0F0]">
-                                <th class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[22%] sm:w-[18%]">Program Code</th>
-                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[46%] sm:w-[52%]">Program Name</th>
+                                <th class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[22%] sm:w-[18%]">Standard Abbreviation</th>
+                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[46%] sm:w-[52%]">Program</th>
                                 <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[32%] sm:w-[30%]">College</th>
                             </tr>
                         </thead>
@@ -917,7 +939,7 @@ new class extends Component {
                 <div class="px-4 sm:px-5 py-2.5 shrink-0 flex items-center justify-between gap-2"
                      style="background:#7A3F91;">
                     <p class="text-white/75 text-[11px] sm:text-xs font-semibold flex items-center gap-1.5 uppercase tracking-wide">
-                        <i class="fas fa-table"></i> Program Table
+                        <i class="fas fa-table"></i> Programs Table
                     </p>
                     <p class="text-white text-xs sm:text-sm font-semibold">
                         {{ number_format($aTotal) }} program{{ $aTotal === 1 ? '' : 's' }} found
@@ -1538,6 +1560,11 @@ new class extends Component {
                         window.location.href = baseRoute + '?profile_filter=all&batch=' + parseInt(batch);
                     }
                 },
+                onHover: function (event, elements) {
+                    if (event && event.native && event.native.target) {
+                        event.native.target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+                    }
+                },
             },
         });
 
@@ -1722,6 +1749,11 @@ new class extends Component {
                     var baseRoute = getAlumniRoute();
                     if (!baseRoute) return;
                     window.location.href = baseRoute + '?employment_status=' + encodeURIComponent(filter);
+                },
+                onHover: function (event, elements) {
+                    if (event && event.native && event.native.target) {
+                        event.native.target.style.cursor = (elements && elements.length) ? 'pointer' : 'default';
+                    }
                 },
             },
         });

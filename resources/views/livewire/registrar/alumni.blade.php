@@ -1410,6 +1410,16 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             box-shadow: none !important;
         }
     }
+
+    /* ── Text on the main Alumni Records page is not selectable by
+       default — only the "View Details" profile panel (rendered
+       separately, outside .ar-page-wrap) allows text selection. ── */
+    .ar-page-wrap {
+        user-select: none;
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+    }
 </style>
 
 <div id="ar-hover-tip" class="ar-hover-tip">
@@ -1455,7 +1465,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             </div>
             <div class="min-w-0">
                 <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Alumni Records</h1>
-                <p class="text-[#666666] text-xs sm:text-sm font-normal">View and manage alumni information and records.</p>
+                <p class="text-[#7A3F91] text-xs sm:text-sm font-normal">View and manage alumni information and records.</p>
             </div>
         </div>
 
@@ -1576,34 +1586,47 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         </div>
         @endif
 
-        {{-- ── Filter bar ── --}}
-        <div class="ar-filter-bar px-3 sm:px-4 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap gap-2 items-center shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
-             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+        {{-- ── Filter bar ──────────────────────────────────────────────
+             Reorganized into clear, labeled groups instead of one long
+             wrapping row: a "Search & Status" row (most-used, first),
+             then a "Filter by" row grouping the three dropdown filters
+             together with Reset at the end, then active-filter chips on
+             their own row. Keeps every wire:click/x-data binding as-is —
+             layout/grouping only, no behavior changes. --}}
+        <div class="ar-filter-bar px-3 sm:px-4 py-3 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2.5 shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
+             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
 
-            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+            {{-- Row 1: Search (primary action) + Profile status pills --}}
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
-            <div class="flex items-center gap-1.5 shrink-0"
-                 x-data="{ active:'{{ $alumniProfileFilter }}' }"
-                 x-init="$wire.$watch('alumniProfileFilter', v => active = v)">
-                <button type="button" @click="active='all'" wire:click="$set('alumniProfileFilter','all')"
-                        :class="{ 'active-all': active==='all' }" class="ar-status-pill">All</button>
-                <button type="button" @click="active='complete'" wire:click="$set('alumniProfileFilter','complete')"
-                        :class="{ 'active-complete': active==='complete' }" class="ar-status-pill">Complete</button>
-                <button type="button" @click="active='incomplete'" wire:click="$set('alumniProfileFilter','incomplete')"
-                        :class="{ 'active-incomplete': active==='incomplete' }" class="ar-status-pill">Pending</button>
+                <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
+                     x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
+                    <input type="text" x-model="q" @input.debounce.200ms="$wire.set('alumniSearch',q)"
+                           placeholder="Search name, ID, email…"
+                           aria-label="Search alumni by name, ID, or email"
+                           class="w-full pl-8 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
+                                  placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                           autocomplete="off" spellcheck="false">
+                </div>
+
+                <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block" aria-hidden="true"></div>
+
+                <div class="flex items-center gap-1.5 shrink-0" role="group" aria-label="Filter by profile status"
+                     x-data="{ active:'{{ $alumniProfileFilter }}' }"
+                     x-init="$wire.$watch('alumniProfileFilter', v => active = v)">
+                    <button type="button" @click="active='all'" wire:click="$set('alumniProfileFilter','all')"
+                            :class="{ 'active-all': active==='all' }" :aria-pressed="active==='all'" class="ar-status-pill">All</button>
+                    <button type="button" @click="active='complete'" wire:click="$set('alumniProfileFilter','complete')"
+                            :class="{ 'active-complete': active==='complete' }" :aria-pressed="active==='complete'" class="ar-status-pill">Complete</button>
+                    <button type="button" @click="active='incomplete'" wire:click="$set('alumniProfileFilter','incomplete')"
+                            :class="{ 'active-incomplete': active==='incomplete' }" :aria-pressed="active==='incomplete'" class="ar-status-pill">Pending</button>
+                </div>
             </div>
 
-            <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
-
-            <div class="relative flex-1 min-w-[150px] max-w-xs" wire:ignore
-                 x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.200ms="$wire.set('alumniSearch',q)"
-                       placeholder="Search name, ID, email…"
-                       class="w-full pl-8 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
-                              placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
-                       autocomplete="off" spellcheck="false">
-            </div>
+            {{-- Row 2: Dropdown filters (Batch / Employment / Program), grouped together, with Reset docked at the end --}}
+            <div class="flex flex-wrap items-center gap-2">
 
             {{-- Batch Year — plain year list by default (click a year,
                  done), PLUS an "Add Range" option at the bottom of the
@@ -1633,9 +1656,9 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                     selectYear(val){ $wire.setSingleBatchYear(val); this.close(); },
                     clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
                     startRange(){ this.rangeFrom=$wire.alumniBatchFrom||''; this.rangeTo=$wire.alumniBatchTo||''; this.rangeMode=true; },
-                    pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
-                    pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
-                    applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.close(); } }
+                    pickFrom(val){ this.rangeFrom=val; },
+                    pickTo(val){ this.rangeTo=val; },
+                    applyRange(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.close(); } }
                  }"
                  @click.outside="close()" wire:key="batch-dropdown">
                 <button type="button" @click.stop="toggle()"
@@ -1719,9 +1742,11 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                         class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
                                     Back to List
                                 </button>
-                                <button type="button" @click.stop="clearYear(); rangeMode=false;"
-                                        class="flex-1 text-xs font-semibold text-[#7A3F91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                    Clear
+                                <button type="button" @click.stop="applyRange()"
+                                        :disabled="rangeFrom==='' || rangeTo===''"
+                                        class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'text-[#7A3F91] border-[#E8E0F0] hover:bg-[#F5F0FA]'">
+                                    Apply
                                 </button>
                             </div>
                         </div>
@@ -1863,15 +1888,21 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 </div>
             </div>
 
-            <button wire:click="resetAlumniFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="resetAlumniFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none">
-                <span wire:loading wire:target="resetAlumniFilters">
-                    <i class="fas fa-spinner animate-spin text-sm"></i>
-                </span>
-                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="resetAlumniFilters"></i>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
+                <button wire:click="resetAlumniFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="resetAlumniFilters"
+                        @if($alumniSearch === '' && $alumniProfileFilter === 'all' && $alumniBatchFrom === '' && $alumniBatchTo === '' && empty($alumniEmploymentStatuses) && empty($alumniCourses)) disabled @endif
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto"
+                        aria-label="Reset all filters">
+                    <span wire:loading wire:target="resetAlumniFilters">
+                        <i class="fas fa-spinner animate-spin text-sm"></i>
+                    </span>
+                    <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="resetAlumniFilters"></i>
+                    <span class="hidden sm:inline">Reset</span>
+                </button>
+            </div>
 
+            {{-- Row 3: Active-filter summary chips — only rendered when at least one filter is applied --}}
+            @if($alumniProfileFilter !== 'all' || ($alumniBatchFrom !== '' && $alumniBatchTo !== '') || !empty($alumniEmploymentStatuses) || !empty($alumniCourses))
+            <div class="flex flex-wrap items-center gap-2" role="status" aria-label="Active filters">
             @if($alumniProfileFilter !== 'all')
             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border
                          {{ $alumniProfileFilter === 'complete' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200' }}">
@@ -1905,6 +1936,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 &mdash; {{ number_format($this->alumniRecords->total()) }} result(s)
             </span>
             @endif
+            </div>
+            @endif
         </div>
 
         {{-- (Old thin top progress bar removed — replaced by the centered
@@ -1919,7 +1952,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                  scroll container. Pure overlay: floats on top, table
                  layout is completely undisturbed while loading. --}}
             <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
-                 wire:loading wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+                 wire:loading wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
                 <div class="flex items-center justify-center" style="margin-top:16px;">
                     <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
                 </div>
@@ -1927,7 +1960,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters">
+                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
@@ -1938,7 +1971,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                         <tr class="bg-[#F5F5F5] border-b-2 border-[#E8E0F0] sticky top-0 z-10">
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Name</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Student ID</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Program Code</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Standard Abbreviation</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Batch</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Employment Status</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Email</th>
