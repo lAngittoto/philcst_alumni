@@ -505,6 +505,22 @@ new class extends Component {
         $this->clearNotifScope();
     }
 
+    /** Applies the whole Program Code multi-select in ONE Livewire
+     *  round-trip. Bound to the dropdown's local Alpine state (checkboxes
+     *  toggle a local array only) so picking programs never touches the
+     *  server until "Apply" is clicked — mirrors applyEmploymentStatuses(). */
+    public function applyProgramCodes(array $codes): void
+    {
+        $validCodes = $this->courses->pluck('code')->all();
+        $this->alumniCourses = collect($codes)
+            ->filter(fn($v) => in_array($v, $validCodes, true))
+            ->unique()
+            ->values()
+            ->all();
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
     /** Toggles a single employment status in/out of the multi-select
      *  filter — bound directly to each checkbox item in the Employment
      *  Status dropdown. Mirrors toggleProgramCode() exactly. */
@@ -533,6 +549,22 @@ new class extends Component {
     public function selectAllEmploymentStatuses(): void
     {
         $this->alumniEmploymentStatuses = ['employed', 'self_employed', 'unemployed', 'no_record'];
+        $this->resetPage('alumniPage');
+        $this->clearNotifScope();
+    }
+
+    /** Applies the whole Employment Status multi-select in ONE Livewire
+     *  round-trip. Bound to the dropdown's local Alpine state (checkboxes
+     *  toggle a local array only) so picking statuses never touches the
+     *  server until "Apply" is clicked — mirrors setBatchRange(). */
+    public function applyEmploymentStatuses(array $statuses): void
+    {
+        $validStatuses = ['employed', 'self_employed', 'unemployed', 'no_record'];
+        $this->alumniEmploymentStatuses = collect($statuses)
+            ->filter(fn($v) => in_array($v, $validStatuses, true))
+            ->unique()
+            ->values()
+            ->all();
         $this->resetPage('alumniPage');
         $this->clearNotifScope();
     }
@@ -931,6 +963,27 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     }
     .ar-row:hover { background: #F0ECF5 !important; }
 
+    /* ── Responsive table columns ──────────────────────────────────
+       The table panel can get squeezed narrower than its own viewport
+       breakpoint would suggest (e.g. a notification/side panel opens
+       next to it), which crushes "Standard Abbreviation" against
+       "Batch". Rather than key off the window width, this panel is a
+       CSS container — so the Email column drops out (and the others
+       reflow to use the freed space) purely based on how narrow the
+       table's own box actually is right now. */
+    .ar-table-container { container-type: inline-size; container-name: ar-table; }
+    @container ar-table (max-width: 760px) {
+        .ar-col-email { display: none !important; }
+        /* table-fixed with % <col> widths won't reflow on its own once
+           a column is hidden, so the remaining 5 columns get their
+           widths redeclared here to fill the freed-up space. */
+        .ar-narrow-col-name       { width: 30% !important; }
+        .ar-narrow-col-studentid  { width: 19% !important; }
+        .ar-narrow-col-abbrev     { width: 16% !important; }
+        .ar-narrow-col-batch      { width: 12% !important; }
+        .ar-narrow-col-empstatus  { width: 23% !important; }
+    }
+
     /* ── Mobile card rows (no horizontal scroll) ───────────────── */
     .ar-mrow {
         cursor: pointer;
@@ -1130,6 +1183,15 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     }
     .ar-dropdown-menu::-webkit-scrollbar { width: 5px; }
     .ar-dropdown-menu::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+    /* Pins the Clear/Apply footer to the BOTTOM of a scrolling dropdown
+       list, mirroring the "Select All" header's sticky-top treatment —
+       so the action buttons stay visible without scrolling all the way
+       down through a long program/status list. */
+    .ar-dropdown-footer {
+        position: sticky; bottom: -4px; left: 0; right: 0;
+        background: #fff; margin: 0 -4px -4px; padding: 8px 4px 4px;
+        border-top: 1px solid #E8E0F0; border-radius: 0 0 8px 8px;
+    }
     .ar-dropdown-item {
         display: block; width: 100%; padding: 7px 10px; border-radius: 7px;
         font-size: .8rem; font-weight: 600; text-align: left; color: #333;
@@ -1594,7 +1656,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
              their own row. Keeps every wire:click/x-data binding as-is —
              layout/grouping only, no behavior changes. --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-3 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2.5 shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
-             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
+             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
 
             {{-- Row 1: Search (primary action) + Profile status pills --}}
             <div class="flex flex-wrap items-center gap-2">
@@ -1685,18 +1747,24 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
                      class="ar-dropdown-menu" style="display:none;min-width:190px;" @click.stop>
 
-                    {{-- Default view: plain year list --}}
+                    {{-- Default view: plain year list. "Add Range" is
+                         pinned to the BOTTOM (sticky), same treatment as
+                         the Clear/Apply footer in All Programs / All
+                         Employment Status — otherwise it gets pushed out
+                         of view by a long year list and requires
+                         scrolling all the way down to find it. --}}
                     <template x-if="!rangeMode">
                         <div>
                             <button type="button" @click.stop="clearYear()" :class="{'active':$wire.alumniBatchFrom==='' && $wire.alumniBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
                             @foreach($this->batches as $b)
                             <button type="button" @click.stop="selectYear('{{ $b }}')" :class="{'active': $wire.alumniBatchFrom==='{{ $b }}' && $wire.alumniBatchTo==='{{ $b }}'}" class="ar-dropdown-item">{{ $b }}</button>
                             @endforeach
-                            <div class="h-px bg-[#E8E0F0] my-1"></div>
-                            <button type="button" @click.stop="startRange()"
-                                    class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
-                                <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
-                            </button>
+                            <div class="ar-dropdown-footer">
+                                <button type="button" @click.stop="startRange()"
+                                        class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
+                                    <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
+                                </button>
+                            </div>
                         </div>
                     </template>
 
@@ -1737,7 +1805,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                     @endforeach
                                 </div>
                             </div>
-                            <div class="flex items-center gap-2 mt-3">
+                            <div class="flex items-center gap-2 mt-3 ar-dropdown-footer">
                                 <button type="button" @click.stop="rangeMode=false"
                                         class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
                                     Back to List
@@ -1755,16 +1823,18 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             </div>
 
             {{-- Employment Status filter — sits right beside Batch.
-                 MULTI-SELECT with real checkboxes, exactly matching the
-                 Program Code dropdown above. Checking a box toggles that
-                 status in/out of alumniEmploymentStatuses via
-                 toggleEmploymentStatus(); the dropdown stays open across
-                 clicks so e.g. "Employed" + "Self-Employed" can be
-                 checked together. A "Select All" checkbox sits in a
-                 sticky header row at the TOP of the list — tri-state:
-                 checked when every status is selected, indeterminate
-                 (dash) when some but not all are. The trigger label
-                 shows a count once 2+ are picked. --}}
+                 MULTI-SELECT with real checkboxes, matching the Program
+                 Code dropdown's checkbox styling. Checking a box only
+                 toggles a LOCAL "pending" array (Alpine state) — nothing
+                 is sent to the server until "Apply" is clicked, which
+                 calls applyEmploymentStatuses() in one round-trip.
+                 "Clear" and "Apply" are both disabled while nothing is
+                 selected. A "Select All" checkbox sits in a sticky header
+                 row at the TOP of the list — tri-state: checked when
+                 every status is selected, indeterminate (dash) when some
+                 but not all are. The trigger label shows a count once 2+
+                 are picked (reflecting the last APPLIED selection, not
+                 the in-progress local one). --}}
             @php $arEmpOptions = [
                 ['employed', 'Employed', 'fa-user-tie'],
                 ['self_employed', 'Self-Employed', 'fa-store'],
@@ -1774,9 +1844,16 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             <div class="ar-dropdown"
                  x-data="{
                     get open(){ return $store.arFilters.isOpen('empStatus'); },
-                    toggle(){ $store.arFilters.toggle('empStatus'); },
-                    close(){ $store.arFilters.close('empStatus'); }
+                    toggle(){ $store.arFilters.toggle('empStatus'); if(this.open){ this.pending = [...$wire.alumniEmploymentStatuses]; } },
+                    close(){ $store.arFilters.close('empStatus'); },
+                    pending: [],
+                    isChecked(val){ return this.pending.includes(val); },
+                    toggleVal(val){ this.isChecked(val) ? this.pending = this.pending.filter(v => v !== val) : this.pending.push(val); },
+                    selectAll(){ this.pending = {{ json_encode(array_column($arEmpOptions, 0)) }}; },
+                    clearAll(){ this.pending = []; },
+                    apply(){ $wire.applyEmploymentStatuses(this.pending); this.close(); }
                  }"
+                 x-init="pending = [...$wire.alumniEmploymentStatuses]"
                  @click.outside="close()" wire:key="employment-status-dropdown">
                 <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.alumniEmploymentStatuses.length>0,'open':open }" class="ar-dropdown-trigger">
                     <span>
@@ -1797,49 +1874,87 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
                     {{-- Header row: "Select All" checkbox, sticky at the
                          TOP of the list — one tap checks/unchecks every
-                         status at once. --}}
+                         status at once. Works on LOCAL "pending" state
+                         only — nothing is sent to the server until
+                         "Apply" is clicked below. --}}
                     <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-1 -mt-1 bg-white z-10 rounded-t-[8px]">
                         <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
                             <input type="checkbox"
-                                   :checked="$wire.alumniEmploymentStatuses.length === {{ count($arEmpOptions) }}"
-                                   :indeterminate="$wire.alumniEmploymentStatuses.length > 0 && $wire.alumniEmploymentStatuses.length < {{ count($arEmpOptions) }}"
-                                   @change="$event.target.checked ? $wire.selectAllEmploymentStatuses() : $wire.clearEmploymentStatuses()"
-                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
+                                   :checked="pending.length === {{ count($arEmpOptions) }}"
+                                   :indeterminate="pending.length > 0 && pending.length < {{ count($arEmpOptions) }}"
+                                   @change="$event.target.checked ? selectAll() : clearAll()"
+                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
                             Select All
                         </label>
-                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="$wire.alumniEmploymentStatuses.length > 0">
-                            <span x-text="$wire.alumniEmploymentStatuses.length"></span> selected
+                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="pending.length > 0">
+                            <span x-text="pending.length"></span> selected
                         </span>
                     </div>
 
                     @foreach($arEmpOptions as [$val, $label, $icon])
                     <label class="ar-dropdown-item flex items-center gap-2 cursor-pointer select-none"
-                           :class="{'active': $wire.alumniEmploymentStatuses.includes('{{ $val }}')}">
-                        <input type="checkbox" wire:click="toggleEmploymentStatus('{{ $val }}')"
-                               :checked="$wire.alumniEmploymentStatuses.includes('{{ $val }}')"
-                               class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
+                           :class="{'active': isChecked('{{ $val }}')}">
+                        <input type="checkbox" @change="toggleVal('{{ $val }}')"
+                               :checked="isChecked('{{ $val }}')"
+                               class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
                         <i class="fas {{ $icon }} text-[11px] opacity-70"></i>{{ $label }}
                     </label>
                     @endforeach
+
+                    {{-- Clear / Apply — same pattern as the Batch range
+                         picker: nothing filters until "Apply" is clicked.
+                         "Clear" only unchecks the boxes LOCALLY (stays
+                         open, no server call) — it does NOT apply or
+                         close the dropdown, it's just a quick way to
+                         un-tick everything before picking again. "Apply"
+                         sends the pending selection to the server and
+                         closes the dropdown. Both disabled while nothing
+                         is checked locally. --}}
+                    <div class="flex items-center gap-2 ar-dropdown-footer">
+                        <button type="button" @click.stop="clearAll()"
+                                :disabled="pending.length === 0"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                :class="pending.length === 0 ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'text-[#333333] border-[#E8E0F0] hover:bg-[#F5F5F5]'">
+                            Clear
+                        </button>
+                        <button type="button" @click.stop="apply()"
+                                :disabled="pending.length === 0"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                :class="pending.length === 0 ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'text-[#7A3F91] border-[#E8E0F0] hover:bg-[#F5F0FA]'">
+                            Apply
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {{-- Program Code — MULTI-SELECT with real checkboxes, exactly
-                 matching the Employment Tracking dashboard. Checking a
-                 box toggles that program in/out of alumniCourses via
-                 toggleProgramCode(); the dropdown stays open across
-                 clicks so several programs can be checked in one go. A
-                 "Select All" checkbox sits in a sticky header row at the
-                 TOP of the list — tri-state: checked when every program
-                 is selected, indeterminate (dash) when some but not all
+                 matching the Employment Status dropdown above. Checking a
+                 box only toggles a LOCAL "pending" array (Alpine state) —
+                 nothing is sent to the server until "Apply" is clicked,
+                 which calls applyProgramCodes() in one round-trip.
+                 "Clear" only unchecks the boxes locally (stays open, no
+                 server call, no closing) — a quick "start over" before
+                 picking again. Both "Clear" and "Apply" are disabled
+                 while nothing is checked locally. A "Select All"
+                 checkbox sits in a sticky header row at the TOP of the
+                 list — tri-state: checked when every program is
+                 selected, indeterminate (dash) when some but not all
                  are. The trigger label shows a count once 2+ are picked
-                 so the bar doesn't overflow with every selected code. --}}
+                 (reflecting the last APPLIED selection, not the
+                 in-progress local one) so the bar doesn't overflow. --}}
             <div class="ar-dropdown"
                  x-data="{
                     get open(){ return $store.arFilters.isOpen('course'); },
-                    toggle(){ $store.arFilters.toggle('course'); if(this.open){ this.$nextTick(()=>{ if(this.$refs.courseMenu) this.$refs.courseMenu.scrollTop = 0; }); } },
-                    close(){ $store.arFilters.close('course'); }
+                    toggle(){ $store.arFilters.toggle('course'); if(this.open){ this.pending = [...$wire.alumniCourses]; this.$nextTick(()=>{ if(this.$refs.courseMenu) this.$refs.courseMenu.scrollTop = 0; }); } },
+                    close(){ $store.arFilters.close('course'); },
+                    pending: [],
+                    isChecked(val){ return this.pending.includes(val); },
+                    toggleVal(val){ this.isChecked(val) ? this.pending = this.pending.filter(v => v !== val) : this.pending.push(val); },
+                    selectAll(){ this.pending = {{ json_encode($this->courses->pluck('code')->values()->all()) }}; },
+                    clearAll(){ this.pending = []; },
+                    apply(){ $wire.applyProgramCodes(this.pending); this.close(); }
                  }"
+                 x-init="pending = [...$wire.alumniCourses]"
                  @click.outside="close()" wire:key="course-dropdown">
                 <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.alumniCourses.length>0,'open':open }" class="ar-dropdown-trigger">
                     <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
@@ -1861,30 +1976,48 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
                     {{-- Header row: "Select All" checkbox, sticky at the
                          TOP of the list — one tap checks/unchecks every
-                         program code at once. --}}
+                         program code at once, locally. --}}
                     <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-1 -mt-1 bg-white z-10 rounded-t-[8px]">
                         <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
                             <input type="checkbox"
-                                   :checked="$wire.alumniCourses.length === {{ count($this->courses) }}"
-                                   :indeterminate="$wire.alumniCourses.length > 0 && $wire.alumniCourses.length < {{ count($this->courses) }}"
-                                   @change="$event.target.checked ? $wire.selectAllProgramCodes() : $wire.clearProgramCodes()"
-                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
+                                   :checked="pending.length === {{ count($this->courses) }}"
+                                   :indeterminate="pending.length > 0 && pending.length < {{ count($this->courses) }}"
+                                   @change="$event.target.checked ? selectAll() : clearAll()"
+                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
                             Select All
                         </label>
-                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="$wire.alumniCourses.length > 0">
-                            <span x-text="$wire.alumniCourses.length"></span> selected
+                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="pending.length > 0">
+                            <span x-text="pending.length"></span> selected
                         </span>
                     </div>
 
                     @foreach($this->courses as $c)
                     <label class="ar-dropdown-item flex items-center gap-2 cursor-pointer select-none"
-                           :class="{'active': $wire.alumniCourses.includes('{{ $c->code }}')}">
-                        <input type="checkbox" wire:click="toggleProgramCode('{{ $c->code }}')"
-                               :checked="$wire.alumniCourses.includes('{{ $c->code }}')"
-                               class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
+                           :class="{'active': isChecked('{{ $c->code }}')}">
+                        <input type="checkbox" @change="toggleVal('{{ $c->code }}')"
+                               :checked="isChecked('{{ $c->code }}')"
+                               class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] text-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
                         <span>{{ $c->name ?? $c->code }}</span>
                     </label>
                     @endforeach
+
+                    {{-- Clear / Apply — same pattern as Employment Status
+                         and the Batch range picker: nothing filters until
+                         "Apply" is clicked. --}}
+                    <div class="flex items-center gap-2 ar-dropdown-footer">
+                        <button type="button" @click.stop="clearAll()"
+                                :disabled="pending.length === 0"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                :class="pending.length === 0 ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'text-[#333333] border-[#E8E0F0] hover:bg-[#F5F5F5]'">
+                            Clear
+                        </button>
+                        <button type="button" @click.stop="apply()"
+                                :disabled="pending.length === 0"
+                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                :class="pending.length === 0 ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'text-[#7A3F91] border-[#E8E0F0] hover:bg-[#F5F0FA]'">
+                            Apply
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -1944,7 +2077,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
              overlay spinner below, which reads more clearly as "working"
              and doesn't risk looking visually stuck mid-DOM-swap.) --}}
 
-        <div class="relative flex-1 min-h-0" x-data="{ showTop:false }">
+        <div class="relative flex-1 min-h-0 ar-table-container" x-data="{ showTop:false }">
 
             {{-- Center overlay spinner — icon only, no background box,
                  absolutely positioned over the table (NOT sticky/in-flow)
@@ -1952,7 +2085,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                  scroll container. Pure overlay: floats on top, table
                  layout is completely undisturbed while loading. --}}
             <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
-                 wire:loading wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
+                 wire:loading wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
                 <div class="flex items-center justify-center" style="margin-top:16px;">
                     <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
                 </div>
@@ -1960,12 +2093,17 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
+                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
                     <colgroup>
-                        <col style="width:24%;"><col style="width:15%;"><col style="width:12%;"><col style="width:9%;"><col style="width:16%;"><col style="width:24%;">
+                        <col class="ar-narrow-col-name" style="width:26%;">
+                        <col class="ar-narrow-col-studentid" style="width:16%;">
+                        <col class="ar-narrow-col-abbrev" style="width:13%;">
+                        <col class="ar-narrow-col-batch" style="width:10%;">
+                        <col class="ar-narrow-col-empstatus" style="width:19%;">
+                        <col class="ar-col-email" style="width:16%;">
                     </colgroup>
                     <thead>
                         <tr class="bg-[#F5F5F5] border-b-2 border-[#E8E0F0] sticky top-0 z-10">
@@ -1974,7 +2112,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Standard Abbreviation</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Batch</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Employment Status</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Email</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest ar-col-email">Email</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F0ECF5]">
@@ -2020,7 +2158,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                     <i class="fas {{ $arEmpIcon }} text-[10px]"></i>{{ $arEmpLabel }}
                                 </span>
                             </td>
-                            <td class="px-4 py-3 overflow-hidden">
+                            <td class="px-4 py-3 overflow-hidden ar-col-email">
                                 <span class="text-[#333333] text-sm font-normal truncate block">
                                     {!! $this->highlight($item->email ?? '', $this->alumniSearch) !!}
                                 </span>

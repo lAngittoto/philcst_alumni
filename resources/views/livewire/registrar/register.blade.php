@@ -21,10 +21,11 @@ new class extends Component {
     public string $regYear          = '';
     public string $regEmail         = '';
 
-    public bool   $submitting  = false;
-    public array  $formErrors  = [];
-    public array  $fieldErrors = [];
-    public string $successMsg  = '';
+    public bool   $submitting     = false;
+    public array  $formErrors     = [];
+    public array  $fieldErrors    = [];
+    public array  $fieldMessages  = []; // ['fieldKey' => 'inline message shown under that input']
+    public string $successMsg     = '';
 
     public bool   $showImportModal      = false;
     public        $importFile           = null;
@@ -43,6 +44,31 @@ new class extends Component {
     public function mount(): void
     {
         $this->regYear = (string) date('Y');
+    }
+
+    // Bawat field na naka wire:model.live ay tatawag dito kapag nagbago,
+    // para live ma-update ang red highlight (fieldErrors) at ang
+    // disabled state ng "Register Alumni" button nang hindi na
+    // kailangan mag-full submit muna.
+    public function updated(string $property): void
+    {
+        $regFields = [
+            'regFirstName', 'regMiddleInitial', 'regLastName', 'regSuffix',
+            'regStudentId', 'regCourseCode', 'regYear', 'regEmail',
+        ];
+
+        if (!in_array($property, $regFields, true)) {
+            return;
+        }
+
+        // Habang naglilive-validate lang (hindi pa nag-submit), huwag
+        // munang i-flag as "required" ang mga blangkong field (di pa
+        // naman tapos mag-type ang user) — format/duplicate checks lang
+        // ang live. Kapag nag-submit na talaga, buong validation
+        // (kasama ang "required") ang gagamitin ng registerAlumni().
+        $result = $this->collectErrors(liveMode: true);
+        $this->fieldErrors   = $result['fields'];
+        $this->fieldMessages = $result['messages'];
     }
 
     #[\Livewire\Attributes\Computed]
@@ -65,109 +91,161 @@ new class extends Component {
         return implode(' ', array_filter(array_map('trim', [$f, $m, $l, $s])));
     }
 
-    private function collectErrors(): array
+    private function collectErrors(bool $liveMode = false): array
     {
         $errors      = [];
         $fieldErrors = [];
+        $fieldMsgs   = []; // ['fieldKey' => 'message shown right under that input']
 
         $firstName = trim($this->regFirstName);
         if (!$firstName) {
-            $errors[]      = 'First name is required.';
-            $fieldErrors[] = 'firstName';
+            if (!$liveMode) {
+                $errors[]              = 'First name is required.';
+                $fieldErrors[]         = 'firstName';
+                $fieldMsgs['firstName'] = 'First name is required.';
+            }
         } elseif (!$this->validateName($firstName)) {
-            $errors[]      = 'First name may only contain letters, spaces, hyphens, or apostrophes.';
-            $fieldErrors[] = 'firstName';
+            $errors[]              = 'First name may only contain letters, spaces, hyphens, or apostrophes.';
+            $fieldErrors[]         = 'firstName';
+            $fieldMsgs['firstName'] = 'Letters, spaces, hyphens, or apostrophes only.';
         }
 
         $lastName = trim($this->regLastName);
         if (!$lastName) {
-            $errors[]      = 'Last name is required.';
-            $fieldErrors[] = 'lastName';
+            if (!$liveMode) {
+                $errors[]             = 'Last name is required.';
+                $fieldErrors[]        = 'lastName';
+                $fieldMsgs['lastName'] = 'Last name is required.';
+            }
         } elseif (!$this->validateName($lastName)) {
-            $errors[]      = 'Last name may only contain letters, spaces, hyphens, or apostrophes.';
-            $fieldErrors[] = 'lastName';
+            $errors[]             = 'Last name may only contain letters, spaces, hyphens, or apostrophes.';
+            $fieldErrors[]        = 'lastName';
+            $fieldMsgs['lastName'] = 'Letters, spaces, hyphens, or apostrophes only.';
         }
 
         $mid = trim($this->regMiddleInitial);
         if ($mid === '') {
-            $errors[]      = 'Middle name is required.';
-            $fieldErrors[] = 'middleName';
+            if (!$liveMode) {
+                $errors[]               = 'Middle name is required.';
+                $fieldErrors[]          = 'middleName';
+                $fieldMsgs['middleName'] = 'Middle name is required.';
+            }
         } else {
             if (!preg_match('/^[a-zA-Z]+$/', $mid)) {
-                $errors[]      = 'Middle name must contain letters only.';
-                $fieldErrors[] = 'middleName';
+                $errors[]               = 'Middle name must contain letters only.';
+                $fieldErrors[]          = 'middleName';
+                $fieldMsgs['middleName'] = 'Letters only, no numbers or symbols.';
             } elseif (strlen($mid) < 2) {
-                $errors[]      = 'Middle name must be a full word (e.g. Santos, not S).';
-                $fieldErrors[] = 'middleName';
+                $errors[]               = 'Middle name must be a full word (e.g. Santos, not S).';
+                $fieldErrors[]          = 'middleName';
+                $fieldMsgs['middleName'] = 'Must be a full word (e.g. Santos, not S).';
             }
         }
 
         $suffix = trim($this->regSuffix);
         if ($suffix !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', $suffix)) {
-            $errors[]      = 'Suffix may only contain letters and periods (e.g. Jr. Sr. III).';
-            $fieldErrors[] = 'suffix';
+            $errors[]           = 'Suffix may only contain letters and periods (e.g. Jr. Sr. III).';
+            $fieldErrors[]      = 'suffix';
+            $fieldMsgs['suffix'] = 'Letters and periods only (e.g. Jr. Sr. III).';
         }
 
         $studentId = trim($this->regStudentId);
         if (!$studentId) {
-            $errors[]      = 'Student ID is required.';
+            if (!$liveMode) {
+                $errors[]               = 'Student ID is required.';
+                $fieldErrors[]          = 'studentId';
+                $fieldMsgs['studentId'] = 'Student ID is required.';
+            }
+        } elseif (!preg_match('/^\d+$/', $studentId)) {
+            $errors[]               = 'Student ID must contain numbers only.';
+            $fieldErrors[]          = 'studentId';
+            $fieldMsgs['studentId'] = 'Numbers only.';
+        } elseif (strlen($studentId) < 8) {
+            // Kulang pa sa 8 digits — required pa rin ito (kasama sa
+            // fieldErrors para manatiling naka-red/disabled ang Register
+            // button), pero iba ang message: "X more digit(s) needed"
+            // habang nagta-type pa lang, sa halip na basta "invalid".
+            // Duplicate-check pa lang ang mangyayari kapag umabot na sa
+            // eksaktong 8 digits.
             $fieldErrors[] = 'studentId';
-        } elseif (!preg_match('/^\d{1,8}$/', $studentId)) {
-            $errors[]      = 'Student ID must be 1-8 digits (numbers only).';
-            $fieldErrors[] = 'studentId';
+            if (!$liveMode) {
+                $errors[]               = 'Student ID must be exactly 8 digits.';
+                $fieldMsgs['studentId'] = 'Must be exactly 8 digits.';
+            } else {
+                $fieldMsgs['studentId'] = (8 - strlen($studentId)) . ' more digit' . ((8 - strlen($studentId)) === 1 ? '' : 's') . ' needed.';
+            }
+        } elseif (strlen($studentId) > 8) {
+            $errors[]               = 'Student ID must be exactly 8 digits.';
+            $fieldErrors[]          = 'studentId';
+            $fieldMsgs['studentId'] = 'Must be exactly 8 digits.';
         } else {
-            $paddedId = str_pad($studentId, 8, '0', STR_PAD_LEFT);
-            if (Alumni::where('student_id', $paddedId)->exists()) {
-                $errors[]      = 'This Student ID is already registered.';
-                $fieldErrors[] = 'studentId';
+            if (Alumni::where('student_id', $studentId)->exists()) {
+                $errors[]               = 'This Student ID is already registered.';
+                $fieldErrors[]          = 'studentId';
+                $fieldMsgs['studentId'] = 'This Student ID is already registered.';
             }
         }
 
         if (!trim($this->regCourseCode)) {
-            $errors[]      = 'Please select a program.';
-            $fieldErrors[] = 'course';
+            if (!$liveMode) {
+                $errors[]            = 'Please select a program.';
+                $fieldErrors[]       = 'course';
+                $fieldMsgs['course'] = 'Please select a program.';
+            }
         } elseif (!Course::where('code', $this->regCourseCode)->exists()) {
-            $errors[]      = 'The selected program does not exist.';
-            $fieldErrors[] = 'course';
+            $errors[]            = 'The selected program does not exist.';
+            $fieldErrors[]       = 'course';
+            $fieldMsgs['course'] = 'The selected program does not exist.';
         }
 
         $year = trim($this->regYear);
         if (!$year) {
-            $errors[]      = 'Batch year is required.';
-            $fieldErrors[] = 'year';
+            if (!$liveMode) {
+                $errors[]          = 'Batch year is required.';
+                $fieldErrors[]     = 'year';
+                $fieldMsgs['year'] = 'Batch year is required.';
+            }
         } elseif (!preg_match('/^\d{4}$/', $year)) {
-            $errors[]      = 'Batch year must be exactly 4 digits.';
-            $fieldErrors[] = 'year';
+            $errors[]          = 'Batch year must be exactly 4 digits.';
+            $fieldErrors[]     = 'year';
+            $fieldMsgs['year'] = 'Must be exactly 4 digits.';
         }
 
         $email = trim($this->regEmail);
         if (!$email) {
-            $errors[]      = 'Email address is required.';
-            $fieldErrors[] = 'email';
+            if (!$liveMode) {
+                $errors[]           = 'Email address is required.';
+                $fieldErrors[]      = 'email';
+                $fieldMsgs['email'] = 'Email address is required.';
+            }
         } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $errors[]      = 'Please enter a valid email address.';
-            $fieldErrors[] = 'email';
+            $errors[]           = 'Please enter a valid email address.';
+            $fieldErrors[]      = 'email';
+            $fieldMsgs['email'] = 'Please enter a valid email address.';
         } elseif (Alumni::whereNotNull('email')->whereRaw('LOWER(TRIM(email))=?', [strtolower($email)])->exists()) {
-            $errors[]      = 'This email address is already registered.';
-            $fieldErrors[] = 'email';
+            $errors[]           = 'This email address is already registered.';
+            $fieldErrors[]      = 'email';
+            $fieldMsgs['email'] = 'This email address is already registered.';
         }
 
-        return ['errors' => $errors, 'fields' => $fieldErrors];
+        return ['errors' => $errors, 'fields' => $fieldErrors, 'messages' => $fieldMsgs];
     }
 
     public function registerAlumni(): void
     {
-        $this->formErrors  = [];
-        $this->fieldErrors = [];
-        $this->successMsg  = '';
-        $this->submitting  = true;
+        $this->formErrors     = [];
+        $this->fieldErrors    = [];
+        $this->fieldMessages  = [];
+        $this->successMsg     = '';
+        $this->submitting     = true;
 
         try {
             $result = $this->collectErrors();
 
             if (!empty($result['errors'])) {
-                $this->formErrors  = ['general' => $result['errors']];
-                $this->fieldErrors = $result['fields'];
+                $this->formErrors    = ['general' => $result['errors']];
+                $this->fieldErrors   = $result['fields'];
+                $this->fieldMessages = $result['messages'];
                 return;
             }
 
@@ -223,9 +301,10 @@ new class extends Component {
     {
         $this->regFirstName = $this->regMiddleInitial = $this->regLastName = $this->regSuffix = '';
         $this->regStudentId = $this->regCourseCode = $this->regEmail = '';
-        $this->regYear      = (string) date('Y');
-        $this->formErrors   = [];
-        $this->fieldErrors  = [];
+        $this->regYear        = (string) date('Y');
+        $this->formErrors     = [];
+        $this->fieldErrors    = [];
+        $this->fieldMessages  = [];
     }
 
     public function clearSuccess(): void
@@ -869,10 +948,16 @@ public function closeImportModal(): void
     .reg-picker-search-input::placeholder { color: #bbb; font-weight: 400; }
 
     .reg-picker-list-course {
-        max-height: 170px;
-        overflow: hidden;
+        max-height: 150px;
+        overflow-y: auto;
         padding: 6px;
+        scrollbar-width: thin;
+        scrollbar-color: #E4D0F5 transparent;
     }
+    .reg-picker-list-course::-webkit-scrollbar { width: 6px; }
+    .reg-picker-list-course::-webkit-scrollbar-track { background: transparent; }
+    .reg-picker-list-course::-webkit-scrollbar-thumb { background: #E4D0F5; border-radius: 6px; }
+    .reg-picker-list-course::-webkit-scrollbar-thumb:hover { background: #c49ed8; }
     .reg-picker-course-cell {
         width: 100%;
         display: flex;
@@ -1290,46 +1375,89 @@ public function closeImportModal(): void
     {{-- ══ Scrollable body (fills remaining height, no page-level scroll/buffer) ══ --}}
     <div id="reg-scroll" class="flex-1 min-h-0 overflow-y-auto">
     <div class="flex items-start justify-center pt-1 pb-4 px-3 sm:px-0">
-        <div class="w-full flex flex-col sm:flex-row gap-5 items-start justify-center
-                    {{ count($formErrors) > 0 ? 'max-w-5xl' : 'max-w-2xl' }}
-                    transition-all duration-300">
+        <div class="w-full flex flex-col sm:flex-row gap-5 items-start justify-center max-w-2xl">
 
             {{-- ── Form Column ── --}}
-            <div class="{{ count($formErrors) > 0 ? 'flex-1 min-w-0 w-full' : 'w-full' }}">
+            <div class="w-full">
                 <div class="reg-card reg-panel">
-                    <form wire:submit="registerAlumni" class="p-5 sm:p-7 space-y-5 pb-7">
+                    <form wire:submit="registerAlumni" class="p-5 sm:p-7 space-y-5 pb-7"
+                          x-data="{
+                              fieldStale(key) { return ($wire.fieldErrors || []).includes(key); },
+                              allFilled() {
+                                  return $wire.regFirstName.trim() !== '' && $wire.regLastName.trim() !== ''
+                                      && $wire.regMiddleInitial.trim() !== '' && $wire.regStudentId.trim() !== ''
+                                      && $wire.regCourseCode !== '' && $wire.regYear !== '' && $wire.regEmail.trim() !== '';
+                              },
+                              get isDisabled() {
+                                  return !!$wire.submitting || !this.allFilled() || ($wire.fieldErrors || []).length > 0;
+                              },
+                              get tooltip() {
+                                  if (!this.allFilled()) return 'Please fill up all required fields *';
+                                  return this.isDisabled ? 'Please fix the highlighted field(s) marked in red' : '';
+                              }
+                          }">
+
+
 
                         {{-- Full Name --}}
                         <div>
                             <p class="text-sm font-bold text-[#333333] uppercase tracking-wide mb-3">
-                                Full Name <span class="text-red-500">*</span>
+                                Full Name
                             </p>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div class="fl-group">
-                                    <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                    <input wire:model.defer="regFirstName" type="text" placeholder=" "
-                                           class="fl-input {{ in_array('firstName', $fieldErrors) ? 'field-error' : '' }}"
-                                           maxlength="100" autocomplete="given-name">
-                                    <label class="fl-label">First Name</label>
+                                <div>
+                                    <div class="fl-group">
+                                        <span class="fl-icon"><i class="fas fa-user"></i></span>
+                                        <input wire:model.live.debounce.400ms="regFirstName" type="text" placeholder=" "
+                                               :class="{ 'field-error': fieldStale('firstName') }"
+                                               class="fl-input"
+                                               maxlength="100" autocomplete="given-name">
+                                        <label class="fl-label">First Name <span class="text-red-500">*</span></label>
+                                    </div>
+                                    @if(isset($fieldMessages['firstName']))
+                                        <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                            <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                            <span>{{ $fieldMessages['firstName'] }}</span>
+                                        </p>
+                                    @endif
                                 </div>
-                                <div class="fl-group">
-                                    <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                    <input wire:model.defer="regLastName" type="text" placeholder=" "
-                                           class="fl-input {{ in_array('lastName', $fieldErrors) ? 'field-error' : '' }}"
-                                           maxlength="100" autocomplete="family-name">
-                                    <label class="fl-label">Last Name</label>
+                                <div>
+                                    <div class="fl-group">
+                                        <span class="fl-icon"><i class="fas fa-user"></i></span>
+                                        <input wire:model.live.debounce.400ms="regLastName" type="text" placeholder=" "
+                                               :class="{ 'field-error': fieldStale('lastName') }"
+                                               class="fl-input"
+                                               maxlength="100" autocomplete="family-name">
+                                        <label class="fl-label">Last Name <span class="text-red-500">*</span></label>
+                                    </div>
+                                    @if(isset($fieldMessages['lastName']))
+                                        <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                            <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                            <span>{{ $fieldMessages['lastName'] }}</span>
+                                        </p>
+                                    @endif
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-3 mt-3">
-                                <div class="fl-group">
-                                    <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                    <input wire:model.defer="regMiddleInitial" type="text" placeholder=" "
-                                           class="fl-input {{ in_array('middleName', $fieldErrors) ? 'field-error' : '' }}"
-                                           maxlength="50">
-                                    <label class="fl-label">Middle Name</label>
+                                <div>
+                                    <div class="fl-group">
+                                        <span class="fl-icon"><i class="fas fa-user"></i></span>
+                                        <input wire:model.live.debounce.400ms="regMiddleInitial" type="text" placeholder=" "
+                                               :class="{ 'field-error': fieldStale('middleName') }"
+                                               class="fl-input"
+                                               maxlength="50">
+                                        <label class="fl-label">Middle Name <span class="text-red-500">*</span></label>
+                                    </div>
+                                    @if(isset($fieldMessages['middleName']))
+                                        <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                            <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                            <span>{{ $fieldMessages['middleName'] }}</span>
+                                        </p>
+                                    @endif
                                 </div>
 
                                 {{-- Suffix dropdown --}}
+                                <div>
                                 <div class="reg-dropdown"
                                      x-data="{
                                          open: false,
@@ -1365,8 +1493,8 @@ public function closeImportModal(): void
 
                                     <button type="button"
                                             @click="toggle()"
-                                            :class="{ 'has-value': $wire.regSuffix !== '', 'open': open }"
-                                            class="reg-dropdown-trigger {{ in_array('suffix', $fieldErrors) ? 'field-error' : '' }}">
+                                            :class="{ 'has-value': $wire.regSuffix !== '', 'open': open, 'field-error': fieldStale('suffix') }"
+                                            class="reg-dropdown-trigger">
                                         <i class="fas fa-tag reg-trigger-icon"></i>
                                         <span class="reg-trigger-label">Suffix</span>
                                         <span class="reg-trigger-value" x-show="$wire.regSuffix !== ''" x-text="$wire.regSuffix" style="display:none;"></span>
@@ -1408,37 +1536,53 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
+                                @if(isset($fieldMessages['suffix']))
+                                    <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                        <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                        <span>{{ $fieldMessages['suffix'] }}</span>
+                                    </p>
+                                @endif
+                                </div>
                             </div>
                         </div>
+
 
                         {{-- Student ID --}}
                         <div>
                             <p class="text-sm font-bold text-[#333333] uppercase tracking-wide mb-3">
-                                Student ID <span class="text-red-500">*</span>
+                                Student ID
                             </p>
                             <div class="fl-group">
                                 <span class="fl-icon"><i class="fas fa-id-card"></i></span>
-                                <input wire:model.defer="regStudentId" type="text" placeholder=" "
-                                       class="fl-input font-mono {{ in_array('studentId', $fieldErrors) ? 'field-error' : '' }}"
+                                <input wire:model.live.debounce.400ms="regStudentId" type="text" placeholder=" "
+                                       :class="{ 'field-error': fieldStale('studentId') }"
+                                       class="fl-input font-mono"
                                        maxlength="8" inputmode="numeric" autocomplete="off">
-                                <label class="fl-label">Student ID</label>
+                                <label class="fl-label">Student ID <span class="text-red-500">*</span></label>
                             </div>
+                            @if(isset($fieldMessages['studentId']))
+                                <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span>{{ $fieldMessages['studentId'] }}</span>
+                                </p>
+                            @endif
                         </div>
 
                         {{-- Program Code + Batch --}}
                         <div>
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
                                 <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
-                                    Program <span class="text-red-500">*</span>
+                                    Program
                                 </p>
                                 <p class="text-sm font-bold text-[#333333] uppercase tracking-wide">
-                                    Batch <span class="text-red-500">*</span>
+                                    Batch
                                 </p>
                             </div>
 
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" style="overflow:visible;position:relative;z-index:10;">
 
                                 {{-- Program picker (shows full program name, e.g. "Bachelor of Science in Information Technology") --}}
+                                <div>
                                 @php
                                     $coursesJson = $this->courses->map(fn($c) => [
                                         'code' => $c->code,
@@ -1449,32 +1593,24 @@ public function closeImportModal(): void
                                      x-data="{
                                          open: false,
                                          allCourses: {{ $coursesJson }},
-                                         pageSize: 3,
-                                         pageIndex: 0,
                                          search: '',
                                          get filtered() {
                                              if (!this.search.trim()) return this.allCourses;
                                              let q = this.search.trim().toLowerCase();
                                              return this.allCourses.filter(c => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q));
                                          },
-                                         get totalPages() { return Math.max(1, Math.ceil(this.filtered.length / this.pageSize)); },
-                                         get pageCourses() { let s = this.pageIndex * this.pageSize; return this.filtered.slice(s, s + this.pageSize); },
-                                         get rangeLabel() {
-                                             if (!this.filtered.length) return 'No programs found';
-                                             let s = this.pageIndex * this.pageSize;
-                                             let e = Math.min(s + this.pageSize - 1, this.filtered.length - 1);
-                                             return this.totalPages === 1 ? 'All Programs' : (s + 1) + ' - ' + (e + 1) + ' of ' + this.filtered.length;
+                                         get statusLabel() {
+                                             if (!this.search.trim()) return this.allCourses.length + ' program' + (this.allCourses.length === 1 ? '' : 's');
+                                             return this.filtered.length ? 'Search found (' + this.filtered.length + ')' : 'Search not found';
                                          },
-                                         prevPage() { if (this.pageIndex > 0) this.pageIndex--; },
-                                         nextPage() { if (this.pageIndex < this.totalPages - 1) this.pageIndex++; },
-                                         canPrev() { return this.pageIndex > 0; },
-                                         canNext() { return this.pageIndex < this.totalPages - 1; },
                                          toggle() { this.open = !this.open; },
-                                         close()  { this.open = false; this.search = ''; this.pageIndex = 0; },
+                                         close()  { this.open = false; this.search = ''; },
                                          select(code) { $wire.set('regCourseCode', code); this.close(); },
                                          jumpToSelected() {
-                                             let i = this.filtered.findIndex(c => c.code === $wire.regCourseCode);
-                                             if (i >= 0) this.pageIndex = Math.floor(i / this.pageSize);
+                                             this.$nextTick(() => {
+                                                 let el = this.$refs.courseList?.querySelector('.reg-picker-course-cell--selected');
+                                                 if (el) el.scrollIntoView({ block: 'center' });
+                                             });
                                          },
                                          nameFor(code) { let c = this.allCourses.find(c => c.code === code); return c ? c.name : ''; }
                                      }"
@@ -1482,10 +1618,10 @@ public function closeImportModal(): void
 
                                     <button type="button"
                                             @click="toggle(); if(open) jumpToSelected()"
-                                            :class="{ 'has-value': $wire.regCourseCode !== '', 'open': open }"
-                                            class="reg-dropdown-trigger reg-dropdown-trigger--program {{ in_array('course', $fieldErrors) ? 'field-error' : '' }}">
+                                            :class="{ 'has-value': $wire.regCourseCode !== '', 'open': open, 'field-error': fieldStale('course') }"
+                                            class="reg-dropdown-trigger reg-dropdown-trigger--program">
                                         <i class="fas fa-book-open reg-trigger-icon"></i>
-                                        <span class="reg-trigger-label" x-show="$wire.regCourseCode === ''">Program</span>
+                                        <span class="reg-trigger-label" x-show="$wire.regCourseCode === ''">Program <span class="text-red-500">*</span></span>
                                         <span class="reg-trigger-value-stack" x-show="$wire.regCourseCode !== ''" style="display:none;">
                                             <span class="reg-trigger-value-code" x-text="$wire.regCourseCode"></span>
                                             <span class="reg-trigger-value-name" x-text="nameFor($wire.regCourseCode)"></span>
@@ -1504,23 +1640,17 @@ public function closeImportModal(): void
 
                                         <div class="reg-picker-search">
                                             <i class="fas fa-magnifying-glass"></i>
-                                            <input type="text" x-model="search" @input="pageIndex = 0"
+                                            <input type="text" x-model="search"
                                                    placeholder="Search program..."
                                                    class="reg-picker-search-input" @click.stop>
                                         </div>
 
                                         <div class="reg-picker-header">
-                                            <button type="button" @click.stop="prevPage()" :disabled="!canPrev()" class="reg-picker-nav-btn">
-                                                <i class="fas fa-chevron-left" style="font-size:.58rem;"></i>
-                                            </button>
-                                            <span class="reg-picker-range-label" x-text="rangeLabel"></span>
-                                            <button type="button" @click.stop="nextPage()" :disabled="!canNext()" class="reg-picker-nav-btn">
-                                                <i class="fas fa-chevron-right" style="font-size:.58rem;"></i>
-                                            </button>
+                                            <span class="reg-picker-range-label" x-text="statusLabel"></span>
                                         </div>
 
-                                        <div class="reg-picker-list-course">
-                                            <template x-for="c in pageCourses" :key="c.code">
+                                        <div class="reg-picker-list-course" x-ref="courseList">
+                                            <template x-for="c in filtered" :key="c.code">
                                                 <button type="button" @click.stop="select(c.code)"
                                                         :class="{ 'reg-picker-course-cell--selected': $wire.regCourseCode === c.code }"
                                                         class="reg-picker-course-cell">
@@ -1530,7 +1660,7 @@ public function closeImportModal(): void
                                                 </button>
                                             </template>
                                             <div x-show="filtered.length === 0" class="reg-picker-course-empty" style="display:none;">
-                                                <i class="fas fa-circle-exclamation"></i> No matching programs
+                                                <i class="fas fa-circle-exclamation"></i> Search not found
                                             </div>
                                         </div>
 
@@ -1539,17 +1669,21 @@ public function closeImportModal(): void
                                                     x-show="$wire.regCourseCode !== ''" style="display:none;">
                                                 <i class="fas fa-xmark" style="font-size:.65rem;margin-right:3px;"></i>Clear
                                             </button>
-                                            <span x-show="totalPages > 1"
-                                                  style="cursor:default;font-size:.68rem;color:#aaa;margin-left:auto;">
-                                                Page <span x-text="pageIndex + 1"></span> / <span x-text="totalPages"></span>
-                                            </span>
                                         </div>
                                     </div>
+                                </div>
+                                @if(isset($fieldMessages['course']))
+                                    <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                        <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                        <span>{{ $fieldMessages['course'] }}</span>
+                                    </p>
+                                @endif
                                 </div>
 
                                 {{-- Batch Year picker — capped at 2030 until the calendar actually
                                      reaches it, then auto-extends by 5-year steps (2035, 2040, ...)
                                      so it never needs a manual bump later. --}}
+                                <div>
                                 <div class="reg-dropdown"
                                      x-data="{
                                          open: false,
@@ -1586,10 +1720,10 @@ public function closeImportModal(): void
 
                                     <button type="button"
                                             @click="toggle()"
-                                            :class="{ 'has-value': $wire.regYear !== '', 'open': open }"
-                                            class="reg-dropdown-trigger {{ in_array('year', $fieldErrors) ? 'field-error' : '' }}">
+                                            :class="{ 'has-value': $wire.regYear !== '', 'open': open, 'field-error': fieldStale('year') }"
+                                            class="reg-dropdown-trigger">
                                         <i class="fas fa-calendar-alt reg-trigger-icon"></i>
-                                        <span class="reg-trigger-label">Batch Year</span>
+                                        <span class="reg-trigger-label">Batch Year <span class="text-red-500">*</span></span>
                                         <span class="reg-trigger-value" x-show="$wire.regYear !== ''" x-text="$wire.regYear" style="display:none;"></span>
                                         <i class="fas fa-chevron-down reg-trigger-chevron"></i>
                                     </button>
@@ -1633,6 +1767,13 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
+                                @if(isset($fieldMessages['year']))
+                                    <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                        <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                        <span>{{ $fieldMessages['year'] }}</span>
+                                    </p>
+                                @endif
+                                </div>
 
                             </div>
                         </div>
@@ -1640,15 +1781,22 @@ public function closeImportModal(): void
                         {{-- Email --}}
                         <div>
                             <p class="text-sm font-bold text-[#333333] uppercase tracking-wide mb-3">
-                                Email <span class="text-red-500">*</span>
+                                Email
                             </p>
                             <div class="fl-group">
                                 <span class="fl-icon"><i class="fas fa-envelope"></i></span>
-                                <input wire:model.defer="regEmail" type="email" placeholder=" "
-                                       class="fl-input {{ in_array('email', $fieldErrors) ? 'field-error' : '' }}"
+                                <input wire:model.live.debounce.400ms="regEmail" type="email" placeholder=" "
+                                       :class="{ 'field-error': fieldStale('email') }"
+                                       class="fl-input"
                                        maxlength="255" autocomplete="email">
-                                <label class="fl-label">Email Address</label>
+                                <label class="fl-label">Email Address <span class="text-red-500">*</span></label>
                             </div>
+                            @if(isset($fieldMessages['email']))
+                                <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span>{{ $fieldMessages['email'] }}</span>
+                                </p>
+                            @endif
                         </div>
 
                         {{-- Buttons --}}
@@ -1664,8 +1812,10 @@ public function closeImportModal(): void
                                 </span>
                             </button>
                             <button type="submit"
+                                    :disabled="isDisabled"
+                                    :title="tooltip"
                                     wire:loading.attr="disabled" wire:target="registerAlumni,resetForm"
-                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
+                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed hover:opacity-90 active:scale-[.99]"
                                     style="background:#7A3F91;">
                                 <span wire:loading wire:target="registerAlumni" class="inline-flex items-center gap-2">
                                     <i class="fas fa-spinner animate-spin"></i> Registering...
@@ -1679,49 +1829,6 @@ public function closeImportModal(): void
                     </form>
                 </div>
             </div>
-
-            {{-- ── Side Error Panel ── --}}
-            @if(count($formErrors) > 0)
-            <div class="w-full sm:w-80 shrink-0">
-                <div class="bg-red-50 border border-red-200 rounded-2xl overflow-hidden shadow-sm">
-                    <div class="px-4 py-3 flex items-center justify-between" style="background:#DC2626;">
-                        <div class="flex items-center gap-2">
-                            <i class="fas fa-circle-xmark text-white text-base"></i>
-                            <span class="text-base font-semibold text-white">Validation Errors</span>
-                        </div>
-                        <div class="relative group">
-                            <button wire:click="resetForm" type="button"
-                                    wire:loading.attr="disabled" wire:target="resetForm"
-                                    class="text-white/70 hover:text-white transition w-7 h-7 flex items-center justify-center rounded-lg hover:bg-white/15 disabled:opacity-50">
-                                <span wire:loading wire:target="resetForm">
-                                    <i class="fas fa-spinner animate-spin text-sm"></i>
-                                </span>
-                                <span wire:loading.remove wire:target="resetForm">
-                                    <i class="fas fa-xmark text-sm"></i>
-                                </span>
-                            </button>
-                            <span class="pointer-events-none absolute top-[calc(100%+6px)] right-0 bg-[#1a1a1a] text-white text-xs font-semibold px-2.5 py-1.5 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 shadow-lg z-50">
-                                Clear errors
-                                <span class="absolute bottom-full right-2.5 border-4 border-transparent border-b-[#1a1a1a]"></span>
-                            </span>
-                        </div>
-                    </div>
-                    <div class="p-4">
-                        <p class="text-sm font-semibold text-red-800 mb-3">Please fix the following errors:</p>
-                        <ul class="space-y-2">
-                            @foreach($formErrors as $msgs)
-                                @foreach($msgs as $msg)
-                                    <li class="flex items-start gap-2">
-                                        <span class="shrink-0 mt-0.5 text-red-500 font-bold">•</span>
-                                        <span class="text-sm text-red-700 leading-relaxed">{{ $msg }}</span>
-                                    </li>
-                                @endforeach
-                            @endforeach
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            @endif
 
         </div>
     </div>

@@ -273,10 +273,11 @@ class RegistrarAlumniExportController extends Controller
     }
 
     /*
-     * Columns: Name, Student ID, Program Code, Batch, Email, Employment
-     * Status, Status. Status reflects the real profile_completed value
-     * per row; Employment Status now reflects the latest
-     * employment_trackings row instead of being missing entirely.
+     * Columns: Name, Student ID, Standard Abbreviation, Batch, Email,
+     * Employment Status, Status. Status reflects the real
+     * profile_completed value per row; Employment Status now reflects
+     * the latest employment_trackings row instead of being missing
+     * entirely.
      */
     private function toXlsx($records): \Symfony\Component\HttpFoundation\StreamedResponse
     {
@@ -290,7 +291,7 @@ class RegistrarAlumniExportController extends Controller
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Alumni Records');
 
-        $headers = ['Name', 'Student ID', 'Program Code', 'Batch', 'Email', 'Employment Status', 'Status'];
+        $headers = ['Name', 'Student ID', 'Standard Abbreviation', 'Batch', 'Email', 'Employment Status', 'Status'];
         $sheet->fromArray($headers, null, 'A1');
 
         $headerRange = 'A1:G1';

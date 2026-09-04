@@ -55,12 +55,16 @@
     thead th {
         background: #F5F0FA;
         color: #333333;
-        font-size: 9.5px;
+        font-size: 8.5px;
         text-transform: uppercase;
-        letter-spacing: .03em;
+        letter-spacing: .01em;
         text-align: left;
-        padding: 6px 7px;
+        padding: 6px 5px;
         border-bottom: 1.5px solid #E0D3EC;
+        white-space: normal;
+        word-break: break-word;
+        line-height: 1.25;
+        vertical-align: bottom;
     }
 
     tbody td {
@@ -156,11 +160,11 @@
     <table>
         <thead>
             <tr>
-                <th style="width:19%;">Name</th>
-                <th style="width:12%;">Student ID</th>
-                <th style="width:10%;">Program Code</th>
+                <th style="width:17%;">Name</th>
+                <th style="width:11%;">Student ID</th>
+                <th style="width:14%;">Standard Abbreviation</th>
                 <th style="width:7%;">Batch</th>
-                <th style="width:20%;">Email</th>
+                <th style="width:19%;">Email</th>
                 <th style="width:16%;">Employment Status</th>
                 <th style="width:16%;">Status</th>
             </tr>
