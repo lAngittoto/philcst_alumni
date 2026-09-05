@@ -104,7 +104,7 @@
             bottom: 6px;
             right: 8px;
             border-radius: 50%;
-            background: #EF4444;
+            background: #2563EB;
             opacity: 0;
             animation: bellBubbleRise 2.6s ease-in infinite;
         }
@@ -118,6 +118,34 @@
             100% { opacity: 0;   transform: translateY(-22px) scale(0.3); }
         }
         .notif-item { cursor: pointer; position: relative; }
+
+        /* ── Per-notification unread dot — blue, scales up on hover, and
+             pulses a soft expanding "wave" ring while unread. Mirrors the
+             registrar sidebar's notif-unread-dot exactly. ── */
+        .notif-unread-dot {
+            position: relative;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #2563EB;
+            flex-shrink: 0;
+            margin-top: 4px;
+            transition: transform 0.15s ease;
+        }
+        .notif-item:hover .notif-unread-dot {
+            transform: scale(1.6);
+        }
+        .notif-unread-dot::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: #2563EB;
+            animation: notif-dot-wave 1.6s ease-out infinite;
+        }
+        @keyframes notif-dot-wave {
+            0%   { transform: scale(1);   opacity: 0.7; }
+            100% { transform: scale(2.8); opacity: 0; }
+        }
 
         /* Prevent copy/select of notification text inside the dropdown panel */
         #alumni-notif-panel {
@@ -228,7 +256,63 @@
             background: #F3EBFA;
             border: 1px solid #E0CFEE;
         }
-        .alm-nav-icon { transition: transform 0.2s ease; }
+        .alm-nav-icon { transition: transform 0.2s ease; position: relative; }
+
+        /* ── Nav link click spinner ──────────────────────────────
+           Same visual language/behavior as the registrar sidebar's
+           loading spinner (fa-spinner fa-spin, brand purple) — icon
+           and notif colors/design stay exactly as-is, only the
+           loading-on-click effect is added. Expanded sidebar: sits
+           at the end of the row (where the active dot sits), icon
+           stays visible. Collapsed sidebar / mobile: centered on
+           top of the icon chip, icon hidden, since there's no
+           label/dot row to show it in. */
+        .alm-nav-spinner {
+            flex-shrink: 0;
+            margin-left: auto;
+            font-size: 13px;
+            color: #7A3F91;
+            line-height: 1;
+        }
+        .alm-nav-spinner-icon-anchored { display: none; }
+
+        /* Icon-only sidebar states: collapsed desktop rail (≥1024px)
+           AND mobile/tablet (<1024px, always icon-only here). Both
+           get the icon-anchored spinner dead-centered on the chip,
+           end-of-row spinner hidden, and the icon itself hidden so
+           nothing peeks out from underneath the spinner. */
+        .alm-sidebar.is-collapsed .alm-nav-link.is-navigating > .alm-nav-spinner,
+        .alm-nav-link.is-navigating > .alm-nav-spinner {
+            display: none !important;
+        }
+        .alm-sidebar.is-collapsed .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored,
+        .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            font-size: 16px !important;
+        }
+        .alm-sidebar.is-collapsed .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid,
+        .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid {
+            display: none !important;
+        }
+        /* On expanded desktop (not collapsed), the end-of-row spinner
+           is the one that should show, with the icon staying visible. */
+        @media (min-width: 1024px) {
+            .alm-sidebar:not(.is-collapsed) .alm-nav-link.is-navigating > .alm-nav-spinner {
+                display: flex !important;
+            }
+            .alm-sidebar:not(.is-collapsed) .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored {
+                display: none !important;
+            }
+            .alm-sidebar:not(.is-collapsed) .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid {
+                display: inline-block !important;
+            }
+        }
 
         /* ── Fade/width-collapsible text (labels, brand text, etc.) ──
            Only opacity + max-width transition, same 0.2s duration as the
@@ -402,6 +486,26 @@
             #alumni-sidebar-aside .alm-logout-spinner {
                 margin-right: 0 !important;
             }
+
+            /* Mobile is always icon-only regardless of .is-collapsed, so
+               the nav spinner must force the icon-anchored treatment here
+               too — same rule shape as the ≥1024px .is-collapsed case. */
+            #alumni-sidebar-aside .alm-nav-link.is-navigating > .alm-nav-spinner {
+                display: none !important;
+            }
+            #alumni-sidebar-aside .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored {
+                display: flex !important;
+                align-items: center;
+                justify-content: center;
+                position: absolute !important;
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                font-size: 16px !important;
+            }
+            #alumni-sidebar-aside .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid {
+                display: none !important;
+            }
         }
 
         /* ════════════════════════════════════════════════════════
@@ -463,6 +567,11 @@
             color: #B91C1C;
         }
         .alm-notif-delete-btn i { font-size: .95rem; pointer-events: none; }
+        .alm-notif-delete-btn.is-deleting {
+            cursor: default;
+            color: #B91C1C;
+            background: #FDE8E8;
+        }
 
         .alm-notif-delete-tooltip {
             position: absolute;
@@ -638,6 +747,7 @@
             _pollTimer: null,
             _navigating: false, // guards against double-click/double-tap firing two navigations for the same notif (the "kidyam"/double-open flicker)
             deleteToast: { show: false, message: '' },
+            deletingId: null, // id of the notif currently mid-delete (drives its spinner)
 
             async init() {
                 await this._fetch();
@@ -830,16 +940,13 @@
             // by the x-show on the delete button in the markup), so this
             // is purely a "clean up old noise" action.
             async deleteNotif(item) {
+                // Ignore repeat clicks on a notif that's already mid-delete.
+                if (this.deletingId === item.id) return;
+
                 var ids = item._ids || [item.id];
                 var self = this;
                 this._deleting = true;
-                this._showDeleteToast('Notification deleted');
-
-                // Give the slide-out leave transition time to play before
-                // actually removing the item from the array — removing it
-                // immediately would skip straight past x-transition:leave.
-                await new Promise(function (resolve) { setTimeout(resolve, 250); });
-                this.items = this.items.filter(function (n) { return n !== item; });
+                this.deletingId = item.id; // drives the per-item spinner in the markup
 
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
                 var failedIds = [];
@@ -859,15 +966,26 @@
                     }
                 }
 
-                this._deleting = false;
-
-                // If any delete calls actually failed server-side, put the
-                // item back rather than silently losing it from view while
-                // it still exists in the DB.
+                // Server call finished — only now do we start the slide-out.
+                // If it failed, leave the item in place and just reset the
+                // spinner so the person can retry.
                 if (failedIds.length > 0) {
-                    await this._fetch();
+                    this.deletingId = null;
+                    this._deleting = false;
                     this._showDeleteToast('Delete failed, please try again');
+                    return;
                 }
+
+                this._showDeleteToast('Notification deleted');
+
+                // Give the slide-out leave transition time to play before
+                // actually removing the item from the array — removing it
+                // immediately would skip straight past x-transition:leave.
+                await new Promise(function (resolve) { setTimeout(resolve, 250); });
+                this.items = this.items.filter(function (n) { return n !== item; });
+
+                this.deletingId = null;
+                this._deleting = false;
             },
 
             // Small self-clearing toast shown at the edge of the notif
@@ -1163,19 +1281,21 @@
     class="antialiased"
     x-data="{
         open: false,
-        sidebarCollapsed: false,
+        // Collapsed state now persists across a refresh — same treatment
+        // as the registrar sidebar — so if it was collapsed before you
+        // reloaded, it stays collapsed. Icon/notif colors and design are
+        // untouched; this only restores the last collapsed/expanded value.
+        sidebarCollapsed: localStorage.getItem('alm_sidebar_collapsed') === '1',
         loggingOut: false,
+        navClickedRoute: null,
         profileComplete: {{ (bool)(auth()->user()?->alumni?->profile_completed ?? false) ? 'true' : 'false' }},
         toggleSidebar() {
-            // Plain in-memory boolean. No localStorage, no pre-boot script,
-            // no persistence layer of any kind — just flip it. Every visual
-            // consequence (icon direction, text fade, widths) is a pure
-            // :class/:title binding off this exact boolean, so what you see
-            // always matches this value with zero extra moving parts.
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
     }"
+    x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('alm_sidebar_collapsed', val ? '1' : '0'); })"
     x-on:profile-updated.window="profileComplete = $event.detail.completed"
+    @@livewire:navigated.window="navClickedRoute = null"
     @click="$store.alumniNotifs && $store.alumniNotifs.open && $store.alumniNotifs.close()">
 
 <div class="alm-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
@@ -1308,14 +1428,21 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="window.__alumniSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false;"
+                   @click="window.__alumniSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false; navClickedRoute = '{{ $link['route'] }}';"
+                   :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="alm-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
 
                     <div class="alm-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
                          style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
                                 box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
-                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
+                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
+                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
+                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                            <span class="alm-nav-spinner-icon-anchored">
+                                <i class="fas fa-spinner fa-spin alm-nav-spinner"></i>
+                            </span>
+                        </template>
                     </div>
 
                     <span class="alm-nav-label alm-collapsible-text font-medium tracking-wide flex-1 text-[14px]
@@ -1323,9 +1450,15 @@
                         {{ $link['label'] }}
                     </span>
 
+                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                        <i class="fas fa-spinner fa-spin alm-nav-spinner"></i>
+                    </template>
+
                     @if($isActive)
-                        <span class="alm-active-dot alm-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
-                              style="background:#7A3F91;"></span>
+                        <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
+                            <span class="alm-active-dot alm-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
+                                  style="background:#7A3F91;"></span>
+                        </template>
                     @endif
                 </a>
             @endforeach
@@ -1625,7 +1758,7 @@
                                 </div>
 
                                 <span x-show="!notif.read" x-cloak
-                                      class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
+                                      class="notif-unread-dot"></span>
                             </div>
 
                             <p class="text-[#333333] mt-1 leading-relaxed"
@@ -1655,9 +1788,15 @@
                                         x-show="notif.created_at && ((Date.now() - new Date(notif.created_at).getTime()) / 86400000) >= 30"
                                         x-cloak
                                         class="alm-notif-delete-btn"
+                                        :class="{ 'is-deleting': $store.alumniNotifs && $store.alumniNotifs.deletingId === notif.id }"
+                                        :disabled="$store.alumniNotifs && $store.alumniNotifs.deletingId === notif.id"
                                         @click.stop="$store.alumniNotifs && $store.alumniNotifs.deleteNotif(notif)"
                                         aria-label="Delete notification">
-                                    <i class="fas fa-trash-can"></i>
+                                    <i class="fas fa-trash-can"
+                                       x-show="!($store.alumniNotifs && $store.alumniNotifs.deletingId === notif.id)"></i>
+                                    <i class="fas fa-spinner fa-spin"
+                                       x-show="$store.alumniNotifs && $store.alumniNotifs.deletingId === notif.id"
+                                       x-cloak></i>
                                     <span class="alm-notif-delete-tooltip">Delete</span>
                                 </button>
                             </div>

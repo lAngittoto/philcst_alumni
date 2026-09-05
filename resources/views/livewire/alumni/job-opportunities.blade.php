@@ -855,7 +855,7 @@ select.filter-input {
                 <option value="Contract">Contract</option>
                 <option value="Internship">Internship</option>
                 <option value="Freelance">Freelance</option>
-                <option value="__job_history">Job History</option>
+                <option value="__job_history" style="background:#7a3f91; color:#ffffff;">Job History</option>
             </select>
 
             <select wire:model.live="filterLevel"
@@ -873,7 +873,7 @@ select.filter-input {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold
                            bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300
                            transition active:scale-95 cursor-pointer">
                 <span wire:loading.remove wire:target="resetFilters">
@@ -1015,16 +1015,21 @@ select.filter-input {
 
             <div class="flex items-center gap-1 flex-wrap">
                 <button wire:click="previousPage"
+                        wire:loading.attr="disabled"
+                        wire:target="previousPage,nextPage,page"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if($this->jobPostings->onFirstPage()) disabled @endif
                         aria-label="Previous">
-                    <i class="fas fa-chevron-left text-[9px]"></i>
+                    <span wire:loading.remove wire:target="previousPage"><i class="fas fa-chevron-left text-[9px]"></i></span>
+                    <span wire:loading wire:target="previousPage"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
                 </button>
 
                 @if($pgStart > 1)
                     <button wire:click="$set('page', 1)"
+                            wire:loading.attr="disabled"
+                            wire:target="previousPage,nextPage,page"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
@@ -1036,6 +1041,8 @@ select.filter-input {
                                      bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
                         <button wire:click="$set('page', {{ $p }})"
+                                wire:loading.attr="disabled"
+                                wire:target="previousPage,nextPage,page"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                        bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
@@ -1044,17 +1051,22 @@ select.filter-input {
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                     <button wire:click="$set('page', {{ $lp }})"
+                            wire:loading.attr="disabled"
+                            wire:target="previousPage,nextPage,page"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                 @endif
 
                 <button wire:click="nextPage"
+                        wire:loading.attr="disabled"
+                        wire:target="previousPage,nextPage,page"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if(!$this->jobPostings->hasMorePages()) disabled @endif
                         aria-label="Next">
-                    <i class="fas fa-chevron-right text-[9px]"></i>
+                    <span wire:loading.remove wire:target="nextPage"><i class="fas fa-chevron-right text-[9px]"></i></span>
+                    <span wire:loading wire:target="nextPage"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
                 </button>
 
                 <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
@@ -1172,11 +1184,6 @@ select.filter-input {
                     @endif
                     <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->employment_type }}</span>
                     <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->experience_level }}</span>
-                    @if($job->target_college)
-                        @foreach(explode(',', $job->target_college) as $col)
-                            <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($col) }}</span>
-                        @endforeach
-                    @endif
                     @if($isUrgent)
                         <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-red-200 bg-white text-red-700">
                             <i class="fas fa-fire mr-1 text-[10px]"></i>{{ $dlLabel }}
@@ -1257,7 +1264,10 @@ select.filter-input {
                                 </p>
                             </div>
 
-                            <div class="pre-wrap text-[15px] leading-relaxed" style="color:#333333;">{{ trim($job->description) }}</div>
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#333333;">📄 Job Description:</p>
+                                <div class="pre-wrap text-[15px] leading-relaxed" style="color:#333333;">{{ trim($job->description) }}</div>
+                            </div>
 
                             @if($hasQual)
                             <div>
@@ -1280,13 +1290,16 @@ select.filter-input {
                                 </ul>
                             </div>
                             @endif
-
-                            <p class="text-sm font-semibold" style="color:#333333;">
-                                📅 Deadline: {{ $dl->format('F d, Y') }} &nbsp;•&nbsp; 🏫 For: {{ $job->target_college ?: 'All Colleges' }}
-                            </p>
                         </div>
                     </div>
                 @else
+                    <div class="bg-white border border-gray-200 rounded-xl px-5 py-4">
+                        <p class="text-lg font-bold" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
+                        <p class="text-sm mt-1 leading-relaxed" style="color:#333333;">
+                            {{ $job->company_name }} is looking for passionate, dedicated individuals to join their growing team! ✨
+                        </p>
+                    </div>
+
                     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
                         <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
                             <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Job Description</span>

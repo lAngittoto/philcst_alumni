@@ -1086,6 +1086,7 @@ input[type="date"].field-input:disabled {
     .emp-hdr-tip { display: none !important; }
 }
 
+
 .emp-card {
     background: #ffffff;
     border: 1px solid #e5e7eb;
@@ -1108,13 +1109,21 @@ input[type="date"].field-input:disabled {
     align-items: baseline;
     gap: 6px;
 }
-.emp-card-title .emp-card-optional {
-    font-size: 0.72rem;
-    font-weight: 500;
-    text-transform: none;
-    letter-spacing: 0;
-    color: #333333;
+/* Back button — plain, sits at the very bottom of column 1 (after the
+   Further Education card), small and left-aligned (not full-width).
+   No hover-shift/box-shadow effects — just the icon swapping to a
+   spinner while $set is loading. */
+.emp-back-btn-bottom {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    width: auto; height: 32px;
+    padding: 0 14px;
+    border-radius: 0.6rem;
+    background: #7a3f91; color: #ffffff;
+    font-size: 12px; font-weight: 700;
+    border: none; cursor: pointer;
+    align-self: flex-start;
 }
+.emp-back-btn-bottom:disabled { opacity: .7; cursor: wait; }
 .emp-card-body { padding: 0.7rem 0.85rem; }
 .emp-radio-tile {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
@@ -1956,7 +1965,7 @@ function phAddress(initial) {
 
                 {{-- Column 1: Status + Education + Unemployment (always present, compact) --}}
                 <div class="flex flex-col gap-3">
-                    <div class="emp-card">
+                    <div class="emp-card" id="emp-status-card">
                         <div class="emp-card-title">Employment Status</div>
                         <div class="emp-card-body">
                             <label class="emp-label-sm">Current Status <span class="text-red-500">*</span></label>
@@ -2006,7 +2015,18 @@ function phAddress(initial) {
                             @error('education_status') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
                         </div>
                     </div>
-                </div>
+
+                    @if($employment_status)
+                    <button type="button"
+                            wire:click="$set('employment_status', '')"
+                            wire:loading.attr="disabled"
+                            wire:target="$set('employment_status', '')"
+                            class="emp-back-btn-bottom">
+                        <span wire:loading.remove wire:target="$set('employment_status', '')"><i class="fas fa-arrow-left"></i></span>
+                        <span wire:loading wire:target="$set('employment_status', '')"><i class="fas fa-spinner fa-spin"></i></span>
+                        Back
+                    </button>
+                    @endif                </div>
 
                 @if(in_array($employment_status, ['employed','self_employed']))
                 @php $isSelf = $employment_status === 'self_employed'; @endphp

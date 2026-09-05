@@ -154,21 +154,28 @@ new class extends Component {
 
     // ── Clean-URL navigation: flash filter into session, redirect to clean URL ──
 
+    // ✅ navigate: true — SPA nav via wire:navigate (same mechanism the
+    //    sidebar links already use). Without this, these were doing a
+    //    hard full-page redirect while the sidebar itself is wire:navigate,
+    //    so clicking "Upcoming"/"Events"/"Jobs" tore down and rebuilt the
+    //    ENTIRE page (sidebar included) instead of morphing just the
+    //    content — that mismatch is what read as the sidebar "glitching"
+    //    on click, especially the mobile drawer flashing/resetting mid-nav.
     public function goToUpcomingEvents(): void
     {
         session()->put('events_filter', 'upcoming');
-        $this->redirect(route('upcoming.events'));
+        $this->redirect(route('upcoming.events'), navigate: true);
     }
 
     public function goToAllEvents(): void
     {
         session()->put('events_filter', 'all');
-        $this->redirect(route('upcoming.events'));
+        $this->redirect(route('upcoming.events'), navigate: true);
     }
 
     public function goToJobs(): void
     {
-        $this->redirect(route('job.opportunities'));
+        $this->redirect(route('job.opportunities'), navigate: true);
     }
 
     // ── Sends the alumni straight into the Update Employment editor on the
@@ -176,14 +183,14 @@ new class extends Component {
     public function goToUpdateEmployment(): void
     {
         session()->put('open_employment', true);
-        $this->redirect(route('alumni.information'));
+        $this->redirect(route('alumni.information'), navigate: true);
     }
 
     // ── Employment modal ──────────────────────────────────────────
     public function openEmploymentModal(): void
     {
         if (!$this->hasEmployment) {
-            $this->redirect(route('alumni.information'));
+            $this->redirect(route('alumni.information'), navigate: true);
             return;
         }
 

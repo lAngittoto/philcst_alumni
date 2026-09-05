@@ -10,6 +10,7 @@ use App\Models\JobPosting;
 use App\Models\JobOption;
 use App\Models\Course;
 use App\Models\AuditLog;
+use App\Http\Controllers\AlumniNotificationController;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\DB;
@@ -979,6 +980,7 @@ new class extends Component {
 
         $this->notifySelf('created', $job);
         $this->notifyOrganizers('director_posted', $job);
+        (new AlumniNotificationController())->notifyAlumniOfNewJob($job);
 
         Cache::forget('job_options_grouped');
         $this->dispatch('flash-message', type: 'success', message: 'Job posting created successfully!');
@@ -1313,6 +1315,10 @@ new class extends Component {
         $this->notifySelf($toggleAction, $job);
         $this->notifyOrganizers($toggleAction, $job);
 
+        if ($toggleAction === 'activated') {
+            (new AlumniNotificationController())->notifyAlumniOfActivatedJob($job);
+        }
+
         $label = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
 
         $this->writeAuditLog(
@@ -1461,6 +1467,10 @@ new class extends Component {
 
         $this->notifySelf('restored', $job);
         $this->notifyOrganizers('restored', $job);
+
+        if ($restoreStatus === 'ACTIVE') {
+            (new AlumniNotificationController())->notifyAlumniOfActivatedJob($job);
+        }
 
         $this->writeAuditLog(
             action:      'updated',

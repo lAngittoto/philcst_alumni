@@ -1363,6 +1363,27 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  FIX: re-anchor the panel to the bell EVERY time it's shown, not just
+    //  when the bell itself is clicked. Previously, clicking a notif item
+    //  (e.g. "Bulk Import Complete") calls markRead() → Livewire.navigate(),
+    //  and if the panel's `open` flips true again outside the bell's own
+    //  @click handler, the panel kept whatever left/top it had before (or
+    //  fell back to the hardcoded top:88px;left:12px in the markup) instead
+    //  of the bell's actual position on the new page — hence it popping up
+    //  on the wrong side of the screen. Watching `open` directly guarantees
+    //  positionPanel() runs on every single open, from every trigger.
+    document.addEventListener('alpine:init', function () {
+        Alpine.effect(function () {
+            var s = window.Alpine && Alpine.store('notifs');
+            if (s && s.open) {
+                // rAF: wait one frame so #notif-panel/#bell-btn have their
+                // post-navigation layout settled before we measure them.
+                requestAnimationFrame(function () { positionPanel(); });
+            }
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  LIVEWIRE → DB BRIDGE
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstNotifListeners) {
@@ -1717,8 +1738,8 @@
     @copy.prevent
     style="
         position: fixed;
-        top: 88px;
-        left: 12px;
+        top: -9999px;
+        left: -9999px;
         width: 400px;
         z-index: 9999;
         transform-origin: top left;
