@@ -1374,16 +1374,28 @@ new class extends Component {
         .emp-pg-btn { min-width:26px; height:26px; padding:0 6px; font-size:.68rem; }
     }
 
-    /* ── Default cursor rules: only actionable elements show pointer ─────── */
+    /* ── Default cursor rules: only actionable elements show pointer ───────
+       `canvas` was previously listed here unconditionally, which gave every
+       chart (including the Employment Status donut and the Trend line —
+       neither of which does anything on click) a pointer cursor that
+       falsely signaled "this is clickable". Charts now opt IN individually
+       via .chart-clickable, added only to the canvases whose data points
+       actually dispatch an action (chartRelevance, chartBatch). Everything
+       else (chartStatus, chartTrend, chartCourse) falls through to the
+       default arrow cursor unless the browser's own cursor: auto applies. */
     button, a, [role="button"], [wire\:click], [x-on\:click], [\@click],
     .emp-pg-btn, .ar-report-btn, .ar-report-menu-item, [data-tip],
     input[type="checkbox"], input[type="radio"], select,
-    .card-clickable, canvas {
+    .card-clickable, .chart-clickable {
         cursor: pointer;
     }
     button:disabled, [disabled] {
         cursor: not-allowed;
     }
+    /* Chart.js draws hover states itself (via its own onHover), but the
+       canvas element's resting/default cursor still needs an explicit
+       reset — otherwise it can inherit `pointer` from an ancestor. */
+    canvas { cursor: default; }
 </style>
 
 {{-- Chart data bridge --}}
@@ -1777,7 +1789,7 @@ new class extends Component {
                     <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>
                 </span>
                 <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearFilters"></i>
-                <span class="hidden sm:inline">Reset</span>
+                <span>Reset</span>
             </button>
 
             {{-- Active-scope pill — same treatment as Alumni Records' "Batch
@@ -1983,14 +1995,12 @@ new class extends Component {
                 </div>
                 <div class="flex gap-2">
                     <button onclick="empOpenModal('local','',null)"
-                            data-tip="View Local Workers"
                             class="flex-1 py-[7px] rounded-xl text-sm font-bold border border-[#7a3f91]/20
                                    bg-[#F9F7FC] text-[#7a3f91] hover:bg-[#7a3f91] hover:text-white hover:border-[#7a3f91]
                                    transition-all duration-150 cursor-pointer">
                         View Local
                     </button>
                     <button onclick="empOpenModal('abroad','',null)"
-                            data-tip="View OFW / Abroad"
                             class="flex-1 py-[7px] rounded-xl text-sm font-bold border border-purple-200
                                    bg-purple-50 text-[#c084fc] hover:bg-[#c084fc] hover:text-white hover:border-[#c084fc]
                                    transition-all duration-150 cursor-pointer">
@@ -2011,7 +2021,7 @@ new class extends Component {
                 </div>
             </div>
             <div class="flex-1 min-h-0 flex items-center justify-center p-2" wire:ignore>
-                <canvas id="chartRelevance" style="max-height:100%;max-width:100%;"></canvas>
+                <canvas id="chartRelevance" class="chart-clickable" style="max-height:100%;max-width:100%;"></canvas>
             </div>
         </div>
 
@@ -2254,7 +2264,7 @@ new class extends Component {
             </div>
         </div>
         <div class="flex-1 min-h-0 p-[10px]" wire:ignore>
-            <canvas id="chartBatch" style="width:100%;height:100%;"></canvas>
+            <canvas id="chartBatch" class="chart-clickable" style="width:100%;height:100%;"></canvas>
         </div>
     </div>
 
@@ -2423,99 +2433,112 @@ new class extends Component {
         </button>
     </div>
 
-    {{-- ── In-modal search + filters — merged into a single row: SEARCH
-         box, result count, then FILTERS (Batch Year + Program Code +
-         Reset), scoped to this modal's own modalSearch/modalBatch/
+    {{-- ── In-modal search + filters — split into two clean rows instead
+         of one long strip: Row 1 is the search box + live result count
+         (no redundant "SEARCH" label — the icon inside the input already
+         makes it obvious, and FILTERS below already labels this whole
+         bar). Row 2 groups the dropdown filters (Batch Year + Program
+         Code) together with Reset docked at the end, same grouping used
+         on the Alumni Records filter bar for a smoother, less cluttered
+         look. Scoped to this modal's own modalSearch/modalBatch/
          modalCourse. Matches wire:loading dim + progress-bar treatment
-         used elsewhere, and highlights matches in blue (mark.ar-hl)
-         like Alumni Records. Single row, scrolls horizontally instead
-         of wrapping if space is tight. ── --}}
-    <div class="emp-modal-filter-bar px-4 sm:px-6 lg:px-10 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center gap-2 flex-wrap shrink-0"
-         wire:loading.class="opacity-60" wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters">
-        <span class="text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">
-            <i class="fas fa-magnifying-glass sm:mr-1"></i><span class="hidden sm:inline">SEARCH</span>
-        </span>
-        <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block"></div>
-        <div class="relative flex-1 min-w-[180px] max-w-xs shrink-0" wire:ignore
-             x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
-            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
-            <input type="text" x-model="q" @input.debounce.300ms="$wire.set('modalSearch',q)"
-                   placeholder="Search name, student ID, email…"
-                   class="emp-modal-search-input w-full pl-8 pr-8 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
-                          placeholder-[#999999] transition font-normal"
-                   autocomplete="off" spellcheck="false">
-            <button type="button" x-show="q" @click="q=''; $wire.set('modalSearch','')"
-                    class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#7A3F91] transition"
-                    style="display:none;">
-                <i class="fas fa-xmark text-xs"></i>
-            </button>
-        </div>
-        <span class="text-[11px] font-semibold text-[#7A3F91] shrink-0 whitespace-nowrap">
-            {{ number_format($records->total()) }} result(s)
-        </span>
+         used elsewhere, and highlights matches in blue (mark.ar-hl) like
+         Alumni Records. Wraps instead of scrolling if space is tight. ── --}}
+    <div class="emp-modal-filter-bar px-4 sm:px-6 lg:px-10 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2 shrink-0"
+         wire:loading.class="opacity-60" wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters,modalPage">
 
-        <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
-        <span class="text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
-
-        {{-- Batch Year --}}
-        <div class="ar-dropdown shrink-0"
-             x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('modalBatch', val===''?null:val); this.close(); } }"
-             @click.outside="close()" wire:key="emp-modal-batch-dropdown">
-            <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.modalBatch!==null,'open':open }" class="ar-dropdown-trigger">
-                <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
-                <span>@if($modalBatch){{ $modalBatch }}@else All Batch Years @endif</span>
-                <i class="fas fa-chevron-down ar-chevron"></i>
-            </button>
-            <div x-show="open"
-                 x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                 x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                 class="ar-dropdown-menu" style="display:none;" @click.stop>
-                <button type="button" @click.stop="select('')" :class="{'active':$wire.modalBatch===null}" class="ar-dropdown-item">All Batch Years</button>
-                @foreach($this->batchYears as $year)
-                <button type="button" @click.stop="select('{{ $year }}')" :class="{'active':$wire.modalBatch=='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
-                @endforeach
+        {{-- Row 1: Search + result count --}}
+        <div class="flex items-center gap-2 flex-wrap">
+            <div class="relative flex-1 min-w-[200px] max-w-sm shrink-0" wire:ignore
+                 x-data="{ q:'', init(){ this.q=$wire.modalSearch??''; $wire.$watch('modalSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
+                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('modalSearch',q)"
+                       placeholder="Search name, student ID, email…"
+                       class="emp-modal-search-input w-full pl-8 pr-8 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
+                              placeholder-[#999999] transition font-normal"
+                       autocomplete="off" spellcheck="false">
+                <button type="button" x-show="q" @click="q=''; $wire.set('modalSearch','')"
+                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#7A3F91] transition"
+                        style="display:none;">
+                    <i class="fas fa-xmark text-xs"></i>
+                </button>
             </div>
-        </div>
-
-        {{-- Program Code --}}
-        <div class="ar-dropdown shrink-0"
-             x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('modalCourse',val); this.close(); } }"
-             @click.outside="close()" wire:key="emp-modal-course-dropdown">
-            <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.modalCourse!=='','open':open }" class="ar-dropdown-trigger">
-                <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
-                <span>@if($modalCourse){{ $modalCourse }}@else All Program Codes @endif</span>
-                <i class="fas fa-chevron-down ar-chevron"></i>
-            </button>
-            <div x-show="open"
-                 x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                 x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                 class="ar-dropdown-menu" style="display:none;" @click.stop>
-                <button type="button" @click.stop="select('')" :class="{'active':$wire.modalCourse===''}" class="ar-dropdown-item">All Program Codes</button>
-                @foreach($this->courseMap as $code => $name)
-                <button type="button" @click.stop="select('{{ $code }}')" :class="{'active':$wire.modalCourse==='{{ $code }}'}" class="ar-dropdown-item">{{ $name }}</button>
-                @endforeach
-            </div>
-        </div>
-
-        {{-- Reset — always visible now, not conditional on an active filter --}}
-        <button wire:click="clearModalFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearModalFilters"
-                type="button"
-                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
-            <span wire:loading wire:target="clearModalFilters">
-                <i class="fas fa-spinner animate-spin text-sm"></i>
+            <span class="text-[11px] font-semibold text-[#7A3F91] shrink-0 whitespace-nowrap">
+                {{ number_format($records->total()) }} result(s)
             </span>
-            <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearModalFilters"></i>
-            <span class="hidden sm:inline">Reset</span>
-        </button>
+        </div>
+
+        {{-- Row 2: FILTERS label + dropdowns, Reset docked at the end --}}
+        <div class="flex items-center gap-2 flex-wrap">
+            <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+
+            <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
+
+            {{-- Batch Year --}}
+            <div class="ar-dropdown shrink-0"
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('modalBatch', val===''?null:val); this.close(); } }"
+                 @click.outside="close()" wire:key="emp-modal-batch-dropdown">
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.modalBatch!==null,'open':open }" class="ar-dropdown-trigger">
+                    <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
+                    <span>@if($modalBatch){{ $modalBatch }}@else All Batch Years @endif</span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;" @click.stop>
+                    <button type="button" @click.stop="select('')" :class="{'active':$wire.modalBatch===null}" class="ar-dropdown-item">All Batch Years</button>
+                    @foreach($this->batchYears as $year)
+                    <button type="button" @click.stop="select('{{ $year }}')" :class="{'active':$wire.modalBatch=='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- Program Code --}}
+            <div class="ar-dropdown shrink-0"
+                 x-data="{ open:false, toggle(){ this.open=!this.open; }, close(){ this.open=false; }, select(val){ $wire.set('modalCourse',val); this.close(); } }"
+                 @click.outside="close()" wire:key="emp-modal-course-dropdown">
+                <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.modalCourse!=='','open':open }" class="ar-dropdown-trigger">
+                    <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
+                    <span>@if($modalCourse){{ $modalCourse }}@else All Program Codes @endif</span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;" @click.stop>
+                    <button type="button" @click.stop="select('')" :class="{'active':$wire.modalCourse===''}" class="ar-dropdown-item">All Program Codes</button>
+                    @foreach($this->courseMap as $code => $name)
+                    <button type="button" @click.stop="select('{{ $code }}')" :class="{'active':$wire.modalCourse==='{{ $code }}'}" class="ar-dropdown-item">{{ $name }}</button>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- Reset — always visible now, not conditional on an active filter --}}
+            <button wire:click="clearModalFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearModalFilters"
+                    type="button"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none sm:ml-auto">
+                <span wire:loading wire:target="clearModalFilters">
+                    <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>
+                </span>
+                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearModalFilters"></i>
+                <span>Reset</span>
+            </button>
+        </div>
     </div>
 
     {{-- Table with center overlay spinner — same treatment as the
-         dashboard and Alumni Records. --}}
+         dashboard and Alumni Records. modalPage is now part of the same
+         wire:loading target list as the search/filter inputs above, so
+         clicking a pagination button (Prev/Next/page number — all bound
+         via $set('modalPage', …)) shows this exact same centered spinner
+         + dim-and-lock overlay instead of the table silently swapping
+         rows with no loading feedback. --}}
     <div class="modal-table-wrap relative flex-1 overflow-y-auto overflow-x-auto min-h-0"
-         wire:loading.class="opacity-40 pointer-events-none" wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters" style="transition:opacity .2s ease;">
+         wire:loading.class="opacity-40 pointer-events-none" wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters,modalPage" style="transition:opacity .2s ease;">
 
         <div class="absolute inset-0 z-20 flex items-center justify-center pointer-events-none"
-             wire:loading wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters">
+             wire:loading wire:target="modalSearch,modalBatch,modalCourse,clearModalFilters,modalPage">
             <div class="flex items-center justify-center px-6 py-5 rounded-2xl"
                  style="background:rgba(255,255,255,0.92); box-shadow:0 8px 24px -6px rgba(90,34,112,0.22);">
                 <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
