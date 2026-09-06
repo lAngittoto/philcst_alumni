@@ -252,7 +252,7 @@ new class extends Component {
 };
 ?>
 
-<div class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full">
+<div class="org-dashboard-root px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full">
 
 <style>
 /* ── Stat card tooltip (desktop only — no tooltip text on mobile) ── */
@@ -306,6 +306,18 @@ new class extends Component {
 .org-profile-col { display: flex; flex-direction: column; }
 .org-profile-card { display: flex; flex-direction: column; }
 
+/* ── No copy/select ANYWHERE on the dashboard — greeting header,
+   stat cards, profile card, chips, tables, everything. Buttons and
+   links stay fully clickable; only text selection is blocked. ── */
+.org-dashboard-root,
+.org-dashboard-root * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
 /* ── Right col ── */
 .org-right-col { display: flex; flex-direction: column; gap: 1rem; }
 
@@ -330,7 +342,7 @@ new class extends Component {
 .org-info-row:last-child { border-bottom: none; }
 .org-info-label { font-size: 0.70rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #333333; flex-shrink: 0; }
 .org-info-value { font-size: 0.875rem; font-weight: 600; color: #111111; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
-.org-info-value-sm { font-size: 0.80rem; font-weight: 600; color: #111111; text-align: right; word-break: break-all; max-width: 160px; }
+.org-info-value-sm { font-size: 0.80rem; font-weight: 600; color: #111111; text-align: right; overflow-wrap: anywhere; word-break: normal; max-width: 180px; line-height: 1.4; }
 
 /* ── Chips section wrapper ── */
 .org-chips-section { padding: 0.65rem 1rem; }
@@ -442,19 +454,6 @@ new class extends Component {
                 <div class="org-info-row">
                     <span class="org-info-label">College</span>
                     <span class="org-info-value text-[#7A3F91] font-bold">{{ $this->organizerDepartment ?: '—' }}</span>
-                </div>
-
-                <div class="org-info-row">
-                    <span class="org-info-label">Total Alumni</span>
-                    <span class="org-info-value">
-                        {{ number_format($totalAlumni) }}
-                        <span class="text-[#333333] font-normal text-xs ml-1">total</span>
-                    </span>
-                </div>
-
-                <div class="org-info-row">
-                    <span class="org-info-label">Verified</span>
-                    <span class="org-info-value text-emerald-700">{{ number_format($verifiedAlumni) }}</span>
                 </div>
 
                 {{-- Quick chips — Events (color-coded per status) --}}

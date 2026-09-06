@@ -62,6 +62,18 @@
         }
 
         .bell-badge { pointer-events: none; }
+
+        /* ── Disable text selection/copy inside the notif panel ───
+           Applies to the whole panel: header label, item titles,
+           messages, timestamps, footer hint. Buttons still work
+           fine since we're only blocking text selection, not clicks. ── */
+        .notif-no-select,
+        .notif-no-select * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
         .notif-item {
             cursor: pointer;
             position: relative;
@@ -70,6 +82,63 @@
             -ms-user-select: none;
             user-select: none;
             -webkit-touch-callout: none;
+        }
+
+        /* ── Unread indicator dot — red here (registrar's is blue), same
+           hover behavior: grows and gets a soft expanding "wave" ring
+           behind it on hover, so hovering the row makes clear this dot
+           is a live unread indicator and not just decoration. ── */
+        .notif-unread-dot {
+            position: relative;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #DC2626;
+            flex-shrink: 0;
+            margin-top: 4px;
+            transition: transform 0.15s ease;
+        }
+        .notif-item:hover .notif-unread-dot {
+            transform: scale(1.6);
+        }
+        .notif-unread-dot::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: #DC2626;
+            opacity: 0;
+        }
+        .notif-item:hover .notif-unread-dot::after {
+            animation: notif-dot-wave 1.6s ease-out infinite;
+        }
+        @keyframes notif-dot-wave {
+            0%   { transform: scale(1);   opacity: 0.7; }
+            100% { transform: scale(2.8); opacity: 0; }
+        }
+
+        /* ── In-place notif loading overlay (used while deleting) ────
+           Same visual language as the rest of the app: fa-spinner
+           fa-spin, brand purple. The item's own content blurs out
+           underneath instead of being fully covered, so it still
+           reads as "this item is busy" rather than an empty gap. ── */
+        .notif-item.is-loading > *:not(.notif-item-loading-overlay) {
+            filter: blur(4px);
+            opacity: 0.5;
+            pointer-events: none;
+            user-select: none;
+        }
+        .notif-item-loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+        }
+        .notif-item-spinner {
+            font-size: 22px;
+            color: #7A3F91;
         }
 
         .notif-close-wrap {
@@ -277,6 +346,60 @@
             color: #7A3F91 !important;
         }
 
+        /* ── Strip icon color while navigating ──────────────────────
+           While a link is mid-navigation (spinner showing), the chip
+           drops its clr-* accent color and goes neutral gray — the
+           spinner is the only signal that matters in that moment. ── */
+        .coord-nav-link.is-navigating .coord-nav-icon {
+            background: #F0F0F0 !important;
+            color: #9CA3AF !important;
+        }
+
+        /* ── Nav link click spinner ──────────────────────────────
+           Expanded sidebar: sits at the end of the row (where the
+           active dot sits), icon stays visible. Collapsed sidebar /
+           mobile: centered on top of the icon chip, icon hidden. ── */
+        .coord-nav-spinner {
+            flex-shrink: 0;
+            margin-left: auto;
+            font-size: 13px;
+            color: #7A3F91;
+            line-height: 1;
+        }
+        .coord-nav-spinner-icon-anchored { display: none; }
+        .coord-nav-icon { position: relative; }
+
+        .coord-sidebar.is-collapsed .coord-nav-link.is-navigating > .coord-nav-spinner,
+        .coord-nav-link.is-navigating > .coord-nav-spinner {
+            display: none !important;
+        }
+        .coord-sidebar.is-collapsed .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored,
+        .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            font-size: 16px !important;
+        }
+        .coord-nav-spinner-icon-anchored .coord-nav-spinner {
+            margin-left: 0;
+        }
+
+        @media (min-width: 1024px) {
+            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating > .coord-nav-spinner {
+                display: inline-block !important;
+            }
+            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored {
+                display: none !important;
+            }
+            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating .coord-nav-icon i.fa-solid {
+                display: none !important;
+            }
+        }
+
         /* ── Bell "wave" alert — soft expanding ring pulse behind the bell,
            runs continuously while there is at least one unread notification. ── */
         .coord-bell-wave {
@@ -401,6 +524,9 @@
             .coord-sidebar.is-collapsed .coord-nav-icon {
                 margin-right: 0 !important;
             }
+            .coord-sidebar.is-collapsed .coord-nav-link.is-navigating .coord-nav-icon i.fa-solid {
+                display: none !important;
+            }
             .coord-sidebar.is-collapsed .coord-nav-section-row {
                 justify-content: center;
                 padding: 0 0.5rem;
@@ -437,6 +563,9 @@
             }
             #coord-sidebar-aside .coord-nav-icon {
                 margin-right: 0 !important;
+            }
+            #coord-sidebar-aside .coord-nav-link.is-navigating .coord-nav-icon i.fa-solid {
+                display: none !important;
             }
 
             #coord-sidebar-aside .coord-logout-btn {
@@ -674,6 +803,7 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            deletingId: null,
             deleteToast: { show: false, message: '' },
 
             // ── Read-order tracking ─────────────────────────────────────────
@@ -1193,11 +1323,16 @@
                 var ids = item._ids || [item.id];
                 var self = this;
                 this._deleting = true;
+                this.deletingId = item.id;
+
+                // Spinner shows first on its own — the success toast only
+                // appears once the spinner is done, not at the same time.
+                await new Promise(function (resolve) { setTimeout(resolve, 600); });
+                this.deletingId = null;
                 this._showDeleteToast('Notification deleted');
 
                 // Give the slide-out leave transition time to play before
-                // actually removing the item from the array — removing it
-                // immediately would skip straight past x-transition:leave.
+                // actually removing the item from the array.
                 await new Promise(function (resolve) { setTimeout(resolve, 250); });
                 this.items = this.items.filter(function (n) { return n !== item; });
 
@@ -1241,7 +1376,7 @@
                 if (this._toastTimer) clearTimeout(this._toastTimer);
                 this._toastTimer = setTimeout(function () {
                     self.deleteToast.show = false;
-                }, 2200);
+                }, 5000);
             },
         };
     };
@@ -1636,16 +1771,19 @@
     class="antialiased"
     x-data="{
         open: false,
-        sidebarCollapsed: false,
+        sidebarCollapsed: localStorage.getItem('coord_sidebar_collapsed') === '1',
         sidebarHiddenByModal: false,
         loggingOut: false,
+        navClickedRoute: null,
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
     }"
+    x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('coord_sidebar_collapsed', val ? '1' : '0'); })"
     @click="$store.coordNotifs && $store.coordNotifs.open && $store.coordNotifs.close()"
     @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
-    @open-sidebar.window="sidebarHiddenByModal = false;">
+    @open-sidebar.window="sidebarHiddenByModal = false;"
+    @@livewire:navigated.window="navClickedRoute = null; open = false;">
 
 <div class="coord-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
@@ -1766,13 +1904,20 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="open = false;"
+                   @click="navClickedRoute = '{{ $link['route'] }}';"
+                   :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="coord-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
 
                     <div class="coord-nav-icon {{ $link['color'] }} w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
                          style="box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
-                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
+                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
+                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
+                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                            <span class="coord-nav-spinner-icon-anchored">
+                                <i class="fas fa-spinner fa-spin coord-nav-spinner"></i>
+                            </span>
+                        </template>
                     </div>
 
                     <span class="coord-nav-label coord-collapsible-text font-medium tracking-wide flex-1 text-[14px]
@@ -1780,9 +1925,15 @@
                         {{ $link['label'] }}
                     </span>
 
+                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                        <i class="fas fa-spinner fa-spin coord-nav-spinner"></i>
+                    </template>
+
                     @if($isActive)
-                        <span class="coord-active-dot coord-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
-                              style="background:#7A3F91;"></span>
+                        <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
+                            <span class="coord-active-dot coord-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
+                                  style="background:#7A3F91;"></span>
+                        </template>
                     @endif
                 </a>
             @endforeach
@@ -1790,25 +1941,34 @@
 
         {{-- ══ BACKGROUND NOTIF POLLER ══ --}}
         {{--
-            IMPORTANT: this Livewire component is what caused the "This page
-            has expired" flash on logout. Its wire:poll.3000ms request runs
-            through Livewire's own request pipeline, and can be in-flight
-            (or fire) the instant the session/CSRF token is destroyed by
-            POST /logout, right before the redirect navigates away.
+            IMPORTANT: this component must stay mounted in the DOM at all
+            times — including during logout. It used to be wrapped in
+            <template x-if="pollingActive">, toggled off by the
+            'stop-coord-polling' event dispatched from the logout form's
+            @submit handler below. That made Alpine physically REMOVE the
+            Livewire component from the DOM the instant logout was
+            clicked. If wire:poll's request was already in flight (or
+            fired right as the component was torn down), Livewire's own
+            JS runtime would try to resolve that request against a
+            component that no longer existed, throwing "Component not
+            found: undefined" plus an unhandled promise rejection with a
+            null-filled error object — visible in the console on every
+            logout.
 
-            We stop it from ever making a poll request AGAIN after logout
-            starts by wiring wire:poll to a condition that goes false the
-            moment __coordLoggingOut flips true (see @submit on the logout
-            form below, and the 'stop-coord-polling' listener in <head>).
-            wire:poll.3000ms.keep-alive would still fire once more mid-flight
-            in the worst case, but the 419 that comes back from THAT request
-            is now silently swallowed because __coordShowSessionExpired()
-            checks __coordLoggingOut and no-ops if true.
+            Fix: keep this component permanently mounted (plain
+            wire:ignore.self div, no x-if/x-show toggle tied to logout).
+            The 'stop-coord-polling' event is still dispatched on logout
+            (see @submit below) and is still needed — it mutes 419
+            handling via __coordLoggingOut and clears the separate
+            plain-JS bell-icon poll timer — it just no longer touches
+            this Livewire component. POST /logout is a hard page
+            navigation, so any in-flight wire:poll request on this
+            component is torn down naturally by the browser the moment
+            the redirect lands, with no manual teardown and no race
+            condition.
         --}}
-      <div wire:ignore.self x-data="{ pollingActive: true }" x-on:stop-coord-polling.window="pollingActive = false">
-            <template x-if="pollingActive">
-                @livewire('organizer.coord-notif-poller')
-            </template>
+      <div wire:ignore.self style="display:none;">
+            @livewire('organizer.coord-notif-poller')
         </div>
 
         {{-- Logout --}}
@@ -1914,7 +2074,7 @@
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
     x-transition:leave-end="opacity-0 scale-95 -translate-y-2"
     @click.stop
-    class="bg-white rounded-2xl border border-[#E8E0F0] flex flex-col overflow-hidden"
+    class="notif-no-select bg-white rounded-2xl border border-[#E8E0F0] flex flex-col overflow-hidden"
     style="
         position: fixed;
         top: 88px;
@@ -1948,8 +2108,8 @@
                     x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
                     x-cloak
                     @click.stop="$store.coordNotifs && $store.coordNotifs.markAllRead()"
-                    class="text-white/70 hover:text-white font-semibold hover:bg-white/10
-                           rounded-lg px-2.5 py-1.5 transition"
+                    class="bg-white text-[#7A3F91] hover:bg-white/90 font-bold
+                           rounded-lg px-3 py-1.5 transition shadow-sm cursor-pointer"
                     style="font-size:11px;">
                 Mark all read
             </button>
@@ -1959,7 +2119,7 @@
                 <button type="button"
                         @click.stop="$store.coordNotifs && $store.coordNotifs.close()"
                         class="w-7 h-7 flex items-center justify-center rounded-lg
-                               text-white/50 hover:text-white hover:bg-white/10 transition">
+                               text-white/50 hover:text-white hover:bg-white/10 transition cursor-pointer">
                     <i class="fas fa-xmark" style="font-size:14px;"></i>
                 </button>
             </div>
@@ -2033,7 +2193,10 @@
                     class="notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
+                    :class="[
+                        notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]',
+                        ($store.coordNotifs.deletingId === notif.id) ? 'is-loading' : ''
+                    ]"
                     oncontextmenu="return false;"
                     ondragstart="return false;"
                     @click.stop="
@@ -2073,6 +2236,12 @@
                             }
                         }
                     ">
+
+                    <template x-if="$store.coordNotifs.deletingId === notif.id">
+                        <div class="notif-item-loading-overlay">
+                            <i class="fas fa-spinner fa-spin notif-item-spinner" style="color:#DC2626;"></i>
+                        </div>
+                    </template>
 
                     {{-- Icon — colored per notif type --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
@@ -2177,7 +2346,7 @@
                             </div>
 
                             <span x-show="!notif.read" x-cloak
-                                  class="w-2 h-2 rounded-full bg-red-500 shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
+                                  class="notif-unread-dot shrink-0 shadow-sm mt-1 flex-shrink-0"></span>
                         </div>
 
                         <p class="text-[#333333] mt-1 leading-relaxed"
