@@ -1352,7 +1352,9 @@ function phAddress(initial) {
 
 {{-- ══ MAIN LAYOUT ══ --}}
 <div class="flex flex-col flex-1 gap-3 px-4 sm:px-6 lg:px-10 pt-3 sm:pt-4 pb-3 max-w-screen-2xl mx-auto w-full min-h-0"
-     x-data="{ showProfileConfirm: false, showEmpConfirm: false }">
+     x-data="{ showProfileConfirm: false, showEmpConfirm: false }"
+     x-on:profile-updated.window="showProfileConfirm = false"
+     x-on:employment-updated.window="showEmpConfirm = false">
 
     {{-- ── PAGE HEADER ── --}}
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 flex-shrink-0">
@@ -1363,14 +1365,14 @@ function phAddress(initial) {
             </div>
             <div>
                 <div class="flex items-center gap-2.5 flex-wrap">
-                    <h1 class="text-base sm:text-lg font-semibold tracking-tight text-gray-900">Professional &amp; Personal Information</h1>
+                    <h1 class="text-base sm:text-lg font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Professional &amp; Personal Information</h1>
                     @if($editingProfile)
                         <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-300">
                             <i class="fas fa-pen text-[9px]"></i> Edit Mode
                         </span>
                     @endif
                 </div>
-                <p class="text-[11px] sm:text-xs leading-relaxed mt-0.5 text-gray-800">
+                <p class="text-[11px] sm:text-xs leading-relaxed mt-0.5 text-gray-800" style="user-select:none;-webkit-user-select:none;">
                     @if($editingProfile)
                         Complete your details below. Fields marked <span class="text-red-500 font-semibold">*</span> are required.
                     @else
@@ -1903,12 +1905,19 @@ function phAddress(initial) {
             </div>
             <div class="px-6 pb-6 flex gap-2">
                 <button type="button" @click="showProfileConfirm = false"
-                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition">
+                        wire:loading.attr="disabled" wire:target="saveProfile"
+                        wire:loading.class="opacity-60 cursor-wait" wire:target="saveProfile"
+                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition disabled:opacity-60 disabled:cursor-wait">
                     Cancel
                 </button>
-                <button type="button" wire:click="saveProfile" @click="showProfileConfirm = false"
-                        class="flex-1 px-4 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold cursor-pointer hover:bg-emerald-600 transition">
-                    Yes, Save
+                <button type="button" wire:click="saveProfile"
+                        wire:loading.attr="disabled" wire:target="saveProfile"
+                        wire:loading.class="opacity-70 cursor-wait" wire:target="saveProfile"
+                        class="flex-1 px-4 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold cursor-pointer hover:bg-emerald-600 transition flex items-center justify-center gap-2">
+                    <span wire:loading.remove wire:target="saveProfile">Yes, Save</span>
+                    <span wire:loading wire:target="saveProfile" class="flex items-center gap-2">
+                        <i class="fas fa-spinner fa-spin text-sm"></i> Saving...
+                    </span>
                 </button>
             </div>
         </div>
@@ -2151,12 +2160,19 @@ function phAddress(initial) {
             </div>
             <div class="px-6 pb-6 flex gap-2">
                 <button type="button" @click="showEmpConfirm = false"
-                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition">
+                        wire:loading.attr="disabled" wire:target="saveEmployment"
+                        wire:loading.class="opacity-60 cursor-wait" wire:target="saveEmployment"
+                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition disabled:opacity-60 disabled:cursor-wait">
                     Cancel
                 </button>
-                <button type="button" wire:click="saveEmployment" @click="showEmpConfirm = false"
-                        class="flex-1 px-4 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold cursor-pointer hover:bg-emerald-600 transition">
-                    Yes, Save
+                <button type="button" wire:click="saveEmployment"
+                        wire:loading.attr="disabled" wire:target="saveEmployment"
+                        wire:loading.class="opacity-70 cursor-wait" wire:target="saveEmployment"
+                        class="flex-1 px-4 py-2.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold cursor-pointer hover:bg-emerald-600 transition flex items-center justify-center gap-2">
+                    <span wire:loading.remove wire:target="saveEmployment">Yes, Save</span>
+                    <span wire:loading wire:target="saveEmployment" class="flex items-center gap-2">
+                        <i class="fas fa-spinner fa-spin text-sm"></i> Saving...
+                    </span>
                 </button>
             </div>
         </div>

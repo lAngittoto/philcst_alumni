@@ -816,8 +816,8 @@ select.filter-input {
                 <i class="fas fa-briefcase text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-gray-900">Job Opportunities</h1>
-                <p class="text-sm leading-relaxed mt-0.5 text-gray-700">
+                <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Job Opportunities</h1>
+                <p class="text-sm leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
                     Openings available for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
                         {{ $alumniCollege ?: 'your college' }}

@@ -814,8 +814,8 @@ select.filter-input {
                 <i class="fas fa-calendar-days text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-gray-900">Upcoming Events</h1>
-                <p class="text-sm leading-relaxed mt-0.5 text-gray-700">
+                <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Upcoming Events</h1>
+                <p class="text-sm leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
                     Events available for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
                         {{ $alumniCollege ?: 'your college' }}
@@ -869,10 +869,10 @@ select.filter-input {
         </div>
 
         <div class="bg-white p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
-             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus">
+             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus,previousPage,nextPage,page">
 
             <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
-                 wire:loading.flex wire:target="search,filterStatus">
+                 wire:loading.flex wire:target="search,filterStatus,previousPage,nextPage,page">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 

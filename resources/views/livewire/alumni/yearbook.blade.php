@@ -2,14 +2,24 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Renderless;
 use Livewire\WithPagination;
+use Livewire\WithoutUrlPagination;
+use Livewire\WithFileUploads;
 use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 new class extends Component {
-    use WithPagination;
+    // WithoutUrlPagination keeps previousPage()/nextPage()/gotoPage()
+    // working exactly the same, but stops Livewire from writing ?page=N
+    // into the browser's address bar — the URL stays clean on every
+    // page, not just page 1. Trade-off: the current page no longer
+    // survives a manual browser refresh (it resets to page 1), since
+    // nothing in the URL remembers it anymore.
+    use WithPagination, WithoutUrlPagination, WithFileUploads;
 
     public string $search = '';
     public string $course = '';
@@ -20,6 +30,12 @@ new class extends Component {
     public string $myCourseName  = '';
     public string $myCollege     = '';
     public int    $myAlumniId    = 0;
+
+    // ── Own-photo upload (yearbook profile modal) ─────────────────
+    // Deliberately keyed off $myAlumniId only — never a ($id) passed
+    // in from the client — so there is no way for this to be pointed
+    // at anyone else's record, no matter what the Alpine layer sends.
+    public $newYearbookPhoto = null;
 
     protected string $paginationTheme = 'tailwind';
 
@@ -147,9 +163,32 @@ new class extends Component {
             );
         })->values();
 
-        // Manual pagination over the sorted collection
+        // Manual pagination over the sorted collection.
+        //
+        // BUG THAT WAS HERE: this used to read $this->page directly, but
+        // WithPagination doesn't expose a plain public $page property —
+        // that silently evaluated to null every time, so this computed
+        // always rebuilt page 1 no matter what page Livewire's internal
+        // state said you were on. Next/Prev/page-number clicks DID
+        // update Livewire's pagination state correctly; this query just
+        // never looked at it.
+        //
+        // A later attempt used $this->getPage('page') instead — but
+        // Livewire's WithPagination trait has no public getPage() method
+        // at all, so that call throws "Call to undefined method", which
+        // is exactly the "clicked > and got 'No alumni found'" symptom:
+        // the request errors out instead of rendering page 2.
+        //
+        // The trait's real, documented mechanism (used internally by
+        // Model::paginate() itself) is Paginator::currentPageResolver(),
+        // which WithPagination::initializeWithPagination() already wires
+        // up automatically before mount() ever runs. Reading through
+        // LengthAwarePaginator::resolveCurrentPage() taps into that same
+        // resolver, so it always matches whatever page previousPage(),
+        // nextPage(), or gotoPage() last set — no separate getPage() call
+        // needed.
         $perPage = 100;
-        $page    = (int) ($this->page ?? 1);
+        $page    = (int) \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage('page');
         $page    = $page > 0 ? $page : 1;
         $sliced  = $all->forPage($page, $perPage);
 
@@ -193,6 +232,36 @@ new class extends Component {
             return asset('storage/alumni-photos/' . $path);
         }
         return asset('storage/' . $path);
+    }
+
+    /**
+     * Replace the logged-in alumni's own yearbook photo. Scoped strictly
+     * to $this->myAlumniId (set once in mount() from the authenticated
+     * user) — there is no id parameter here on purpose, so this can
+     * never be used to touch anyone else's photo.
+     */
+    #[Renderless]
+    public function uploadYearbookPhoto(): void
+    {
+        if (! $this->myAlumniId || ! $this->newYearbookPhoto) return;
+
+        try {
+            $alumni = Alumni::findOrFail($this->myAlumniId);
+
+            if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png')) {
+                Storage::disk('public')->delete($alumni->profile_photo);
+            }
+
+            $path = $this->newYearbookPhoto->store('alumni-photos', 'public');
+            $alumni->update(['profile_photo' => $path]);
+
+            $this->newYearbookPhoto = null;
+
+            $this->dispatch('flash-message', type: 'success', message: 'Yearbook photo updated successfully.');
+            $this->dispatch('yb-photo-saved', url: $this->getPhotoUrl($path));
+        } catch (\Exception $e) {
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo.');
+        }
     }
 
     public function formatAlumniName(string $fullName): string
@@ -244,10 +313,24 @@ new class extends Component {
         profileOpen: false,
         profileData: null,
         closing: false,
+        photoPreview: null,
+        pendingPhotoFile: null,
+        hasPendingPhoto: false,
+        savingPhoto: false,
+        checkingFace: false,
+        faceError: '',
+        faceModelsReady: false,
+        faceModelsLoading: null,
         openProfile(data) {
             this.profileData = data;
+            this.photoPreview = data.photo;
+            this.pendingPhotoFile = null;
+            this.hasPendingPhoto = false;
+            this.savingPhoto = false;
+            this.faceError = '';
             this.profileOpen = true;
             this.closing = false;
+            if (data.isMe) this.ensureFaceModels();
         },
         closeProfile() {
             if (this.closing) return;
@@ -255,14 +338,188 @@ new class extends Component {
             setTimeout(() => {
                 this.profileOpen = false;
                 this.closing = false;
-                setTimeout(() => { this.profileData = null; }, 200);
+                setTimeout(() => {
+                    this.profileData = null;
+                    this.photoPreview = null;
+                    this.pendingPhotoFile = null;
+                    this.hasPendingPhoto = false;
+                    this.faceError = '';
+                }, 200);
             }, 350);
+        },
+        // ── Loads face-api.js + the Tiny Face Detector model once, lazily,
+        //    only when someone actually opens their own card (not on page
+        //    load). Guarded by faceModelsLoading so a fast double-open
+        //    can't kick off two parallel loads. ~190KB model, cached by
+        //    the browser after the first load. ──
+        ensureFaceModels() {
+            if (this.faceModelsReady) return Promise.resolve();
+            if (this.faceModelsLoading) return this.faceModelsLoading;
+            this.faceModelsLoading = (async () => {
+                if (typeof faceapi === 'undefined') {
+                    await new Promise((resolve, reject) => {
+                        const s = document.createElement('script');
+                        s.src = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.js';
+                        s.onload = resolve;
+                        s.onerror = () => reject(new Error('Failed to load face detection library'));
+                        document.head.appendChild(s);
+                    });
+                }
+                const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                this.faceModelsReady = true;
+            })();
+            return this.faceModelsLoading;
+        },
+        // ── Verifies the uploaded image contains a detectable human
+        //    face before it's allowed as a yearbook photo. Uses the
+        //    lightweight Tiny Face Detector (client-side, no server
+        //    round-trip). Not a perfect real-photo-vs-drawing check —
+        //    some photorealistic art can still pass,
+        //    and some genuine photos (heavy shadow, extreme angle,
+        //    covered face) can still fail — but it reliably blocks
+        //    clearly non-human images like anime/cartoon avatars,
+        //    logos, landscapes, etc. ──
+        async detectFace(imgEl) {
+            await this.ensureFaceModels();
+            const result = await faceapi.detectSingleFace(
+                imgEl,
+                new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 })
+            );
+            return !!result;
+        },
+        async onYbPhotoChange(event) {
+            if (!this.profileData || !this.profileData.isMe) return;
+            const file = event.target.files[0];
+            if (!file) return;
+
+            this.faceError = '';
+            this.checkingFace = true;
+
+            try {
+                // Load the picked file into a real <img> element first —
+                // face-api.js needs a rendered image/canvas/video element
+                // to run detection on, not a raw File/Blob.
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = (e) => resolve(e.target.result);
+                    r.onerror = reject;
+                    r.readAsDataURL(file);
+                });
+                const probeImg = await new Promise((resolve, reject) => {
+                    const im = new Image();
+                    im.onload = () => resolve(im);
+                    im.onerror = () => reject(new Error('Could not read that image file.'));
+                    im.src = dataUrl;
+                });
+
+                let hasFace = false;
+                try {
+                    hasFace = await this.detectFace(probeImg);
+                } catch (detErr) {
+                    // If the detector itself fails to load/run (offline,
+                    // CDN blocked, etc.), fail OPEN rather than trap the
+                    // user unable to ever change their photo — but still
+                    // log it so it's visible during troubleshooting.
+                    console.warn('Face detection unavailable, allowing photo through:', detErr);
+                    hasFace = true;
+                }
+
+                this.checkingFace = false;
+
+                if (!hasFace) {
+                    this.faceError = 'We couldn\'t detect a clear face in that photo. Please use a real photo of yourself, not an avatar, drawing, or anime/cartoon image.';
+                    if (this.$refs.ybPhotoInput) this.$refs.ybPhotoInput.value = '';
+                    return;
+                }
+            } catch (err) {
+                this.checkingFace = false;
+                this.faceError = 'Couldn\'t read that image. Please try a different file.';
+                if (this.$refs.ybPhotoInput) this.$refs.ybPhotoInput.value = '';
+                return;
+            }
+
+            try {
+                const compressed = await this.compressYbImage(file, 500, 500, 0.75);
+                this.pendingPhotoFile = compressed;
+                this.hasPendingPhoto = true;
+                const reader = new FileReader();
+                reader.onload = (e) => { this.photoPreview = e.target.result; };
+                reader.readAsDataURL(compressed);
+            } catch (err) {
+                this.pendingPhotoFile = file;
+                this.hasPendingPhoto = true;
+                const reader = new FileReader();
+                reader.onload = (e) => { this.photoPreview = e.target.result; };
+                reader.readAsDataURL(file);
+            }
+        },
+        compressYbImage(file, maxW, maxH, quality) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    img.onload = () => {
+                        let w = img.width, h = img.height;
+                        if (w > maxW || h > maxH) {
+                            const ratio = Math.min(maxW / w, maxH / h);
+                            w = Math.round(w * ratio);
+                            h = Math.round(h * ratio);
+                        }
+                        const canvas = document.createElement('canvas');
+                        canvas.width = w; canvas.height = h;
+                        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                        canvas.toBlob((blob) => {
+                            if (!blob) return reject(new Error('compress failed'));
+                            resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+                        }, 'image/jpeg', quality);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        },
+        saveYbPhoto() {
+            if (this.savingPhoto || !this.pendingPhotoFile || !this.profileData?.isMe) return;
+            this.savingPhoto = true;
+            $wire.upload('newYearbookPhoto', this.pendingPhotoFile,
+                () => { $wire.uploadYearbookPhoto(); },
+                () => {
+                    this.savingPhoto = false;
+                    this.hasPendingPhoto = false;
+                    this.pendingPhotoFile = null;
+                    this.photoPreview = this.profileData.photo;
+                    if (this.$refs.ybPhotoInput) this.$refs.ybPhotoInput.value = '';
+                },
+                () => {}
+            );
+        },
+        cancelYbPhoto() {
+            this.pendingPhotoFile = null;
+            this.hasPendingPhoto = false;
+            this.photoPreview = this.profileData ? this.profileData.photo : null;
+            this.faceError = '';
+            if (this.$refs.ybPhotoInput) this.$refs.ybPhotoInput.value = '';
         }
      }"
      x-init="
         setAvailHeight();
         window.addEventListener('resize', () => setAvailHeight());
         window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
+        $wire.on('yb-photo-saved', (e) => {
+            const url = Array.isArray(e) ? e[0]?.url : e?.url;
+            savingPhoto = false;
+            hasPendingPhoto = false;
+            pendingPhotoFile = null;
+            if (url) {
+                photoPreview = url;
+                if (profileData) profileData.photo = url;
+                document.querySelectorAll('[data-yb-my-photo]').forEach(img => { img.src = url; });
+            }
+            if ($refs.ybPhotoInput) $refs.ybPhotoInput.value = '';
+        });
      ">
 
 
@@ -621,7 +878,7 @@ new class extends Component {
 .yb-modal-header {
     position: relative;
     background: linear-gradient(135deg, #7A3F91 0%, #9C5FB8 100%);
-    padding: 34px 20px 50px;
+    padding: 40px 20px 66px;
     text-align: center;
     flex-shrink: 0;
 }
@@ -643,34 +900,101 @@ new class extends Component {
 .yb-modal-photo-ring {
     position: relative;
     margin: 0 auto;
-    width: 96px; height: 96px; border-radius: 9999px;
-    background: #fff; padding: 4px;
+    width: 148px; height: 148px; border-radius: 9999px;
+    background: #fff; padding: 5px;
     box-shadow: 0 8px 22px rgba(60,20,80,.3);
     z-index: 2;
 }
+/* ── Hover-to-change overlay — enabled ONLY on the viewer's own
+     card (gated server-side via profileData.isMe in the template),
+     mirrors the registrar's "hover photo to change" pattern. ── */
+.yb-modal-photo-outer {
+    position: relative;
+    width: 100%; height: 100%;
+}
+.yb-modal-photo-wrap {
+    position: relative;
+    width: 100%; height: 100%;
+    border-radius: 9999px;
+    overflow: hidden;
+}
+.yb-modal-photo-overlay {
+    position: absolute; inset: 0;
+    border-radius: 9999px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    background: rgba(0,0,0,.55);
+    color: #fff;
+    opacity: 0;
+    transition: opacity .15s;
+    cursor: pointer;
+}
+.yb-modal-photo-wrap:hover .yb-modal-photo-overlay { opacity: 1; }
+.yb-modal-photo-overlay span {
+    font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+}
+.yb-modal-photo-uploading {
+    position: absolute; inset: 0;
+    border-radius: 9999px;
+    background: linear-gradient(90deg,rgba(122,63,145,.25) 25%,rgba(122,63,145,.45) 50%,rgba(122,63,145,.25) 75%);
+    background-size: 200% 100%;
+    animation: ybShimmer 1.2s infinite linear;
+    display: flex; align-items: center; justify-content: center;
+}
+@keyframes ybShimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+}
+.yb-modal-photo-actions {
+    position: absolute;
+    left: 50%; transform: translateX(-50%);
+    bottom: -32px;
+    display: flex; gap: 6px;
+    z-index: 3;
+}
+.yb-modal-photo-action-btn {
+    width: 30px; height: 30px; border-radius: 9999px;
+    border: 1.5px solid #E0E0E0;
+    background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    cursor: pointer;
+    box-shadow: 0 3px 10px rgba(0,0,0,.18);
+    transition: all .15s;
+}
+.yb-modal-photo-save-btn { background: #7A3F91; border-color: #7A3F91; color: #fff; }
+.yb-modal-photo-save-btn:hover { background: #6a3280; border-color: #6a3280; }
+.yb-modal-photo-save-btn:disabled { opacity: .55; cursor: not-allowed; }
+.yb-modal-photo-cancel-btn { color: #555555; }
+.yb-modal-photo-cancel-btn:hover { background: #FEF2F2; border-color: #FECACA; color: #DC2626; }
+.yb-modal-face-error {
+    margin-top: 16px;
+    display: flex; align-items: flex-start; gap: 7px;
+    padding: 10px 13px; border-radius: 12px;
+    background: #FEF2F2; border: 1.5px solid #FECACA;
+    color: #B91C1C;
+    font-size: 12px; font-weight: 600; line-height: 1.45;
+    text-align: left;
+}
+.yb-modal-face-error i { margin-top: 1px; flex-shrink: 0; }
 .yb-modal-body {
     padding: 20px 24px 24px;
     text-align: center;
     overflow-y: auto;
 }
-.yb-modal-info-grid {
+.yb-modal-info-stack {
     margin-top: 18px;
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
-.yb-modal-info-item {
-    display: flex; flex-direction: column; gap: 3px;
-    padding: 10px 12px; border-radius: 12px;
-    background: #F8F0FF; border: 1px solid #E4CBFA;
-    text-align: left;
+.yb-modal-program {
+    font-size: 14px; font-weight: 800; color: #333333;
+    line-height: 1.3;
 }
-.yb-modal-info-label {
-    display: flex; align-items: center; gap: 5px;
-    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
-    color: #7A3F91;
-}
-.yb-modal-info-value {
-    font-size: 12.5px; font-weight: 700; color: #333333;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.yb-modal-batch-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 16px; border-radius: 9999px;
+    font-size: 12.5px; font-weight: 700;
+    background: #F3E8FF; color: #7A3F91;
+    border: 1.5px solid #D8B4FE;
 }
 .yb-modal-note {
     margin-top: 14px;
@@ -892,6 +1216,7 @@ new class extends Component {
                                                 <div class="absolute left-1/2 -translate-x-1/2 -bottom-[39px] z-10 w-[78px] h-[78px]">
                                                     <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
                                                          alt="{{ $alumni->name }}"
+                                                         @if($isMe) data-yb-my-photo @endif
                                                          class="w-full h-full rounded-full object-cover block"
                                                          style="border:{{ $isMe ? '3px solid #7A3F91' : '3px solid #fff' }}; box-shadow:{{ $isMe ? '0 0 0 3px #fff, 0 0 0 5px #7A3F91, 0 3px 12px rgba(122,63,145,.3)' : '0 2px 10px rgba(0,0,0,.12)' }}; background:#f0e6f8;"
                                                          loading="lazy" decoding="async"
@@ -1034,26 +1359,87 @@ new class extends Component {
                 <div class="yb-modal-header">
                     <div class="yb-modal-header-deco"></div>
                     <div class="yb-modal-photo-ring">
-                        <img :src="profileData.photo" :alt="profileData.name"
-                             class="w-full h-full rounded-full object-cover block"
-                             style="background:#f0e6f8;"
-                             onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
+                        {{-- Hover-to-change is enabled ONLY when this is the
+                             viewer's own card (profileData.isMe, set server-side
+                             when the card was opened) — everyone else's photo
+                             here is view-only, same rule as the registrar tool. --}}
+                        <template x-if="profileData.isMe">
+                            <div class="yb-modal-photo-outer">
+                                <div class="yb-modal-photo-wrap">
+                                    <img :src="photoPreview" :alt="profileData.name"
+                                         class="w-full h-full rounded-full object-cover block"
+                                         style="background:#f0e6f8;"
+                                         onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
+
+                                    <div x-show="savingPhoto" class="yb-modal-photo-uploading">
+                                        <i class="fas fa-spinner fa-spin text-white"></i>
+                                    </div>
+
+                                    <div x-show="checkingFace" class="yb-modal-photo-uploading">
+                                        <div class="flex flex-col items-center gap-1">
+                                            <i class="fas fa-spinner fa-spin text-white"></i>
+                                            <span style="font-size:9px;font-weight:700;color:#fff;letter-spacing:.03em;">CHECKING…</span>
+                                        </div>
+                                    </div>
+
+                                    <label x-show="!savingPhoto && !checkingFace" class="yb-modal-photo-overlay">
+                                        <i class="fas fa-camera" style="font-size:18px;"></i>
+                                        <span>Change photo</span>
+                                        <input type="file" x-ref="ybPhotoInput" class="hidden"
+                                               accept="image/jpeg,image/png,image/webp" @change="onYbPhotoChange($event)">
+                                    </label>
+                                </div>
+
+                                {{-- Moved OUTSIDE .yb-modal-photo-wrap on purpose:
+                                     that wrap needs overflow:hidden to mask the photo
+                                     into a circle, which was also clipping these
+                                     buttons (they render half-visible but can't
+                                     receive clicks there). This outer div has no
+                                     clipping, so the buttons sit fully outside the
+                                     circle and are actually clickable. --}}
+                                <div class="yb-modal-photo-actions" x-show="hasPendingPhoto && !savingPhoto && !checkingFace">
+                                    <button type="button" class="yb-modal-photo-action-btn yb-modal-photo-save-btn"
+                                            @click="saveYbPhoto()" title="Save photo">
+                                        <i class="fas fa-check"></i>
+                                    </button>
+                                    <button type="button" class="yb-modal-photo-action-btn yb-modal-photo-cancel-btn"
+                                            @click="cancelYbPhoto()" title="Cancel">
+                                        <i class="fas fa-xmark"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                        <template x-if="!profileData.isMe">
+                            <img :src="profileData.photo" :alt="profileData.name"
+                                 class="w-full h-full rounded-full object-cover block"
+                                 style="background:#f0e6f8;"
+                                 onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
+                        </template>
                     </div>
                 </div>
 
                 <div class="yb-modal-body">
                     <p class="text-lg font-semibold uppercase leading-snug" style="color:#333333;" x-text="profileData.name"></p>
 
-                    {{-- Digital yearbook info strip --}}
-                    <div class="yb-modal-info-grid">
-                        <div class="yb-modal-info-item">
-                            <span class="yb-modal-info-label"><i class="fas fa-id-card"></i> Program</span>
-                            <span class="yb-modal-info-value" x-text="profileData.course"></span>
-                        </div>
-                        <div class="yb-modal-info-item">
-                            <span class="yb-modal-info-label"><i class="fas fa-calendar-check"></i> Batch</span>
-                            <span class="yb-modal-info-value" x-text="profileData.batch"></span>
-                        </div>
+                    {{-- Face-check rejection message — only ever relevant on
+                         the viewer's own card, since that's the only place
+                         the file input exists. --}}
+                    <template x-if="profileData.isMe && faceError">
+                        <p class="yb-modal-face-error">
+                            <i class="fas fa-triangle-exclamation"></i>
+                            <span x-text="faceError"></span>
+                        </p>
+                    </template>
+
+                    {{-- Digital yearbook info: program on top, batch centered below —
+                         no field labels, so this reads like a yearbook caption
+                         rather than a form. --}}
+                    <div class="yb-modal-info-stack">
+                        <p class="yb-modal-program" x-text="profileData.course"></p>
+                        <span class="yb-modal-batch-pill">
+                            <i class="fas fa-calendar-check" style="font-size:10px;"></i>
+                            <span x-text="'Batch ' + profileData.batch"></span>
+                        </span>
                     </div>
 
                     {{-- "We / Our" congratulatory note --}}

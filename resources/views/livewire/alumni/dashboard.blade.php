@@ -270,9 +270,20 @@ new class extends Component {
     }
 }; ?>
 
-<div>
+<div class="alm-dash-noselect">
 
 <style>
+    /* ── Disable text selection/copy across the dashboard.
+         Clickable cards keep their own `cursor-pointer` class untouched —
+         user-select and cursor are independent properties, so disabling
+         selection here does not affect the pointer cursor on cards. ── */
+    .alm-dash-noselect {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
+    }
+
     /* ── Animations ── */
     @keyframes dashPageIn  { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
     @keyframes dashModalIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }

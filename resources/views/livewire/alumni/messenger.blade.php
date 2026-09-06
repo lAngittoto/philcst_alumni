@@ -362,16 +362,17 @@ new class extends \Livewire\Volt\Component {
     //    only compare against the last `last_seen_at` ping timestamp ──────
     private function formatLastSeen(?string $lastSeenAt): string
     {
-        if (! $lastSeenAt) return 'Offline';
-        $ts  = Carbon::parse($lastSeenAt)->setTimezone('Asia/Manila');
-        $now = Carbon::now('Asia/Manila');
+        if (! $lastSeenAt) return 'Not yet active';
+        $ts   = Carbon::parse($lastSeenAt)->setTimezone('Asia/Manila');
+        $now  = Carbon::now('Asia/Manila');
         $diff = $now->diffInSeconds($ts);
-        if ($diff < 60)                return 'Online';
-        if ($diff < 3600)              return 'Active ' . floor($diff / 60) . 'm ago';
-        if ($ts->isToday())            return 'Active today at ' . $ts->format('h:i A');
-        if ($ts->isYesterday())        return 'Active yesterday';
-        if ($now->diffInDays($ts) < 7) return 'Active ' . $now->diffInDays($ts) . 'd ago';
-        return 'Active ' . $ts->format('M d');
+        if ($diff < 60)                 return 'Online';
+        if ($diff < 3600)               return floor($diff / 60) . 'm ago';
+        if ($diff < 86400)              return floor($diff / 3600) . 'h ago';
+        $days = $now->diffInDays($ts);
+        if ($days < 30)                 return $days . 'd ago';
+        if ($days < 365)                return floor($days / 30) . 'mo ago';
+        return floor($days / 365) . 'y ago';
     }
 
     // ── 1-minute online threshold (same grace window as above) ─────────────
@@ -1445,11 +1446,29 @@ new class extends \Livewire\Volt\Component {
     x-data="{ mobileChatOpen: false }"
     @chat-open-mobile.window="mobileChatOpen = true"
     @chat-close-mobile.window="mobileChatOpen = false"
-    class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
+    class="alm-msgr-noselect flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;"
     @if(! $confirmDeleteId) wire:poll.1500ms="unifiedPoll" @endif>
 
     <style>
+        /* ── Disable text selection/copy across the whole messenger UI —
+             room list, header, member panel, message bubbles, etc.
+             Inputs/textareas (chat composer) explicitly opt back into
+             normal text selection so typing/editing still works. ── */
+        .alm-msgr-noselect {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        .alm-msgr-noselect input,
+        .alm-msgr-noselect textarea {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+        }
+
         #msgr-room-list button,
         #msgr-room-list .msgr-pin-btn,
         .msgr-bubble,
@@ -1459,6 +1478,24 @@ new class extends \Livewire\Volt\Component {
         #msgr-room-list > div { transition: transform .18s ease, opacity .18s ease; }
 
         .msgr-bubble { transform-origin: bottom; animation: msgrPop .14s ease-out; }
+
+        /* ── Chat composer while editing an existing message — solid,
+             clearly blue border (explicit hex, not a Tailwind shade that
+             can read washed-out/cyan on some screens) with a matching
+             glow ring on focus. ── */
+        .msgr-input-editing {
+            border-color: #1D4ED8 !important;
+            background-color: #ffffff;
+        }
+        .msgr-input-editing:focus {
+            box-shadow: 0 0 0 4px rgba(29,78,216,0.28);
+        }
+        .msgr-bubble {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
         @keyframes msgrPop {
             from { opacity: 0; transform: translateY(6px) scale(.97); }
             to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1529,72 +1566,11 @@ new class extends \Livewire\Volt\Component {
         .msgr-reactions-popup-list::-webkit-scrollbar-thumb { background: #c9aee0; border-radius: 999px; }
         .msgr-reactions-popup-list::-webkit-scrollbar-thumb:hover { background: #ad8ac7; }
 
-        /* ── Floating background bubbles — same drifting lavender-circle
-           theme as the Yearbook page, used on the "no chat selected"
-           empty state so the two pages feel like one design system.
-           Split into separate layers (::before, ::after, and one real
-           child .msgr-bubble-layer) because a single element can only
-           animate its background-position along ONE shared path — to
-           get bubbles drifting in different directions each layer needs
-           its own animated element. ── */
+        /* ── Floating background bubbles theme removed per request. ── */
         .msgr-bubble-bg {
             position: relative;
             background-color: #FFFFFF;
-            overflow: hidden;
         }
-        .msgr-bubble-bg::before,
-        .msgr-bubble-bg::after,
-        .msgr-bubble-layer {
-            content: '';
-            position: absolute;
-            inset: -60px;
-            z-index: 0;
-            pointer-events: none;
-        }
-        .msgr-bubble-bg::before {
-            background-image:
-                radial-gradient(circle, rgba(216,180,254,0.55) 0, rgba(216,180,254,0.55) 22px, transparent 23px),
-                radial-gradient(circle, rgba(122,63,145,0.3) 0, rgba(122,63,145,0.3) 17px, transparent 18px);
-            background-repeat: repeat;
-            background-size: 340px 340px, 300px 300px;
-            background-position: 20px 40px, 90px 220px;
-            animation: msgrBubbleDriftUp 26s linear infinite;
-        }
-        .msgr-bubble-bg::after {
-            background-image:
-                radial-gradient(circle, rgba(216,180,254,0.4) 0, rgba(216,180,254,0.4) 14px, transparent 15px),
-                radial-gradient(circle, rgba(122,63,145,0.22) 0, rgba(122,63,145,0.22) 8px, transparent 9px);
-            background-repeat: repeat;
-            background-size: 260px 260px, 180px 180px;
-            background-position: 180px 120px, 40px 260px;
-            animation: msgrBubbleDriftDown 32s linear infinite;
-        }
-        .msgr-bubble-layer {
-            background-image:
-                radial-gradient(circle, rgba(216,180,254,0.45) 0, rgba(216,180,254,0.45) 10px, transparent 11px);
-            background-repeat: repeat;
-            background-size: 220px 220px;
-            background-position: 250px 60px;
-            animation: msgrBubbleDriftDiag 38s linear infinite;
-        }
-        @keyframes msgrBubbleDriftUp {
-            from { background-position: 20px 40px, 90px 220px; }
-            to   { background-position: 20px -300px, 90px -80px; }
-        }
-        @keyframes msgrBubbleDriftDown {
-            from { background-position: 180px 120px, 40px 260px; }
-            to   { background-position: 180px 380px, 40px 440px; }
-        }
-        @keyframes msgrBubbleDriftDiag {
-            from { background-position: 250px 60px; }
-            to   { background-position: -70px 340px; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-            .msgr-bubble-bg::before,
-            .msgr-bubble-bg::after,
-            .msgr-bubble-layer { animation: none; }
-        }
-        .msgr-bubble-bg > * { position: relative; z-index: 1; }
 
         #msgr-chat-body-wrap { position: relative; }
         .msgr-watermark {
@@ -1627,47 +1603,6 @@ new class extends \Livewire\Volt\Component {
         .msgr-hdr-soft    { color: #EDE0F5; }
         .msgr-hdr-faint   { color: #D9C2EE; }
 
-        /* ── Scroll-to-top / scroll-to-bottom floating nav ────────────────
-           Centered at the bottom of the thread (Messenger-style), not
-           pinned to a side. A single button appears in the direction
-           you're actively scrolling — up-arrow while scrolling up,
-           down-arrow while scrolling down — and fades out shortly after
-           you stop scrolling. Each click nudges the thread by a small
-           step (see scrollBy calls below) instead of jumping straight to
-           the very top or very bottom. */
-        .msgr-scroll-nav {
-            position: absolute;
-            left: 50%;
-            transform: translateX(-50%);
-            bottom: 14px;
-            display: flex;
-            gap: 8px;
-            z-index: 50;
-            pointer-events: none;
-        }
-        .msgr-scroll-nav .msgr-scroll-btn { pointer-events: auto; }
-        .msgr-scroll-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: #ffffff;
-            border: 1px solid #E8E0F0;
-            color: #7a3f91;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            box-shadow: 0 2px 10px rgba(122,63,145,.20);
-            cursor: pointer;
-            transition: background .15s ease, transform .15s ease, box-shadow .15s ease;
-        }
-        .msgr-scroll-btn:hover {
-            background: #f3eef8;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 14px rgba(122,63,145,.28);
-        }
-        .msgr-scroll-btn:active { transform: translateY(0) scale(.94); }
-
         /* ── Job/Event share preview card — PURPLE "news-card" theme ─────
            Purple gradient card, image banner up top with a small brand
            badge (top-left) and a type tag (top-right), a bold white
@@ -1687,6 +1622,10 @@ new class extends \Livewire\Volt\Component {
             background: linear-gradient(160deg, #7a3f91 0%, #5c2d7a 100%);
             border: 1px solid rgba(122,63,145,.25);
             box-shadow: 0 4px 14px rgba(122,63,145,.22);
+            transition: box-shadow .2s ease, transform .2s ease, opacity .2s ease, border-color .2s ease;
+        }
+        .msgr-post-card:hover {
+            box-shadow: 0 8px 22px rgba(122,63,145,.3);
         }
         .msgr-post-card.is-mine { border-color: rgba(255,255,255,.28); }
         .msgr-post-card.is-unavailable { opacity: .82; }
@@ -1701,6 +1640,7 @@ new class extends \Livewire\Volt\Component {
         .msgr-post-thumb img {
             width: 100%; height: 100%; object-fit: cover; display: block;
             filter: saturate(1.02);
+            transition: filter .2s ease, transform .2s ease;
         }
         .msgr-post-card.is-unavailable .msgr-post-thumb img { filter: grayscale(.55) saturate(.7); }
 
@@ -1774,18 +1714,6 @@ new class extends \Livewire\Volt\Component {
             display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
         }
         .msgr-post-overlay-strip p .accent { color: #7a3f91; }
-
-        .msgr-post-thumb-overlay {
-            position: absolute; inset: 0; z-index: 3;
-            display: flex; align-items: center; justify-content: center;
-            background: rgba(58,27,77,0); transition: background .18s ease;
-        }
-        .msgr-post-card:not(.is-unavailable):hover .msgr-post-thumb-overlay { background: rgba(58,27,77,.32); }
-        .msgr-post-view-btn {
-            opacity: 0; transform: translateY(4px);
-            transition: opacity .18s ease, transform .18s ease;
-        }
-        .msgr-post-card:not(.is-unavailable):hover .msgr-post-view-btn { opacity: 1; transform: translateY(0); }
 
         .msgr-post-caption { padding: 10px 12px 11px; background: transparent; }
         .msgr-post-caption .headline {
@@ -1902,10 +1830,18 @@ new class extends \Livewire\Volt\Component {
             <div wire:key="room-{{ $r['id'] }}" class="relative" x-data="{ hovered: false }" @mouseenter="hovered = true" @mouseleave="hovered = false" style="isolation: isolate;">
 
                 <button wire:click="selectRoom({{ $r['id'] }})"
-                        class="w-full text-left rounded-xl px-3 py-3 transition-all duration-200 border cursor-pointer
+                        wire:loading.attr="disabled" wire:target="selectRoom({{ $r['id'] }})"
+                        wire:loading.class="opacity-60 cursor-wait" wire:target="selectRoom({{ $r['id'] }})"
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all duration-200 border cursor-pointer relative
                                @if($isActive)      border-[#d9c9e8] bg-[#f3eef8]
                                @elseif($hasUnread) border-[#d9b8ef] bg-[#ede5f7] hover:bg-[#e4d8f2]
                                @else               border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa] @endif">
+
+                    <div class="hidden absolute bottom-2 right-2 z-10 items-center justify-center"
+                         wire:loading.flex wire:target="selectRoom({{ $r['id'] }})">
+                        <i class="fas fa-spinner fa-spin" style="font-size:14px; color:#7a3f91;"></i>
+                    </div>
+
 
                     <div class="flex items-start gap-2.5">
                         <div class="relative flex-shrink-0 self-start mt-0.5">
@@ -2068,23 +2004,14 @@ new class extends \Livewire\Volt\Component {
         <div class="flex flex-1 min-h-0 relative">
             <div class="flex flex-col flex-1 min-w-0">
 
-                <div id="msgr-chat-body-wrap" class="flex-1 min-h-0 flex flex-col msgr-bubble-bg"
+                <div id="msgr-chat-body-wrap" class="flex-1 min-h-0 flex flex-col msgr-bubble-bg relative"
                      x-data="{
                          nearBottom: true,
-                         scrollDir: null,
-                         dirTimer: null,
-                         lastTop: 0,
                          onScroll(el) {
-                             const cur = el.scrollTop;
-                             this.scrollDir = cur < this.lastTop ? 'up' : (cur > this.lastTop ? 'down' : this.scrollDir);
-                             this.lastTop = cur;
                              this.nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 120;
-                             clearTimeout(this.dirTimer);
-                             this.dirTimer = setTimeout(() => { this.scrollDir = null; }, 1200);
                          }
                      }">
 
-                    <div class="msgr-bubble-layer" aria-hidden="true"></div>
 
                     @if($watermarkText !== '')
                     <div class="msgr-watermark" aria-hidden="true">
@@ -2099,14 +2026,12 @@ new class extends \Livewire\Volt\Component {
                          older messages never gets interrupted by new incoming
                          ones. Sending a message or switching rooms fires
                          'chat-scroll-bottom-force' instead, which always jumps
-                         to the bottom regardless of where you were scrolled.
-                         `scrollDir` (shared with the parent scope above) drives
-                         the centered up/down quick-nav button below. --}}
+                         to the bottom regardless of where you were scrolled. --}}
                     <div id="msg-list"
                          class="flex-1 overflow-y-auto px-3 sm:px-4 py-4"
-                         x-init="lastTop = $el.scrollTop; $el.scrollTop = $el.scrollHeight; $el.addEventListener('scroll', () => onScroll($el));"
+                         x-init="$el.scrollTop = $el.scrollHeight; $el.addEventListener('scroll', () => onScroll($el));"
                          @chat-scroll-bottom.window="if (nearBottom) { $nextTick(() => { $el.scrollTop = $el.scrollHeight; }); }"
-                         @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; scrollDir = null; })"
+                         @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; })"
                          @click="$wire.closeToolbar()">
 
                         @php $prevDate = null; $prevSendKey = null; $lastIdx = count($messages) - 1; @endphp
@@ -2212,8 +2137,9 @@ new class extends \Livewire\Volt\Component {
                                             $ppIsEvent   = ($pp['type'] ?? 'job') === 'event';
                                         @endphp
                                         <div wire:click.stop="toggleToolbar({{ $msg['id'] }})"
-                                             class="msgr-bubble msgr-post-card cursor-pointer {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}
-                                                    {{ $toolbarOpen ? 'ring-2 ring-white/40' : '' }}">
+                                             class="msgr-bubble msgr-post-card {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}
+                                                    {{ $toolbarOpen ? 'ring-2 ring-white/40' : '' }}"
+                                             style="cursor:default;">
                                             <div class="msgr-post-thumb">
                                                 @if($ppAvailable)
                                                     @if(! empty($pp['image']))
@@ -2249,15 +2175,6 @@ new class extends \Livewire\Volt\Component {
                                                         @endif
                                                     </p>
                                                 </div>
-
-                                                @if($ppAvailable)
-                                                <div class="msgr-post-thumb-overlay">
-                                                    <a href="{{ $pp['url'] }}" wire:navigate @click.stop
-                                                       class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#5c2d7a] text-xs font-bold shadow-md inline-flex items-center gap-1.5">
-                                                        <i class="fa-solid fa-eye"></i>View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}
-                                                    </a>
-                                                </div>
-                                                @endif
                                             </div>
 
                                             <div class="msgr-post-caption">
@@ -2271,6 +2188,17 @@ new class extends \Livewire\Volt\Component {
                                                     </span>
                                                     <span>PHILCST</span>
                                                 </div>
+
+                                                @if($ppAvailable)
+                                                <a href="{{ $pp['url'] }}" wire:navigate @click.stop
+                                                   x-data="{ going: false }"
+                                                   @click="going = true"
+                                                   class="msgr-post-view-btn-static mt-2.5 w-full px-3 py-2 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-150">
+                                                    <i class="fa-solid fa-eye" x-show="!going"></i>
+                                                    <i class="fa-solid fa-spinner fa-spin" x-show="going" x-cloak></i>
+                                                    <span x-text="going ? 'Loading…' : 'View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}'"></span>
+                                                </a>
+                                                @endif
                                             </div>
                                         </div>
 
@@ -2294,13 +2222,13 @@ new class extends \Livewire\Volt\Component {
                                                            ? 'text-white rounded-bl-none bg-[#7a3f91]'
                                                            : 'bg-white border border-[#E8E0F0] text-[#333333] rounded-bl-none') }}
                                                    {{ $toolbarOpen ? 'ring-2 ring-[#7a3f91]/25' : '' }}
-                                                   {{ $isBeingEdited ? 'ring-2 ring-amber-400' : '' }}">
+                                                   {{ $isBeingEdited ? 'ring-2 ring-blue-400' : '' }}">
                                             {!! $formatted !!}
                                             @if($msg['edited'])
                                                 <span class="text-xs opacity-50 ml-1 italic">(edited)</span>
                                             @endif
                                             @if($isBeingEdited)
-                                                <span class="block text-[10px] font-semibold mt-1 {{ $msg['is_mine'] ? 'text-amber-200' : 'text-amber-600' }}">
+                                                <span class="block text-[10px] font-semibold mt-1 {{ $msg['is_mine'] ? 'text-blue-200' : 'text-blue-600' }}">
                                                     <i class="fa-solid fa-pen text-[9px] mr-1"></i>Editing…
                                                 </span>
                                             @endif
@@ -2317,6 +2245,8 @@ new class extends \Livewire\Volt\Component {
                                             @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'] as $rk => $re)
                                             <div class="relative msgr-tooltip-wrap" x-data>
                                                 <button wire:click.stop="react({{ $msg['id'] }}, '{{ $rk }}')"
+                                                        wire:loading.attr="disabled" wire:target="react({{ $msg['id'] }}, '{{ $rk }}')"
+                                                        wire:loading.class="opacity-40 cursor-wait" wire:target="react({{ $msg['id'] }}, '{{ $rk }}')"
                                                         class="w-9 h-9 flex items-center justify-center rounded-xl text-xl leading-none transition-all duration-150 cursor-pointer
                                                                hover:scale-125 active:scale-110
                                                                {{ $msg['my_reaction'] === $rk ? 'bg-[#f3eef8] ring-2 ring-[#7a3f91]' : 'hover:bg-[#f9f5fd]' }}">{{ $re }}</button>
@@ -2330,15 +2260,20 @@ new class extends \Livewire\Volt\Component {
 
                                             <div class="relative msgr-tooltip-wrap" x-data>
                                                 <button wire:click.stop="setReply({{ $msg['id'] }})"
+                                                        wire:loading.attr="disabled" wire:target="setReply({{ $msg['id'] }})"
+                                                        wire:loading.class="opacity-40 cursor-wait" wire:target="setReply({{ $msg['id'] }})"
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer
                                                                hover:bg-[#f3eef8] hover:text-[#7a3f91] transition-all duration-150">
-                                                    <i class="fa-solid fa-reply text-xs"></i>
+                                                    <i class="fa-solid fa-reply text-xs" wire:loading.remove wire:target="setReply({{ $msg['id'] }})"></i>
+                                                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="setReply({{ $msg['id'] }})"></i>
                                                 </button>
                                                 <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Reply</span>
                                             </div>
 
                                             <div class="relative msgr-tooltip-wrap" x-data>
                                                 <button wire:click.stop="togglePin({{ $msg['id'] }})"
+                                                        wire:loading.attr="disabled" wire:target="togglePin({{ $msg['id'] }})"
+                                                        wire:loading.class="opacity-40 cursor-wait" wire:target="togglePin({{ $msg['id'] }})"
                                                         @if(! $canTogglePin) disabled @endif
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl transition-all duration-150
                                                                {{ $msg['is_pinned']
@@ -2346,7 +2281,8 @@ new class extends \Livewire\Volt\Component {
                                                                        ? 'text-amber-600 bg-amber-50 hover:bg-amber-100 cursor-pointer'
                                                                        : 'text-amber-300 bg-amber-50/50 cursor-not-allowed')
                                                                    : 'text-[#555] hover:bg-amber-50 hover:text-amber-600 cursor-pointer' }}">
-                                                    <i class="fa-solid fa-thumbtack text-xs"></i>
+                                                    <i class="fa-solid fa-thumbtack text-xs" wire:loading.remove wire:target="togglePin({{ $msg['id'] }})"></i>
+                                                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="togglePin({{ $msg['id'] }})"></i>
                                                 </button>
                                                 <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">
                                                     {{ $msg['is_pinned'] ? ($canTogglePin ? 'Unpin' : 'Only the pinner can unpin') : 'Pin' }}
@@ -2359,9 +2295,12 @@ new class extends \Livewire\Volt\Component {
                                             @if(! $msg['post_preview'])
                                             <div class="relative msgr-tooltip-wrap" x-data>
                                                 <button wire:click.stop="startEdit({{ $msg['id'] }})"
+                                                        wire:loading.attr="disabled" wire:target="startEdit({{ $msg['id'] }})"
+                                                        wire:loading.class="opacity-40 cursor-wait" wire:target="startEdit({{ $msg['id'] }})"
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer
                                                                hover:bg-[#f3eef8] hover:text-[#7a3f91] transition-all duration-150">
-                                                    <i class="fa-solid fa-pen text-xs"></i>
+                                                    <i class="fa-solid fa-pen text-xs" wire:loading.remove wire:target="startEdit({{ $msg['id'] }})"></i>
+                                                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="startEdit({{ $msg['id'] }})"></i>
                                                 </button>
                                                 <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Edit</span>
                                             </div>
@@ -2375,9 +2314,12 @@ new class extends \Livewire\Volt\Component {
                                                  a tap anymore. --}}
                                             <div class="relative msgr-tooltip-wrap">
                                                 <button wire:click.stop="askDeleteConfirmation({{ $msg['id'] }})"
+                                                        wire:loading.attr="disabled" wire:target="askDeleteConfirmation({{ $msg['id'] }})"
+                                                        wire:loading.class="opacity-40 cursor-wait" wire:target="askDeleteConfirmation({{ $msg['id'] }})"
                                                         class="w-8 h-8 flex items-center justify-center rounded-xl text-[#555] cursor-pointer
                                                                hover:bg-red-50 hover:text-red-600 transition-all duration-150">
-                                                    <i class="fa-solid fa-trash-can text-xs"></i>
+                                                    <i class="fa-solid fa-trash-can text-xs" wire:loading.remove wire:target="askDeleteConfirmation({{ $msg['id'] }})"></i>
+                                                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="askDeleteConfirmation({{ $msg['id'] }})"></i>
                                                 </button>
                                                 <span class="msgr-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Delete</span>
                                             </div>
@@ -2469,42 +2411,6 @@ new class extends \Livewire\Volt\Component {
                         <div class="h-10"></div>
                     </div>
 
-                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav (Messenger-style) ──
-                         Centered at the bottom of the thread (not pinned to a
-                         side). `scrollDir` comes from the shared x-data scope
-                         on #msgr-chat-body-wrap above, so the button shows an
-                         up-arrow while actively scrolling up, a down-arrow
-                         while scrolling down, and fades out shortly after you
-                         stop moving. Each click nudges the thread a small
-                         step (300px) instead of jumping straight to the very
-                         top or bottom. --}}
-                    <div class="msgr-scroll-nav">
-                        <button type="button" class="msgr-scroll-btn"
-                                x-show="scrollDir === 'up'"
-                                x-transition:enter="transition ease-out duration-150"
-                                x-transition:enter-start="opacity-0 translate-y-1"
-                                x-transition:enter-end="opacity-100 translate-y-0"
-                                x-transition:leave="transition ease-in duration-150"
-                                x-transition:leave-start="opacity-100"
-                                x-transition:leave-end="opacity-0"
-                                onclick="document.getElementById('msg-list').scrollBy({top:-300,behavior:'smooth'});"
-                                style="display:none;">
-                            <i class="fa-solid fa-arrow-up"></i>
-                        </button>
-                        <button type="button" class="msgr-scroll-btn"
-                                x-show="scrollDir === 'down'"
-                                x-transition:enter="transition ease-out duration-150"
-                                x-transition:enter-start="opacity-0 translate-y-1"
-                                x-transition:enter-end="opacity-100 translate-y-0"
-                                x-transition:leave="transition ease-in duration-150"
-                                x-transition:leave-start="opacity-100"
-                                x-transition:leave-end="opacity-0"
-                                onclick="document.getElementById('msg-list').scrollBy({top:300,behavior:'smooth'});"
-                                style="display:none;">
-                            <i class="fa-solid fa-arrow-down"></i>
-                        </button>
-                    </div>
-
                 </div>
 
                 <div class="flex-shrink-0">
@@ -2525,13 +2431,13 @@ new class extends \Livewire\Volt\Component {
                 </div>
 
                 @if($editingId)
-                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-amber-50 flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
-                    <div class="w-1 h-10 rounded-full flex-shrink-0 bg-amber-400"></div>
+                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-blue-50 flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
+                    <div class="w-1 h-10 rounded-full flex-shrink-0 bg-blue-400"></div>
                     <div class="flex-1 min-w-0">
-                        <p class="text-xs font-semibold text-amber-700 truncate uppercase tracking-widest">
+                        <p class="text-xs font-semibold text-blue-700 truncate uppercase tracking-widest">
                             <i class="fa-solid fa-pen text-[10px] mr-1"></i>Editing message
                         </p>
-                        <p class="text-xs text-amber-700/70 truncate">Press Enter or Send to save changes</p>
+                        <p class="text-xs text-blue-700/70 truncate">Press Enter or Send to save changes</p>
                     </div>
                     <button wire:click="cancelEdit" class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition-all duration-150 flex-shrink-0 cursor-pointer">
                         <i class="fa-solid fa-xmark text-base"></i>
@@ -2584,20 +2490,21 @@ new class extends \Livewire\Volt\Component {
                                 placeholder="{{ $editingId ? 'Edit your message…' : ($roomType==='college' ? 'Message '.$alumniCollege.'…' : 'Message '.($room['name']??'group').'…') }}"
                                 rows="1"
                                 :disabled="sending"
-                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); sending = true; const val=$el.value; $el.value=''; $el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; });}"
+                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); sending = true; const val=$el.value; $el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; });}"
                                 @keydown.escape="$wire.cancelEdit()"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
-                                class="w-full resize-none rounded-lg border px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:ring-2 transition-all duration-150 placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed
-                                       {{ $editingId ? 'border-amber-300 bg-amber-50/50 focus:border-amber-400 focus:ring-amber-300/30' : 'border-[#E8E0F0] bg-white focus:border-[#7a3f91] focus:ring-[#7a3f91]/20' }}"
+                                class="w-full resize-none rounded-lg border-2 px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none transition-all duration-150 placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed
+                                       {{ $editingId ? 'msgr-input-editing' : 'border-[#7a3f91] bg-white focus:ring-4 focus:ring-[#7a3f91]/25' }}"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
                         <button type="button"
                                 :disabled="sending"
-                                @click="if (!sending) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.value=''; el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; }); }"
+                                @click="if (!sending) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); }"
                                 wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-all duration-150 hover:opacity-90 active:scale-90 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer
-                                       {{ $editingId ? 'bg-amber-500' : 'bg-[#7a3f91]' }}">
+                                       {{ $editingId ? '' : 'bg-[#7a3f91]' }}"
+                                style="{{ $editingId ? 'background-color:#1D4ED8;' : '' }}">
                             <i class="fa-solid {{ $editingId ? 'fa-check' : 'fa-paper-plane' }} text-base" wire:loading.remove wire:target="sendMessage"></i>
                             <span class="hidden items-center gap-1" wire:loading.flex wire:target="sendMessage">
                                 <span class="w-1.5 h-1.5 rounded-full bg-white animate-bounce" style="animation-delay:0ms;animation-duration:800ms;"></span>
@@ -2647,20 +2554,6 @@ new class extends \Livewire\Volt\Component {
                             </p>
                         </div>
                         @endif
-                        <div class="px-3 py-2.5 border-b border-[#E8E0F0] flex-shrink-0">
-                            <div class="relative" x-data="{ term: @entangle('batchSearch').live }">
-                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-xs pointer-events-none"
-                                   wire:loading.class="opacity-0" wire:target="batchSearch"></i>
-                                <span class="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 hidden"
-                                      wire:loading.class.remove="hidden" wire:target="batchSearch">
-                                    <span class="block w-3 h-3 rounded-full border-2 border-[#7a3f91]/30 border-t-[#7a3f91] animate-spin"></span>
-                                </span>
-                                <input type="text"
-                                       x-model.debounce.300ms="term"
-                                       placeholder="{{ $roomType==='college' ? 'Search all alumni…' : 'Search members…' }}"
-                                       class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#E8E0F0] bg-[#fafafa] focus:outline-none focus:border-[#7a3f91] focus:ring-1 focus:ring-[#7a3f91]/20 transition-all duration-150 placeholder-[#999999]"/>
-                            </div>
-                        </div>
 
                         @if(! empty($coordinators) && $batchSearch === '')
                         <div class="px-3 pt-3 pb-1 flex-shrink-0">
@@ -2679,7 +2572,7 @@ new class extends \Livewire\Volt\Component {
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <p class="text-xs font-semibold text-[#333333] truncate">{{ $coord['name'] }}</p>
-                                    <p class="text-xs font-medium {{ $coord['is_online'] ? 'text-emerald-600' : 'text-[#999999]' }}">
+                                    <p class="text-xs font-medium {{ $coord['is_online'] ? 'text-emerald-600' : 'text-[#333333]' }}">
                                         {{ $coord['is_online'] ? 'Online · Coordinator' : $coord['last_seen_fmt'] . ' · Coordinator' }}
                                     </p>
                                 </div>
@@ -2746,7 +2639,7 @@ new class extends \Livewire\Volt\Component {
                                             {{ $bm['name'] }}
                                             @if($bm['is_me'])<span class="text-xs font-medium text-[#7a3f91]"> (You)</span>@endif
                                         </p>
-                                        <p class="text-xs font-medium text-[#999999]">
+                                        <p class="text-xs font-medium text-[#333333]">
                                             {{ $bm['last_seen_fmt'] }}
                                             @if($roomType === 'college')
                                                 @if($bm['course_code'])<span class="ml-1">· {{ strtoupper($bm['course_code']) }}</span>@endif

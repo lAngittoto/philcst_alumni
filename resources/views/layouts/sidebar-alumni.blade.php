@@ -93,29 +93,29 @@
              and keeps its normal color (untouched). ── */
         .bell-bubbles {
             position: absolute;
-            top: -2px;
-            right: -2px;
-            width: 26px;
-            height: 26px;
+            top: -10px;
+            right: -10px;
+            width: 42px;
+            height: 42px;
             pointer-events: none;
         }
         .bell-bubble {
             position: absolute;
-            bottom: 6px;
-            right: 8px;
+            bottom: 10px;
+            right: 12px;
             border-radius: 50%;
             background: #2563EB;
             opacity: 0;
             animation: bellBubbleRise 2.6s ease-in infinite;
         }
-        .bell-bubble:nth-child(1) { width: 5px;   height: 5px;   right: 10px; animation-delay: 0s;    }
-        .bell-bubble:nth-child(2) { width: 3.5px; height: 3.5px; right: 3px;  animation-delay: 0.55s; }
-        .bell-bubble:nth-child(3) { width: 4px;   height: 4px;   right: 15px; animation-delay: 1.1s;  }
+        .bell-bubble:nth-child(1) { width: 9px; height: 9px; right: 16px; animation-delay: 0s;    }
+        .bell-bubble:nth-child(2) { width: 6px; height: 6px; right: 4px;  animation-delay: 0.55s; }
+        .bell-bubble:nth-child(3) { width: 7px; height: 7px; right: 24px; animation-delay: 1.1s;  }
         @keyframes bellBubbleRise {
             0%   { opacity: 0;   transform: translateY(0) scale(0.4); }
-            12%  { opacity: 0.9; transform: translateY(-3px) scale(1); }
-            70%  { opacity: 0.55; transform: translateY(-16px) scale(0.85); }
-            100% { opacity: 0;   transform: translateY(-22px) scale(0.3); }
+            12%  { opacity: 1;   transform: translateY(-5px) scale(1.1); }
+            70%  { opacity: 0.6; transform: translateY(-28px) scale(0.9); }
+            100% { opacity: 0;   transform: translateY(-38px) scale(0.35); }
         }
         .notif-item { cursor: pointer; position: relative; }
 
@@ -904,32 +904,6 @@
                 } catch (e) { /* ignore */ }
             },
 
-            async markReadByRoute(routeName) {
-                var matched = this.items.filter(function (n) {
-                    return n.link_route === routeName && !n.read;
-                });
-                if (matched.length === 0) return;
-
-                var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                var allIds = [];
-
-                matched.forEach(function (n) {
-                    n.read = true;
-                    allIds = allIds.concat(n._ids || [n.id]);
-                });
-                window.__alumniLocalReadIds.addMany(allIds);
-
-                await Promise.all(allIds.map(function (id) {
-                    return window.fetch('/alumni/notifications/' + id + '/read', {
-                        method: 'PATCH',
-                        headers: {
-                            'X-CSRF-TOKEN':     csrf,
-                            'X-Requested-With': 'XMLHttpRequest',
-                        }
-                    }).catch(function () { /* ignore network errors */ });
-                }));
-            },
-
             // Deletes a notification MESSAGE only — never the underlying
             // alumni record, job posting, or event that generated it. This
             // just clears the row(s) from the `notifications` table so the
@@ -1098,18 +1072,6 @@
         var s = window.__safeAlumniNotifsStore();
         if (s && s.open) positionAlumniPanel();
     });
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  SIDEBAR SMART MARK-READ
-    // ─────────────────────────────────────────────────────────────────────────
-    window.__alumniSidebarNotifsMarkRead = function (routeName) {
-        var s = window.__safeAlumniNotifsStore();
-        if (!s) return;
-        var routesToMark = [routeName];
-        routesToMark.forEach(function (r) {
-            s.markReadByRoute(r);
-        });
-    };
 
     // ─────────────────────────────────────────────────────────────────────────
     //  NOTIFICATION EVENT LISTENERS
@@ -1428,7 +1390,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="window.__alumniSidebarNotifsMarkRead('{{ $link['route'] }}'); open = false; navClickedRoute = '{{ $link['route'] }}';"
+                   @click="open = false; navClickedRoute = '{{ $link['route'] }}';"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="alm-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
@@ -1608,8 +1570,9 @@
                     x-show="$store.alumniNotifs && $store.alumniNotifs.unread > 0"
                     x-cloak
                     @click.stop="$store.alumniNotifs && $store.alumniNotifs.markAllRead()"
-                    class="text-white/70 hover:text-white font-semibold hover:bg-white/10
-                           rounded-lg px-2.5 py-1.5 transition"
+                    class="text-[#5A2D70] hover:text-[#7A3F91] font-bold
+                           bg-white hover:bg-gray-100 shadow-sm
+                           rounded-lg px-3 py-1.5 transition"
                     style="font-size:11px;">
                 Mark all read
             </button>
