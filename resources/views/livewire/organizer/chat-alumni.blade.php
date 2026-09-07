@@ -2,7 +2,7 @@
 
 <?php
 
-use Livewire\Volt\Component;
+use Livewire\Component;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
@@ -201,6 +201,19 @@ new class extends Component {
     private function pinnedRoomsCacheKey(): string
     {
         return "chat_pinned_rooms.organizer.{$this->coordinatorId}";
+    }
+
+    // ── Real-messenger room-list ordering ────────────────────────────────
+    // A room's position in the sidebar is simply the timestamp of the
+    // latest message in that room (any sender — you or someone else).
+    // Opening a room (selectRoom) never changes this — it only clears
+    // the unread flag. Sending a message DOES change it, because sending
+    // creates a new latest message, same as an incoming one would.
+    // This matches real messenger apps (Messenger/WhatsApp/Telegram):
+    // a chat only moves when a message actually lands in it.
+    private function getRoomOrderTs(int $roomId, int $fallbackTs): int
+    {
+        return $fallbackTs;
     }
 
     private function unreadCacheKey(): string
@@ -722,43 +735,18 @@ new class extends Component {
     private function runUnifiedPoll(): void
     {
         $this->pollTick++;
+        $isHeavyTick = ($this->pollTick % 4 === 0);
 
-        // Presence is pinged every tick so the coordinator stays "online"
-        // continuously while this page/tab is open and focused.
-        $this->pingPresence();
-
-        $this->checkAndDispatchNewMessageNotifications();
-
-        // Rebuilding the whole room list is the most expensive step here
-        // (it touches chat_rooms + chat_messages + alumni + organizer for
-        // every room). Doing it every OTHER tick instead of every tick
-        // cuts that DB load in half without any visible staleness, since
-        // unread badges/timestamps still refresh within ~5s.
-        if ($this->pollTick % 2 === 0) {
-            $this->loadRooms();
-        }
-
-        if ($this->roomId) {
-            $this->loadTypingIndicators();
-        }
-
-        // ── FIX: messenger-style "don't touch the thread unless something
+        // ── Messenger-style "don't touch the thread unless something
         //    actually changed" ─────────────────────────────────────────────
-        //    Previously this called loadMessages() unconditionally every
-        //    2nd tick, which fully REPLACES $this->messages (a brand new
-        //    PHP array, brand new object identities) even when the room has
-        //    zero new activity. Livewire then re-morphs the entire #msg-list
-        //    DOM subtree on every one of those ticks. That morph is what was
-        //    causing the "jumps to the top" glitch: it could fire in the
-        //    middle of you just sitting there composing a message (BEFORE
-        //    you even hit send), because the poll doesn't know or care
-        //    whether you're mid-type — it just fires on its own clock.
-        //    Real messenger apps never touch the thread's scroll position
-        //    unless a message was actually added/changed. So now we cheaply
-        //    check the latest message id first (single scalar query, no
-        //    joins) and only do the expensive full loadMessages() rebuild +
-        //    scroll dispatch when that id actually moved.
-        if ($this->pollTick % 2 === 0 && $this->roomId) {
+        //    Checked every tick (not every 2nd) so a new message shows up
+        //    just as fast as it does on the Alumni Messenger side. We
+        //    cheaply check the latest message id first (single scalar
+        //    query, no joins) and only do the expensive full
+        //    loadMessages() rebuild + scroll dispatch when that id
+        //    actually moved — this is what keeps typing/reading from ever
+        //    being interrupted by a poll tick that found nothing new.
+        if ($this->roomId) {
             $latestId = (int) (DB::table('chat_messages')
                 ->where('room_id', $this->roomId)
                 ->whereNull('deleted_at')
@@ -768,11 +756,31 @@ new class extends Component {
                 $this->lastRenderedMessageId = $latestId;
                 $this->loadMessages();
                 $this->markRoomAsRead($this->roomId);
-                $this->dispatch('chat-scroll-bottom');
             }
+
+            $this->loadTypingIndicators();
+
+            // Soft scroll: only actually jumps to the bottom if the user
+            // is already near the bottom of the thread (handled client
+            // side) — otherwise it leaves their current scroll position
+            // alone so background polling never yanks them back down
+            // while they're reading older messages. Matches Alumni
+            // Messenger's unifiedPoll exactly.
+            $this->dispatch('chat-scroll-bottom');
         }
 
-        if ($this->pollTick % 4 === 0) {
+        // Presence is pinged every tick so the coordinator stays "online"
+        // continuously while this page/tab is open and focused.
+        $this->pingPresence();
+
+        // Heavier sidebar/notification work is staggered to every 4th
+        // tick (~6s), same budget as Alumni Messenger — real-time "did a
+        // new message arrive" only needs the room-scoped work above every
+        // tick; the room list and notification scan don't need to be
+        // that fresh.
+        if ($isHeavyTick) {
+            $this->checkAndDispatchNewMessageNotifications();
+            $this->loadRooms();
             $this->refreshOnlineCount();
             if ($this->showMembers && $this->isStaffRoom) {
                 $this->loadStaffMembers();
@@ -1098,6 +1106,7 @@ new class extends Component {
                     'latest_sender'  => $latestSender,
                     'latest_time'    => $latestTime,
                     'latest_ts'      => $latestTs ? $latestTs->timestamp : 0,
+                    'order_ts'       => $self->getRoomOrderTs($staffRoomRow->id, $latestTs ? $latestTs->timestamp : 0),
                     'online_count'   => $staffOnline,
                     'total_count'    => $staffTotal,
                     'is_active'      => $isCurrentRoom,
@@ -1206,6 +1215,7 @@ new class extends Component {
                     'latest_sender'  => $latestSender,
                     'latest_time'    => $latestTime,
                     'latest_ts'      => $latestTs ? $latestTs->timestamp : 0,
+                    'order_ts'       => $self->getRoomOrderTs($collegeRoomRow->id, $latestTs ? $latestTs->timestamp : 0),
                     'online_count'   => $onlineCount,
                     'total_count'    => $totalCount,
                     'is_active'      => $isCurrentRoom,
@@ -1330,6 +1340,7 @@ new class extends Component {
                 'latest_sender'  => $latestSender,
                 'latest_time'    => $latestTime,
                 'latest_ts'      => $latestTs ? $latestTs->timestamp : 0,
+                'order_ts'       => $self->getRoomOrderTs($r->id, $latestTs ? $latestTs->timestamp : 0),
                 'online_count'   => $onlineCount,
                 'total_count'    => $totalCount,
                 'is_active'      => $isCurrentRoom,
@@ -1420,6 +1431,7 @@ new class extends Component {
                 'latest_sender'  => $latestSender,
                 'latest_time'    => $latestTime,
                 'latest_ts'      => $latestTs ? $latestTs->timestamp : 0,
+                'order_ts'       => $self->getRoomOrderTs($r->id, $latestTs ? $latestTs->timestamp : 0),
                 'online_count'   => $onlineCount,
                 'total_count'    => $totalCount,
                 'is_active'      => $isCurrentRoom,
@@ -1495,28 +1507,23 @@ new class extends Component {
             ->values();
     }
 
-    // Shared "currently-open → unread newest-first → read newest-first
-    // → alphabetical" ordering. Applied identically to the pinned group
-    // and the unpinned group so pinning only changes WHICH of those two
-    // groups a room belongs to — never how rooms are ordered within it.
+    // Real-messenger ordering: newest message first, full stop. Applied
+    // identically to the pinned group and the unpinned group so pinning
+    // only changes WHICH of those two groups a room belongs to — never
+    // how rooms are ordered within it.
+    //
+    // Sorts by 'order_ts', which is just the timestamp of the latest
+    // message in the room (see getRoomOrderTs()). Being the currently-
+    // open room does NOT pin it to the top by itself — it only sits at
+    // the top if it also happens to have the newest message, same as
+    // any real messenger app. Unread vs read no longer affects position
+    // at all; unread only controls the red-dot indicator.
     private function sortWithinGroup($group)
     {
-        $active = $group->filter(fn ($r) => $r['is_active']);
-        $rest   = $group->filter(fn ($r) => ! $r['is_active']);
+        $withMsg    = $group->filter(fn ($r) => $r['order_ts'] > 0)->sortByDesc('order_ts');
+        $withoutMsg = $group->filter(fn ($r) => $r['order_ts'] === 0)->sortBy('name');
 
-        $unread = $rest->filter(fn ($r) => $r['has_unread']);
-        $read   = $rest->filter(fn ($r) => ! $r['has_unread']);
-
-        $unreadWithMsg    = $unread->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
-        $unreadWithoutMsg = $unread->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
-
-        $readWithMsg    = $read->filter(fn ($r) => $r['latest_ts'] > 0)->sortByDesc('latest_ts');
-        $readWithoutMsg = $read->filter(fn ($r) => $r['latest_ts'] === 0)->sortBy('name');
-
-        return $active
-            ->merge($unreadWithMsg)->merge($unreadWithoutMsg)
-            ->merge($readWithMsg)->merge($readWithoutMsg)
-            ->values();
+        return $withMsg->merge($withoutMsg)->values();
     }
 
     // Public wrapper so it's callable from inside the collect()->map() closures
@@ -1609,17 +1616,19 @@ new class extends Component {
 
         // Update just THIS room's active/unread flags locally instead of
         // re-querying the entire room list from scratch on every click.
+        // NOTE: order_ts is intentionally left untouched here — opening a
+        // room must never change its position in the list, only reading
+        // it (has_unread = false). is_active is no longer a sort key, so
+        // no re-sort is needed just from opening a room either.
         $updatedRooms = collect($this->rooms)->map(function ($r) use ($id) {
-            $r['is_active']  = ($r['id'] === $id);
-            if ($r['id'] === $id) $r['has_unread'] = false;
+            $r['is_active'] = ($r['id'] === $id);
+            if ($r['id'] === $id) {
+                $r['has_unread'] = false;
+            }
             return $r;
         });
 
-        // is_active is a sort key (see sortRoomGroup()), so re-sort right
-        // away — otherwise the newly-opened room stays wherever it was
-        // sitting until the next poll tick instead of jumping to its
-        // "currently open" slot immediately.
-        $this->rooms = $this->sortRoomGroup($updatedRooms)->values()->toArray();
+        $this->rooms = $updatedRooms->values()->toArray();
 
         $this->dispatch('chat-scroll-bottom-force');
         $this->dispatch('chat-open-mobile');
@@ -1888,9 +1897,9 @@ new class extends Component {
     // preview for this room updates locally instead, and the next poll
     // tick (≤2.5s later) reconciles it with the DB for everyone else.
     // ─────────────────────────────────────────────────────────────────────
-    public function sendMessage(): void
+    public function sendMessage(?string $typed = null): void
     {
-        $body = trim($this->body);
+        $body = trim($typed ?? $this->body);
         if ($body === '' || ! $this->roomId) return;
 
         $body = self::filterProfanity($body);
@@ -1964,6 +1973,7 @@ new class extends Component {
                 $r['latest_sender'] = $this->coordinatorFirstName ?: $this->coordinatorName;
                 $r['latest_time']   = now()->setTimezone('Asia/Manila')->format('h:i A');
                 $r['latest_ts']     = $nowTs;
+                $r['order_ts']      = $nowTs;
                 $r['has_unread']    = false;
             }
             return $r;
@@ -1972,6 +1982,9 @@ new class extends Component {
         // Re-sort right away (same rule as loadRooms()) so the room I
         // just sent in jumps to the top immediately instead of sitting
         // in its old position until the next poll tick's full rebuild.
+        // Rooms I did NOT send in keep their existing order_ts untouched
+        // — an incoming message from someone else there never moves
+        // them, only this one (the one I just acted in) does.
         $this->rooms = $this->sortRoomGroup($updatedRooms)->values()->toArray();
 
         $this->dispatch('chat-scroll-bottom-force');
@@ -2371,7 +2384,7 @@ new class extends Component {
     @chat-close-mobile.window="mobileChatOpen = false"
     class="flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;"
-    @if(! $confirmDeleteId) wire:poll.2500ms.visible="unifiedPoll" @endif>
+    @if(! $confirmDeleteId) wire:poll.1500ms="unifiedPoll" @endif>
 
     <style>
         #org-room-list button,
@@ -2434,12 +2447,13 @@ new class extends Component {
             z-index: 5;
         }
 
-        /* ── Smooth message entrance — new/rendered messages ease in
-             instead of popping in abruptly ── */
-        .org-msg-in { animation: orgMsgIn .22s ease-out both; }
+        /* ── Smooth message entrance — matches Alumni Messenger's snappier
+             bubble pop-in (.14s) instead of the slower .22s fade-up, so new
+             messages feel just as quick to land here as on the alumni side. ── */
+        .org-msg-in { animation: orgMsgIn .14s ease-out both; }
         @keyframes orgMsgIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to   { opacity: 1; transform: translateY(0); }
+            from { opacity: 0; transform: translateY(6px) scale(.97); }
+            to   { opacity: 1; transform: translateY(0) scale(1); }
         }
 
         @keyframes orgPop {
@@ -2823,48 +2837,12 @@ new class extends Component {
             font-size: 11px; font-weight: 500; color: #EDE0F5;
         }
 
-        /* ── Floating background bubbles + college/course watermark —
-           same drifting lavender-circle theme as the alumni Messenger
-           page, so the coordinator's chat feels like one design system
-           with the alumni-facing side instead of a flat gray backdrop. ── */
+        /* ── Floating background bubbles removed per request — plain white
+           chat background instead of the drifting lavender-circle theme. ── */
         .org-bubble-bg {
             position: relative;
             background-color: #FFFFFF;
-            overflow: hidden;
         }
-        .org-bubble-bg::before,
-        .org-bubble-bg::after,
-        .org-bubble-layer {
-            content: '';
-            position: absolute;
-            inset: -60px;
-            z-index: 0;
-            pointer-events: none;
-        }
-        .org-bubble-bg::before {
-            background-image:
-                radial-gradient(circle, rgba(216,180,254,0.55) 0, rgba(216,180,254,0.55) 22px, transparent 23px),
-                radial-gradient(circle, rgba(107,36,144,0.3) 0, rgba(107,36,144,0.3) 17px, transparent 18px);
-            background-repeat: repeat;
-            background-size: 340px 340px, 300px 300px;
-            background-position: 20px 40px, 90px 220px;
-        }
-        .org-bubble-bg::after {
-            background-image:
-                radial-gradient(circle, rgba(216,180,254,0.4) 0, rgba(216,180,254,0.4) 14px, transparent 15px),
-                radial-gradient(circle, rgba(107,36,144,0.22) 0, rgba(107,36,144,0.22) 8px, transparent 9px);
-            background-repeat: repeat;
-            background-size: 260px 260px, 180px 180px;
-            background-position: 180px 120px, 40px 260px;
-        }
-        .org-bubble-layer {
-            background-image:
-                radial-gradient(circle, rgba(216,180,254,0.45) 0, rgba(216,180,254,0.45) 10px, transparent 11px);
-            background-repeat: repeat;
-            background-size: 220px 220px;
-            background-position: 250px 60px;
-        }
-        .org-bubble-bg > * { position: relative; z-index: 1; }
 
         #org-chat-body-wrap { position: relative; }
         #msg-list { position: relative; z-index: 1; background: transparent; }
@@ -2954,11 +2932,17 @@ new class extends Component {
 
                 <button wire:click="selectRoom({{ $r['id'] }})"
                         wire:loading.class="opacity-70"
+                        wire:loading.attr="disabled"
                         wire:target="selectRoom({{ $r['id'] }})"
-                        class="w-full text-left rounded-xl px-3 py-3 transition-all border cursor-pointer
+                        class="w-full text-left rounded-xl px-3 py-3 transition-all border cursor-pointer relative
                                @if($isActive)      org-room-active border-[#c49bdb] bg-[#f2e8f9]
                                @elseif($hasUnread) border-[#d9b8ef] bg-[#ede5f7] hover:bg-[#e4d8f2]
                                @else               border-transparent hover:border-[#ddd3e8] hover:bg-[#fafafa] @endif">
+
+                    <div class="hidden absolute bottom-2 right-2 z-10 items-center justify-center"
+                         wire:loading.flex wire:target="selectRoom({{ $r['id'] }})">
+                        <i class="fas fa-spinner fa-spin" style="font-size:14px; color:#6b2490;"></i>
+                    </div>
 
                     <div class="flex items-start gap-2.5">
                         {{-- Icon with badges --}}
@@ -3198,8 +3182,6 @@ new class extends Component {
                          });
                      ">
 
-                    <div class="org-bubble-layer" aria-hidden="true"></div>
-
                     <div id="msg-list"
                          class="flex-1 overflow-y-auto px-3 sm:px-4 py-4"
                          x-init="onScroll($el); $el.addEventListener('scroll', () => onScroll($el));"
@@ -3375,7 +3357,7 @@ new class extends Component {
                                                     <a href="{{ $pp['url'] }}" wire:navigate
                                                        x-data="{ going: false }"
                                                        @click.stop="going = true"
-                                                       @livewire:navigate.window="going = false"
+                                                       x-on:livewire:navigate.window="going = false"
                                                        class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#4a1863] text-xs font-bold shadow-md inline-flex items-center gap-1.5"
                                                        :class="{ 'opacity-70 pointer-events-none': going }">
                                                         <i class="fa-solid fa-spinner fa-spin" x-show="going" style="display:none;"></i>
@@ -3661,32 +3643,45 @@ new class extends Component {
                     </div>
                     @endif
 
-                    <div class="flex items-end gap-2">
+                    {{-- ── Messenger-style optimistic send ─────────────────────
+                         Mirrors Alumni Messenger's composer exactly: hitting
+                         Enter or Send clears the textarea and resets its
+                         height IMMEDIATELY, then fires sendMessage(val) in
+                         the background — the coordinator never watches a
+                         disabled/loading textarea while the request round
+                         trips. `sending` is a local Alpine flag (not
+                         wire:loading) so the UI updates on the very next
+                         frame instead of waiting for Livewire's response. ── --}}
+                    <div class="flex items-end gap-2" x-data="{ sending: false }">
                         <div class="flex-1 relative">
                             <textarea id="chat-input"
-                                wire:model="body"
+                                wire:model.live.debounce.200ms="body"
                                 wire:keyup.debounce.800ms="pingTyping"
                                 placeholder="Message {{ $isStaffRoom ? 'Coordinators/Director' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? $this->displayCourseLabel($room['course_code'] ?? '').' All Batches GC' : ('Batch '.$room['batch'].' · '.$this->displayCourseLabel($room['course_code'] ?? '')))) }}… (@ to mention)"
                                 rows="1"
+                                :disabled="sending"
                                 x-data="{
                                     _mTimer: null,
                                     checkMention(el){
                                         clearTimeout(this._mTimer);
                                         this._mTimer = setTimeout(() => {
-                                            if (/@(\w*)$/.test(el.value)) { $wire.body = el.value; $wire.checkMentions(el.value); }
-                                            else if ($wire.showMentions) { $wire.body = el.value; $wire.closeMentions(); }
+                                            if (/@(\w*)$/.test(el.value)) { $wire.checkMentions(el.value); }
+                                            else if ($wire.showMentions) { $wire.closeMentions(); }
                                         }, 180);
                                     }
                                 }"
                                 @input="checkMention($el)"
-                                @keydown.enter="if(!$event.shiftKey){$event.preventDefault();$wire.body=$el.value;$wire.sendMessage();}"
+                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); sending = true; const val=$el.value; $el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; });}"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
-                                class="w-full resize-none rounded-xl border-2 border-[#6b2490]/40 bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/20 transition placeholder-[#999999]"
+                                class="w-full resize-none rounded-xl border-2 border-[#6b2490]/40 bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:border-[#6b2490] focus:ring-2 focus:ring-[#6b2490]/20 transition placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
-                        <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
-                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60 cursor-pointer"
+                        <button type="button"
+                                :disabled="sending"
+                                @click="if (!sending) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); }"
+                                wire:loading.attr="disabled" wire:target="sendMessage"
+                                class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                                 style="background:#6b2490;">
                             <i class="fa-solid fa-paper-plane text-base" wire:loading.remove wire:target="sendMessage"></i>
                             <span class="hidden items-center gap-1" wire:loading.flex wire:target="sendMessage">

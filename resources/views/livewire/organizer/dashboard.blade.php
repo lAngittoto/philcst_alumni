@@ -504,12 +504,6 @@ new class extends Component {
                 </div>
                 <p class="org-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($totalAlumni) }}</p>
                 <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Total Alumni</p>
-                <p class="font-semibold mt-1 flex items-center gap-1 text-[0.85rem] text-emerald-600">
-                    <i class="fas fa-circle-check text-xs"></i> {{ number_format($verifiedAlumni) }} verified
-                    @if($pendingAlumni > 0)
-                        <span class="text-amber-600 font-normal">· {{ $pendingAlumni }} pending</span>
-                    @endif
-                </p>
             </button>
 
             {{-- Total Events --}}

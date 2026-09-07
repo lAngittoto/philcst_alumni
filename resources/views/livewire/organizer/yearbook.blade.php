@@ -286,7 +286,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height"
+<div class="yb-noselect flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height"
      x-data="{
         setAvailHeight() {
             const rect = this.$el.getBoundingClientRect();
@@ -302,6 +302,24 @@ new class extends Component {
      ">
 
 <style>
+/* ── Disable text selection/copy across the whole Alumni Yearbook page —
+     header, filters, section badges, cards, pagination, etc. The search
+     input explicitly opts back into normal text selection so typing
+     still works. ── */
+.yb-noselect {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+.yb-noselect input,
+.yb-noselect textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
+
 /* ── Base ──────────────────────────────────────────────── */
 .yb-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
 .yb-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
@@ -515,7 +533,7 @@ new class extends Component {
                 </div>
                 <div>
                     <h1 class="yb-mobile-title text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                    <p class="yb-mobile-subtitle text-xs leading-relaxed mt-0.5" style="color:#555555;">Complete Alumni Directory</p>
+                    <p class="yb-mobile-subtitle text-xs leading-relaxed mt-0.5 font-semibold" style="color:#7a3f91;">Complete Alumni Directory</p>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -616,7 +634,15 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Reset --}}
+            {{-- Found count ── --}}
+            <div class="flex items-center gap-2 ml-auto">
+                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
+                      style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
+                    {{ number_format($this->totalFiltered) }} found
+                </span>
+            </div>
+
+            {{-- Reset — moved to the very end of the filter bar --}}
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
@@ -632,14 +658,6 @@ new class extends Component {
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
-
-            {{-- Found count ── --}}
-            <div class="flex items-center gap-2 ml-auto">
-                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
-                      style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
-                    {{ number_format($this->totalFiltered) }} found
-                </span>
-            </div>
         </div>
 
         {{-- ── SCROLLABLE CARDS AREA ── --}}

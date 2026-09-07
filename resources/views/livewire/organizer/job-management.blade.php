@@ -1705,10 +1705,30 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         padding: 2px 7px;
     }
 }
+
+/* ── Job modals: mobile scroll fix ──
+     On mobile the whole multi-column modal body (Photo/Company + 
+     Description/Requirements + Courses/Deadline) scrolls as ONE 
+     natural-height column instead of each column fighting for its own 
+     flex-1/min-h-0 scroll region — which caused stuck/non-scrolling 
+     behaviour on phones. Desktop (lg:) keeps the original 
+     independently-scrolling multi-column layout. ── */
+@media (max-width: 1023px) {
+    .jm-modal-body-scroll {
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .jm-modal-col {
+        flex: none !important;
+        min-height: 0 !important;
+        overflow-y: visible !important;
+    }
+}
 </style>
 
 {{-- Hover tooltip --}}
 <div id="eo-hover-tip"
+     wire:ignore
      class="fixed bg-[#1a1a1a] text-white text-[11px] font-semibold tracking-[.05em] px-3 py-1.5 rounded-[7px] whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)]"
      style="transform: translate(12px, -110%);">
     <i class="fas fa-eye mr-1.5"></i>View Details
@@ -1743,7 +1763,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ══ PAGE HEADER ══ --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
+    <div class="jm-page-header-noselect flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0"
+         style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
+         onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;">
         <div class="flex items-center gap-4">
             <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
                  style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
@@ -1751,7 +1773,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
             <div>
                 <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Job Management</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#555555]">
+                <p class="text-xs leading-relaxed mt-0.5 text-[#7A3F91] font-normal">
                     Post and manage job listings for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
                         <i class="fas fa-building-columns text-[9px]"></i>
@@ -1861,13 +1883,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                  same pattern as the alumni-facing yearbook, instead of only
                  the thin progress bar in the filter strip. --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             <div id="jm-table-scroll"
                  class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage,gotoPage">
 
             @if($this->jobPostings->count() > 0)
 
@@ -1950,7 +1972,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                                     @php
                                         $canToggle = !$isAlumniDirector && !$isDeadlinePassed;
-                                        $canDelete = !$isAlumniDirector && !$isActive;
                                     @endphp
 
                                     {{-- Activate / Deactivate --}}
@@ -1965,22 +1986,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         </button>
                                         <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                                             {{ $isActive ? 'Deactivate' : 'Activate' }}
-                                            <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                        </div>
-                                    </div>
-
-                                    {{-- Delete --}}
-                                    <div class="relative inline-flex group" data-eo-share>
-                                        <button type="button"
-                                                @if($canDelete) wire:click.stop="confirmDeleteJob({{ $job->id }})" @endif
-                                                wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $job->id }})"
-                                                @disabled(!$canDelete)
-                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition bg-red-50 text-red-600 border border-red-200 hover:bg-white hover:border-red-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-50 disabled:hover:border-red-200 {{ $canDelete ? 'cursor-pointer' : '' }}">
-                                            <i class="fas fa-trash text-[10px]" wire:loading.remove wire:target="confirmDeleteJob({{ $job->id }})"></i>
-                                            <i class="fas fa-spinner fa-spin text-[10px]" wire:loading wire:target="confirmDeleteJob({{ $job->id }})"></i>
-                                        </button>
-                                        <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                            Delete
                                             <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                         </div>
                                     </div>
@@ -2051,7 +2056,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 </button>
 
                 @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)"
+                    <button wire:click="gotoPage(1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
@@ -2060,14 +2065,14 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     @if($p === $cp)
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="$set('page', {{ $p }})"
+                        <button wire:click="gotoPage({{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
                 @endfor
 
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                    <button wire:click="$set('page', {{ $lp }})"
+                    <button wire:click="gotoPage({{ $lp }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                 @endif
 
@@ -2087,58 +2092,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     </div>
 
 </div>
-
-
-{{-- ══ DELETE CONFIRM MODAL ══ --}}
-@if($showDeleteModal)
-<div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-     wire:keydown.escape.window="cancelDeleteJob">
-    <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
-        <div class="px-6 py-4 border-b border-red-100 bg-red-50">
-            <h2 class="text-base font-semibold text-red-800 flex items-center gap-2.5">
-                <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-trash-can text-red-500 text-sm"></i>
-                </div>
-                Permanently Delete Job Posting
-            </h2>
-        </div>
-        <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">Are you sure you want to permanently delete:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
-                {{ $deleteJobTitle }}
-            </p>
-            <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-triangle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-red-800"><strong>This action cannot be undone.</strong> The job posting will be permanently removed and will no longer appear anywhere in this table. There is no restore option.</span>
-            </div>
-            <div class="flex gap-2">
-                <button wire:click="cancelDeleteJob"
-                        wire:loading.attr="disabled" wire:target="executeDeleteJob,cancelDeleteJob"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
-                    <span wire:loading.remove wire:target="cancelDeleteJob">
-                        <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
-                    </span>
-                    <span wire:loading wire:target="cancelDeleteJob">
-                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Cancel
-                    </span>
-                </button>
-                <button wire:click="executeDeleteJob"
-                        wire:loading.attr="disabled" wire:target="executeDeleteJob"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-70 disabled:cursor-wait">
-                    <span wire:loading.remove wire:target="executeDeleteJob">
-                        <i class="fas fa-trash-can mr-1 text-xs"></i>
-                        Yes, Delete Permanently
-                    </span>
-                    <span wire:loading wire:target="executeDeleteJob">
-                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>
-                        Deleting…
-                    </span>
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-@endif
 
 
 {{-- ══ ACTIVATE / DEACTIVATE CONFIRM ══ --}}
@@ -2234,10 +2187,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="jm-modal-body-scroll flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- LEFT: Photo first, then Company --}}
-        <div class="w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
+        <div class="jm-modal-col w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-3 space-y-3">
 
                 {{-- Job Photo — shown first so the default photo is visible immediately at the top --}}
@@ -2393,7 +2346,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
 
         {{-- MIDDLE: Job Info + Textareas --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+        <div class="jm-modal-col flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
             <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -2500,7 +2453,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
 
         {{-- RIGHT: Target College + Submission Tips (moved here, above Visibility) + Actions --}}
-        <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
+        <div class="jm-modal-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
             <div class="p-3 space-y-3 flex-1">
 
                 {{-- Target College --}}
@@ -2705,19 +2658,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <span class="mtip">Share</span>
                     </button>
                 @endif
-                @if(!$editJobIsActive)
-                    <button wire:click="confirmDeleteJob({{ $editingJobId }})" type="button"
-                            wire:loading.attr="disabled" wire:target="confirmDeleteJob({{ $editingJobId }})"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
-                        <span wire:loading.remove wire:target="confirmDeleteJob({{ $editingJobId }})">
-                            <i class="fas fa-trash text-white text-sm"></i>
-                        </span>
-                        <span wire:loading wire:target="confirmDeleteJob({{ $editingJobId }})">
-                            <i class="fas fa-spinner fa-spin text-white text-sm"></i>
-                        </span>
-                        <span class="mtip">Delete</span>
-                    </button>
-                @endif
             @elseif($editingJob && $editIsAlumniDirectorJob)
                 @php
                     $editJobDeadlinePassed = \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay());
@@ -2785,10 +2725,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     @endif
 
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="jm-modal-body-scroll flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- LEFT: Company Details + Job Info --}}
-        <div class="w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
+        <div class="jm-modal-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-2.5 space-y-2.5">
 
                 @if($editingJob)
@@ -3042,7 +2982,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
 
         {{-- MIDDLE: Textareas --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+        <div class="jm-modal-col flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
             <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
@@ -3100,7 +3040,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
 
         {{-- RIGHT: Target College + Status + History + Tips + Actions --}}
-        <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
+        <div class="jm-modal-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
             <div class="p-3 space-y-3 flex-1">
 
                 {{-- Target College --}}
@@ -3713,7 +3653,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
 <script>
 (function () {
-    var tip = document.getElementById('eo-hover-tip');
+    function getTip() { return document.getElementById('eo-hover-tip'); }
 
     function isHoverCapable() {
         return window.matchMedia('(hover: hover) and (pointer: fine)').matches
@@ -3726,6 +3666,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             row._eoTipBound = true;
 
             row.addEventListener('mousemove', function (e) {
+                var tip = getTip();
                 if (!tip || !isHoverCapable()) return;
                 var shareWrap = e.target.closest('[data-eo-share]');
                 if (shareWrap) {
@@ -3738,10 +3679,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             });
 
             row.addEventListener('mouseleave', function () {
+                var tip = getTip();
                 if (tip) tip.style.opacity = '0';
             });
 
             row.addEventListener('click', function () {
+                var tip = getTip();
                 if (tip) tip.style.opacity = '0';
             });
         });
@@ -3750,6 +3693,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             if (sw._eoShareBound) return;
             sw._eoShareBound = true;
             sw.addEventListener('mouseenter', function () {
+                var tip = getTip();
                 if (tip) tip.style.opacity = '0';
             });
         });
@@ -3782,6 +3726,31 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
     }
 })();
+</script>
+
+<script>
+// ── Mobile scroll-up fix: Post New Job / Edit / View Job ────────────
+//    Both modals dispatch 'close-sidebar' the moment they open. On
+//    mobile, if the job list underneath was scrolled down (or a
+//    previous modal's inner column was left scrolled from before), the
+//    new modal could appear with the page/inner content still sitting
+//    mid-scroll instead of at the top — reading as "not working" since
+//    the header/actions the user expects to see first are off-screen.
+//    Reset every relevant scroll position back to the top whenever a
+//    modal opens.
+document.addEventListener('livewire:init', function () {
+    Livewire.on('close-sidebar', function () {
+        requestAnimationFrame(function () {
+            window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0; // Safari
+
+            document.querySelectorAll('#jm-table-scroll, .jm-modal-body-scroll, .jm-modal-col').forEach(function (el) {
+                el.scrollTop = 0;
+            });
+        });
+    });
+});
 </script>
 
 </div>

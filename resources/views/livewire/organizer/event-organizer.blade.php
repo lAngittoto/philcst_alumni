@@ -1569,7 +1569,9 @@ select.tw-select-arrow {
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left) ══ --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
+    <div class="eo-page-header-noselect flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0"
+         style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
+         onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;">
         <div class="flex items-center gap-3">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1649,21 +1651,6 @@ select.tw-select-arrow {
                 <option value="COMPLETED">Completed</option>
             </select>
 
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
-                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-
             @if($filterStatus)
             @php
                 $pillMap = [
@@ -1685,6 +1672,25 @@ select.tw-select-arrow {
             </span>
             @endif
             @endif
+
+            {{-- Reset — pushed to the far end of the filter bar (ml-auto),
+                 away from the search/status controls it acts on, so it
+                 reads as a distinct "clear everything" action rather than
+                 sitting in the middle of the filter controls. --}}
+            <button wire:click="resetFilters"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="resetFilters"
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
+                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
         </div>
 
         {{-- ── TABLE WRAPPER (fixed-height card, scrolls internally — same pattern as Alumni Records) ── --}}
@@ -1694,13 +1700,13 @@ select.tw-select-arrow {
                  same pattern as the alumni-facing yearbook, instead of only
                  the thin progress bar in the filter strip. --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,resetFilters,previousPage,nextPage">
+                 wire:loading.flex wire:target="search,filterStatus,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             <div id="eo-table-scroll"
                  class="scroll-c h-full overflow-y-auto overflow-x-auto transition-opacity duration-200 bg-white"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,resetFilters,previousPage,nextPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,resetFilters,previousPage,nextPage,gotoPage">
 
             @if($this->events->count() > 0)
 
@@ -1902,7 +1908,7 @@ select.tw-select-arrow {
                 </button>
 
                 @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)"
+                    <button wire:click="gotoPage(1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
@@ -1913,7 +1919,7 @@ select.tw-select-arrow {
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                      bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="$set('page', {{ $p }})"
+                        <button wire:click="gotoPage({{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                        bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
@@ -1921,7 +1927,7 @@ select.tw-select-arrow {
 
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                    <button wire:click="$set('page', {{ $lp }})"
+                    <button wire:click="gotoPage({{ $lp }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                 @endif
@@ -2437,7 +2443,8 @@ select.tw-select-arrow {
                                 </label>
                                 <input wire:model="event_date" type="date"
                                        min="{{ now('Asia/Manila')->format('Y-m-d') }}"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                       onclick="window.__eoOpenDatePicker(this)"
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($formErrors['event_date']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['event_date'] }}</p>@endif
                             </div>
 
@@ -2622,7 +2629,17 @@ select.tw-select-arrow {
                                 Phone <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                             </label>
                             <input wire:model.defer="contact_phone" type="text"
-                                   placeholder="09XXXXXXXXX" maxlength="16"
+                                   placeholder="09XXXXXXXXX" maxlength="11"
+                                   inputmode="numeric"
+                                   onfocus="if(!this.value) this.value='09';"
+                                   onblur="if(this.value === '09') { this.value = ''; }"
+                                   oninput="
+                                       var d = this.value.replace(/\D/g, '');
+                                       if (d.length === 0) { d = '09'; }
+                                       else if (d.charAt(0) !== '0') { d = '0' + d; }
+                                       if (d.length >= 2 && d.charAt(1) !== '9') { d = '09' + d.slice(2); }
+                                       this.value = d.slice(0, 11);
+                                   "
                                    class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_phone']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                             @if(isset($formErrors['contact_phone']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['contact_phone'] }}</p>@endif
                         </div>
@@ -3417,6 +3434,46 @@ select.tw-select-arrow {
         url.searchParams.delete('highlight_event');
         window.history.replaceState({}, '', url.pathname + url.search + url.hash);
     }
+})();
+// ── Mobile scroll-up fix: Add Event / View Details ──────────────────
+//    Both openCreateModal() and viewEvent() dispatch 'close-sidebar' the
+//    moment they open their fullscreen modal. On mobile, if the events
+//    table underneath was scrolled down (or a previous modal's inner
+//    panel was left scrolled from before), the new modal could appear
+//    with the page/inner content still sitting mid-scroll instead of at
+//    the top — reading as "not working" since the header/actions the
+//    user expects to see first are off-screen. Reset every relevant
+//    scroll position back to the top whenever a modal opens.
+document.addEventListener('livewire:init', function () {
+    Livewire.on('close-sidebar', function () {
+        requestAnimationFrame(function () {
+            window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+            document.documentElement.scrollTop = 0;
+            document.body.scrollTop = 0; // Safari
+
+            ['#eo-table-scroll', '.eo-view-right-scroll'].forEach(function (sel) {
+                var el = document.querySelector(sel);
+                if (el) el.scrollTop = 0;
+            });
+        });
+    });
+});
+</script>
+
+<script>
+(function () {
+    // ── Click anywhere in the date field to open the picker ────────────
+    // A native <input type="date"> only opens its calendar when you click
+    // the small icon on the right — clicking the text/box area just moves
+    // the text cursor. This makes the WHOLE input act like the icon, so
+    // one click anywhere in the box pops the picker open immediately —
+    // same behavior as the date field in Job Management.
+    window.__eoOpenDatePicker = function (el) {
+        if (!el) return;
+        if (typeof el.showPicker === 'function') {
+            try { el.showPicker(); } catch (e) { /* ignore — e.g. not user-triggered enough for some browsers */ }
+        }
+    };
 })();
 </script>
 

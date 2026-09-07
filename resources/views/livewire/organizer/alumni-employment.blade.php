@@ -167,20 +167,27 @@ new class extends Component {
 
     /** Human-readable summary of whatever filters are currently active,
      *  shown inside the Generate Reports dropdown ("Report will
-     *  include…") — mirrors activeFilterSummary() in Alumni Records. */
+     *  include…"). Unlike before, every filter GROUP is always listed —
+     *  Batches / Programs / Statuses each show their own part even when
+     *  untouched (as "All Batches" / "All Programs" / "All Statuses"),
+     *  so the three sit evenly together instead of only the active ones
+     *  appearing. Search stays conditional since it isn't a dropdown
+     *  filter with an "all" state. */
     #[Computed]
     public function activeFilterSummary(): string
     {
         $parts = [];
 
-        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
-            $parts[] = $this->filterBatchFrom === $this->filterBatchTo
+        $parts[] = ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '')
+            ? ($this->filterBatchFrom === $this->filterBatchTo
                 ? 'Batch ' . $this->filterBatchFrom
-                : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo;
-        }
-        if (!empty($this->filterCourses)) {
-            $parts[] = implode(', ', $this->filterCourses);
-        }
+                : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo)
+            : 'All Batches';
+
+        $parts[] = !empty($this->filterCourses)
+            ? implode(', ', $this->filterCourses)
+            : 'All Programs';
+
         if (!empty($this->filterStatuses)) {
             $labels = [
                 'employed'      => 'Employed',
@@ -189,12 +196,15 @@ new class extends Component {
                 'not_filled'    => 'Not Filled',
             ];
             $parts[] = implode(', ', array_map(fn($s) => $labels[$s] ?? $s, $this->filterStatuses));
+        } else {
+            $parts[] = 'All Statuses';
         }
+
         if ($this->search !== '') {
             $parts[] = 'Search: "' . $this->search . '"';
         }
 
-        return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
+        return implode(' · ', $parts);
     }
 
     /** Count of records matching the currently-applied filters — shown
@@ -494,6 +504,23 @@ new class extends Component {
         $this->resetPage();
     }
 
+    /** "Apply" button inside the Programs dropdown — the checkboxes only
+     *  edit a local Alpine draft while the panel is open, so nothing hits
+     *  the table until this fires once with the whole picked set. Only
+     *  codes that are actually valid course codes are kept, so a stale/
+     *  tampered payload can't smuggle in a bogus filter value. */
+    public function applyFilterCourses(array $codes): void
+    {
+        $valid = DB::table('courses')
+            ->when(!empty($this->allowedCourseCodes),
+                fn($q) => $q->whereIn('code', $this->allowedCourseCodes))
+            ->pluck('code')
+            ->toArray();
+
+        $this->filterCourses = array_values(array_intersect($codes, $valid));
+        $this->resetPage();
+    }
+
     /** Toggles a single employment status in/out of the multi-select
      *  filter — bound directly to each checkbox item in the Status
      *  dropdown. Mirrors Alumni Records' toggleEmploymentStatus(). */
@@ -519,6 +546,17 @@ new class extends Component {
     public function selectAllFilterStatuses(): void
     {
         $this->filterStatuses = ['employed', 'self_employed', 'unemployed', 'not_filled'];
+        $this->resetPage();
+    }
+
+    /** "Apply" button inside the Status dropdown — same Clear/Apply-gated
+     *  pattern as applyFilterCourses(): checkboxes only edit a local
+     *  Alpine draft while the panel is open, this fires once with the
+     *  whole picked set. Only recognized status values are kept. */
+    public function applyFilterStatuses(array $statuses): void
+    {
+        $valid = ['employed', 'self_employed', 'unemployed', 'not_filled'];
+        $this->filterStatuses = array_values(array_intersect($statuses, $valid));
         $this->resetPage();
     }
 
@@ -725,6 +763,21 @@ new class extends Component {
         box-shadow: 0 10px 30px rgba(122,63,145,.18);
         z-index: 500; padding: 6px;
     }
+    /* On narrow viewports the header row wraps (flex-wrap), so the
+       report button can land anywhere horizontally — an absolute menu
+       anchored to it can spill off the left/right edge of the screen.
+       Anchor to the viewport instead so it's always fully visible,
+       centered under the header, regardless of where the button wraps to. */
+    @media (max-width: 640px) {
+        .ae-report-menu {
+            position: fixed;
+            top: var(--ae-report-menu-top, 60px);
+            left: 12px;
+            right: 12px;
+            width: auto;
+            max-width: none;
+        }
+    }
     .ae-report-menu-message {
         padding: 10px 10px 11px;
         margin-bottom: 4px;
@@ -802,14 +855,16 @@ new class extends Component {
 <div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full transition-all duration-300 ease-in-out">
 
     {{-- PAGE HEADER --}}
-    <div class="flex items-center justify-between gap-4 flex-shrink-0 flex-wrap">
+    <div class="ae-page-header-noselect flex items-center justify-between gap-4 flex-shrink-0 flex-wrap"
+         style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
+         onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;">
         <div class="flex items-center gap-4">
             <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
                 <i class="fas fa-chart-line text-white text-lg"></i>
             </div>
             <div>
                 <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Employment Tracking</h1>
-                <p class="text-xs leading-relaxed mt-0.5 flex flex-wrap items-center gap-1.5 text-[#555555]">
+                <p class="text-xs leading-relaxed mt-0.5 flex flex-wrap items-center gap-1.5 text-[#7A3F91] font-normal">
                     Track employment status of your assigned alumni.
                     @if($organizerDepartment)
                         <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
@@ -833,6 +888,7 @@ new class extends Component {
                 summary: 'All alumni records (no filters applied)',
                 count: '0',
                 _observer: null,
+                menuTop: 0,
                 syncFromSource(){
                     const src = document.getElementById('ae-report-summary-source');
                     if (!src) return;
@@ -844,6 +900,16 @@ new class extends Component {
                     if (!src || this._observer) return;
                     this._observer = new MutationObserver(() => this.syncFromSource());
                     this._observer.observe(src, { attributes: true, attributeFilter: ['data-summary', 'data-count'] });
+                },
+                positionMenu(){
+                    // Only matters on the narrow-viewport fixed-position
+                    // layout (see .ae-report-menu media query) — on desktop
+                    // the menu stays absolute/anchored to the button via
+                    // CSS and this value is simply unused.
+                    const btn = $el.querySelector('.ae-report-btn');
+                    if (!btn) return;
+                    const rect = btn.getBoundingClientRect();
+                    this.menuTop = rect.bottom + 8;
                 }
              }"
              x-init="
@@ -852,7 +918,7 @@ new class extends Component {
                 watchSource();
              "
              @click.outside="$store.aeReport.open=false" wire:key="ae-report-dropdown">
-            <button type="button" @click.stop="$store.aeReport.toggle()" class="ae-report-btn"
+            <button type="button" @click.stop="positionMenu(); $store.aeReport.toggle()" class="ae-report-btn"
                     :disabled="$store.aeReport.exporting"
                     :class="{ 'ae-report-btn-active': $store.aeReport.open }">
                 <i class="fas fa-spinner animate-spin" x-show="$store.aeReport.exporting" style="display:none;"></i>
@@ -863,12 +929,13 @@ new class extends Component {
             <div x-show="$store.aeReport.open"
                  x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                  x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                 class="ae-report-menu" style="display:none;" @click="setTimeout(() => syncFromSource(), 0)">
+                 class="ae-report-menu" style="display:none;"
+                 :style="{ '--ae-report-menu-top': menuTop + 'px' }"
+                 @click="setTimeout(() => syncFromSource(), 0)">
 
                 <div class="ae-report-menu-message">
                     <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
                     <span class="txt" x-text="summary"></span>
-                    <span class="cnt" x-text="count + ' matching record(s)'"></span>
                 </div>
 
                 <button type="button" @click="$store.aeReport.doExport('pdf', $wire)"
@@ -915,6 +982,30 @@ new class extends Component {
           data-summary="{{ $this->activeFilterSummary }}"
           data-count="{{ number_format($this->activeFilterCount) }}"></span>
 
+    {{-- Hidden source for the Batch dropdown's trigger label — same
+         wire:ignore + MutationObserver pattern as above: the batch
+         dropdown root is wire:ignore'd (so background Livewire morphs
+         never disturb its Alpine open/chevron state — that was the bug:
+         a mid-click morph could reset the panel, requiring a second
+         click to register), but this small span is NOT wire:ignore'd,
+         so it re-renders normally and the dropdown watches it to keep
+         its label live. --}}
+    @php
+        $aeBatchLabel = 'All Batches';
+        if ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) {
+            $aeBatchLabel = 'Batch ' . $filterBatchFrom . '–' . $filterBatchTo;
+        } elseif ($filterBatchFrom !== '' && $filterBatchTo !== '') {
+            $aeBatchLabel = 'Batch ' . $filterBatchFrom;
+        } elseif ($filterBatchFrom !== '') {
+            $aeBatchLabel = 'Batch ' . $filterBatchFrom . ' → pick end year';
+        } elseif ($filterBatchTo !== '') {
+            $aeBatchLabel = 'pick start year → Batch ' . $filterBatchTo;
+        }
+    @endphp
+    <span id="ae-batch-label-source" class="hidden"
+          data-label="{{ $aeBatchLabel }}"
+          data-active="{{ ($filterBatchFrom !== '' || $filterBatchTo !== '') ? '1' : '0' }}"></span>
+
     {{-- BODY: stat cards visually moved to the RIGHT side of the table via
          CSS `order`. Both columns always fill the same fixed height
          (calc(100vh - page chrome)) regardless of whether the table has
@@ -930,7 +1021,7 @@ new class extends Component {
              on large screens via lg:order-2. Always visible, no toggle.
              On tablet/mobile it is NOT independently scrollable (shows in
              full). On desktop it scrolls on its own (lg:h-full lg:overflow-y-auto). --}}
-        <div class="w-full lg:w-56 xl:w-64 flex-shrink-0 lg:order-2
+        <div class="ae-statcards-noselect w-full lg:w-56 xl:w-64 flex-shrink-0 lg:order-2
                     grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-3 content-start
                     lg:h-full lg:overflow-y-auto lg:pr-1
                     [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f3f4f6]
@@ -939,8 +1030,10 @@ new class extends Component {
                     [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full
                     hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]
                     transition-opacity duration-200"
+             style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
+             onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;"
              wire:loading.class="opacity-50"
-             wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
+             wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,applyFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,applyFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
 
             {{-- Total Alumni --}}
             <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
@@ -1127,15 +1220,18 @@ new class extends Component {
              @keydown.escape.window="fullscreen = false">
 
             {{-- FILTER BAR --}}
-            <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+            <div class="ae-filter-bar-noselect bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+                 style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
+                 onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;"
                  wire:loading.class="opacity-60"
-                 wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
+                 wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,applyFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,applyFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
 
                 <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                     Filters
                 </div>
 
-                {{-- Search --}}
+                {{-- Search — text selection re-enabled here specifically so
+                     the person can still select/copy/edit what they type. --}}
                 <div class="relative flex-1 min-w-[160px] max-w-xs"
                      wire:ignore
                      x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -1143,18 +1239,20 @@ new class extends Component {
                     <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)"
                            :class="q !== '' ? 'border-[#7a3f91] bg-white text-[#333333] font-semibold' : 'bg-white text-[#333333] font-medium'"
                            placeholder="Search name, ID, email or job…"
+                           style="-webkit-user-select:text;-moz-user-select:text;-ms-user-select:text;user-select:text;"
+                           onselectstart="event.stopPropagation(); return true;"
                            class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
                            autocomplete="off" maxlength="100" spellcheck="false">
                 </div>
 
-                {{-- Status — MULTI-SELECT with real checkboxes. Checking a
-                     box toggles that status in/out of filterStatuses via
-                     toggleFilterStatus(); the dropdown stays open across
-                     clicks so e.g. "Employed" + "Self-Employed" can be
-                     checked together. A "Select All" checkbox sits in a
-                     sticky header row at the TOP of the list — tri-state:
-                     checked when every status is selected, indeterminate
-                     (dash) when some but not all are. --}}
+                {{-- Status — MULTI-SELECT with real checkboxes, Clear/
+                     Apply-gated: checking a box only edits a LOCAL Alpine
+                     draft ("picked") while the panel is open — nothing
+                     hits the server, nothing filters the table until
+                     "Apply" is clicked. Mirrors the Programs dropdown
+                     exactly. "Clear" only unchecks every box (does NOT
+                     close the panel, does NOT touch the server); Apply
+                     is what actually sends the picked set and closes. --}}
                 @php $aeStatusOptions = [
                     ['employed', 'Employed'],
                     ['self_employed', 'Self-Employed'],
@@ -1164,8 +1262,24 @@ new class extends Component {
                 <div class="relative"
                      x-data="{
                         get open(){ return $store.aeFilters.isOpen('status'); },
-                        toggle(){ $store.aeFilters.toggle('status'); },
-                        close(){ $store.aeFilters.close('status'); }
+                        toggle(){
+                            if (!this.open) { this.picked = [...$wire.filterStatuses]; }
+                            $store.aeFilters.toggle('status');
+                        },
+                        close(){ $store.aeFilters.close('status'); },
+                        picked: [],
+                        isPicked(val){ return this.picked.includes(val); },
+                        togglePick(val){
+                            this.picked = this.isPicked(val)
+                                ? this.picked.filter(v => v !== val)
+                                : [...this.picked, val];
+                        },
+                        clearPicked(){ this.picked = []; },
+                        selectAllPicked(allVals){ this.picked = [...allVals]; },
+                        apply(){
+                            $store.aeFilters.closeAll();
+                            $wire.applyFilterStatuses(this.picked);
+                        }
                      }"
                      @click.outside="close()" wire:key="status-dropdown">
                     <button type="button" @click.stop="toggle()"
@@ -1190,53 +1304,94 @@ new class extends Component {
                          x-transition:leave="transition ease-in duration-75"
                          x-transition:leave-start="opacity-100"
                          x-transition:leave-end="opacity-0 scale-95"
-                         class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[180px] max-h-[220px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
+                         class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[180px] flex flex-col [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
                          style="display:none;"
                          @click.stop>
-                        <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-0 -mt-0 bg-white z-10">
-                            <label class="flex items-center gap-2 text-xs font-semibold select-none"
-                                   :class="$wire.filterStatuses.length === 0 ? 'text-[#999999] cursor-not-allowed' : 'text-[#333333] cursor-pointer'">
+                        <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] bg-white z-10 shrink-0">
+                            <label class="flex items-center gap-2 text-xs font-semibold select-none text-[#333333] cursor-pointer">
                                 <input type="checkbox"
-                                       :checked="$wire.filterStatuses.length === {{ count($aeStatusOptions) }}"
-                                       :indeterminate="$wire.filterStatuses.length > 0 && $wire.filterStatuses.length < {{ count($aeStatusOptions) }}"
-                                       :disabled="$wire.filterStatuses.length === 0"
-                                       @change="$event.target.checked ? $wire.selectAllFilterStatuses() : $wire.clearFilterStatuses()"
-                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">
+                                       :checked="picked.length === {{ count($aeStatusOptions) }}"
+                                       :indeterminate="picked.length > 0 && picked.length < {{ count($aeStatusOptions) }}"
+                                       @change="$event.target.checked ? selectAllPicked({{ \Illuminate\Support\Js::from(array_column($aeStatusOptions, 0)) }}) : clearPicked()"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7a3f91] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer">
                                 Select All
                             </label>
-                            <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="$wire.filterStatuses.length > 0">
-                                <span x-text="$wire.filterStatuses.length"></span> selected
+                            <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="picked.length > 0">
+                                <span x-text="picked.length"></span> selected
                             </span>
                         </div>
-                        <div class="py-1">
+                        <div class="py-1 max-h-[220px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]">
                             @foreach($aeStatusOptions as [$val, $label])
-                            <label class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer select-none hover:bg-purple-50 hover:text-purple-700 transition-colors
-                                          {{ in_array($val, $filterStatuses, true) ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
-                                <input type="checkbox" wire:click="toggleFilterStatus('{{ $val }}')"
-                                       :checked="$wire.filterStatuses.includes('{{ $val }}')"
-                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer shrink-0">
+                            <label class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer select-none hover:bg-purple-50 hover:text-purple-700 transition-colors"
+                                   :class="isPicked('{{ $val }}') ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]'">
+                                <input type="checkbox" @change="togglePick('{{ $val }}')"
+                                       :checked="isPicked('{{ $val }}')"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7a3f91] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer shrink-0">
                                 {{ $label }}
                             </label>
                             @endforeach
                         </div>
+                        <div class="flex items-center gap-2 px-3 py-2 border-t border-[#E8E0F0] bg-white shrink-0">
+                            <button type="button" @click="clearPicked()" :disabled="picked.length === 0"
+                                    class="flex-1 text-sm font-semibold py-1.5 rounded-lg border border-[#E8E0F0] transition-colors
+                                           disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white
+                                           text-[#666666] hover:bg-gray-50 cursor-pointer">
+                                Clear
+                            </button>
+                            <button type="button" @click="apply()" :disabled="picked.length === 0"
+                                    class="flex-1 text-sm font-semibold py-1.5 rounded-lg transition-colors
+                                           disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#7a3f91]
+                                           bg-[#7a3f91] text-white hover:bg-[#6a3580] cursor-pointer">
+                                Apply
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                {{-- Programs — MULTI-SELECT with real checkboxes. Checking
-                     a box toggles that program in/out of filterCourses via
-                     toggleFilterCourse(); the dropdown stays open across
-                     clicks so several programs can be checked together.
-                     A "Select All" checkbox sits in a sticky header row at
-                     the TOP of the list — tri-state: checked when every
-                     program is selected, indeterminate (dash) when some
-                     but not all are. Mirrors the Status dropdown above and
-                     Alumni Records' Program filter exactly. --}}
+
+                {{-- Programs — MULTI-SELECT with real checkboxes, but now
+                     Clear/Apply-gated instead of live: checking a box only
+                     edits a LOCAL Alpine draft ("picked") while the panel
+                     is open — nothing hits the server, nothing filters the
+                     table yet. Draft is seeded from $wire.filterCourses
+                     every time the dropdown opens, so it always starts in
+                     sync with whatever is actually applied.
+                        - "Apply" sends the whole draft to the server in
+                          ONE round-trip via applyFilterCourses() and
+                          closes the dropdown.
+                        - "Clear" just empties the draft (unchecks every
+                          box) — it does NOT close the dropdown and does
+                          NOT touch the server; the person still has to
+                          hit Apply (with nothing checked) to actually
+                          clear the live filter.
+                     A "Select All" checkbox sits in a sticky header row,
+                     tri-state against the DRAFT (not the live filter). --}}
                 @if($courses->isNotEmpty())
                 <div class="relative"
                      x-data="{
                         get open(){ return $store.aeFilters.isOpen('course'); },
-                        toggle(){ $store.aeFilters.toggle('course'); },
-                        close(){ $store.aeFilters.close('course'); }
+                        toggle(){
+                            // Reseed the draft from the live filter every time
+                            // the panel is (re)opened, so stale in-progress
+                            // picks from a previous open (that were never
+                            // Applied) don't linger.
+                            if (!this.open) { this.picked = [...$wire.filterCourses]; }
+                            $store.aeFilters.toggle('course');
+                        },
+                        close(){ $store.aeFilters.close('course'); },
+                        picked: [],
+                        isPicked(code){ return this.picked.includes(code); },
+                        togglePick(code){
+                            this.picked = this.isPicked(code)
+                                ? this.picked.filter(c => c !== code)
+                                : [...this.picked, code];
+                        },
+                        clearPicked(){ this.picked = []; },
+                        selectAllPicked(allCodes){ this.picked = [...allCodes]; },
+                        apply(){
+                            $store.aeFilters.closeAll();
+                            $wire.applyFilterCourses(this.picked);
+                        }
                      }"
                      @click.outside="close()" wire:key="course-dropdown">
                     <button type="button" @click.stop="toggle()"
@@ -1261,38 +1416,51 @@ new class extends Component {
                          x-transition:leave="transition ease-in duration-75"
                          x-transition:leave-start="opacity-100"
                          x-transition:leave-end="opacity-0 scale-95"
-                         class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[220px] max-h-[260px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
+                         class="absolute top-full left-0 mt-1 z-50 bg-white border border-[#E8E0F0] rounded-xl shadow-xl overflow-hidden min-w-[220px] flex flex-col [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]"
                          style="display:none;"
                          @click.stop>
-                        <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-0 -mt-0 bg-white z-10">
-                            <label class="flex items-center gap-2 text-xs font-semibold select-none"
-                                   :class="$wire.filterCourses.length === 0 ? 'text-[#999999] cursor-not-allowed' : 'text-[#333333] cursor-pointer'">
+                        <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] bg-white z-10 shrink-0">
+                            <label class="flex items-center gap-2 text-xs font-semibold select-none text-[#333333] cursor-pointer">
                                 <input type="checkbox"
-                                       :checked="$wire.filterCourses.length === {{ $courses->count() }}"
-                                       :indeterminate="$wire.filterCourses.length > 0 && $wire.filterCourses.length < {{ $courses->count() }}"
-                                       :disabled="$wire.filterCourses.length === 0"
-                                       @change="$event.target.checked ? $wire.selectAllFilterCourses() : $wire.clearFilterCourses()"
-                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">
+                                       :checked="picked.length === {{ $courses->count() }}"
+                                       :indeterminate="picked.length > 0 && picked.length < {{ $courses->count() }}"
+                                       @change="$event.target.checked ? selectAllPicked({{ \Illuminate\Support\Js::from($courses->pluck('code')) }}) : clearPicked()"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7a3f91] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer">
                                 Select All
                             </label>
-                            <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="$wire.filterCourses.length > 0">
-                                <span x-text="$wire.filterCourses.length"></span> selected
+                            <span class="text-xs font-bold text-[#7a3f91] select-none" x-show="picked.length > 0">
+                                <span x-text="picked.length"></span> selected
                             </span>
                         </div>
-                        <div class="py-1">
+                        <div class="py-1 max-h-[220px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]">
                             @foreach($courses as $c)
-                            <label class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer select-none hover:bg-purple-50 hover:text-purple-700 transition-colors
-                                          {{ in_array($c->code, $filterCourses, true) ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
-                                <input type="checkbox" wire:click="toggleFilterCourse('{{ $c->code }}')"
-                                       :checked="$wire.filterCourses.includes('{{ $c->code }}')"
-                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer shrink-0">
+                            <label class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer select-none hover:bg-purple-50 hover:text-purple-700 transition-colors"
+                                   :class="isPicked('{{ $c->code }}') ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]'">
+                                <input type="checkbox" @change="togglePick('{{ $c->code }}')"
+                                       :checked="isPicked('{{ $c->code }}')"
+                                       class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7a3f91] text-[#7a3f91] focus:ring-[#7a3f91]/30 cursor-pointer shrink-0">
                                 {{ $c->name ?? $c->code }}
                             </label>
                             @endforeach
                         </div>
+                        <div class="flex items-center gap-2 px-3 py-2 border-t border-[#E8E0F0] bg-white shrink-0">
+                            <button type="button" @click="clearPicked()" :disabled="picked.length === 0"
+                                    class="flex-1 text-sm font-semibold py-1.5 rounded-lg border border-[#E8E0F0] transition-colors
+                                           disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white
+                                           text-[#666666] hover:bg-gray-50 cursor-pointer">
+                                Clear
+                            </button>
+                            <button type="button" @click="apply()" :disabled="picked.length === 0"
+                                    class="flex-1 text-sm font-semibold py-1.5 rounded-lg transition-colors
+                                           disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#7a3f91]
+                                           bg-[#7a3f91] text-white hover:bg-[#6a3580] cursor-pointer">
+                                Apply
+                            </button>
+                        </div>
                     </div>
                 </div>
                 @endif
+
 
                 {{-- Batch — FROM/TO range. Default view is a plain year
                      list (click a year, done); "Add Range" swaps to two
@@ -1302,39 +1470,50 @@ new class extends Component {
                      doesn't filter anything yet, and the trigger label
                      says so explicitly. --}}
                 @if($batches->isNotEmpty())
-                    <div class="relative"
+                    <div class="relative" wire:ignore
                          x-data="{
                             get open(){ return $store.aeFilters.isOpen('batch'); },
-                            toggle(){ $store.aeFilters.toggle('batch'); },
+                            toggle(){
+                                if (!this.open) {
+                                    this.rangeFrom = $wire.filterBatchFrom || '';
+                                    this.rangeTo   = $wire.filterBatchTo   || '';
+                                    this.rangeMode = (this.rangeFrom !== '' && this.rangeTo !== '' && this.rangeFrom !== this.rangeTo);
+                                }
+                                $store.aeFilters.toggle('batch');
+                            },
                             close(){ $store.aeFilters.close('batch'); },
                             rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
                             rangeFrom: '{{ $filterBatchFrom }}',
                             rangeTo: '{{ $filterBatchTo }}',
+                            label: 'All Batches',
+                            active: {{ ($filterBatchFrom !== '' || $filterBatchTo !== '') ? 'true' : 'false' }},
+                            _observer: null,
+                            syncLabel(){
+                                const src = document.getElementById('ae-batch-label-source');
+                                if (!src) return;
+                                this.label  = src.dataset.label;
+                                this.active = src.dataset.active === '1';
+                            },
+                            watchLabel(){
+                                const src = document.getElementById('ae-batch-label-source');
+                                if (!src || this._observer) return;
+                                this._observer = new MutationObserver(() => this.syncLabel());
+                                this._observer.observe(src, { attributes: true, attributeFilter: ['data-label', 'data-active'] });
+                            },
                             selectYear(val){ $wire.setSingleBatchYear(val); this.close(); },
                             clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
                             startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
-                            pickFrom(val){ this.rangeFrom=val; this.applyRangeIfComplete(); },
-                            pickTo(val){ this.rangeTo=val; this.applyRangeIfComplete(); },
-                            applyRangeIfComplete(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.close(); } }
+                            pickFrom(val){ this.rangeFrom = (this.rangeFrom===val) ? '' : val; },
+                            pickTo(val){ this.rangeTo = (this.rangeTo===val) ? '' : val; },
+                            applyRange(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.close(); } }
                          }"
+                         x-init="syncLabel(); watchLabel();"
                          @click.outside="close()" wire:key="batch-dropdown">
                         <button type="button"
                                 @click.stop="toggle()"
-                                class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none
-                                       {{ ($filterBatchFrom !== '' || $filterBatchTo !== '') ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white' }}">
-                            <span class="truncate text-sm">
-                                @if($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo)
-                                    Batch {{ $filterBatchFrom }}–{{ $filterBatchTo }}
-                                @elseif($filterBatchFrom !== '' && $filterBatchTo !== '')
-                                    Batch {{ $filterBatchFrom }}
-                                @elseif($filterBatchFrom !== '')
-                                    Batch {{ $filterBatchFrom }} → pick end year
-                                @elseif($filterBatchTo !== '')
-                                    pick start year → Batch {{ $filterBatchTo }}
-                                @else
-                                    All Batches
-                                @endif
-                            </span>
+                                class="border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 px-3 rounded-lg font-medium inline-flex items-center gap-2 min-w-[130px] justify-between cursor-pointer hover:border-[#c4b5d4] focus:outline-none"
+                                :class="active ? 'border-[#7a3f91] bg-[#f5f0fa] text-[#7a3f91] font-semibold' : 'text-[#333333] bg-white'">
+                            <span class="truncate text-sm" x-text="label"></span>
                             <i class="fas fa-chevron-down text-xs flex-shrink-0 transition-transform duration-150"
                                :class="open ? 'rotate-180' : ''"></i>
                         </button>
@@ -1349,67 +1528,73 @@ new class extends Component {
                              style="display:none;"
                              @click.stop>
 
-                            {{-- Default view: plain year list --}}
-                            <template x-if="!rangeMode">
+                            {{-- Default view: plain year list. "Add Range"
+                                 sits in its own fixed footer row BELOW the
+                                 scrollable year list — always visible, no
+                                 scrolling needed to reach it, however many
+                                 batch years there are. --}}
+                            <div x-show="!rangeMode">
                                 <div class="py-1 max-h-[180px] overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#c4b5d4_#f5f0fa]">
                                     <button type="button" @click.stop="clearYear()"
-                                            class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors
+                                            class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors cursor-pointer
                                                    {{ ($filterBatchFrom === '' && $filterBatchTo === '') ? 'bg-purple-50 text-purple-700 font-semibold' : 'text-[#333333]' }}">
                                         All Batches
                                     </button>
                                     @foreach($batches as $b)
                                         <button type="button" @click.stop="selectYear('{{ $b }}')"
-                                                class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors
+                                                class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors cursor-pointer
                                                        {{ ($filterBatchFrom == $b && $filterBatchTo == $b) ? 'bg-purple-100 text-purple-800 font-semibold' : 'text-[#333333]' }}">
                                             Batch {{ $b }}
                                         </button>
                                     @endforeach
-                                    <div class="h-px bg-[#E8E0F0] my-1"></div>
+                                </div>
+                                <div class="border-t border-[#E8E0F0]">
                                     <button type="button" @click.stop="startRange()"
-                                            class="w-full text-left px-3 py-2 text-sm font-semibold flex items-center gap-1.5 text-[#7a3f91] hover:bg-purple-50 transition-colors">
+                                            class="w-full text-left px-3 py-2 text-sm font-semibold flex items-center gap-1.5 text-[#7a3f91] hover:bg-purple-50 transition-colors cursor-pointer">
                                         <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
                                     </button>
                                 </div>
-                            </template>
+                            </div>
 
                             {{-- Range view: two side-by-side scrollable
                                  year lists. Local Alpine state only —
-                                 nothing sent to the server until both
-                                 sides are picked. --}}
-                            <template x-if="rangeMode">
-                                <div class="p-2" style="width:220px;">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
-                                        <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
+                                 nothing sent to the server until "Apply"
+                                 is clicked. Text sized up (text-sm) from
+                                 the original text-xs for readability. --}}
+                            <div x-show="rangeMode" class="p-2.5" style="width:240px;">
+                                <div class="flex items-center gap-2 mb-1.5">
+                                    <span class="flex-1 text-xs font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
+                                    <span class="flex-1 text-xs font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
+                                </div>
+                                <div class="flex items-start gap-2">
+                                    <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:160px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                        @foreach($batches as $b)
+                                        <button type="button" @click.stop="pickFrom('{{ $b }}')"
+                                                :class="rangeFrom==='{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333]'"
+                                                class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors cursor-pointer">{{ $b }}</button>
+                                        @endforeach
                                     </div>
-                                    <div class="flex items-start gap-2">
-                                        <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                            @foreach($batches as $b)
-                                            <button type="button" @click.stop="pickFrom('{{ $b }}')"
-                                                    :class="rangeFrom==='{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333]'"
-                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors">{{ $b }}</button>
-                                            @endforeach
-                                        </div>
-                                        <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                            @foreach($batches as $b)
-                                            <button type="button" @click.stop="pickTo('{{ $b }}')"
-                                                    :class="rangeTo==='{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333]'"
-                                                    class="w-full text-left px-2.5 py-1.5 text-xs font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors">{{ $b }}</button>
-                                            @endforeach
-                                        </div>
-                                    </div>
-                                    <div class="flex items-center gap-2 mt-3">
-                                        <button type="button" @click.stop="rangeMode=false"
-                                                class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                            Back to List
-                                        </button>
-                                        <button type="button" @click.stop="clearYear(); rangeMode=false;"
-                                                class="flex-1 text-xs font-semibold text-[#7a3f91] hover:bg-[#F5F0FA] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                            Clear
-                                        </button>
+                                    <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:160px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                        @foreach($batches as $b)
+                                        <button type="button" @click.stop="pickTo('{{ $b }}')"
+                                                :class="rangeTo==='{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333]'"
+                                                class="w-full text-left px-3 py-2 text-sm font-medium hover:bg-purple-50 hover:text-purple-700 transition-colors cursor-pointer">{{ $b }}</button>
+                                        @endforeach
                                     </div>
                                 </div>
-                            </template>
+                                <div class="flex items-center gap-2 mt-3">
+                                    <button type="button" @click.stop.prevent="rangeMode=false"
+                                            class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0] cursor-pointer">
+                                        Back to List
+                                    </button>
+                                    <button type="button" @click.stop="applyRange()" :disabled="rangeFrom==='' || rangeTo===''"
+                                            class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-transparent
+                                                   disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[#7a3f91]
+                                                   bg-[#7a3f91] text-white hover:bg-[#6a3580] cursor-pointer">
+                                        Apply
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 @endif
@@ -1471,19 +1656,21 @@ new class extends Component {
                 {{-- Centered loading spinner — big icon over the table itself,
                      same pattern as Job Management / Event Organizer. --}}
                 <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                     wire:loading.flex wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters,previousPage,nextPage,gotoPage">
+                     wire:loading.flex wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,applyFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,applyFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters,previousPage,nextPage,gotoPage">
                     <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
                 </div>
 
                 @if($rows->count() > 0)
-                <div class="overflow-x-hidden overflow-y-auto flex-1 min-h-0 bg-white
+                <div class="ae-table-noselect overflow-x-hidden overflow-y-auto flex-1 min-h-0 bg-white
                             [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f3f4f6]
                             [&::-webkit-scrollbar]:w-[5px]
                             [&::-webkit-scrollbar-track]:bg-gray-100 [&::-webkit-scrollbar-track]:rounded-full
                             [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full
                             hover:[&::-webkit-scrollbar-thumb]:bg-[#7a3f91]"
+                     style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
+                     onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;"
                      wire:loading.class="opacity-40 pointer-events-none"
-                     wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters,previousPage,nextPage,gotoPage">
+                     wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,applyFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,applyFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters,previousPage,nextPage,gotoPage">
 
                     {{-- ── DESKTOP / TABLET: table view ── --}}
                     <table class="w-full bg-white border-collapse hidden md:table">
@@ -1729,7 +1916,9 @@ new class extends Component {
                 $pgStart = max(1, $cp - 2);
                 $pgEnd   = min($lp, $cp + 2);
             @endphp
-            <div class="flex-shrink-0 bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] px-4 min-h-[48px] flex items-center justify-between gap-2 flex-wrap border-t border-[#7a3f91]/30">
+            <div class="ae-pagination-noselect flex-shrink-0 bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] px-4 min-h-[48px] flex items-center justify-between gap-2 flex-wrap border-t border-[#7a3f91]/30"
+                 style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
+                 onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;">
                 <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                     Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
                     of <strong class="text-white font-bold">{{ $total }}</strong>
@@ -1847,18 +2036,30 @@ new class extends Component {
      backdrop handler from firing when you click inside the card itself, so
      it never intercepts clicks meant for the X button. --}}
 <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4"
-     x-data
-     wire:click.self="closeModal"
-     @keydown.escape.window="$wire.closeModal()">
+     x-data="{ open: false, closing(){ this.open = false; setTimeout(() => $wire.closeModal(), 180); } }"
+     x-init="requestAnimationFrame(() => open = true)"
+     x-show="open"
+     x-transition:enter="transition ease-out duration-200"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
+     wire:click.self="closing"
+     @keydown.escape.window="closing()">
     {{-- On mobile (below sm) this is a full-screen sheet, not a floating
          modal: no rounded corners, no border, fills the entire viewport.
          From sm and up it goes back to being a centered, rounded modal
          card capped at max-w-lg / 90vh. --}}
     <div class="bg-white rounded-none sm:rounded-2xl w-full h-full sm:h-auto sm:max-w-lg max-h-[100dvh] sm:max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border-0 sm:border sm:border-[#E8E0F0]"
          @click.stop
+         x-show="open"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2"
-         x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0">
+         x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100 sm:scale-100 translate-y-0"
+         x-transition:leave-end="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2">
 
         <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0 bg-[#7A3F91]">
             <div class="flex items-center gap-3">
@@ -1873,12 +2074,9 @@ new class extends Component {
                 </div>
             </div>
             <button type="button"
-                    wire:click="closeModal"
-                    wire:loading.attr="disabled"
-                    wire:target="closeModal"
-                    class="relative group/close w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-base" wire:loading.remove wire:target="closeModal"></i>
-                <i class="fa-solid fa-spinner fa-spin text-base" wire:loading wire:target="closeModal"></i>
+                    @click="closing()"
+                    class="relative group/close w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white cursor-pointer">
+                <i class="fa-solid fa-xmark text-base"></i>
                 <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close:opacity-100 transition-opacity duration-150">Close</span>
             </button>
         </div>
