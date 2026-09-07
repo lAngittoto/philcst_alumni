@@ -171,6 +171,23 @@ new class extends Component {
         return implode(' ', array_filter($parts));
     }
 
+    /** Wraps each case-insensitive match of $search inside $text with the
+     *  same light-blue <mark> used on the Alumni Records search — keeps
+     *  the "here's what matched" visual cue consistent across pages. */
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="cp-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
     private function validateName(string $n): bool { return (bool) preg_match('/^[a-zA-Z\s\-\.\']+$/', $n); }
 
     private function buildFullName(string $f, string $m, string $l, string $s): string
@@ -661,6 +678,15 @@ new class extends Component {
 <div class="flex flex-col" style="height: calc(100vh - 120px); max-height: calc(100vh - 120px); overflow: hidden;">
 
 <style>
+    /* ── Search highlight — same light blue mark used on Alumni Records ── */
+    mark.cp-hl {
+        background: #BFDBFE;
+        color: inherit;
+        border-radius: 2px;
+        padding: 0 1px;
+        font-weight: 700;
+    }
+
     /* ══ Coordinator table — same interaction language as Alumni Records ══ */
     .coord-row {
         cursor: pointer;
@@ -872,10 +898,10 @@ new class extends Component {
     {{-- PAGE HEADER — fixed, never scrolls --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
         <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
+            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md" style="background:#7a3f91;">
                 <i class="fas fa-users-gear text-white text-lg"></i>
             </div>
-            <div>
+            <div style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                 <h1 class="text-xl font-semibold tracking-tight text-gray-900">Manage Coordinator</h1>
                 <p class="text-sm leading-relaxed mt-0.5 text-gray-700">
                     Manage coordinator records and
@@ -893,7 +919,7 @@ new class extends Component {
                     <i class="fas fa-user-plus text-white text-sm" wire:loading.remove wire:target="openModal('registerCoordinator')"></i>
                     <i class="fas fa-spinner animate-spin text-white text-sm" wire:loading wire:target="openModal('registerCoordinator')"></i>
                 </button>
-                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+                <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
                         Register Coordinator
@@ -909,7 +935,7 @@ new class extends Component {
                     <i class="fas fa-building-columns text-white text-sm" wire:loading.remove wire:target="openModal('manageOrgCourses')"></i>
                     <i class="fas fa-spinner animate-spin text-white text-sm" wire:loading wire:target="openModal('manageOrgCourses')"></i>
                 </button>
-                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
+                <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
                         Manage Colleges
@@ -957,7 +983,7 @@ new class extends Component {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetCoordFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none">
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none">
                 <i class="fas fa-rotate-left text-xs" wire:loading.remove wire:target="resetCoordFilters"></i>
                 <span wire:loading wire:target="resetCoordFilters">
                     <i class="fas fa-spinner animate-spin text-xs"></i>
@@ -1032,15 +1058,15 @@ new class extends Component {
                                          alt="{{ $item->first_name }}"
                                          class="w-10 h-10 rounded-xl object-cover shrink-0 shadow-sm ring-1 ring-gray-200">
                                     <span class="font-semibold text-gray-900 text-sm leading-tight truncate block">
-                                        {{ $this->formatDisplayName($item->first_name ?? '', $item->middle_initial ?? '', $item->last_name ?? '', $item->suffix ?? '') }}
+                                        {!! $this->highlight($this->formatDisplayName($item->first_name ?? '', $item->middle_initial ?? '', $item->last_name ?? '', $item->suffix ?? ''), $coordSearch) !!}
                                     </span>
                                 </div>
                             </td>
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <span class="font-mono text-gray-700 text-sm truncate block">{{ $item->id_number }}</span>
+                                <span class="font-mono text-gray-700 text-sm truncate block">{!! $this->highlight($item->id_number ?? '', $coordSearch) !!}</span>
                             </td>
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <span class="text-gray-600 text-sm truncate block">{{ $item->email }}</span>
+                                <span class="text-gray-600 text-sm truncate block">{!! $this->highlight($item->email ?? '', $coordSearch) !!}</span>
                             </td>
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
                                 <span class="block font-semibold text-gray-800 text-sm leading-snug truncate">{{ $collegeName }}</span>
@@ -1077,7 +1103,7 @@ new class extends Component {
                                                 <i class="fas fa-ban text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"></i>
                                                 <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"></i>
                                             </button>
-                                            <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
+                                            <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
                                                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
                                                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
                                                     Deactivate
@@ -1095,7 +1121,7 @@ new class extends Component {
                                                 <i class="fas fa-circle-check text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"></i>
                                                 <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"></i>
                                             </button>
-                                            <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
+                                            <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
                                                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
                                                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
                                                     Activate
@@ -1123,10 +1149,10 @@ new class extends Component {
                              class="w-11 h-11 rounded-xl object-cover shrink-0 ring-1 ring-gray-200">
                         <div class="flex-1 min-w-0">
                             <p class="font-semibold text-gray-900 text-sm truncate">
-                                {{ $this->formatDisplayName($item->first_name ?? '', $item->middle_initial ?? '', $item->last_name ?? '', $item->suffix ?? '') }}
+                                {!! $this->highlight($this->formatDisplayName($item->first_name ?? '', $item->middle_initial ?? '', $item->last_name ?? '', $item->suffix ?? ''), $coordSearch) !!}
                             </p>
                             <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                                <span class="font-mono text-gray-600 text-xs">{{ $item->id_number }}</span>
+                                <span class="font-mono text-gray-600 text-xs">{!! $this->highlight($item->id_number ?? '', $coordSearch) !!}</span>
                                 <span class="text-gray-300 text-xs">&bull;</span>
                                 <span class="text-gray-600 text-xs truncate">{{ $collegeName }}</span>
                             </div>
@@ -1254,7 +1280,7 @@ new class extends Component {
                 </svg>
                 <i class="fas fa-spinner animate-spin text-white text-xs" wire:loading wire:target="closeModal"></i>
             </button>
-            <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/close:opacity-100 transition-opacity duration-150 z-50">
+            <div class="hidden md:block absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/close:opacity-100 transition-opacity duration-150 z-50">
                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
                     <span class="absolute bottom-full right-3 border-4 border-transparent border-b-gray-900"></span>
                     Close
@@ -1610,7 +1636,7 @@ new class extends Component {
             </svg>
             <i class="fas fa-spinner animate-spin text-white text-xs" wire:loading wire:target="closeModal"></i>
             {{-- Tooltip below --}}
-            <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/x:opacity-100 transition-opacity duration-150 z-50">
+            <div class="hidden md:block absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/x:opacity-100 transition-opacity duration-150 z-50">
                 <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative shadow-lg">
                     <span class="absolute bottom-full right-3 border-4 border-transparent border-b-gray-900"></span>
                     Close
@@ -1872,7 +1898,7 @@ new class extends Component {
                                         <i class="fas fa-pen text-[10px]" wire:loading.remove wire:target="startEditingProfileEmail"></i>
                                         <i class="fas fa-spinner animate-spin text-[10px]" wire:loading wire:target="startEditingProfileEmail"></i>
                                     </button>
-                                    <div class="absolute top-full right-0 mt-1.5 pointer-events-none opacity-0 group-hover/email-edit:opacity-100 transition-opacity duration-150 z-50">
+                                    <div class="hidden md:block absolute top-full right-0 mt-1.5 pointer-events-none opacity-0 group-hover/email-edit:opacity-100 transition-opacity duration-150 z-50">
                                         <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md whitespace-nowrap relative">
                                             <span class="absolute bottom-full right-2.5 border-4 border-transparent border-b-gray-900"></span>
                                             Edit
@@ -1919,7 +1945,7 @@ new class extends Component {
                                 @foreach($deptCodeNamesForProfile as $deptCode => $deptCodeName)
                                     <div class="relative group/dept">
                                         <span class="inline-block px-2 py-0.5 bg-[#faf7fd] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-mono font-semibold cursor-default">{{ $deptCode }}</span>
-                                        <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/dept:opacity-100 transition-opacity duration-150 z-50">
+                                        <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/dept:opacity-100 transition-opacity duration-150 z-50">
                                             <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
                                                 <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
                                                 {{ $deptCodeName ?: $deptCode }}
@@ -1967,7 +1993,7 @@ new class extends Component {
                     </svg>
                     <i class="fas fa-spinner animate-spin text-white text-xs" wire:loading wire:target="closeModal"></i>
                 </button>
-                <div class="absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/close:opacity-100 transition-opacity duration-150 z-50">
+                <div class="hidden md:block absolute top-full right-0 mt-2 pointer-events-none opacity-0 group-hover/close:opacity-100 transition-opacity duration-150 z-50">
                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
                         <span class="absolute bottom-full right-3 border-4 border-transparent border-b-gray-900"></span>
                         Close
@@ -2171,7 +2197,7 @@ new class extends Component {
                                                     <i class="fas fa-pen-to-square text-xs" wire:loading.remove wire:target="startRenamingCollege('{{ addslashes($college) }}')"></i>
                                                     <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="startRenamingCollege('{{ addslashes($college) }}')"></i>
                                                 </button>
-                                                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/a:opacity-100 transition-opacity z-50">
+                                                <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/a:opacity-100 transition-opacity z-50">
                                                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
                                                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
                                                         Rename
@@ -2187,7 +2213,7 @@ new class extends Component {
                                                     <i class="fas fa-pencil text-xs" wire:loading.remove wire:target="startEditingCollege('{{ addslashes($college) }}')"></i>
                                                     <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="startEditingCollege('{{ addslashes($college) }}')"></i>
                                                 </button>
-                                                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/b:opacity-100 transition-opacity z-50">
+                                                <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/b:opacity-100 transition-opacity z-50">
                                                     <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
                                                         <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
                                                         Edit

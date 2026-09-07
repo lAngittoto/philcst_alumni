@@ -276,6 +276,57 @@
             color: #7A3F91 !important;
         }
 
+        /* ── Nav link click spinner ──────────────────────────────
+           Same visual language as the registrar sidebar's spinner
+           (fa-spinner fa-spin) so navigation feedback is consistent
+           across portals. Expanded sidebar: spinner sits at the end
+           of the row (where the active dot sits), icon stays visible.
+           Collapsed sidebar / mobile: spinner is centered on top of
+           the icon chip, icon hidden. */
+        .dir-nav-icon { position: relative; }
+        .dir-nav-spinner {
+            flex-shrink: 0;
+            margin-left: auto;
+            font-size: 13px;
+            color: #7A3F91;
+            line-height: 1;
+        }
+        .dir-nav-spinner-icon-anchored { display: none; }
+
+        .dir-sidebar.is-collapsed .dir-nav-link.is-navigating > .dir-nav-spinner,
+        .dir-nav-link.is-navigating > .dir-nav-spinner {
+            display: none !important;
+        }
+        .dir-sidebar.is-collapsed .dir-nav-link.is-navigating .dir-nav-spinner-icon-anchored,
+        .dir-nav-link.is-navigating .dir-nav-spinner-icon-anchored {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            font-size: 16px !important;
+        }
+        .dir-nav-spinner-icon-anchored .dir-nav-spinner {
+            margin-left: 0;
+        }
+        .dir-sidebar.is-collapsed .dir-nav-link.is-navigating .dir-nav-icon i.fa-solid,
+        .dir-nav-link.is-navigating .dir-nav-icon i.fa-solid {
+            display: none !important;
+        }
+        @media (min-width: 1024px) {
+            .dir-sidebar:not(.is-collapsed) .dir-nav-link.is-navigating > .dir-nav-spinner {
+                display: flex !important;
+            }
+            .dir-sidebar:not(.is-collapsed) .dir-nav-link.is-navigating .dir-nav-spinner-icon-anchored {
+                display: none !important;
+            }
+            .dir-sidebar:not(.is-collapsed) .dir-nav-link.is-navigating .dir-nav-icon i.fa-solid {
+                display: inline-block !important;
+            }
+        }
+
         /* ── Bell "sonar" alert — two staggered rings ping out from the
            badge dot like a radar sweep, runs continuously while there is
            at least one unread notification. The second ring is delayed
@@ -315,6 +366,13 @@
             overflow: hidden;
             white-space: nowrap;
             transition: opacity 0.2s ease, max-width 0.2s ease;
+        }
+
+        /* Coordinator Management label is the longest in the sidebar —
+           shrink just this one so it fits without wrapping/truncating. */
+        .dir-nav-label.dir-nav-label-sm {
+            font-size: 12.5px !important;
+            letter-spacing: 0.005em;
         }
 
         .dir-nav-section-row {
@@ -451,6 +509,22 @@
             #dir-sidebar-aside .dir-nav-icon {
                 margin-right: 0 !important;
             }
+            #dir-sidebar-aside .dir-nav-link.is-navigating > .dir-nav-spinner {
+                display: none !important;
+            }
+            #dir-sidebar-aside .dir-nav-link.is-navigating .dir-nav-spinner-icon-anchored {
+                display: flex !important;
+                align-items: center;
+                justify-content: center;
+                position: absolute !important;
+                top: 50% !important;
+                left: 50% !important;
+                transform: translate(-50%, -50%) !important;
+                font-size: 16px !important;
+            }
+            #dir-sidebar-aside .dir-nav-link.is-navigating .dir-nav-icon i.fa-solid {
+                display: none !important;
+            }
 
             #dir-sidebar-aside .dir-logout-btn {
                 gap: 0;
@@ -471,6 +545,32 @@
         #dir-notif-panel {
             max-width: calc(100vw - 16px);
         }
+
+        /* ── Disable text selection/copy inside the notif panel ───
+           Applies to the whole panel: header label, item titles,
+           messages, timestamps, footer hint. Buttons still work
+           fine since we're only blocking text selection, not clicks. ── */
+        #dir-notif-panel,
+        #dir-notif-panel * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
+        /* ── "Mark all read" as a proper button chip instead of a
+           bare text link, so it reads as a clear tappable action. ── */
+        .dir-mark-all-btn {
+            background: rgba(255,255,255,0.16) !important;
+            border: 1px solid rgba(255,255,255,0.28) !important;
+        }
+        .dir-mark-all-btn:hover {
+            background: rgba(255,255,255,0.26) !important;
+        }
+        .dir-mark-all-btn:active {
+            transform: scale(0.96);
+        }
+
         @media (max-width: 1023px) {
             #dir-notif-panel {
                 position: fixed !important;
@@ -1321,16 +1421,19 @@
     class="antialiased"
     x-data="{
         open: false,
-        sidebarCollapsed: false,
+        sidebarCollapsed: localStorage.getItem('dir_sidebar_collapsed') === '1',
         sidebarHiddenByModal: false,
         loggingOut: false,
+        navClickedRoute: null,
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
     }"
+    x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('dir_sidebar_collapsed', val ? '1' : '0'); })"
     @click="$store.dirNotifs && $store.dirNotifs.open && $store.dirNotifs.close()"
     @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
-    @open-sidebar.window="sidebarHiddenByModal = false;">
+    @open-sidebar.window="sidebarHiddenByModal = false;"
+    @@livewire:navigated.window="navClickedRoute = null">
 
 <div class="dir-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
@@ -1357,6 +1460,26 @@
         class="dir-sidebar fixed inset-y-0 left-0 z-[60] transform
                lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0">
+        <script>
+            /* Apply the collapsed class synchronously, before Alpine
+               initializes and before first paint, so a page navigated
+               to via wire:navigate never flashes open-then-collapse.
+               Also kill the width transition for this one frame so the
+               class snapping on doesn't itself animate. */
+            (function () {
+                var aside = document.getElementById('dir-sidebar-aside');
+                if (!aside) return;
+                if (localStorage.getItem('dir_sidebar_collapsed') === '1') {
+                    aside.classList.add('is-collapsed');
+                    aside.style.transition = 'none';
+                    requestAnimationFrame(function () {
+                        requestAnimationFrame(function () {
+                            aside.style.transition = '';
+                        });
+                    });
+                }
+            })();
+        </script>
 
         {{-- Sidebar header --}}
         <div class="dir-sidebar-header h-24 px-5 shrink-0">
@@ -1434,27 +1557,43 @@
             @endphp
 
             @foreach($sidebarLinks as $link)
-                @php $isActive = request()->is($link['pattern']); @endphp
+                @php
+                    $isActive = request()->is($link['pattern']);
+                    $isCoordinator = $link['route'] === 'director.coordinator/management';
+                @endphp
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="open = false;"
+                   @click="open = false; navClickedRoute = '{{ $link['route'] }}';"
+                   :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="dir-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
 
                     <div class="dir-nav-icon {{ $link['color'] }} w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
                          style="box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
-                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
+                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
+                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
+                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                            <span class="dir-nav-spinner-icon-anchored">
+                                <i class="fas fa-spinner fa-spin dir-nav-spinner"></i>
+                            </span>
+                        </template>
                     </div>
 
-                    <span class="dir-nav-label dir-collapsible-text font-medium tracking-wide flex-1 text-[14px]
+                    <span class="dir-nav-label dir-collapsible-text font-medium tracking-wide flex-1 text-[14px] {{ $isCoordinator ? 'dir-nav-label-sm' : '' }}
                                  {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
 
+                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                        <i class="fas fa-spinner fa-spin dir-nav-spinner"></i>
+                    </template>
+
                     @if($isActive)
-                        <span class="dir-active-dot dir-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
-                              style="background:#7A3F91;"></span>
+                        <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
+                            <span class="dir-active-dot dir-collapsible-text ml-auto w-1.5 h-6 rounded-full shrink-0"
+                                  style="background:#7A3F91;"></span>
+                        </template>
                     @endif
                 </a>
             @endforeach
@@ -1631,7 +1770,7 @@
                     x-show="$store.dirNotifs && $store.dirNotifs.unread > 0"
                     x-cloak
                     @click.stop="$store.dirNotifs && $store.dirNotifs.markAllRead()"
-                    class="text-white/70 hover:text-white font-semibold hover:bg-white/10
+                    class="dir-mark-all-btn text-white font-semibold
                            rounded-lg px-2.5 py-1.5 transition"
                     style="font-size:11px;">
                 Mark all read

@@ -4,6 +4,7 @@
 
 use Livewire\Volt\Component;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use App\Models\AdminEvent;
 use App\Models\JobPosting;
 use App\Models\Organizer;
@@ -34,6 +35,10 @@ new class extends Component {
     public string $greeting    = '';
     public string $currentDate = '';
 
+    public string $directorName  = '';
+    public string $directorEmail = '';
+    public string $directorPhoto = '';
+
     public function mount(): void
     {
         abort_unless(auth()->check() && auth()->user()->role === 'director', 403);
@@ -46,7 +51,24 @@ new class extends Component {
             default    => 'Good Evening',
         };
 
+        $dir = DB::table('director')->where('user_id', auth()->id())->first();
+        $this->directorName = $dir
+            ? trim(implode(' ', array_filter([$dir->first_name ?? '', $dir->middle_name ?? '', $dir->last_name ?? '', $dir->suffix ?? ''])))
+            : '';
+        if ($this->directorName === '') $this->directorName = auth()->user()->name ?? 'Director';
+
+        $this->directorEmail = ($dir && !empty($dir->email)) ? $dir->email : (auth()->user()->email ?? '—');
+        $this->directorPhoto = $this->photoUrl($dir->profile_photo ?? '');
+
         $this->loadStats();
+    }
+
+    public function photoUrl(?string $p): string
+    {
+        if (!$p) return asset('storage/alumni-photos/default.png');
+        if (str_starts_with($p, 'alumni-photos/') || str_starts_with($p, 'organizers/') || str_starts_with($p, 'directors/') || str_starts_with($p, 'registrars/'))
+            return Storage::disk('public')->exists($p) ? asset('storage/'.$p) : asset('storage/alumni-photos/default.png');
+        return asset('storage/alumni-photos/default.png');
     }
 
     private function loadStats(): void
@@ -196,10 +218,23 @@ new class extends Component {
 ?>
 
 <div
+    id="dir-dashboard-root"
     class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full"
 >
 
 <style>
+/* ── Disable text selection/copy across the whole dashboard ──
+   Covers stat numbers, labels, table rows, chips, account info,
+   everything. Buttons/links/inputs still work fine since this
+   only blocks text selection, not clicks. ── */
+#dir-dashboard-root,
+#dir-dashboard-root * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+
 /* ── Stat card tooltip (desktop only — no tooltip text on mobile) ── */
 .dir-stat-card { position: relative; overflow: visible; }
 .dir-stat-card .dir-card-tip {
@@ -355,22 +390,25 @@ new class extends Component {
     <div class="dir-account-col dir-fade-up">
         <div class="dir-account-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
-            <div class="relative w-full overflow-hidden shrink-0 h-[400px] sm:h-[240px]"
+            <div class="relative w-full overflow-hidden shrink-0 h-[420px] sm:h-[270px]"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <div class="w-full h-full flex items-center justify-center">
-                    <div class="w-24 h-24 sm:w-20 sm:h-20 rounded-full flex items-center justify-center font-black text-white text-[2.4rem] sm:text-[2rem]"
-                         style="background:rgba(255,255,255,0.16); border:2px solid rgba(255,255,255,0.4);">
-                        <i class="fas fa-user-shield"></i>
-                    </div>
+                    @if(str_ends_with($directorPhoto, 'default.png'))
+                        <div class="w-52 h-52 sm:w-40 sm:h-40 rounded-full flex items-center justify-center font-black text-white text-[4.5rem] sm:text-[3.6rem]"
+                             style="background:rgba(255,255,255,0.16); border:3px solid rgba(255,255,255,0.4);">
+                            <i class="fas fa-user-shield"></i>
+                        </div>
+                    @else
+                        <img src="{{ $directorPhoto }}" alt="{{ $directorName }}"
+                             class="w-52 h-52 sm:w-40 sm:h-40 rounded-full object-cover"
+                             style="border:3px solid rgba(255,255,255,0.4);">
+                    @endif
                 </div>
                 <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.55) 100%);"></div>
                 <div class="absolute bottom-0 left-0 right-0 px-4 pb-4">
                     <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.1rem] sm:text-[1.15rem]"
                        style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
-                        {{ auth()->user()->name ?? 'Director' }}
-                    </p>
-                    <p class="font-mono text-[0.78rem] sm:text-[0.8rem]" style="color:rgba(255,255,255,.75);">
-                        Alumni Portal Admin
+                        {{ $directorName ?: 'Director' }}
                     </p>
                 </div>
             </div>
@@ -379,12 +417,12 @@ new class extends Component {
 
                 <div class="dir-info-row">
                     <span class="dir-info-label">Name</span>
-                    <span class="dir-info-value">{{ auth()->user()->name ?? 'Director' }}</span>
+                    <span class="dir-info-value">{{ $directorName ?: 'Director' }}</span>
                 </div>
 
-                <div class="dir-info-row" style="align-items:flex-start;">
-                    <span class="dir-info-label" style="margin-top:2px;">Email</span>
-                    <span class="dir-info-value-sm">{{ auth()->user()->email ?? '—' }}</span>
+                <div class="dir-info-row">
+                    <span class="dir-info-label">Email</span>
+                    <span class="dir-info-value" style="max-width:220px;" title="{{ $directorEmail }}">{{ $directorEmail }}</span>
                 </div>
 
                 <div class="dir-info-row">
