@@ -256,7 +256,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-adm-root-height"
+<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-adm-root-height yb-adm-noselect"
      x-data="{
         setAvailHeight() {
             const rect = this.$el.getBoundingClientRect();
@@ -269,7 +269,11 @@ new class extends Component {
         setAvailHeight();
         window.addEventListener('resize', () => setAvailHeight());
         window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
-     ">
+     "
+     oncontextmenu="return false;"
+     oncopy="return false;"
+     onselectstart="return false;"
+     oncut="return false;">
 
 <style>
 /* ── Card hover ── */
@@ -443,6 +447,24 @@ new class extends Component {
 }
 
 [x-cloak] { display: none !important; }
+
+/* ── Disable text selection / copy across the yearbook UI ── */
+.yb-adm-noselect,
+.yb-adm-noselect * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+/* Keep the search box usable for typing/selecting its own text */
+.yb-adm-noselect input,
+.yb-adm-noselect textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
 </style>
 
     {{-- ══ PAGE HEADER ══ --}}
@@ -455,7 +477,7 @@ new class extends Component {
                 </div>
                 <div>
                     <h1 class="yb-adm-mobile-title text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                    <p class="yb-adm-mobile-subtitle text-xs leading-relaxed mt-0.5" style="color:#555555;">All Colleges &amp; Courses</p>
+                    <p class="yb-adm-mobile-subtitle text-xs leading-relaxed mt-0.5 font-semibold" style="color:#7A3F91;">All Colleges &amp; Courses</p>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -561,7 +583,7 @@ new class extends Component {
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
+                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer ml-auto order-2"
                     style="color:#333333;">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm"></i>
@@ -577,7 +599,7 @@ new class extends Component {
             </button>
 
             {{-- Found count ── --}}
-            <div class="flex items-center gap-2 ml-auto">
+            <div class="flex items-center gap-2 order-3">
                 <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
                       style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
                     {{ number_format($this->totalFiltered) }} found

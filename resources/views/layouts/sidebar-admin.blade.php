@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>{{ config('app.name', 'Philcst') }} - Admin</title>
 
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
@@ -13,6 +16,11 @@
     @livewireStyles
 
     <style>
+        /* ── Disable Livewire wire:navigate top progress bar (nprogress) ── */
+        #nprogress {
+            display: none !important;
+        }
+
         [x-cloak] { display: none !important; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
@@ -72,6 +80,42 @@
             100% { transform: scale(2.2);  opacity: 0; }
         }
         .admin-notif-item { cursor: pointer; position: relative; }
+
+        /* ── Hover-grow on the unread dot — hovering the row scales the
+           red dot up (the ripple wave underneath keeps animating as-is),
+           so hovering makes clear this is a live unread indicator. ── */
+        .notif-ripple {
+            transition: transform 0.15s ease;
+        }
+        .admin-notif-item:hover .notif-ripple {
+            transform: scale(1.6);
+        }
+
+        /* ── In-place notif loading overlay (used while marking read /
+           navigating to the notif's target, and while deleting). Same
+           visual language as the rest of the app: fa-spinner fa-spin,
+           brand purple (red for delete). The item's own content blurs
+           out underneath instead of being fully covered, so it still
+           reads as "this item is busy" rather than an empty gap. ── */
+        .admin-notif-item.is-loading > *:not(.admin-notif-item-loading-overlay) {
+            filter: blur(4px);
+            opacity: 0.5;
+            pointer-events: none;
+            user-select: none;
+        }
+        .admin-notif-item-loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+        }
+        .admin-notif-item-spinner {
+            font-size: 22px;
+            color: #7A3F91;
+        }
 
         /* Disable text selection/copy inside the notif panel — header
            label, item titles, messages, timestamps, footer hint.
@@ -268,11 +312,8 @@
 
         @media (min-width: 1024px) {
             #admin-sidebar-aside.is-collapsed {
-                width: 0 !important;
-                min-width: 0 !important;
-                border-right-width: 0 !important;
-                overflow: hidden !important;
-                pointer-events: none;
+                width: 5rem !important;
+                min-width: 5rem !important;
             }
             #admin-sidebar-aside.is-collapsed .admin-collapsible-text {
                 opacity: 0;
@@ -293,6 +334,9 @@
             #admin-sidebar-aside.is-collapsed nav a > div:first-child {
                 margin-right: 0 !important;
             }
+            #admin-sidebar-aside.is-collapsed .admin-nav-link.is-navigating .admin-nav-icon-wrap i.fa-solid {
+                display: none !important;
+            }
             #admin-sidebar-aside.is-collapsed .admin-nav-section-row {
                 justify-content: center;
                 padding: 0 0.25rem;
@@ -306,6 +350,73 @@
             }
             #admin-sidebar-aside.is-collapsed form button[type="submit"] i {
                 margin-right: 0 !important;
+            }
+            #admin-sidebar-aside.is-collapsed .p-4 > a[href*="logout"] {
+                gap: 0;
+                padding: 0.9rem;
+            }
+            #admin-sidebar-aside.is-collapsed .p-4 > a[href*="logout"] i.fa-right-from-bracket {
+                margin-right: 0 !important;
+            }
+        }
+
+        @media (max-width: 1023px) {
+            #admin-sidebar-aside {
+                box-shadow: 0 0 60px rgba(0,0,0,0.18);
+            }
+        }
+
+        /* ── Nav link click spinner — mirrors the organizer sidebar's
+           coord-nav-spinner. Shows a small spinner at the end of the
+           row while a page navigation is in flight, so clicking a
+           sidebar link gives immediate feedback instead of feeling
+           unresponsive until the next page lands.
+           Expanded sidebar: sits at the end of the row (where the
+           active dot sits), icon stays visible. Collapsed sidebar /
+           mobile: centered on top of the icon chip, icon hidden. ── */
+        .admin-nav-link { position: relative; }
+        .admin-nav-icon-wrap { position: relative; }
+        .admin-nav-link.is-navigating .admin-nav-icon-wrap {
+            background: #F0F0F0 !important;
+            color: #9CA3AF !important;
+        }
+        .admin-nav-spinner {
+            flex-shrink: 0;
+            margin-left: auto;
+            font-size: 13px;
+            color: #7A3F91;
+            line-height: 1;
+        }
+        .admin-nav-spinner-icon-anchored { display: none; }
+
+        #admin-sidebar-aside.is-collapsed .admin-nav-link.is-navigating > .admin-nav-spinner,
+        .admin-nav-link.is-navigating > .admin-nav-spinner {
+            display: none !important;
+        }
+        #admin-sidebar-aside.is-collapsed .admin-nav-link.is-navigating .admin-nav-spinner-icon-anchored,
+        .admin-nav-link.is-navigating .admin-nav-spinner-icon-anchored {
+            display: flex !important;
+            align-items: center;
+            justify-content: center;
+            position: absolute !important;
+            top: 50% !important;
+            left: 50% !important;
+            transform: translate(-50%, -50%) !important;
+            font-size: 16px !important;
+        }
+        .admin-nav-spinner-icon-anchored .admin-nav-spinner {
+            margin-left: 0;
+        }
+
+        @media (min-width: 1024px) {
+            #admin-sidebar-aside:not(.is-collapsed) .admin-nav-link.is-navigating > .admin-nav-spinner {
+                display: inline-block !important;
+            }
+            #admin-sidebar-aside:not(.is-collapsed) .admin-nav-link.is-navigating .admin-nav-spinner-icon-anchored {
+                display: none !important;
+            }
+            #admin-sidebar-aside:not(.is-collapsed) .admin-nav-link.is-navigating .admin-nav-icon-wrap i.fa-solid {
+                display: none !important;
             }
         }
     </style>
@@ -333,6 +444,8 @@
             items:      [],
             _pollTimer: null,
             _deleting:  false,
+            navigating: false,
+            loadingId:  null,
             deleteToast: { show: false, message: '' },
 
             async init() {
@@ -352,7 +465,8 @@
             },
 
             async _fetch() {
-                if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
+                if (this._deleting)  return; // don't let a poll refresh clobber an in-flight delete
+                if (this.navigating) return; // don't let a poll refresh clobber an in-flight mark-read/navigate
                 try {
                     var res = await window.fetch('/admin/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -401,6 +515,12 @@
 
                         // NEW JOB POST — dedup prefix: job-posted:: (separate row per job, never grouped)
                         var isNewJobEvent = rawDedup.startsWith('job-posted::');
+                        // job_id lives right after the prefix in dedup_key
+                        // (job-posted::{id}) — parsed here since the API
+                        // payload doesn't carry a separate job_id field.
+                        var jobIdFromDedup = isNewJobEvent
+                            ? (rawDedup.split('::')[1] || null)
+                            : null;
 
                         // EVENT APPROVED / COMPLETED — dedup prefix: event-status::
                         // One row PER EVENT that morphs in place: created as
@@ -492,10 +612,23 @@
                                 _isUserToggled:    isUserToggledEvent,
                                 _isUserEmail:      isUserEmailEvent,
                                 _isUserUsername:   isUserUsernameEvent,
+                                job_id:            n.job_id || jobIdFromDedup || null,
                             }));
                         }
                     });
-                return Array.from(map.values());
+
+                // ── Stable sort: unread items first, then read items —
+                //    each block keeps its existing created_at-desc order.
+                //    Without this, the "Already Read" divider (which
+                //    fires on every unread→read transition in the list)
+                //    can render more than once whenever an unread and a
+                //    read item end up interleaved instead of cleanly
+                //    grouped (e.g. after a poll refresh reorders things
+                //    by timestamp instead of by read state). ──
+                var grouped = Array.from(map.values());
+                var unreadGroup = grouped.filter(function (n) { return !n.read; });
+                var readGroup   = grouped.filter(function (n) { return n.read; });
+                return unreadGroup.concat(readGroup);
             },
 
             get unread() {
@@ -514,18 +647,111 @@
             async markRead(item) {
                 if (item.read) return;
                 item.read = true;
-                var ids  = Array.isArray(item._ids) ? item._ids : [item.id];
-                var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                var ids     = Array.isArray(item._ids) ? item._ids : [item.id];
+                var csrf    = document.querySelector('meta[name="csrf-token"]').content;
+                var allOk   = true;
                 for (var i = 0; i < ids.length; i++) {
                     try {
-                        await window.fetch('/admin/notifications/' + ids[i] + '/read', {
+                        var res = await window.fetch('/admin/notifications/' + ids[i] + '/read', {
                             method: 'PATCH',
                             headers: {
                                 'X-CSRF-TOKEN':     csrf,
                                 'X-Requested-With': 'XMLHttpRequest',
                             }
                         });
-                    } catch (e) { /* ignore */ }
+                        if (!res.ok) allOk = false;
+                    } catch (e) {
+                        allOk = false;
+                    }
+                }
+                // ── If the PATCH didn't actually succeed, don't leave the
+                //    item optimistically marked read in memory — the next
+                //    poll (every 1.5s) re-fetches from the DB, which still
+                //    has it unread, and silently "resets" it back to
+                //    unread on screen. Revert now instead so the UI stays
+                //    honest, and let the row be clickable again. ──
+                if (!allOk) {
+                    item.read = false;
+                }
+            },
+
+            // Click entry point for a notif row: shows a spinner overlay on
+            // the item (via `navigating` + `loadingId`) while it's marked
+            // read and routed to its target — same UX as the organizer
+            // sidebar's notif panel. The overlay is left on until either
+            // the destination page actually lands (`livewire:navigated`,
+            // handled globally below) or, for a same-page click that never
+            // navigates at all, a short timeout clears it itself.
+            async openNotif(item) {
+                this.navigating = true;
+                this.loadingId  = item.id;
+                var clearedByNav = false;
+                try {
+                    await this.markRead(item);
+                    clearedByNav = this._goToTarget(item);
+                } finally {
+                    if (!clearedByNav) {
+                        this.navigating = false;
+                        this.loadingId  = null;
+                    }
+                }
+            },
+
+            // Routes to wherever this notif points. Returns true when it
+            // kicked off some kind of transition (so the caller leaves the
+            // spinner on), false when there was nowhere to go (spinner
+            // clears immediately).
+            _goToTarget(item) {
+                if (!item.link_route) return false;
+
+                var self = this;
+                var url  = window.__adminRouteMap[item.link_route] || '/admin/dashboard';
+                if (item.link_route === 'job.posts' && item.job_id) {
+                    url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_job=' + encodeURIComponent(item.job_id);
+                }
+
+                var targetPath    = url.split('?')[0];
+                var isSameLocation = window.location.pathname === targetPath;
+
+                // ── Already on Job Posts? Skip the URL/reload entirely —
+                //    dispatch straight to the mounted Livewire component
+                //    so it opens View Details immediately, no page flash.
+                //    Nothing actually navigates here, so drop the spinner
+                //    (and close the panel) shortly after instead of
+                //    waiting on a `livewire:navigated` that will never
+                //    fire. ──
+                if (isSameLocation && item.link_route === 'job.posts' && item.job_id && window.Livewire) {
+                    Livewire.dispatch('open-view-job', { id: Number(item.job_id) });
+                    setTimeout(function () {
+                        self.navigating = false;
+                        self.loadingId  = null;
+                        self.open       = false;
+                    }, 400);
+                    return true;
+                } else if (isSameLocation) {
+                    // Already on the target page — nothing will actually
+                    // navigate, so just close the panel and drop the
+                    // spinner shortly after instead of waiting on a
+                    // `livewire:navigated` that will never fire.
+                    setTimeout(function () {
+                        self.navigating = false;
+                        self.loadingId  = null;
+                        self.open       = false;
+                    }, 400);
+                    return true;
+                } else if (window.Livewire) {
+                    // ── Keep the panel open (with the spinner overlay
+                    //    showing on this item) until the destination page
+                    //    actually lands — closing it here left a visible
+                    //    flash of "panel closed, spinner still spinning"
+                    //    right before navigation kicked in. The
+                    //    `livewire:navigated` handler below closes the
+                    //    panel once the new page has truly landed. ──
+                    Livewire.navigate(url);
+                    return true;
+                } else {
+                    window.location.href = url;
+                    return true;
                 }
             },
 
@@ -683,6 +909,8 @@
                     if (s._pollTimer) clearInterval(s._pollTimer);
                     s._pollTimer = null;
                     s.open = false;
+                    s.navigating = false;
+                    s.loadingId  = null;
                 }
                 return;
             }
@@ -691,6 +919,8 @@
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open = false;
+                s.navigating = false; // destination page has landed — drop the spinner now, not before
+                s.loadingId  = null;
                 s.init();
             } else {
                 Alpine.store('adminNotifs', window.__makeAdminNotifsStore());
@@ -1022,12 +1252,15 @@
     class="antialiased"
     x-data="{
         open: false,
-        sidebarCollapsed: false,
+        sidebarCollapsed: localStorage.getItem('admin_sidebar_collapsed') === '1',
+        navClickedRoute: null,
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
     }"
-    @click="$store.adminNotifs && $store.adminNotifs.open && $store.adminNotifs.close()">
+    x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('admin_sidebar_collapsed', val ? '1' : '0'); })"
+    @click="$store.adminNotifs && $store.adminNotifs.open && $store.adminNotifs.close()"
+    @@livewire:navigated.window="navClickedRoute = null; open = false;">
 
 @php
     $authAdmin = auth()->user();
@@ -1152,15 +1385,23 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   class="flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
+                   @click="navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024) open = false;"
+                   :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
+                   class="admin-nav-link flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
                           {{ $isActive
                               ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
                               : 'hover:bg-[#F9F7FC]' }}">
 
-                    <div class="w-10 h-10 flex items-center justify-center rounded-lg
+                    <div class="admin-nav-icon-wrap w-10 h-10 flex items-center justify-center rounded-lg
                                 transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
                          style="background-color:{{ $isActive ? $link['color'].'1F' : '#F9F7FC' }};color:{{ $link['color'] }};">
-                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"></i>
+                        <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
+                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
+                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                            <span class="admin-nav-spinner-icon-anchored">
+                                <i class="fas fa-spinner fa-spin admin-nav-spinner"></i>
+                            </span>
+                        </template>
                     </div>
 
                     <span class="admin-collapsible-text font-medium tracking-wide flex-1
@@ -1169,9 +1410,15 @@
                         {{ $link['label'] }}
                     </span>
 
+                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
+                        <i class="fas fa-spinner fa-spin admin-nav-spinner"></i>
+                    </template>
+
                     @if($isActive)
-                        <span class="admin-nav-active-dot ml-auto w-1.5 h-5 rounded-full shrink-0 opacity-70"
-                              style="background:{{ $link['color'] }};"></span>
+                        <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
+                            <span class="admin-nav-active-dot ml-auto w-1.5 h-5 rounded-full shrink-0 opacity-70"
+                                  style="background:{{ $link['color'] }};"></span>
+                        </template>
                     @endif
                 </a>
             @endforeach
@@ -1272,18 +1519,6 @@
             </style>
         </div>
     </aside>
-
-    {{-- Floating expand button — only visible when sidebar is fully collapsed --}}
-    <button type="button"
-            x-show="sidebarCollapsed"
-            x-cloak
-            @click.stop="toggleSidebar()"
-            title="Expand sidebar"
-            class="hidden lg:flex fixed items-center justify-center w-8 h-8 rounded-r-lg
-                   transition hover:bg-[#E9D8F5]"
-            style="top: 1.75rem; left: 0; background:#F3EBFA; color:#7A3F91; z-index: 9992; border:1px solid #E8E0F0; border-left:none;">
-        <i class="fas fa-angles-right" style="font-size:11px;line-height:1;"></i>
-    </button>
 
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
@@ -1519,15 +1754,19 @@
                     class="admin-notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#F8F5FD] hover:bg-[#F0E9FA]'"
-                    @click.stop="
-                        $store.adminNotifs.markRead(notif);
-                        $store.adminNotifs.close();
-                        if (notif.link_route) {
-                            const url = window.__adminRouteMap[notif.link_route] || '/admin/dashboard';
-                            window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
-                        }
-                    ">
+                    :class="[
+                        notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#F8F5FD] hover:bg-[#F0E9FA]',
+                        ($store.adminNotifs.navigating && $store.adminNotifs.loadingId === notif.id) ? 'is-loading' : ''
+                    ]"
+                    @click.stop="$store.adminNotifs.openNotif(notif)">
+
+                    {{-- Loading overlay — shown while this notif is being
+                         marked read and routed to its target page. --}}
+                    <template x-if="$store.adminNotifs.navigating && $store.adminNotifs.loadingId === notif.id">
+                        <div class="admin-notif-item-loading-overlay">
+                            <i class="fas fa-spinner fa-spin admin-notif-item-spinner"></i>
+                        </div>
+                    </template>
 
                     {{-- Icon (color-coded per notification type) --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"

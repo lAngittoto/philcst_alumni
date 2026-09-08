@@ -278,10 +278,27 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-6 max-w-screen-2xl mx-auto h-full min-h-0">
+<div class="crs-page flex flex-col px-3 sm:px-5 lg:px-6 pt-5 pb-6 max-w-screen-2xl mx-auto h-full min-h-0">
 
 <style>
 [x-cloak] { display: none !important; }
+
+/* Disable text selection/highlighting across this whole page — labels,
+   headers, hints, badges, buttons — but keep it enabled inside actual
+   inputs/textareas so typing, editing, and text-cursor placement there
+   still works normally. */
+.crs-page {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+}
+.crs-page input,
+.crs-page textarea,
+.crs-page [contenteditable="true"] {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    user-select: text;
+}
 
 .crs-action-tip {
     position: fixed;
@@ -362,8 +379,8 @@ new class extends Component {
             </svg>
         </div>
         <div>
-            <h1 class="text-3xl font-semibold text-[#333333] leading-tight">Manage Programs</h1>
-            <p class="text-xl text-[#333333] font-normal">Add and Edit Programs</p>
+            <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Manage Programs</h1>
+            <p class="text-sm text-[#7A3F91] font-normal select-none">Add and Edit Programs</p>
         </div>
     </div>
 

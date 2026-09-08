@@ -4,6 +4,7 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\WithPagination;
 use App\Models\JobPosting;
 use App\Models\JobOption;
@@ -93,6 +94,27 @@ new class extends Component {
         $jobsFilter = session()->pull('admin_jobs_filter', '');
         if (in_array($jobsFilter, ['ACTIVE', 'INACTIVE', 'EXPIRING'], true)) {
             $this->filterStatus = $jobsFilter;
+        }
+
+        // ── Auto-open View Details when arriving from a notification
+        // (sidebar notif panel routes here with ?highlight_job={id}) —
+        // same "click a notif -> land with the record already open"
+        // pattern as Event Management's highlight_event handling. Only
+        // opens if the job still exists; a deleted job's notif link
+        // just lands on the plain table instead of erroring.
+        $highlightJobId = request()->query('highlight_job');
+        if ($highlightJobId && JobPosting::whereKey($highlightJobId)->exists()) {
+            $this->viewJob((int) $highlightJobId);
+
+            // Strip ?highlight_job=... from the address bar once the modal
+            // is open — the query param has done its job, and leaving it
+            // there means a manual refresh or reshare of the URL keeps
+            // popping the same modal back open, plus it's just noise in
+            // the URL bar. history.replaceState swaps it out in place
+            // with no reload and no extra navigation entry.
+            $this->js(<<<'JS'
+                window.history.replaceState({}, '', window.location.pathname);
+            JS);
         }
     }
 
@@ -296,6 +318,15 @@ new class extends Component {
         $this->authorizeRole();
         $this->viewingJobId  = $id;
         $this->showViewModal = true;
+    }
+
+    // Same-page notif click: the sidebar dispatches this directly (instead
+    // of a full navigate) when the admin is already on Job Posts, so the
+    // View Details modal opens immediately with no page flash.
+    #[On('open-view-job')]
+    public function openViewJobFromNotif(int $id): void
+    {
+        $this->viewJob($id);
     }
 
     public function closeViewModal(): void
@@ -1951,27 +1982,20 @@ select.adm-select-arrow {
             + (payload.company ? ' at ' + payload.company : '')
             + ' — ' + posterLabel;
 
-        // Fire into the admin notification infrastructure
-        window.dispatchEvent(new CustomEvent('admin-job-updated', {
-            detail: [{
-                id:      payload.id,
-                title:   payload.title  || 'New Job Posting',
-                company: payload.company || '',
-                poster:  payload.poster  || 'Alumni Director',
-                // __message is used by the _saveAdminNotif handler in admin.blade.php
-                // We override it via a custom event so the message is richer
-            }]
-        }));
-
-        // Also directly save with the rich message by calling the store's
-        // internal save pathway — we re-dispatch with the extra _message field
-        // so the admin.blade.php handler can pick it up correctly.
-        // (The admin-job-updated handler in admin.blade.php uses d.title for the
-        //  message, so we patch the title to carry the poster info.)
-        //
-        // Actually: the admin.blade.php handler reads d.title for the notification
-        // title and builds its own message string. We need a richer message, so
-        // we dispatch a SECOND custom event with a _message override.
+        // ── Fire straight into the SAME save pathway the coordinator/
+        //    organizer flow already uses correctly (the __admin-job-posted-rich
+        //    handler below, which POSTs with the explicit link_route:
+        //    'job.posts'). Previously this also fired a generic
+        //    'admin-job-updated' event that a separate handler elsewhere
+        //    picked up and saved its own competing notification row for
+        //    the same dedup_key — whichever one landed last in the DB
+        //    won, which is why a director-posted job (poster label
+        //    falls back to 'Alumni Director' since there's no organizer
+        //    relation) would intermittently end up with the wrong
+        //    link_route and land on the dashboard instead of View
+        //    Details. Removing the duplicate dispatch means there's only
+        //    ever one save path — the one that's already proven correct
+        //    for coordinator/organizer job posts. ──
         window.dispatchEvent(new CustomEvent('__admin-job-posted-rich', {
             detail: {
                 id:      payload.id,
@@ -2007,6 +2031,7 @@ select.adm-select-arrow {
                         message:    d.message,
                         link_route: 'job.posts',
                         link_label: 'View Jobs',
+                        job_id:     d.id,
                         dedup_key:  'job-posted::' + d.id,
                     }),
                 });
