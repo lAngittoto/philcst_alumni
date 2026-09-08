@@ -25,15 +25,15 @@ new class extends Component {
     public ?int   $editingId = null;
     public string $editBody  = '';
 
+    // ── Delete-confirmation modal state ─────────────────────────────────────
+    public ?int $confirmDeleteId = null;
+
     // ── Side panels ───────────────────────────────────────────────────────
     public bool  $showMembers    = false;
     public bool  $showPins       = false;
     public array $directors      = [];
     public array $coordinators   = [];
     public array $pinnedMessages = [];
-
-    // ── Member search ─────────────────────────────────────────────────────
-    public string $memberSearch = '';
 
     // ── Online presence ───────────────────────────────────────────────────
     public int $onlineCount = 0;
@@ -922,12 +922,47 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     // Messages – Unsend (soft-delete → shows placeholder)
     // ─────────────────────────────────────────────────────────────────────
+    public function askDeleteConfirmation(int $id): void
+    {
+        $msg = collect($this->messages)->firstWhere('id', $id);
+        if (! $msg || ! $msg['is_mine'] || $msg['deleted']) return;
+        $this->confirmDeleteId = $id;
+    }
+
+    public function cancelDelete(): void
+    {
+        $this->confirmDeleteId = null;
+    }
+
     public function unsend(int $id): void
     {
-        // Unsend feature disabled — messages can no longer be removed
-        // by directors. Kept as a no-op stub so any stray wire:click
-        // calls (or an old cached UI) fail silently instead of erroring.
-        return;
+        $updated = DB::table('chat_messages')
+            ->where('id', $id)
+            ->where('sender_type', 'director')
+            ->where('sender_id', $this->directorId)
+            ->whereNull('deleted_at')
+            ->update(['deleted_at' => now()]);
+
+        $this->confirmDeleteId = null;
+
+        if (! $updated) return;
+
+        DB::table('chat_pins')->where('message_id', $id)->delete();
+        DB::table('chat_reactions')->where('message_id', $id)->delete();
+
+        if ($this->editingId === $id) {
+            $this->editingId = null;
+            $this->editBody  = '';
+        }
+
+        $this->loadMessages();
+
+        if ($this->showPins) {
+            $this->pinnedMessages = array_values(array_filter(
+                $this->pinnedMessages,
+                fn ($p) => $p['id'] !== $id
+            ));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1091,7 +1126,6 @@ new class extends Component {
     {
         $this->showMembers  = ! $this->showMembers;
         $this->showPins     = false;
-        $this->memberSearch = '';
         if ($this->showMembers) $this->loadMembers();
     }
 
@@ -1108,39 +1142,35 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     public function loadMembers(): void
     {
-        $q = trim($this->memberSearch);
-
         $self = $this;
 
         $this->directors = [];
 
-        $coordQuery = DB::table('organizer')
+        $this->coordinators = DB::table('organizer')
             ->where('status', 'ACTIVE')
-            ->whereNull('deleted_at');
-        if ($q !== '') {
-            $coordQuery->where(function ($sub) use ($q) {
-                $sub->where('first_name', 'like', "%{$q}%")
-                    ->orWhere('last_name', 'like', "%{$q}%")
-                    ->orWhereRaw("CONCAT(first_name,' ',last_name) LIKE ?", ["%{$q}%"]);
-            });
-        }
-
-        $this->coordinators = $coordQuery
+            ->whereNull('deleted_at')
             ->orderBy('first_name')
             ->get(['id', 'first_name', 'last_name', 'profile_photo', 'last_seen_at', 'department'])
-            ->map(fn ($o) => [
-                'id'         => $o->id,
-                'name'       => trim($o->first_name . ' ' . $o->last_name),
-                'photo'      => $self->resolvePhotoUrl($o->profile_photo ?? null),
-                'department' => $o->department ?? '',
-                'is_online'  => isset($o->last_seen_at)
-                                 && Carbon::parse($o->last_seen_at)->gte(now()->subMinutes(5)),
-            ])->toArray();
-    }
+            ->map(function ($o) use ($self) {
+                $isOnline = isset($o->last_seen_at)
+                            && Carbon::parse($o->last_seen_at)->gte(now()->subMinutes(5));
 
-    public function updatedMemberSearch(): void
-    {
-        $this->loadMembers();
+                return [
+                    'id'               => $o->id,
+                    'name'             => trim($o->first_name . ' ' . $o->last_name),
+                    'photo'            => $self->resolvePhotoUrl($o->profile_photo ?? null),
+                    'department'       => $o->department ?? '',
+                    'is_online'        => $isOnline,
+                    // Messenger-style relative label: "Online" while active,
+                    // "5 minutes ago" / "1 day ago" for ones who've been seen
+                    // before, or "Not yet active" if they've never logged in.
+                    'last_seen_label'  => $isOnline
+                                            ? 'Online'
+                                            : ($o->last_seen_at
+                                                ? Carbon::parse($o->last_seen_at)->diffForHumans()
+                                                : 'Not yet active'),
+                ];
+            })->toArray();
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1270,7 +1300,7 @@ new class extends Component {
 <div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
      style="height: calc(100vh - 250px); max-width: 1400px;"
      x-data="{ postNavigating: false }"
-     wire:poll.5000ms.visible="unifiedPoll">
+     @if(! $confirmDeleteId) wire:poll.5000ms.visible="unifiedPoll" @endif>
 <style>
     /* ── Shared Job/Event post-preview card — mirrors alumni-side
        messenger.blade.php card design (msgr-post-*) so shared events/jobs
@@ -1471,25 +1501,35 @@ new class extends Component {
                         wire:loading.attr="disabled"
                         wire:target="togglePins"
                         @click="pressed = 'pins'"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
+                        class="relative group flex items-center justify-center w-8 h-8 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
                         :style="(pressed === 'pins' || {{ $showPins ? 'true' : 'false' }})
                             ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
                             : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);'">
                     <i class="fa-solid fa-thumbtack text-xs" wire:loading.remove wire:target="togglePins"></i>
                     <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="togglePins"></i>
-                    <span class="hidden sm:inline ml-1">Pins</span>
+                    <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2
+                                 whitespace-nowrap px-2 py-1 rounded-md text-[11px] font-medium
+                                 bg-black text-white opacity-0 group-hover:opacity-100 transition-opacity
+                                 duration-150 z-50">
+                        Pins
+                    </span>
                 </button>
                 <button wire:click="toggleMembers"
                         wire:loading.attr="disabled"
                         wire:target="toggleMembers"
                         @click="pressed = 'members'"
-                        class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
+                        class="relative group flex items-center justify-center w-8 h-8 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
                         :style="(pressed === 'members' || {{ $showMembers ? 'true' : 'false' }})
                             ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
                             : 'background:rgba(255,255,255,.12);color:rgba(255,255,255,.75);border-color:rgba(255,255,255,.18);'">
                     <i class="fa-solid fa-user-group text-xs" wire:loading.remove wire:target="toggleMembers"></i>
                     <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="toggleMembers"></i>
-                    <span class="hidden sm:inline ml-1">Members</span>
+                    <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2
+                                 whitespace-nowrap px-2 py-1 rounded-md text-[11px] font-medium
+                                 bg-black text-white opacity-0 group-hover:opacity-100 transition-opacity
+                                 duration-150 z-50">
+                        Members
+                    </span>
                 </button>
             </div>
         </div>
@@ -1532,10 +1572,7 @@ new class extends Component {
 
                         {{-- Message row --}}
                         <div wire:key="msg-{{ $msg['id'] }}"
-                             class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}"
-                             x-data="{ confirmUnsend: false }"
-                             x-ref="row"
-                             @click.outside="confirmUnsend = false">
+                             class="flex {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }} items-end gap-2 {{ $sameGroup ? 'mt-0.5' : 'mt-3' }}">
 
                             {{-- Avatar – others --}}
                             @if(! $msg['is_mine'])
@@ -1625,7 +1662,7 @@ new class extends Component {
                                 @elseif($editingId === $msg['id'])
                                 <div class="px-3.5 py-2.5 rounded-2xl text-sm italic flex items-center gap-2
                                             {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}"
-                                     style="background:rgba(122,63,145,.08); border:1px dashed #c9a8d9; color:#7a3f91;">
+                                     style="background:#EFF6FF; border:1px dashed #93C5FD; color:#1D4ED8;">
                                     <i class="fa-solid fa-pen text-xs"></i>
                                     <span>Editing this message…</span>
                                 </div>
@@ -1644,7 +1681,7 @@ new class extends Component {
                                     $ppIsEvent   = ($pp['type'] ?? 'job') === 'event';
                                     $ppCompleted = $ppIsEvent && ($pp['is_completed'] ?? false);
                                 @endphp
-                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); confirmUnsend = false; $nextTick(() => { if (openMessageId === {{ $msg['id'] }}) $refs.row.scrollIntoView({ block: 'center', behavior: 'smooth' }); })"
+                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }})"
                                      class="msgr-post-card cursor-pointer {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
                                     <div class="msgr-post-thumb">
                                         @if($ppAvailable)
@@ -1722,7 +1759,7 @@ new class extends Component {
                                         $safe
                                     );
                                 @endphp
-                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); confirmUnsend = false; $nextTick(() => { if (openMessageId === {{ $msg['id'] }}) $refs.row.scrollIntoView({ block: 'center', behavior: 'smooth' }); })"
+                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }})"
                                      class="px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words
                                             cursor-pointer select-none transition-opacity active:opacity-80
                                             {{ $msg['is_mine']
@@ -1738,10 +1775,10 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- ── Inline action bar — anchored to the wrapper above,
-                                     so it always opens directly below the actual bubble
-                                     content (never overlapping it). Only shown for
-                                     non-deleted messages. ── --}}
+                                {{-- ── Inline action bar — click-to-open popup, anchored to
+                                     the wrapper above so it always opens directly below
+                                     the actual bubble content. Only shown for non-deleted
+                                     messages. ── --}}
                                 @if(!$msg['deleted'])
                                 <div x-show="openMessageId === {{ $msg['id'] }}"
                                      x-transition:enter="transition ease-out duration-150"
@@ -1829,10 +1866,13 @@ new class extends Component {
                                     </button>
                                     @endif
 
-                                    <button disabled
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#bbbbbb]
-                                                   cursor-not-allowed text-xs font-semibold">
-                                        <i class="fa-solid fa-trash-can text-xs"></i>
+                                    <button wire:click="askDeleteConfirmation({{ $msg['id'] }})"
+                                            @click.stop="openMessageId = null"
+                                            wire:loading.attr="disabled" wire:target="askDeleteConfirmation({{ $msg['id'] }})"
+                                            class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
+                                                   hover:text-red-600 hover:bg-red-50 transition text-xs font-semibold disabled:opacity-50">
+                                        <i class="fa-solid fa-trash-can text-xs" wire:loading.remove wire:target="askDeleteConfirmation({{ $msg['id'] }})"></i>
+                                        <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="askDeleteConfirmation({{ $msg['id'] }})"></i>
                                         <span class="hidden sm:inline">Unsend</span>
                                     </button>
                                     @endif
@@ -2141,7 +2181,7 @@ new class extends Component {
                             <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
                             <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
                             <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">@</kbd> mention &nbsp;·&nbsp;
-                            <span class="text-[#E8E0F0]">tap message for actions</span>
+                            <span class="text-[#bbbbbb]">tap message for actions</span>
                         @endif
                     </p>
                 </div>
@@ -2179,7 +2219,41 @@ new class extends Component {
 
                     @if($showMembers)
 
+                        {{-- ── You (Director) — always shown online, mirrors the
+                             alumni-side "(You) · Online" self row ── --}}
                         <div class="px-3 pt-3 pb-1 flex-shrink-0">
+                            <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#d9c9e8]"
+                                 style="background:#f3eef8;">
+                                <div class="relative flex-shrink-0">
+                                    <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center
+                                                text-xs font-semibold text-white"
+                                         style="background:#7a3f91;">
+                                        @if($directorPhoto)
+                                            <img src="{{ $directorPhoto }}"
+                                                 class="w-full h-full object-cover"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                                 alt="{{ $directorName }}">
+                                            <span style="display:none">{{ strtoupper(substr($directorName, 0, 1)) }}</span>
+                                        @else
+                                            {{ strtoupper(substr($directorName, 0, 1)) }}
+                                        @endif
+                                    </div>
+                                    <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-xs font-semibold text-[#333333] truncate">
+                                        {{ $directorName }}
+                                        <span class="text-[#7a3f91] font-semibold">(You)</span>
+                                    </p>
+                                    <span class="text-xs text-emerald-600 font-medium flex items-center gap-1 mt-0.5">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>
+                                        Online · Director
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="px-3 pt-2 pb-1 flex-shrink-0">
                             <div class="flex items-center justify-between mb-2 px-1">
                                 <p class="text-xs font-semibold text-[#7a3f91] uppercase tracking-widest">
                                     <i class="fa-solid fa-users text-xs mr-1"></i>Coordinators — {{ count($coordinators) }}
@@ -2194,24 +2268,12 @@ new class extends Component {
                             </div>
                         </div>
 
-                        <div class="px-3 pb-2.5 flex-shrink-0">
-                            <div class="relative">
-                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2
-                                          text-[#999999] text-xs pointer-events-none"></i>
-                                <input wire:model.live.debounce.300ms="memberSearch"
-                                       type="text"
-                                       placeholder="Search staff…"
-                                       class="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-[#E8E0F0]
-                                              bg-[#fafafa] focus:outline-none focus:border-[#7a3f91]
-                                              focus:ring-1 focus:ring-[#7a3f91]/20 transition placeholder-[#999999]"/>
-                            </div>
-                        </div>
-
                         <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-1">
                             @php
                                 $onlineCoords  = collect($coordinators)->where('is_online', true)->values();
                                 $offlineCoords = collect($coordinators)->where('is_online', false)->values();
                             @endphp
+
 
                             @if(count($onlineCoords) > 0)
                             <p class="text-xs font-semibold text-emerald-600 uppercase tracking-widest px-1 pb-1 pt-0.5">
@@ -2284,7 +2346,7 @@ new class extends Component {
                                     <div class="flex items-center gap-1.5 mt-0.5">
                                         <span class="text-xs text-[#999999] font-medium flex items-center gap-1">
                                             <span class="w-1.5 h-1.5 rounded-full bg-gray-400 inline-block flex-shrink-0"></span>
-                                            Offline
+                                            {{ $coord['last_seen_label'] ?? 'Not yet active' }}
                                         </span>
                                         @if($coord['department'])
                                         <span class="text-[#E8E0F0] text-xs">·</span>
@@ -2299,8 +2361,7 @@ new class extends Component {
                             @if(empty($coordinators))
                             <div class="flex flex-col items-center justify-center py-10 text-[#999999]">
                                 <i class="fa-solid fa-user-slash text-3xl text-[#E8E0F0] mb-3"></i>
-                                <p class="text-sm font-semibold">No results</p>
-                                <p class="text-xs mt-1">Try a different name</p>
+                                <p class="text-sm font-semibold">No coordinators yet</p>
                             </div>
                             @endif
                         </div>
@@ -2358,6 +2419,53 @@ new class extends Component {
             <p class="text-xs text-[#999999] mt-2 max-w-xs leading-relaxed">
                 The staff channel is being initialized. Please refresh the page.
             </p>
+        </div>
+    </div>
+    @endif
+
+    {{-- ══ Unsend confirmation modal ═══════════════════════════════════════
+         Single instance, driven purely by $confirmDeleteId (server-side
+         state) — mirrors the alumni-side messenger.blade.php modal so the
+         delete/unsend flow behaves identically across both roles. Kept
+         inside this component's single root div (Livewire/Volt requires
+         exactly one root element). ══ --}}
+    @if($confirmDeleteId)
+    @php $delMsg = collect($messages)->firstWhere('id', $confirmDeleteId); @endphp
+    <div class="fixed inset-0 z-[400] flex items-center justify-center p-4"
+         style="background:rgba(26,15,34,.45); backdrop-filter: blur(2px);"
+         wire:click="cancelDelete">
+        <div class="w-full max-w-sm bg-white rounded-2xl shadow-2xl overflow-hidden" wire:click.stop>
+            <div class="p-5">
+                <div class="flex items-start gap-3.5">
+                    <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0"
+                         style="background:#FDECEC; color:#DC2626;">
+                        <i class="fa-solid fa-trash-can text-lg"></i>
+                    </div>
+                    <div class="flex-1 min-w-0 pt-1">
+                        <p class="text-sm font-semibold text-[#1a1a1a]">Unsend this message?</p>
+                        <p class="text-xs text-[#666666] mt-1 leading-relaxed">
+                            Are you sure you want to unsend this message? This can't be undone
+                            @if($delMsg && (! empty($delMsg['reactions']) || ($delMsg['is_pinned'] ?? false)))
+                                , and it will also remove its reactions{{ ($delMsg['is_pinned'] ?? false) ? ' and unpin it' : '' }}
+                            @endif
+                            .
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="flex border-t border-[#E8E0F0]">
+                <button wire:click="cancelDelete"
+                        class="flex-1 py-3 text-sm font-semibold text-[#555555] hover:bg-[#f5f5f5] transition cursor-pointer">
+                    Cancel
+                </button>
+                <div class="w-px bg-[#E8E0F0]"></div>
+                <button wire:click="unsend({{ $confirmDeleteId }})"
+                        wire:loading.attr="disabled" wire:target="unsend"
+                        class="flex-1 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 transition cursor-pointer disabled:opacity-60">
+                    <span wire:loading.remove wire:target="unsend">Confirm</span>
+                    <span wire:loading wire:target="unsend">Unsending…</span>
+                </button>
+            </div>
         </div>
     </div>
     @endif

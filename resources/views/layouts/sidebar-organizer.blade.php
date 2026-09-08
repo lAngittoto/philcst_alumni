@@ -804,6 +804,8 @@
             items:      [],
             _pollTimer: null,
             deletingId: null,
+            navigating: false,
+            loadingId:  null,
             deleteToast: { show: false, message: '' },
 
             // ── Read-order tracking ─────────────────────────────────────────
@@ -1215,7 +1217,13 @@
             },
 
             toggle() { this.open = !this.open; },
-            close()  { this.open = false; },
+            close()  {
+                // Don't let the panel be closed (outside click, etc.) while
+                // a notif click is still navigating/loading — same rule as
+                // the registrar sidebar's notif panel.
+                if (this.navigating) return;
+                this.open = false;
+            },
 
             async markRead(item) {
                 if (window.__coordLoggingOut) return;
@@ -1249,6 +1257,85 @@
                     }
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
+            },
+
+            // Click entry point for a notif row: shows a spinner overlay on
+            // the item (via `navigating` + `loadingId`) while it's marked
+            // read and routed to its target — same UX as the registrar
+            // sidebar's notif panel. The overlay is left on until either
+            // the destination page actually lands (`livewire:navigated`,
+            // handled globally below) or, for a same-page Livewire dispatch
+            // that never navigates at all, a short timeout clears it itself.
+            async openNotif(item) {
+                if (window.__coordLoggingOut) return;
+                this.navigating = true;
+                this.loadingId  = item.id;
+                var clearedByNav = false;
+                try {
+                    await this.markRead(item);
+                    clearedByNav = this._goToTarget(item);
+                } finally {
+                    if (!clearedByNav) {
+                        this.navigating = false;
+                        this.loadingId  = null;
+                    }
+                }
+            },
+
+            // Routes to wherever this notif points. Returns true when it
+            // kicked off some kind of transition (so the caller leaves the
+            // spinner on), false when there was nowhere to go (spinner
+            // clears immediately).
+            _goToTarget(item) {
+                if (!item.link_route) return false;
+
+                var self = this;
+                var url  = window.__coordRouteMap[item.link_route] || '/organizer/dashboard';
+                if (item.link_route === 'organizer.event/organizer' && item.event_id) {
+                    url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_event=' + encodeURIComponent(item.event_id);
+                } else if (item.link_route === 'organizer.job/management' && item.job_id) {
+                    url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_job=' + encodeURIComponent(item.job_id);
+                }
+
+                var targetPath    = url.split('?')[0];
+                var isSameLocation = window.location.pathname === targetPath;
+
+                // ── Already on Event Management? Skip the URL/reload
+                //    entirely — dispatch straight to the mounted Livewire
+                //    component so it opens View Details (or the resubmit
+                //    form) immediately, no page flash. Nothing actually
+                //    navigates here, so drop the spinner (and close the
+                //    panel) shortly after instead of waiting on a
+                //    `livewire:navigated` that will never fire. ──
+                if (isSameLocation && item.link_route === 'organizer.event/organizer' && item.event_id && window.Livewire) {
+                    Livewire.dispatch('open-view-event', { id: Number(item.event_id) });
+                    setTimeout(function () {
+                        self.navigating = false;
+                        self.loadingId  = null;
+                        self.open       = false;
+                    }, 400);
+                    return true;
+                } else if (isSameLocation && item.link_route === 'organizer.job/management' && item.job_id && window.Livewire) {
+                    // ── Same treatment for Job Management: already on the
+                    //    page? Dispatch straight to the mounted Livewire
+                    //    component instead of a full reload. ──
+                    Livewire.dispatch('open-view-job', { id: Number(item.job_id) });
+                    setTimeout(function () {
+                        self.navigating = false;
+                        self.loadingId  = null;
+                        self.open       = false;
+                    }, 400);
+                    return true;
+                } else if (isSameLocation) {
+                    window.location.href = url;
+                    return true;
+                } else if (window.Livewire) {
+                    Livewire.navigate(url);
+                    return true;
+                } else {
+                    window.location.href = url;
+                    return true;
+                }
             },
 
             async markAllRead() {
@@ -1432,6 +1519,8 @@
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open = false;
+                s.navigating = false; // destination page has landed — drop the spinner now, not before
+                s.loadingId  = null;
                 s.init();
             } else {
                 Alpine.store('coordNotifs', window.__makeCoordNotifsStore());
@@ -2195,47 +2284,18 @@
                            transition-colors duration-150 select-none"
                     :class="[
                         notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]',
+                        ($store.coordNotifs.navigating && $store.coordNotifs.loadingId === notif.id) ? 'is-loading' : '',
                         ($store.coordNotifs.deletingId === notif.id) ? 'is-loading' : ''
                     ]"
                     oncontextmenu="return false;"
                     ondragstart="return false;"
-                    @click.stop="
-                        $store.coordNotifs.markRead(notif);
-                        $store.coordNotifs.close();
-                        if (notif.link_route) {
-                            let url = window.__coordRouteMap[notif.link_route] || '/organizer/dashboard';
-                            if (notif.link_route === 'organizer.event/organizer' && notif.event_id) {
-                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_event=' + encodeURIComponent(notif.event_id);
-                            } else if (notif.link_route === 'organizer.job/management' && notif.job_id) {
-                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_job=' + encodeURIComponent(notif.job_id);
-                            }
+                    @click.stop="$store.coordNotifs.openNotif(notif);">
 
-                            const targetPath = url.split('?')[0];
-                            const isSameLocation = window.location.pathname === targetPath;
-
-                            // ── Already on Event Management? Skip the URL/reload
-                            //    entirely — dispatch straight to the mounted
-                            //    Livewire component so it opens View Details
-                            //    (or the resubmit form) immediately, no page
-                            //    flash, sidebar close/open transition plays
-                            //    normally like any other click. ──
-                            if (isSameLocation && notif.link_route === 'organizer.event/organizer' && notif.event_id && window.Livewire) {
-                                Livewire.dispatch('open-view-event', { id: Number(notif.event_id) });
-                            } else if (isSameLocation && notif.link_route === 'organizer.job/management' && notif.job_id && window.Livewire) {
-                                // ── Same treatment for Job Management: already on
-                                //    the page? Dispatch straight to the mounted
-                                //    Livewire component so it opens View/Edit
-                                //    Details immediately instead of a full reload. ──
-                                Livewire.dispatch('open-view-job', { id: Number(notif.job_id) });
-                            } else if (isSameLocation) {
-                                window.location.href = url;
-                            } else if (window.Livewire) {
-                                Livewire.navigate(url);
-                            } else {
-                                window.location.href = url;
-                            }
-                        }
-                    ">
+                    <template x-if="$store.coordNotifs.navigating && $store.coordNotifs.loadingId === notif.id">
+                        <div class="notif-item-loading-overlay">
+                            <i class="fas fa-spinner fa-spin notif-item-spinner"></i>
+                        </div>
+                    </template>
 
                     <template x-if="$store.coordNotifs.deletingId === notif.id">
                         <div class="notif-item-loading-overlay">

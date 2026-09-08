@@ -474,7 +474,7 @@ new class extends Component {
         if ($this->filterCollege !== '') $q->where('target_participants', 'like', "%{$this->filterCollege}%");
 
         $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
-        return $q->paginate(15);
+        return $q->paginate(20);
     }
 
     #[Computed]
@@ -1159,7 +1159,7 @@ select.tw-select-arrow {
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left, mirrors organizer style) ══ --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
         <div class="flex items-center gap-3">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1189,7 +1189,7 @@ select.tw-select-arrow {
         <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterCollege">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                 Filters
             </div>
 
@@ -1262,7 +1262,7 @@ select.tw-select-arrow {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
                            bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
@@ -1270,7 +1270,7 @@ select.tw-select-arrow {
                 <span wire:loading wire:target="resetFilters">
                     <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
                 </span>
-                <span class="hidden sm:inline">Reset</span>
+                <span class="hidden sm:inline" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
             </button>
 
             {{-- Mobile college select --}}
@@ -1286,25 +1286,25 @@ select.tw-select-arrow {
 
             {{-- Centered loading spinner — mirrors event-organizer's table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             @if($this->events->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
                         <col style="width:32%;"><col style="width:20%;"><col style="width:22%;"><col style="width:12%;"><col style="width:14%;">
                     </colgroup>
-                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
+                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0; user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                         <tr>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Date &amp; Time</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Coordinator</th>
                             <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Action</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]"></th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
@@ -1614,7 +1614,7 @@ select.tw-select-arrow {
                 </button>
 
                 @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)"
+                    <button wire:click="gotoPage(1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
@@ -1625,7 +1625,7 @@ select.tw-select-arrow {
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                      bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="$set('page', {{ $p }})"
+                        <button wire:click="gotoPage({{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                        bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
@@ -1633,7 +1633,7 @@ select.tw-select-arrow {
 
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                    <button wire:click="$set('page', {{ $lp }})"
+                    <button wire:click="gotoPage({{ $lp }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                 @endif

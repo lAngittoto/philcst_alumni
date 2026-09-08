@@ -2571,50 +2571,6 @@ new class extends Component {
         .org-reactions-popup-list::-webkit-scrollbar-thumb { background: #c9aee0; border-radius: 999px; }
         .org-reactions-popup-list::-webkit-scrollbar-thumb:hover { background: #ad8ac7; }
 
-        /* ── Scroll-to-top / scroll-to-bottom floating nav — matches
-             Alumni Messenger's msgr-scroll-nav design exactly (lighter
-             36px button, thin border, softer shadow, no wire:ignore so
-             it never desyncs from Livewire's own re-renders). Centered
-             horizontally in the message column via left:50% +
-             translateX(-50%) on the container itself, so it stays
-             dead-center regardless of which single button (up/down) is
-             visible at a given moment. ── */
-        .org-scroll-nav {
-            position: absolute;
-            left: 50%;
-            right: auto;
-            top: auto;
-            bottom: 14px;
-            transform: translateX(-50%);
-            display: flex;
-            width: max-content;
-            gap: 8px;
-            z-index: 50;
-            pointer-events: none;
-        }
-        .org-scroll-nav .org-scroll-btn { pointer-events: auto; }
-        .org-scroll-btn {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            background: #ffffff;
-            border: 1px solid #ddd3e8;
-            color: #6b2490;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            box-shadow: 0 2px 10px rgba(107,36,144,.20);
-            cursor: pointer;
-            transition: background .15s ease, transform .15s ease, box-shadow .15s ease;
-        }
-        .org-scroll-btn:hover {
-            background: #f3eef8;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 14px rgba(107,36,144,.28);
-        }
-        .org-scroll-btn:active { transform: translateY(0) scale(.94); }
-
         /* ── Delete confirmation modal ─────────────────────────────────── */
         .org-modal-backdrop {
             position: fixed;
@@ -2736,6 +2692,7 @@ new class extends Component {
             background: linear-gradient(160deg, #6b2490 0%, #4a1863 100%);
             border: 1px solid rgba(107,36,144,.25);
             box-shadow: 0 4px 14px rgba(107,36,144,.22);
+            cursor: default;
         }
         .msgr-post-card.is-mine { border-color: rgba(255,255,255,.28); }
         .msgr-post-card.is-unavailable { opacity: .82; }
@@ -2801,17 +2758,20 @@ new class extends Component {
         }
         .msgr-post-overlay-strip p .accent { color: #6b2490; }
 
-        .msgr-post-thumb-overlay {
-            position: absolute; inset: 0; z-index: 3;
-            display: flex; align-items: center; justify-content: center;
-            background: rgba(48,20,66,0); transition: background .18s ease;
-        }
-        .msgr-post-card:not(.is-unavailable):hover .msgr-post-thumb-overlay { background: rgba(48,20,66,.32); }
         .msgr-post-view-btn {
-            opacity: 0; transform: translateY(4px);
-            transition: opacity .18s ease, transform .18s ease;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 12.5px; font-weight: 700;
+            color: #ffffff;
+            background: rgba(255,255,255,.14);
+            border-top: 1px solid rgba(255,255,255,.18);
+            text-decoration: none;
+            cursor: pointer;
+            transition: background .15s ease;
         }
-        .msgr-post-card:not(.is-unavailable):hover .msgr-post-view-btn { opacity: 1; transform: translateY(0); }
+        .msgr-post-view-btn:hover { background: rgba(255,255,255,.22); }
+        .msgr-post-view-btn.is-going { opacity: .75; pointer-events: none; }
 
         .msgr-post-caption { padding: 10px 12px 11px; background: transparent; }
         .msgr-post-caption .headline {
@@ -3024,8 +2984,15 @@ new class extends Component {
                 {{-- Pin/Unpin button on hover — org-pin-tooltip-wrap carries
                      the raised z-index + forced-visible style fix so this
                      tooltip always renders clearly above neighboring room
-                     rows instead of being clipped or invisible --}}
-                <div class="absolute top-2 right-2 z-30 org-tooltip-wrap org-pin-tooltip-wrap"
+                     rows instead of being clipped or invisible.
+                     Desktop-only (hidden sm:block): mouseenter/mouseleave
+                     has no reliable equivalent on touch, so on mobile a tap
+                     could set hovered=true and never get a mouseleave to
+                     clear it — leaving the button + "Pin" tooltip stuck
+                     floating on top of the room list. Hiding it below the
+                     sm breakpoint removes that stuck-overlay case entirely;
+                     mobile already has the amber pinned-dot indicator. --}}
+                <div class="absolute top-2 right-2 z-30 org-tooltip-wrap org-pin-tooltip-wrap hidden sm:block"
                      x-show="hovered"
                      x-transition:enter="transition ease-out duration-100"
                      x-transition:enter-start="opacity-0 scale-90"
@@ -3308,11 +3275,7 @@ new class extends Component {
                                             $ppCompleted = $ppIsEvent && ($pp['is_completed'] ?? false);
                                         @endphp
                                         <div wire:click.stop="toggleToolbar({{ $msg['id'] }})"
-                                             wire:loading.class="org-bubble-loading" wire:target="toggleToolbar({{ $msg['id'] }})"
-                                             class="msgr-post-card cursor-pointer relative {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
-                                            <span class="org-bubble-spinner org-bubble-spinner-inset" wire:loading wire:target="toggleToolbar({{ $msg['id'] }})">
-                                                <i class="fa-solid fa-spinner fa-spin"></i>
-                                            </span>
+                                             class="msgr-post-card relative {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
                                             <div class="msgr-post-thumb">
                                                 @if($ppAvailable)
                                                     @if(! empty($pp['image']))
@@ -3352,20 +3315,6 @@ new class extends Component {
                                                 </div>
 
                                                 @php $ppTypeLabel = $pp['type'] === 'job' ? 'Job' : 'Event'; @endphp
-                                                @if($ppAvailable)
-                                                <div class="msgr-post-thumb-overlay">
-                                                    <a href="{{ $pp['url'] }}" wire:navigate
-                                                       x-data="{ going: false }"
-                                                       @click.stop="going = true"
-                                                       x-on:livewire:navigate.window="going = false"
-                                                       class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#4a1863] text-xs font-bold shadow-md inline-flex items-center gap-1.5"
-                                                       :class="{ 'opacity-70 pointer-events-none': going }">
-                                                        <i class="fa-solid fa-spinner fa-spin" x-show="going" style="display:none;"></i>
-                                                        <i class="fa-solid fa-eye" x-show="!going"></i>
-                                                        <span x-text="going ? 'Opening...' : 'View {{ $ppTypeLabel }}'"></span>
-                                                    </a>
-                                                </div>
-                                                @endif
                                             </div>
 
                                             <div class="msgr-post-caption">
@@ -3380,6 +3329,19 @@ new class extends Component {
                                                     <span>PHILCST</span>
                                                 </div>
                                             </div>
+
+                                            @if($ppAvailable)
+                                            <a href="{{ $pp['url'] }}" wire:navigate
+                                               x-data="{ going: false }"
+                                               @click.stop="going = true"
+                                               x-on:livewire:navigate.window="going = false"
+                                               class="msgr-post-view-btn"
+                                               :class="{ 'is-going': going }">
+                                                <i class="fa-solid fa-spinner fa-spin" x-show="going" style="display:none;"></i>
+                                                <i class="fa-solid fa-eye" x-show="!going"></i>
+                                                <span x-text="going ? 'Opening...' : 'View {{ $ppTypeLabel }}'"></span>
+                                            </a>
+                                            @endif
                                         </div>
                                         @else
                                         @php
@@ -3541,46 +3503,6 @@ new class extends Component {
                         @endforelse
 
                         <div class="h-10"></div>
-                    </div>
-
-                    {{-- ── Scroll-to-top / scroll-to-bottom quick nav — fixed,
-                         centered at the bottom of the thread. Each button's
-                         visibility is driven purely by DISTANCE from the top
-                         or bottom of the message list (nearTop / nearBottom
-                         from the shared x-data scope on #org-chat-body-wrap
-                         above) — never by "which way did the last pixel of
-                         scroll move", which used to make the button swap
-                         between up/down (and appear to jump around) on every
-                         tiny scroll wobble. Now: not near top → up-arrow
-                         shows; not near bottom → down-arrow shows; both can
-                         show together in the middle of a long thread. The
-                         wrapper's position never changes — only which
-                         button(s) inside it are visible. --}}
-                    <div class="org-scroll-nav">
-                        <button type="button" class="org-scroll-btn"
-                                x-show="!nearTop"
-                                x-transition:enter="transition ease-out duration-150"
-                                x-transition:enter-start="opacity-0 translate-y-1"
-                                x-transition:enter-end="opacity-100 translate-y-0"
-                                x-transition:leave="transition ease-in duration-150"
-                                x-transition:leave-start="opacity-100"
-                                x-transition:leave-end="opacity-0"
-                                onclick="document.getElementById('msg-list').scrollTo({top:0,behavior:'smooth'});"
-                                style="display:none;">
-                            <i class="fa-solid fa-arrow-up"></i>
-                        </button>
-                        <button type="button" class="org-scroll-btn"
-                                x-show="!nearBottom"
-                                x-transition:enter="transition ease-out duration-150"
-                                x-transition:enter-start="opacity-0 translate-y-1"
-                                x-transition:enter-end="opacity-100 translate-y-0"
-                                x-transition:leave="transition ease-in duration-150"
-                                x-transition:leave-start="opacity-100"
-                                x-transition:leave-end="opacity-0"
-                                onclick="const el=document.getElementById('msg-list'); el.scrollTo({top:el.scrollHeight,behavior:'smooth'});"
-                                style="display:none;">
-                            <i class="fa-solid fa-arrow-down"></i>
-                        </button>
                     </div>
 
                 </div>

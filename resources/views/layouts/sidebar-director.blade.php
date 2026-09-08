@@ -72,6 +72,33 @@
             -webkit-touch-callout: none;
         }
 
+        /* ── Notif item click loading overlay ────────────────────
+           Same visual language as the registrar sidebar's notif
+           panel: while a clicked notif is navigating, the row's
+           own content blurs/dims and a centered spinner overlay
+           takes over — so clicking a notif gives clear feedback
+           instead of the panel looking like it "did nothing"
+           while the navigation is still in flight. ── */
+        .dir-notif-item.is-loading > *:not(.dir-notif-item-loading-overlay) {
+            filter: blur(4px);
+            opacity: 0.5;
+            pointer-events: none;
+            user-select: none;
+        }
+        .dir-notif-item-loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+        }
+        .dir-notif-item-spinner {
+            font-size: 22px;
+            color: #7A3F91;
+        }
+
         .dir-notif-close-wrap {
             position: relative;
             display: inline-flex;
@@ -801,6 +828,8 @@
             items:       [],
             _pollTimer:  null,
             deleteToast: { show: false, message: '' },
+            navigating:  false,
+            loadingId:   null,
 
             async init() {
                 if (window.__dirLoggingOut) return;
@@ -1060,7 +1089,13 @@
             },
 
             toggle() { this.open = !this.open; },
-            close()  { this.open = false; },
+            close()  {
+                // Don't let the panel be closed (outside click, X button,
+                // etc.) while a notif click is still navigating/loading —
+                // it should only close once the destination page lands.
+                if (this.navigating) return;
+                this.open = false;
+            },
 
             async markRead(item) {
                 if (window.__dirLoggingOut) return;
@@ -1240,6 +1275,8 @@
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open = false;
+                s.navigating = false; // destination page has landed — drop the spinner now, not before
+                s.loadingId  = null;
                 s.init();
             } else {
                 Alpine.store('dirNotifs', window.__makeDirNotifsStore());
@@ -1855,22 +1892,53 @@
                     class="dir-notif-item flex items-start gap-4 px-5 py-4
                            border-b border-[#F5F5F5] last:border-b-0
                            transition-colors duration-150 select-none"
-                    :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
+                    :class="[
+                        notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]',
+                        ($store.dirNotifs.navigating && $store.dirNotifs.loadingId === notif.id) ? 'is-loading' : ''
+                    ]"
                     oncontextmenu="return false;"
                     ondragstart="return false;"
                     @click.stop="
+                        if ($store.dirNotifs.navigating) return;
                         $store.dirNotifs.markRead(notif);
-                        $store.dirNotifs.close();
                         if (notif.link_route) {
+                            $store.dirNotifs.navigating = true;
+                            $store.dirNotifs.loadingId  = notif.id;
                             let url = window.__dirRouteMap[notif.link_route] || '/director/dashboard';
                             if (notif.link_route === 'director.event/management' && notif.event_id) {
                                 url += (url.indexOf('?') === -1 ? '?' : '&') + 'event=' + encodeURIComponent(notif.event_id);
                             } else if (notif.link_route === 'director.job/management' && notif.job_id) {
                                 url += (url.indexOf('?') === -1 ? '?' : '&') + 'job=' + encodeURIComponent(notif.job_id);
                             }
-                            window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                            // Panel stays open with the spinner overlay showing
+                            // on this row — it only closes once the destination
+                            // page has actually landed (see livewire:navigated
+                            // listener below), instead of closing instantly and
+                            // making the click look like it did nothing.
+                            //
+                            // If already on the target page, SPA-navigate won't
+                            // re-fire livewire:navigated the same way, so force
+                            // a hard reload there (page unload clears the
+                            // spinner naturally) — same fix as the registrar
+                            // sidebar's notif click.
+                            let isSameLocation = window.location.pathname === url.split('?')[0];
+                            if (isSameLocation) {
+                                window.location.href = url;
+                            } else if (window.Livewire && typeof window.Livewire.navigate === 'function') {
+                                window.Livewire.navigate(url);
+                            } else {
+                                window.location.href = url;
+                            }
+                        } else {
+                            $store.dirNotifs.close();
                         }
                     ">
+
+                    <template x-if="$store.dirNotifs.navigating && $store.dirNotifs.loadingId === notif.id">
+                        <div class="dir-notif-item-loading-overlay">
+                            <i class="fas fa-spinner fa-spin dir-notif-item-spinner"></i>
+                        </div>
+                    </template>
 
                     {{-- Icon — colored per notif type --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"

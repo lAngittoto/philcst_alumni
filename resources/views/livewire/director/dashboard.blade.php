@@ -392,18 +392,15 @@ new class extends Component {
 
             <div class="relative w-full overflow-hidden shrink-0 h-[420px] sm:h-[270px]"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <div class="w-full h-full flex items-center justify-center">
-                    @if(str_ends_with($directorPhoto, 'default.png'))
-                        <div class="w-52 h-52 sm:w-40 sm:h-40 rounded-full flex items-center justify-center font-black text-white text-[4.5rem] sm:text-[3.6rem]"
-                             style="background:rgba(255,255,255,0.16); border:3px solid rgba(255,255,255,0.4);">
-                            <i class="fas fa-user-shield"></i>
-                        </div>
-                    @else
-                        <img src="{{ $directorPhoto }}" alt="{{ $directorName }}"
-                             class="w-52 h-52 sm:w-40 sm:h-40 rounded-full object-cover"
-                             style="border:3px solid rgba(255,255,255,0.4);">
-                    @endif
-                </div>
+                @if(str_ends_with($directorPhoto, 'default.png'))
+                    <div class="w-full h-full flex items-center justify-center font-black text-white text-[4.5rem] sm:text-[3.6rem]"
+                         style="background:rgba(255,255,255,0.16);">
+                        <i class="fas fa-user-shield"></i>
+                    </div>
+                @else
+                    <img src="{{ $directorPhoto }}" alt="{{ $directorName }}"
+                         class="w-full h-full object-cover">
+                @endif
                 <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.55) 100%);"></div>
                 <div class="absolute bottom-0 left-0 right-0 px-4 pb-4">
                     <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.1rem] sm:text-[1.15rem]"

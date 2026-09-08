@@ -1697,6 +1697,39 @@ new class extends Component {
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
+/* ══ MOBILE FIX: Post/Edit/View modals stack their columns in a
+   flex-col layout on phones. Each column had its OWN overflow-y:auto,
+   but a flex-col child with no fixed height (only its natural content
+   height) never gets a bounded box to scroll inside — so nothing
+   scrolled and the bottom fields (Employment Type, Deadline, Photo,
+   Submit button, etc.) were unreachable below the fold. Fix: on
+   mobile, let the single 3-column BODY wrapper be the one scroll
+   region (one continuous scroll down the whole stacked form), and
+   turn off each inner column's own scroll-lock so it just grows with
+   its content instead of clipping it. Desktop (lg:+) is untouched —
+   there each column is still its own independent scroll pane. Also
+   force a visible, always-on scrollbar on mobile/tablet as a strong
+   visual cue that there's more to scroll (regular browsers show the
+   native scrollbar; WebKit gets a thicker always-visible thumb via
+   the rules below instead of the thin desktop hover-hidden one). ══ */
+@media (max-width: 1023px) {
+    .mobile-scroll-body {
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    .mobile-scroll-body .mobile-scroll-col,
+    .mobile-scroll-body .mobile-scroll-inner {
+        overflow: visible !important;
+        min-height: 0 !important;
+        flex: none !important;
+    }
+    .mobile-scroll-body::-webkit-scrollbar { width: 8px; }
+    .mobile-scroll-body::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 99px; }
+    .mobile-scroll-body::-webkit-scrollbar-thumb { background: #b98fcb; border-radius: 99px; }
+    .mobile-scroll-body::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+    .mobile-scroll-body { scrollbar-width: thin; scrollbar-color: #b98fcb #f1f1f1; }
+}
+
 /* ══ MOBILE: full-screen View/Edit/Post modals — force real height so the
    inner .scroll-c panes can actually compute a scrollable overflow.
    Root cause of "can't scroll job details on mobile": iOS Safari/Chrome
@@ -1720,6 +1753,10 @@ new class extends Component {
         max-height: 45vh;
         max-height: 45dvh;
     }
+    .job-view-info-pane {
+        max-height: 40vh;
+        max-height: 40dvh;
+    }
 }
 
 select.tw-select-arrow {
@@ -1735,6 +1772,7 @@ select.tw-select-arrow {
 }
 
 .modal-top-btn .mtip {
+    display: none !important;
     position: absolute;
     top: calc(100% + 6px);
     left: 50%;
@@ -1746,6 +1784,9 @@ select.tw-select-arrow {
     padding: 4px 10px; border-radius: 6px;
     white-space: nowrap; pointer-events: none;
     opacity: 0; transition: opacity .15s; z-index: 9999;
+}
+@media (min-width: 1024px) {
+    .modal-top-btn .mtip { display: block !important; }
 }
 .modal-top-btn .mtip::before {
     content: '';
@@ -1793,6 +1834,12 @@ select.tw-select-arrow {
 .view-content-box {
     background: #ffffff !important;
     border: 1.5px solid #e8e0f0 !important;
+    /* Allow mouse-wheel/trackpad scroll to chain through to the modal's
+       outer scroll container once this box has no more room to scroll
+       (or has nothing to scroll at all) — this box must NEVER trap the
+       wheel event, which is what made the whole modal feel "unscrollable"
+       whenever the cursor happened to be sitting over a description box. */
+    overscroll-behavior-y: auto;
 }
 
 /* ══ Coordinator/Alumni Director-style status badge (view modal) ══ */
@@ -1822,6 +1869,10 @@ select.tw-select-arrow {
 }
 #dm-table-scroll .overflow-x-auto {
     overflow-x: visible !important;
+}
+#eo-hover-tip, #eo-deadline-tip { display: none !important; }
+@media (min-width: 1024px) {
+    #eo-hover-tip, #eo-deadline-tip { display: block !important; }
 }
 </style>
 
@@ -1872,18 +1923,18 @@ select.tw-select-arrow {
 
     {{-- ══ PAGE HEADER ══ --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-4" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
             <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                 style="background:#7a3f91;">
                 <i class="fas fa-briefcase text-white text-lg"></i>
             </div>
             <div>
                 <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Job Overview</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#555555]">Review, moderate, and manage all job postings.</p>
+                <p class="text-xs leading-relaxed mt-0.5 text-[#7a3f91] font-medium">Review, moderate, and manage all job postings.</p>
             </div>
         </div>
         <div class="flex items-center gap-2.5 flex-wrap">
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide">
+            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                 <i class="fas fa-briefcase text-purple-600 text-[10px]"></i>
                 {{ $this->jobPostings->total() }} {{ $this->jobPostings->total() !== 1 ? 'Jobs' : 'Job' }}
             </span>
@@ -1898,7 +1949,7 @@ select.tw-select-arrow {
                         <i class="fas fa-spinner fa-spin text-sm"></i>
                     </span>
                 </button>
-                <div class="absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50 shadow-lg">
+                <div class="hidden lg:block absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50 shadow-lg">
                     <i class="fas fa-plus text-[9px] mr-1"></i>Post a Job
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-[4px] border-transparent border-b-[#1a1a1a]"></span>
                 </div>
@@ -1915,7 +1966,7 @@ select.tw-select-arrow {
         {{-- ── FILTER BAR ── --}}
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege,filterSort">
-            <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
+            <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                 Filters
             </div>
             <div class="relative flex-1 min-w-[160px] max-w-xs"
@@ -1994,14 +2045,14 @@ select.tw-select-arrow {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
                 </span>
                 <span wire:loading wire:target="resetFilters">
                     <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
                 </span>
-                <span class="hidden sm:inline text-[#333333]">Reset</span>
+                <span class="hidden sm:inline text-[#333333]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
             </button>
 
             {{-- Mobile-only selects --}}
@@ -2029,13 +2080,13 @@ select.tw-select-arrow {
                  same pattern as the alumni-facing yearbook, instead of only
                  the thin progress bar in the filter strip. --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,filterSort,resetFilters,previousPage,nextPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             <div id="dm-table-scroll"
                  class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,filterSort,resetFilters,previousPage,nextPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage">
 
             @if($this->jobPostings->count() > 0)
 
@@ -2045,7 +2096,7 @@ select.tw-select-arrow {
                     <colgroup>
                         <col style="width:34%;"><col style="width:22%;"><col style="width:15%;"><col style="width:14%;"><col style="width:15%;">
                     </colgroup>
-                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0;">
+                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0; user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                         <tr>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Job Title</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Coordinator</th>
@@ -2270,7 +2321,7 @@ select.tw-select-arrow {
                     <i class="fas fa-chevron-left text-[9px]"></i>
                 </button>
                 @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)"
+                    <button wire:click="gotoPage(1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
@@ -2278,13 +2329,13 @@ select.tw-select-arrow {
                     @if($p === $cp)
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="$set('page', {{ $p }})"
+                        <button wire:click="gotoPage({{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
                 @endfor
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                    <button wire:click="$set('page', {{ $lp }})"
+                    <button wire:click="gotoPage({{ $lp }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                 @endif
                 <button wire:click="nextPage"
@@ -2496,10 +2547,10 @@ select.tw-select-arrow {
     </div>
 
     {{-- 3-COLUMN BODY --}}
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden lg:overflow-hidden mobile-scroll-body">
 
         {{-- LEFT: Organization + Target Colleges + Job Photo --}}
-        <div class="w-full lg:w-[290px] xl:w-[310px] shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
+        <div class="mobile-scroll-col w-full lg:w-[290px] xl:w-[310px] shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-3 space-y-3">
 
                 {{-- Organization Category --}}
@@ -2627,7 +2678,7 @@ select.tw-select-arrow {
         </div>
 
         {{-- MIDDLE: Job Info + Textareas --}}
-        <div class="flex-1 min-w-0 overflow-y-auto border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50 scroll-c">
+        <div class="mobile-scroll-col flex-1 min-w-0 overflow-y-auto border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50 scroll-c">
             <div class="p-3 space-y-3 flex flex-col flex-1">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -2706,7 +2757,7 @@ select.tw-select-arrow {
         </div>
 
         {{-- RIGHT: Default Photo Preview + Posted As + Tips + Actions --}}
-        <div class="w-full lg:w-[240px] xl:w-[260px] shrink-0 overflow-y-auto bg-white flex flex-col scroll-c">
+        <div class="mobile-scroll-col w-full lg:w-[240px] xl:w-[260px] shrink-0 overflow-y-auto bg-white flex flex-col scroll-c">
             <div class="p-3 space-y-3 flex-1">
 
                 {{-- Job Photo / Photo Preview --}}
@@ -2919,23 +2970,6 @@ select.tw-select-arrow {
                         <span class="mtip">Share</span>
                     </button>
                 @endif
-
-                @if($editJobIsActive)
-                    <div class="activate-disabled-wrap" data-tip="Deactivate first to delete">
-                        <span class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed bg-white/10 border border-white/15">
-                            <i class="fas fa-trash text-white/50 text-sm"></i>
-                            <span class="mtip">Deactivate first to delete</span>
-                        </span>
-                    </div>
-                @else
-                    <button wire:click="confirmDelete({{ $editingJobId }})" type="button"
-                            wire:loading.attr="disabled" wire:target="confirmDelete({{ $editingJobId }})"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white/14">
-                        <i class="fas fa-trash text-white text-sm" wire:loading.remove wire:target="confirmDelete({{ $editingJobId }})"></i>
-                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmDelete({{ $editingJobId }})"></i>
-                        <span class="mtip">Delete</span>
-                    </button>
-                @endif
             @endif
 
             <button wire:click="closeEditModal" type="button"
@@ -2971,10 +3005,10 @@ select.tw-select-arrow {
     </div>
     @endif
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden mobile-scroll-body">
 
         {{-- LEFT: Photo + Org Details + Target Colleges + Status --}}
-        <div class="w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
+        <div class="mobile-scroll-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto scroll-c bg-white job-view-info-pane">
             <div class="p-2.5 space-y-2.5">
 
                 @if($editingJob)
@@ -3188,8 +3222,8 @@ select.tw-select-arrow {
         </div>
 
         {{-- MIDDLE: Job Info + Textareas --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
+        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+            <div class="mobile-scroll-inner flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
@@ -3275,7 +3309,7 @@ select.tw-select-arrow {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
                              style="min-height:160px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editDescription ?: 'No description provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editDescription"
@@ -3292,7 +3326,7 @@ select.tw-select-arrow {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
                              style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editQualifications"
@@ -3309,7 +3343,7 @@ select.tw-select-arrow {
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
                              style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editApplicationInstructions"
@@ -3324,7 +3358,7 @@ select.tw-select-arrow {
         </div>
 
         {{-- RIGHT: History + Tips + Actions --}}
-        <div class="w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
+        <div class="mobile-scroll-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c job-view-info-pane">
             <div class="p-3 space-y-3 flex-1">
 
                 @if($editingJob)
@@ -3442,24 +3476,6 @@ select.tw-select-arrow {
                     <span class="mtip">Share</span>
                 </button>
             @endif
-            @if(!$isOrgDeletedView)
-                @if($isActiveView)
-                    <div class="activate-disabled-wrap" data-tip="Deactivate first to delete">
-                        <span class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed bg-white/10 border border-white/15">
-                            <i class="fas fa-trash text-white/50 text-sm"></i>
-                            <span class="mtip">Deactivate first to delete</span>
-                        </span>
-                    </div>
-                @else
-                    <button type="button" wire:click="confirmDelete({{ $job->id }})"
-                            wire:loading.attr="disabled" wire:target="confirmDelete({{ $job->id }})"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white/14">
-                        <span wire:loading.remove wire:target="confirmDelete({{ $job->id }})"><i class="fas fa-trash text-white text-sm"></i></span>
-                        <span wire:loading wire:target="confirmDelete({{ $job->id }})"><i class="fas fa-spinner fa-spin text-white text-sm"></i></span>
-                        <span class="mtip">Delete</span>
-                    </button>
-                @endif
-            @endif
             <button wire:click="closeViewModal" type="button"
                     wire:loading.attr="disabled" wire:loading.class="opacity-60" wire:target="closeViewModal"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none">
@@ -3482,14 +3498,14 @@ select.tw-select-arrow {
     </div>
     @endif
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden mobile-scroll-body">
 
         {{-- LEFT: card-style info panel — matches the organizer/director
              "View Job" card layout (Job Photo / Company Details / Job
              Information cards) instead of the old icon-row sidebar. Every
              field here is read-only (no edit toggle) since this modal is
              strictly view-only for Coordinator-posted jobs. --}}
-        <div class="w-full lg:w-[300px] xl:w-[320px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
+        <div class="mobile-scroll-col w-full lg:w-[300px] xl:w-[320px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto scroll-c bg-white job-view-info-pane">
             <div class="p-2.5 space-y-2.5">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -3599,15 +3615,15 @@ select.tw-select-arrow {
         {{-- MIDDLE/RIGHT: read-only content cards — matches the organizer's
              view-content-box treatment for Description / Qualifications /
              How to Apply. --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-gray-50">
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c p-3 flex flex-col gap-3">
+        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden bg-gray-50">
+            <div class="mobile-scroll-inner flex-1 min-h-0 overflow-y-auto scroll-c p-3 flex flex-col gap-3">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Job Description
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
-                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c" style="min-height:120px;">{{ trim($job->description) ?: 'No description provided.' }}</div>
+                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:120px;">{{ trim($job->description) ?: 'No description provided.' }}</div>
                     </div>
                 </div>
 
@@ -3617,7 +3633,7 @@ select.tw-select-arrow {
                         Qualifications
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
-                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c" style="min-height:100px;">{{ trim($job->qualifications) }}</div>
+                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:100px;">{{ trim($job->qualifications) }}</div>
                     </div>
                 </div>
                 @endif
@@ -3628,7 +3644,7 @@ select.tw-select-arrow {
                         How to Apply
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
-                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c" style="min-height:100px;">{{ trim($job->application_instructions) }}</div>
+                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:100px;">{{ trim($job->application_instructions) }}</div>
                     </div>
                 </div>
                 @endif
@@ -4066,72 +4082,62 @@ select.tw-select-arrow {
 (function () {
     var tip = document.getElementById('eo-hover-tip');
 
-    function bindRows() {
-        document.querySelectorAll('[data-eo-row]').forEach(function (row) {
-            if (row._eoTipBound) return;
-            row._eoTipBound = true;
+    // ── Delegated listeners on the table's scroll container instead of
+    //    per-row binding. Rows get fresh DOM nodes every time the page
+    //    changes (different wire:key per job id), so any "bind once per
+    //    row" approach silently stops working the moment new rows swap
+    //    in — this is what caused the tooltip text to vanish on
+    //    page 2 / after switching pages. A single delegated listener on
+    //    the container never needs re-binding, so it survives every
+    //    Livewire morph automatically. ──
+    function findRow(el) { return el.closest('[data-eo-row]'); }
+    function findAction(el) { return el.closest('[data-eo-action]'); }
 
-            row.addEventListener('mousemove', function (e) {
-                if (!tip) return;
-                var actionWrap = e.target.closest('[data-eo-action]');
-                if (actionWrap) { tip.style.opacity = '0'; return; }
-                tip.style.left = e.clientX + 'px';
-                tip.style.top  = e.clientY + 'px';
-                tip.style.opacity = '1';
-            });
+    document.addEventListener('mousemove', function (e) {
+        if (!tip) return;
+        var row = findRow(e.target);
+        if (!row) { tip.style.opacity = '0'; return; }
+        if (findAction(e.target)) { tip.style.opacity = '0'; return; }
+        tip.style.left = e.clientX + 'px';
+        tip.style.top  = e.clientY + 'px';
+        tip.style.opacity = '1';
+    });
 
-            row.addEventListener('mouseleave', function () {
-                if (tip) tip.style.opacity = '0';
-            });
+    document.addEventListener('mouseout', function (e) {
+        if (!tip) return;
+        var row = findRow(e.target);
+        if (row && !row.contains(e.relatedTarget)) tip.style.opacity = '0';
+    });
 
-            row.addEventListener('click', function () {
-                if (tip) tip.style.opacity = '0';
-            });
-        });
+    document.addEventListener('click', function (e) {
+        if (tip && findRow(e.target)) tip.style.opacity = '0';
+    });
 
-        document.querySelectorAll('[data-eo-action]').forEach(function (aw) {
-            if (aw._eoActionBound) return;
-            aw._eoActionBound = true;
-            aw.addEventListener('mouseenter', function () {
-                if (tip) tip.style.opacity = '0';
-            });
-        });
-    }
+    // Generic fixed/overlay tooltip for any [data-tip] element (e.g. the
+    // "Update deadline to activate" icon). Same delegated approach.
+    var dTip     = document.getElementById('eo-deadline-tip');
+    var dTipText = document.getElementById('eo-deadline-tip-text');
 
-    // Generic fixed/overlay tooltip for any [data-tip] element. Always
-    // position:fixed + follows the mouse + shows ABOVE the cursor, so it
-    // can never get clipped by a scrollable ancestor (table, modal body,
-    // etc.) — fixes the "Update deadline to activate" readability bug.
-    function bindDeadlineTips() {
-        var dTip     = document.getElementById('eo-deadline-tip');
-        var dTipText = document.getElementById('eo-deadline-tip-text');
+    document.addEventListener('mouseover', function (e) {
         if (!dTip || !dTipText) return;
+        var el = e.target.closest('[data-tip]');
+        if (!el) return;
+        dTipText.textContent = el.getAttribute('data-tip') || '';
+        dTip.style.opacity = '1';
+    });
 
-        document.querySelectorAll('[data-tip]').forEach(function (el) {
-            if (el._eoDeadlineTipBound) return;
-            el._eoDeadlineTipBound = true;
+    document.addEventListener('mousemove', function (e) {
+        if (!dTip) return;
+        var el = e.target.closest('[data-tip]');
+        if (!el) return;
+        dTip.style.left = e.clientX + 'px';
+        dTip.style.top  = e.clientY + 'px';
+    });
 
-            el.addEventListener('mouseenter', function () {
-                dTipText.textContent = this.getAttribute('data-tip') || '';
-                dTip.style.opacity = '1';
-            });
-
-            el.addEventListener('mousemove', function (e) {
-                dTip.style.left = e.clientX + 'px';
-                dTip.style.top  = e.clientY + 'px';
-            });
-
-            el.addEventListener('mouseleave', function () {
-                dTip.style.opacity = '0';
-            });
-        });
-    }
-
-    bindRows();
-    bindDeadlineTips();
-    document.addEventListener('livewire:updated', function () {
-        bindRows();
-        bindDeadlineTips();
+    document.addEventListener('mouseout', function (e) {
+        if (!dTip) return;
+        var el = e.target.closest('[data-tip]');
+        if (el && !el.contains(e.relatedTarget)) dTip.style.opacity = '0';
     });
 })();
 </script>
