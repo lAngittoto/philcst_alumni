@@ -44,6 +44,7 @@ new class extends Component {
     public string $shareJobDeadline    = '';
     public string $shareJobDescription = '';
     public string $shareJobTarget      = '';
+    public string $shareJobPhotoUrl    = '';
 
     private function authorizeRole(): void
     {
@@ -82,6 +83,17 @@ new class extends Component {
 
         // ── Dispatch notifications for recently posted jobs ─────────────────
         $this->dispatchJobNotifications();
+
+        // ── Auto-apply the status filter when arriving from the admin
+        // dashboard's Job Postings Snapshot mini-tiles (goToJobs() there
+        // stores the target status in session before redirecting here) —
+        // same "click a stat -> land already filtered" pattern as Events'
+        // admin_events_filter handling. Values match $filterStatus 1:1:
+        // ACTIVE, INACTIVE, EXPIRING.
+        $jobsFilter = session()->pull('admin_jobs_filter', '');
+        if (in_array($jobsFilter, ['ACTIVE', 'INACTIVE', 'EXPIRING'], true)) {
+            $this->filterStatus = $jobsFilter;
+        }
     }
 
     /**
@@ -313,6 +325,7 @@ new class extends Component {
         $this->shareJobDeadline    = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('F d, Y');
         $this->shareJobDescription = $job->description ?? '';
         $this->shareJobTarget      = $job->target_college ?? '';
+        $this->shareJobPhotoUrl    = $this::jobImageUrl($job->job_image ?? null);
 
         $this->showShareJobModal = true;
         $this->showViewModal     = false;
@@ -332,6 +345,7 @@ new class extends Component {
         $this->shareJobDeadline    = '';
         $this->shareJobDescription = '';
         $this->shareJobTarget      = '';
+        $this->shareJobPhotoUrl    = '';
     }
 
     public function jobsBaseUrl(): string
@@ -818,21 +832,6 @@ select.adm-select-arrow {
             </span>
             @endif
 
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
-                           bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-
             {{-- Mobile selects --}}
             <select wire:model.live="filterType"
                     class="py-2 px-3 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] flex-1 sm:hidden adm-select-arrow">
@@ -848,6 +847,24 @@ select.adm-select-arrow {
                     <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
                 @endforeach
             </select>
+
+            {{-- Reset — pinned to the far right of the filter bar via ml-auto,
+                 instead of sitting inline between the active-filter pills and
+                 the mobile-only selects. --}}
+            <button wire:click="resetFilters"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="resetFilters"
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
+                           bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
@@ -855,13 +872,13 @@ select.adm-select-arrow {
 
             {{-- Centered loading spinner — mirrors Event Monitoring's table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             @if($this->jobPostings->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
@@ -1062,17 +1079,23 @@ select.adm-select-arrow {
             </p>
             <div class="flex items-center gap-1 flex-wrap py-2">
                 <button wire:click="previousPage"
+                        wire:loading.attr="disabled" wire:target="previousPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if($this->jobPostings->onFirstPage()) disabled @endif>
-                    <i class="fas fa-chevron-left text-[9px]"></i>
+                    <i class="fas fa-chevron-left text-[9px]" wire:loading.remove wire:target="previousPage"></i>
+                    <i class="fas fa-spinner fa-spin text-[9px]" wire:loading wire:target="previousPage"></i>
                 </button>
 
                 @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)"
+                    <button wire:click="gotoPage(1)"
+                            wire:loading.attr="disabled" wire:target="gotoPage(1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-60 disabled:cursor-wait">
+                        <span wire:loading.remove wire:target="gotoPage(1)">1</span>
+                        <i class="fas fa-spinner fa-spin text-[9px]" wire:loading wire:target="gotoPage(1)"></i>
+                    </button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-bold px-0.5">…</span>@endif
                 @endif
 
@@ -1081,25 +1104,35 @@ select.adm-select-arrow {
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                      bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="$set('page', {{ $p }})"
+                        <button wire:click="gotoPage({{ $p }})"
+                                wire:loading.attr="disabled" wire:target="gotoPage({{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-60 disabled:cursor-wait">
+                            <span wire:loading.remove wire:target="gotoPage({{ $p }})">{{ $p }}</span>
+                            <i class="fas fa-spinner fa-spin text-[9px]" wire:loading wire:target="gotoPage({{ $p }})"></i>
+                        </button>
                     @endif
                 @endfor
 
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-bold px-0.5">…</span>@endif
-                    <button wire:click="$set('page', {{ $lp }})"
+                    <button wire:click="gotoPage({{ $lp }})"
+                            wire:loading.attr="disabled" wire:target="gotoPage({{ $lp }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-60 disabled:cursor-wait">
+                        <span wire:loading.remove wire:target="gotoPage({{ $lp }})">{{ $lp }}</span>
+                        <i class="fas fa-spinner fa-spin text-[9px]" wire:loading wire:target="gotoPage({{ $lp }})"></i>
+                    </button>
                 @endif
 
                 <button wire:click="nextPage"
+                        wire:loading.attr="disabled" wire:target="nextPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if(!$this->jobPostings->hasMorePages()) disabled @endif>
-                    <i class="fas fa-chevron-right text-[9px]"></i>
+                    <i class="fas fa-chevron-right text-[9px]" wire:loading.remove wire:target="nextPage"></i>
+                    <i class="fas fa-spinner fa-spin text-[9px]" wire:loading wire:target="nextPage"></i>
                 </button>
 
                 <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
@@ -1316,8 +1349,6 @@ select.adm-select-arrow {
 {{-- ══ SHARE JOB — MODAL ══ --}}
 @if($showShareJobModal)
 @php
-    $sjBaseUrl  = $this->jobsBaseUrl();
-
     $sjTargetParts = $shareJobTarget
         ? array_values(array_filter(array_map('trim', explode(',', $shareJobTarget))))
         : [];
@@ -1347,8 +1378,7 @@ select.adm-select-arrow {
     }
 
     $sjLines[] = '';
-    $sjLines[] = 'See full details and apply on the PHILCST Alumni Connect portal.';
-    $sjLines[] = $sjBaseUrl;
+    $sjLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
     $sjLines[] = '#YourFutureStarsHere';
     $sjPostText = implode("\n", $sjLines);
 @endphp
@@ -1361,7 +1391,7 @@ select.adm-select-arrow {
 .adm-share-sheet { animation: admPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
 .adm-share-modal-wrapper {
-    max-height: 90vh;
+    max-height: 70vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1399,6 +1429,49 @@ select.adm-select-arrow {
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .adm-share-option-btn .label-text { flex: 1; text-align: left; }
+
+/* ── Job photo preview (Post Preview column) ── */
+.adm-share-photo-preview {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    border: 1px solid #E5E7EB;
+    background: #f2f2f2;
+    flex-shrink: 0;
+}
+.adm-share-photo-preview img {
+    width: 100%; height: 100%; object-fit: contain; display: block;
+}
+.adm-share-photo-preview .dl-badge {
+    position: absolute; bottom: 8px; right: 8px;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(0,0,0,.72); color: #fff;
+    font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 999px;
+}
+@media (max-width: 480px) {
+    .adm-share-photo-preview { aspect-ratio: 4 / 3; }
+}
+
+/* ── Pre-share "download the photo?" confirm dialog ── */
+.adm-dl-confirm-icon {
+    width: 2.25rem; height: 2.25rem; border-radius: 0.65rem; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #F5F0FA; color: #7a3f91; font-size: 0.95rem;
+}
+.adm-dl-confirm-btn {
+    flex: 1; padding: 0.6rem 0.9rem; border-radius: 0.65rem;
+    font-size: 0.8125rem; font-weight: 700; cursor: pointer;
+    transition: filter .12s ease-out, transform .1s ease-out; border: none;
+}
+.adm-dl-confirm-btn:active { transform: scale(.97); transition-duration: .05s; }
+.adm-dl-confirm-btn.primary   { background: #7a3f91; color: #fff; }
+.adm-dl-confirm-btn.primary:hover  { filter: brightness(0.94); }
+.adm-dl-confirm-btn.primary:disabled { opacity: .7; cursor: wait; }
+.adm-dl-confirm-btn.secondary { background: #F3F4F6; color: #374151; }
+.adm-dl-confirm-btn.secondary:hover { background: #E5E7EB; }
 </style>
 
 <div id="admjob-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 adm-share-backdrop"
@@ -1407,6 +1480,12 @@ select.adm-select-arrow {
          sharingTo: null,
          shareText: {{ json_encode($sjPostText) }},
          jobTitle:  {{ json_encode($shareJobTitle) }},
+         imageUrl:  {{ json_encode($shareJobPhotoUrl) }},
+
+         downloading: false,
+         downloaded:  false,
+         showDlConfirm: false,
+         pendingTarget: null,
 
          async copyText(text) {
              try {
@@ -1423,12 +1502,80 @@ select.adm-select-arrow {
              } catch (e) { return false; }
          },
 
+         async buildImageFile() {
+             if (!this.imageUrl) return null;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 return new File([blob], 'job-photo.' + ext, { type: blob.type });
+             } catch (e) { return null; }
+         },
+
+         async downloadImage() {
+             if (!this.imageUrl) return false;
+             this.downloading = true;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 const url  = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = 'job-photo.' + ext;
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+                 setTimeout(() => URL.revokeObjectURL(url), 4000);
+                 this.downloading = false;
+                 this.downloaded  = true;
+                 setTimeout(() => this.downloaded = false, 4000);
+                 return true;
+             } catch (e) {
+                 this.downloading = false;
+                 return false;
+             }
+         },
+
          async nativeShare() {
              this.sharingTo = 'native';
              try {
-                 await navigator.share({ title: this.jobTitle, text: this.shareText });
+                 const shareData = { title: this.jobTitle, text: this.shareText };
+                 const file = await this.buildImageFile();
+                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+                     shareData.files = [file];
+                 }
+                 await navigator.share(shareData);
              } catch (e) { /* cancelled by user — nothing to do */ }
              this.sharingTo = null;
+         },
+
+         // Facebook/Messenger don't accept a file via window.open, so —
+         // same pattern as the organizer side — ask the admin to download
+         // the photo first (or skip if they already have it) before we
+         // open the share target and copy the caption.
+         askShare(target) {
+             if (!this.imageUrl) { this.pendingTarget = target; this.proceedToTarget(); return; }
+             this.pendingTarget = target;
+             this.showDlConfirm = true;
+         },
+
+         async confirmDownloadThenGo() {
+             await this.downloadImage();
+             this.proceedToTarget();
+         },
+
+         proceedToTarget() {
+             this.showDlConfirm = false;
+             const target = this.pendingTarget;
+             this.pendingTarget = null;
+             if (target === 'facebook') this.openFacebook();
+             else if (target === 'messenger') this.openMessenger();
+         },
+
+         cancelDlConfirm() {
+             this.showDlConfirm = false;
+             this.pendingTarget = null;
          },
 
          async openFacebook() {
@@ -1464,7 +1611,7 @@ select.adm-select-arrow {
      x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
-     @keydown.escape.window="$wire.closeShareJobModal()">
+     @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareJobModal()}">
 
     <div class="adm-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 adm-share-modal-wrapper">
 
@@ -1489,7 +1636,18 @@ select.adm-select-arrow {
             <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto adm-scroll">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0 text-[#111111]">Post Preview</p>
 
-                <div class="rounded-xl border border-gray-200 flex-shrink-0">
+                @if($shareJobPhotoUrl)
+                <div class="adm-share-photo-preview">
+                    <img src="{{ $shareJobPhotoUrl }}" alt="{{ $shareJobTitle }}"
+                         onerror="this.style.display='none'">
+                    <span class="dl-badge" x-show="downloading || downloaded" x-cloak>
+                        <i class="fas" :class="downloading ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+                        <span x-text="downloading ? 'Downloading…' : 'Downloaded'"></span>
+                    </span>
+                </div>
+                @endif
+
+                <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto adm-scroll" style="max-height: 180px;">
                     <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed text-[#111111]" style="font-size:clamp(11px,1vw,13px);">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $sjPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
@@ -1510,7 +1668,7 @@ select.adm-select-arrow {
                     </button>
                 </template>
 
-                <button type="button" @click="openFacebook()" :disabled="sharingTo==='facebook'" class="adm-share-option-btn" style="background:#1877F2;">
+                <button type="button" @click="askShare('facebook')" :disabled="sharingTo==='facebook'" class="adm-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
                         <i class="fas fa-spinner fa-spin text-[#1877F2] text-sm" x-show="sharingTo==='facebook'" x-cloak></i>
                         <svg x-show="sharingTo!=='facebook'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
@@ -1518,7 +1676,7 @@ select.adm-select-arrow {
                     <span class="label-text text-xs font-semibold" x-text="sharingTo==='facebook' ? 'Opening…' : 'Share on Facebook'"></span>
                 </button>
 
-                <button type="button" @click="openMessenger()" :disabled="sharingTo==='messenger'" class="adm-share-option-btn" style="background:#0084FF;">
+                <button type="button" @click="askShare('messenger')" :disabled="sharingTo==='messenger'" class="adm-share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
                         <i class="fas fa-spinner fa-spin text-[#0084FF] text-sm" x-show="sharingTo==='messenger'" x-cloak></i>
                         <svg x-show="sharingTo!=='messenger'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
@@ -1539,6 +1697,46 @@ select.adm-select-arrow {
                     The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
                     into the Facebook or Messenger window that opens.
                 </p>
+            </div>
+        </div>
+    </div>
+
+    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ──
+         Facebook/Messenger's window.open() can't carry an attached file,
+         so — same UX as the organizer side — ask the admin to download
+         the job photo first (or skip if they already have it saved)
+         before we open the share target and copy the caption. ── --}}
+    <div x-show="showDlConfirm" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
+         @click.self="cancelDlConfirm()">
+        <div class="adm-share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+            <div class="flex items-start gap-3">
+                <span class="adm-dl-confirm-icon"><i class="fas fa-image"></i></span>
+                <div class="min-w-0 pt-0.5">
+                    <p class="text-sm font-semibold text-[#111111]">Download the job photo?</p>
+                    <p class="text-xs mt-1 leading-relaxed text-[#666666]">
+                        You'll need to attach a photo to your post. Download it now, or skip if you already have it saved.
+                    </p>
+                </div>
+            </div>
+
+            @if($shareJobPhotoUrl)
+            <div class="adm-share-photo-preview">
+                <img src="{{ $shareJobPhotoUrl }}" alt="{{ $shareJobTitle }}" onerror="this.style.display='none'">
+            </div>
+            @endif
+
+            <div class="flex items-center gap-2">
+                <button type="button" @click="proceedToTarget()" class="adm-dl-confirm-btn secondary">
+                    Skip
+                </button>
+                <button type="button" @click="confirmDownloadThenGo()" class="adm-dl-confirm-btn primary" :disabled="downloading">
+                    <span x-show="!downloading"><i class="fas fa-download mr-1"></i>Download</span>
+                    <span x-show="downloading" x-cloak><i class="fas fa-spinner fa-spin mr-1"></i>Downloading…</span>
+                </button>
             </div>
         </div>
     </div>

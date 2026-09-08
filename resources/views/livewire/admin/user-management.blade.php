@@ -58,8 +58,8 @@ new class extends Component {
         $filter = session()->pull('admin_alumni_filter', '');
         if ($filter) {
             $this->activeRole = 'alumni';
-            if (in_array($filter, ['complete', 'pending'], true)) {
-                $this->statusFilter = $filter;
+            if (in_array($filter, ['complete', 'pending', 'this_month'], true)) {
+                $this->statusFilter = $filter === 'this_month' ? 'new_this_month' : $filter;
             }
         }
         $tab = session()->pull('admin_users_tab', '');
@@ -91,7 +91,7 @@ new class extends Component {
 
     public function setStatusFilter(string $status): void {
         $this->activeRole    = 'alumni';
-        $this->statusFilter  = in_array($status, ['all', 'complete', 'pending'], true) ? $status : 'all';
+        $this->statusFilter  = in_array($status, ['all', 'complete', 'pending', 'new_this_month'], true) ? $status : 'all';
         $this->search        = '';
         $this->currentPage   = 1;
     }
@@ -121,20 +121,30 @@ new class extends Component {
         $alumniVerified = DB::table('alumni')->whereNotNull('password_changed_at')->count();
         $alumniPending  = $alumniTotal - $alumniVerified;
 
+        // Newly registered alumni — created_at falls within the current
+        // calendar month (Asia/Manila), read straight off the users table
+        // since that's where the registration timestamp lives.
+        $alumniNewThisMonth = DB::table('users')
+            ->where('role', 'alumni')
+            ->whereMonth('created_at', now('Asia/Manila')->month)
+            ->whereYear('created_at', now('Asia/Manila')->year)
+            ->count();
+
         return [
-            'total'          => $rows->sum(),
-            'alumni'         => $alumniTotal,
-            'alumniVerified' => $alumniVerified,
-            'alumniPending'  => $alumniPending,
-            'director'       => $rows->get('director',  0),
-            'dirActive'      => $dirActive,
-            'dirInactive'    => $dirInactive,
-            'coordinator'    => $rows->get('organizer', 0),
-            'coordActive'    => $coordActive,
-            'coordInactive'  => $coordInactive,
-            'registrar'      => $rows->get('registrar', 0),
-            'regActive'      => $regActive,
-            'regInactive'    => $regInactive,
+            'total'              => $rows->sum(),
+            'alumni'             => $alumniTotal,
+            'alumniVerified'     => $alumniVerified,
+            'alumniPending'      => $alumniPending,
+            'alumniNewThisMonth' => $alumniNewThisMonth,
+            'director'           => $rows->get('director',  0),
+            'dirActive'          => $dirActive,
+            'dirInactive'        => $dirInactive,
+            'coordinator'        => $rows->get('organizer', 0),
+            'coordActive'        => $coordActive,
+            'coordInactive'      => $coordInactive,
+            'registrar'          => $rows->get('registrar', 0),
+            'regActive'          => $regActive,
+            'regInactive'        => $regInactive,
         ];
     }
 
@@ -180,11 +190,14 @@ new class extends Component {
         if ($this->activeRole !== 'all' && isset($map[$this->activeRole]))
             $q->where('users.role', $map[$this->activeRole]);
 
-        if ($this->activeRole === 'alumni' && in_array($this->statusFilter, ['complete', 'pending'], true)) {
+        if ($this->activeRole === 'alumni' && in_array($this->statusFilter, ['complete', 'pending', 'new_this_month'], true)) {
             if ($this->statusFilter === 'complete') {
                 $q->whereNotNull('al.password_changed_at');
-            } else {
+            } elseif ($this->statusFilter === 'pending') {
                 $q->whereNull('al.password_changed_at');
+            } else { // new_this_month
+                $q->whereMonth('users.created_at', now('Asia/Manila')->month)
+                  ->whereYear('users.created_at', now('Asia/Manila')->year);
             }
         }
 
@@ -660,11 +673,13 @@ select.mu-filter-input.mu-active {
 
 .mu-stat-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 0.6rem;
     flex-shrink: 0;
 }
-@media (max-width: 768px) { .mu-stat-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 1100px) { .mu-stat-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 768px)  { .mu-stat-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 480px)  { .mu-stat-grid { grid-template-columns: 1fr; } }
 
 /* ── Mobile: let the whole layout use more of the real viewport height ── */
 @media (max-width: 640px) {
@@ -680,6 +695,15 @@ select.mu-filter-input.mu-active {
     position: relative; overflow: visible;
     display: flex; flex-direction: row; align-items: center; gap: 12px;
     min-height: 72px;
+    transition: border-color .15s, box-shadow .15s;
+}
+/* Hover border picks up each card's own icon color, set per-card via
+   the --stat-accent custom property (see inline style on each card).
+   Scoped to .cursor-pointer only — Directors/Coordinators/Registrars
+   aren't clickable, so they must NOT show an interactive hover state. */
+.mu-stat-card.cursor-pointer:hover {
+    border-color: var(--stat-accent, #c4b5d4);
+    box-shadow: 0 3px 10px var(--stat-accent-shadow, rgba(122,63,145,.10));
 }
 .mu-stat-icon-lg {
     width: 46px; height: 46px; border-radius: 12px;
@@ -862,7 +886,7 @@ select.mu-filter-input.mu-active {
     {{-- KPI STAT CARDS --}}
     @php $s = $this->stats; @endphp
     <div class="mu-stat-grid">
-        <div wire:click="switchTab('alumni')" class="mu-stat-card cursor-pointer">
+        <div class="mu-stat-card" style="--stat-accent:#7a3f91;--stat-accent-shadow:rgba(122,63,145,.15);">
             <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
                 <i class="fas fa-graduation-cap text-white"></i>
             </div>
@@ -902,6 +926,16 @@ select.mu-filter-input.mu-active {
                 <div class="mu-stat-sub">{{ $s['regActive'] }} active · {{ $s['regInactive'] }} inactive</div>
             </div>
         </div>
+        <div class="mu-stat-card" style="--stat-accent:#2563eb;--stat-accent-shadow:rgba(37,99,235,.15);">
+            <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#1a4db5,#2563eb);">
+                <i class="fas fa-user-plus text-white"></i>
+            </div>
+            <div class="mu-stat-text">
+                <div class="mu-stat-num">{{ number_format($s['alumniNewThisMonth']) }}</div>
+                <div class="mu-stat-lbl">Newly Registered</div>
+                <div class="mu-stat-sub">Alumni this month</div>
+            </div>
+        </div>
     </div>
 
     {{-- UNIFIED TABLE BLOCK --}}
@@ -929,9 +963,10 @@ select.mu-filter-input.mu-active {
                 <div class="relative">
                     @php
                         $aBadge = match($statusFilter) {
-                            'complete' => ['Complete', '#059669', '#ECFDF5'],
-                            'pending'  => ['Pending',  '#d97706', '#FFF7ED'],
-                            default    => ['All Alumni', '#7a3f91', '#F3E8FF'],
+                            'complete'       => ['Complete', '#059669', '#ECFDF5'],
+                            'pending'        => ['Pending',  '#d97706', '#FFF7ED'],
+                            'new_this_month' => ['New',      '#2563eb', '#EFF6FF'],
+                            default          => ['All Alumni', '#7a3f91', '#F3E8FF'],
                         };
                     @endphp
                     <div class="mu-tab-pill {{ $activeRole==='alumni' ? 'mu-tab-active' : 'mu-tab-inactive' }} pr-6">
@@ -944,9 +979,10 @@ select.mu-filter-input.mu-active {
                     <select wire:key="alumni-status-select-{{ $activeRole }}-{{ $statusFilter }}"
                             wire:change="setStatusFilter($event.target.value)"
                             class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
-                        <option value="all"      {{ $activeRole==='alumni' ? ($statusFilter==='all'      ? 'selected' : '') : 'selected' }}>All Alumni</option>
-                        <option value="complete" {{ $activeRole==='alumni' && $statusFilter==='complete' ? 'selected' : '' }}>Complete</option>
-                        <option value="pending"  {{ $activeRole==='alumni' && $statusFilter==='pending'  ? 'selected' : '' }}>Pending</option>
+                        <option value="all"            {{ $activeRole==='alumni' ? ($statusFilter==='all'            ? 'selected' : '') : 'selected' }}>All Alumni</option>
+                        <option value="complete"       {{ $activeRole==='alumni' && $statusFilter==='complete'       ? 'selected' : '' }}>Complete</option>
+                        <option value="pending"        {{ $activeRole==='alumni' && $statusFilter==='pending'        ? 'selected' : '' }}>Pending</option>
+                        <option value="new_this_month" {{ $activeRole==='alumni' && $statusFilter==='new_this_month' ? 'selected' : '' }}>Newly Registered</option>
                     </select>
                 </div>
                 @endif

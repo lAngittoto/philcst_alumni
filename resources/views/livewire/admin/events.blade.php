@@ -455,7 +455,7 @@ select.adm-select-arrow {
     margin-bottom: 0.5rem;
 }
 .vw-body-box {
-    font-size: 0.875rem;
+    font-size: 1rem;
     font-weight: 400;
     line-height: 1.8;
     color: #333333;
@@ -658,7 +658,7 @@ select.adm-select-arrow {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
                            bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none cursor-pointer">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
@@ -682,13 +682,13 @@ select.adm-select-arrow {
 
             {{-- Centered loading spinner — mirrors Manage Event (Director)'s table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             @if($this->events->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
@@ -894,46 +894,50 @@ select.adm-select-arrow {
                     <span class="text-white/50 text-xs ml-1">(filtered)</span>
                 @endif
             </p>
-            <div class="flex items-center gap-1 flex-wrap py-2">
-                <button wire:click="previousPage"
+            <div class="flex items-center gap-1 flex-wrap py-2" wire:loading.class="pointer-events-none" wire:target="previousPage,nextPage,gotoPage,search,filterStatus,filterSort,filterCollege,resetFilters">
+                <button type="button" wire:click="previousPage" wire:key="adm-evt-page-prev"
+                        wire:loading.attr="disabled" wire:target="previousPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
-                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition cursor-pointer"
                         @if($this->events->onFirstPage()) disabled @endif>
-                    <i class="fas fa-chevron-left text-[9px]"></i>
+                    <span wire:loading.remove wire:target="previousPage"><i class="fas fa-chevron-left text-[9px]"></i></span>
+                    <span wire:loading wire:target="previousPage"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
                 </button>
 
                 @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)"
+                    <button type="button" wire:click="gotoPage(1)" wire:key="adm-evt-page-1"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition cursor-pointer">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-bold px-0.5">…</span>@endif
                 @endif
 
                 @for($p = $pgStart; $p <= $pgEnd; $p++)
                     @if($p === $cp)
-                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
+                        <span wire:key="adm-evt-page-{{ $p }}" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                      bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="$set('page', {{ $p }})"
+                        <button type="button" wire:click="gotoPage({{ $p }})" wire:key="adm-evt-page-{{ $p }}"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition cursor-pointer">{{ $p }}</button>
                     @endif
                 @endfor
 
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-bold px-0.5">…</span>@endif
-                    <button wire:click="$set('page', {{ $lp }})"
+                    <button type="button" wire:click="gotoPage({{ $lp }})" wire:key="adm-evt-page-{{ $lp }}"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition cursor-pointer">{{ $lp }}</button>
                 @endif
 
-                <button wire:click="nextPage"
+                <button type="button" wire:click="nextPage" wire:key="adm-evt-page-next"
+                        wire:loading.attr="disabled" wire:target="nextPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
-                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition cursor-pointer"
                         @if(!$this->events->hasMorePages()) disabled @endif>
-                    <i class="fas fa-chevron-right text-[9px]"></i>
+                    <span wire:loading.remove wire:target="nextPage"><i class="fas fa-chevron-right text-[9px]"></i></span>
+                    <span wire:loading wire:target="nextPage"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
                 </button>
 
                 <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
@@ -1097,18 +1101,6 @@ select.adm-select-arrow {
                     @endif
                 </div>
 
-                @if($ev->updated_by)
-                <div class="vw-field">
-                    <p class="vw-label">Last Updated By</p>
-                    <p class="vw-value">{{ $ev->updated_by }}</p>
-                    <p class="vw-subvalue">{{ \Carbon\Carbon::parse($ev->updated_at)->setTimezone('Asia/Manila')->format('M d, Y g:i A') }}</p>
-                </div>
-                @endif
-
-                <p class="text-xs text-center text-[#111111] pt-1 font-semibold">
-                    Submitted {{ $createdPH->diffForHumans() }} · {{ $createdPH->format('M d, Y g:i A') }}
-                </p>
-
             </div>
         </div>
 
@@ -1174,7 +1166,6 @@ select.adm-select-arrow {
 {{-- ══ SHARE EVENT — MODAL ══ --}}
 @if($showShareModal)
 @php
-    $shareBaseUrl   = $this->eventsBaseUrl();
     $isCompleted    = $shareEventStatus === 'COMPLETED';
     $shTimeDisplay  = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
 
@@ -1192,10 +1183,7 @@ select.adm-select-arrow {
     }
 
     $fbLines[] = '';
-    $fbLines[] = $isCompleted
-        ? 'Thank you to everyone who joined! For more updates, visit the PHILCST Alumni Connect portal.'
-        : 'For more information and to RSVP, visit the PHILCST Alumni Connect portal.';
-    $fbLines[] = $shareBaseUrl;
+    $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp
@@ -1208,7 +1196,7 @@ select.adm-select-arrow {
 .adm-share-sheet { animation: admPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
 .adm-share-modal-wrapper {
-    max-height: 90vh;
+    max-height: 70vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1247,46 +1235,45 @@ select.adm-select-arrow {
 .adm-share-option-btn .label-text { flex: 1; text-align: left; }
 
 .adm-share-photo-preview {
+    position: relative;
     width: 100%;
-    height: 140px;
+    aspect-ratio: 16 / 9;
     border-radius: 0.75rem;
     overflow: hidden;
-    background: #f3f4f6;
-    border: 1px solid #e5e7eb;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border: 1px solid #E5E7EB;
+    background: #f2f2f2;
     flex-shrink: 0;
-    position: relative;
 }
 .adm-share-photo-preview img {
-    width: 100%; height: 100%; object-fit: contain;
+    width: 100%; height: 100%; object-fit: contain; display: block;
 }
 .adm-share-photo-preview .dl-badge {
-    position: absolute; bottom: 6px; right: 6px;
-    background: rgba(17,24,39,.75); color: #fff;
-    font-size: 10px; font-weight: 700; letter-spacing: .03em;
-    padding: 3px 8px; border-radius: 999px;
-    display: flex; align-items: center; gap: 4px;
-    pointer-events: none;
+    position: absolute; bottom: 8px; right: 8px;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: rgba(0,0,0,.72); color: #fff;
+    font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 999px;
+}
+@media (max-width: 480px) {
+    .adm-share-photo-preview { aspect-ratio: 4 / 3; }
 }
 
 .adm-dl-confirm-icon {
-    width: 3rem; height: 3rem; border-radius: 0.9rem;
-    background: #eff6ff; color: #2563eb;
+    width: 2.25rem; height: 2.25rem; border-radius: 0.65rem; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    font-size: 1.1rem; flex-shrink: 0;
+    background: #F5F0FA; color: #7a3f91; font-size: 0.95rem;
 }
 .adm-dl-confirm-btn {
-    flex: 1; padding: 0.65rem 1rem; border-radius: 0.75rem;
+    flex: 1; padding: 0.6rem 0.9rem; border-radius: 0.65rem;
     font-size: 0.8125rem; font-weight: 700; cursor: pointer;
-    transition: filter .15s, transform .1s; border: none;
+    transition: filter .12s ease-out, transform .1s ease-out; border: none;
 }
-.adm-dl-confirm-btn:active { transform: scale(.97); }
-.adm-dl-confirm-btn.primary { background: #2563eb; color: #fff; }
-.adm-dl-confirm-btn.primary:hover { filter: brightness(0.95); }
-.adm-dl-confirm-btn.secondary { background: #f3f4f6; color: #333333; border: 1px solid #e5e7eb; }
-.adm-dl-confirm-btn.secondary:hover { background: #e5e7eb; }
+.adm-dl-confirm-btn:active { transform: scale(.97); transition-duration: .05s; }
+.adm-dl-confirm-btn.primary   { background: #7a3f91; color: #fff; }
+.adm-dl-confirm-btn.primary:hover  { filter: brightness(0.94); }
+.adm-dl-confirm-btn.primary:disabled { opacity: .7; cursor: wait; }
+.adm-dl-confirm-btn.secondary { background: #F3F4F6; color: #374151; }
+.adm-dl-confirm-btn.secondary:hover { background: #E5E7EB; }
 </style>
 
 <div id="adm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 adm-share-backdrop"
@@ -1458,7 +1445,7 @@ select.adm-select-arrow {
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 flex-shrink-0">
+                <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto adm-scroll" style="max-height: 180px;">
                     <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed text-[#111111]" style="font-size:clamp(11px,1vw,13px);">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>

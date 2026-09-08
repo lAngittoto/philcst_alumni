@@ -179,7 +179,7 @@ new #[Layout('app')] class extends Component {
         $this->chartEmpSnapshotData = json_encode([
             'labels' => ['Employed', 'Self-Employed', 'Unemployed', 'Not Filled'],
             'data'   => [$this->empEmployed, $this->empSelf, $this->empUnemployed, $this->empNotFilled],
-            'colors' => ['#059669', '#2563eb', '#d97706', '#9ca3af'],
+            'colors' => ['#059669', '#2563eb', '#d97706', '#6B7280'],
         ]);
     }
 
@@ -359,7 +359,38 @@ new #[Layout('app')] class extends Component {
 /* ══════════════════════════════════════════════
    ROOT — page now scrolls naturally, no fixed-height lock
    ══════════════════════════════════════════════ */
-.adm-root { display: flex; flex-direction: column; min-height: 100%; }
+.adm-root {
+    display: flex; flex-direction: column; min-height: 100%;
+    max-width: 100%; overflow-x: hidden;
+}
+
+/* ══════════════════════════════════════════════
+   NO SELECT / NO COPY — the whole dashboard is a display
+   surface, not text meant to be highlighted/copied. Inputs
+   and textareas (if any get added later) are explicitly
+   exempted so the dashboard never accidentally breaks a
+   future form field.
+   ══════════════════════════════════════════════ */
+.adm-root, .adm-root * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none; /* iOS: kills the "Copy/Look Up" long-press bubble */
+}
+.adm-root input,
+.adm-root textarea,
+.adm-root [contenteditable="true"] {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
+.adm-root img {
+    -webkit-user-drag: none;
+    user-drag: none;
+    pointer-events: none;
+}
 
 /* ── Tooltips (shared) — DESKTOP ONLY, hidden entirely on mobile/touch ── */
 .adm-tip-wrap { position: relative; overflow: visible; }
@@ -423,8 +454,29 @@ new #[Layout('app')] class extends Component {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     flex-shrink: 0;
 }
-.adm-panel-ttl { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #000000; line-height: 1.2; }
-.adm-panel-sub { font-size: .68rem; color: #555555; font-weight: 500; margin-top: 3px; }
+.adm-panel-ttl { font-size: .92rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #000000; line-height: 1.2; }
+.adm-panel-sub { font-size: .8rem; color: #333333; font-weight: 500; margin-top: 3px; }
+@media (max-width: 480px) {
+    .adm-panel-head { padding: 10px 14px; }
+    .adm-role-tile { padding: 12px 14px; }
+    .adm-snap-mini-tile { padding: 9px 10px; }
+    .adm-snap-mini-num { font-size: 1.3rem; }
+    .adm-snap-row { padding: 12px 14px 14px; }
+}
+@media (max-width: 360px) {
+    .adm-panel-head { padding: 9px 12px; }
+    .adm-panel-ttl { font-size: .82rem; }
+    .adm-panel-sub { font-size: .72rem; }
+    .adm-role-tile { padding: 10px 12px; gap: 6px; }
+    .adm-role-tile-icon { width: 30px; height: 30px; }
+    .adm-role-tile-label { font-size: .7rem; }
+    .adm-role-tile-total { font-size: .95rem; }
+    .adm-role-tile-pill { font-size: .68rem; padding: 2px 7px; }
+    .adm-snap-mini-tile { padding: 8px 9px; }
+    .adm-snap-mini-num { font-size: 1.1rem; }
+    .adm-snap-mini-lbl { font-size: .68rem; }
+    .adm-snap-row { padding: 10px 12px 12px; }
+}
 
 /* ── Scrollbar ── */
 .adm-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 #f9f7fc; }
@@ -444,7 +496,9 @@ new #[Layout('app')] class extends Component {
     cursor: pointer;
     transition: box-shadow .15s, border-color .15s;
 }
-.adm-stat-card:hover { border-color: #c4b5d4; box-shadow: 0 3px 10px rgba(122,63,145,.10); }
+/* Hover border picks up this card's own icon color, set per-card via
+   the --stat-accent custom property (see inline style on each card). */
+.adm-stat-card:hover { border-color: var(--stat-accent, #c4b5d4); box-shadow: 0 3px 10px var(--stat-accent-shadow, rgba(122,63,145,.10)); }
 
 /* Large icon on the left */
 .adm-stat-icon-lg {
@@ -460,6 +514,23 @@ new #[Layout('app')] class extends Component {
 .adm-stat-lbl { font-size: .875rem; font-weight: 500; margin-top: 4px; color: #333333; }
 .adm-stat-sub { font-size: .75rem; font-weight: 500; margin-top: 4px; color: #555555; }
 
+@media (max-width: 480px) {
+    .adm-stat-card { padding: 12px 14px; gap: 10px; }
+    .adm-stat-icon-lg { width: 42px; height: 42px; border-radius: 10px; }
+    .adm-stat-icon-lg i { font-size: 1.1rem; }
+    .adm-stat-num { font-size: 1.5rem; }
+    .adm-stat-lbl { font-size: .8rem; }
+    .adm-stat-sub { font-size: .7rem; }
+}
+@media (max-width: 360px) {
+    .adm-stat-card { padding: 10px 12px; gap: 8px; }
+    .adm-stat-icon-lg { width: 36px; height: 36px; border-radius: 9px; }
+    .adm-stat-icon-lg i { font-size: .95rem; }
+    .adm-stat-num { font-size: 1.3rem; }
+    .adm-stat-lbl { font-size: .74rem; }
+    .adm-stat-sub { font-size: .64rem; }
+}
+
 /* ── Body grid: courses (left) + snapshots (right) ── */
 .adm-body-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
@@ -473,6 +544,10 @@ new #[Layout('app')] class extends Component {
 .adm-panel-body-scroll { max-height: 520px; overflow-y: auto; }
 @media (max-width: 1023px) {
     .adm-panel-body-scroll { max-height: 400px; }
+}
+@media (max-width: 640px) {
+    .adm-body-grid { gap: 0.75rem; }
+    .adm-panel-body-scroll { max-height: 320px; }
 }
 
 /* ── Role counts strip — now bigger, more detailed cards ── */
@@ -491,7 +566,9 @@ new #[Layout('app')] class extends Component {
     border: 1px solid #E8E0F0; background: #fff;
     cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s;
 }
-.adm-role-tile:hover { background: #FBF7FD; border-color: #d4b8e8; box-shadow: 0 3px 10px rgba(122,63,145,.10); }
+/* Hover border picks up this tile's own icon color, set per-tile via
+   the --stat-accent custom property (see inline style on each tile). */
+.adm-role-tile:hover { background: #FBF7FD; border-color: var(--stat-accent, #d4b8e8); box-shadow: 0 3px 10px var(--stat-accent-shadow, rgba(122,63,145,.10)); }
 .adm-role-tile-top { display: flex; align-items: center; gap: 10px; }
 .adm-role-tile-icon { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .adm-role-tile-icon i { font-size: .85rem !important; }
@@ -511,9 +588,16 @@ new #[Layout('app')] class extends Component {
 }
 
 .adm-snap-card {
-    cursor: pointer;
     display: flex;
     flex-direction: column;
+}
+
+/* Snapshot cards that are themselves a single clickable link (e.g.
+   Employment, Job Postings) get the pointer cursor here. Events' outer
+   card is intentionally NOT clickable (only its 4 status tiles are), so
+   it uses .adm-snap-card without this modifier. */
+.adm-snap-card-clickable {
+    cursor: pointer;
 }
 
 .adm-snap-row {
@@ -528,9 +612,28 @@ new #[Layout('app')] class extends Component {
 }
 .adm-snap-mini-tile {
     border-radius: 10px; padding: 10px 12px; border: 1px solid #E8E0F0; background: #FAFBFF;
-    cursor: pointer; transition: background .12s, border-color .12s;
+    transition: background .12s, border-color .12s;
 }
-.adm-snap-mini-tile:hover { background: #F0E6F8; border-color: #d4b8e8; }
+/* Individually-clickable mini-tiles (currently: Events status tiles) get
+   the pointer + hover highlight. Non-clickable tiles (e.g. Employment's,
+   which route only via their parent card) don't use this modifier. */
+.adm-snap-mini-tile-clickable {
+    cursor: pointer;
+}
+.adm-snap-mini-tile-clickable:hover { background: #F0E6F8; border-color: #d4b8e8; }
+
+/* Events status tiles — hover keeps the shared purple background but the
+   border color matches each tile's own status theme instead of purple. */
+.adm-tile-pending:hover   { border-color: #d97706; }
+.adm-tile-approved:hover  { border-color: #059669; }
+.adm-tile-completed:hover { border-color: #16a34a; }
+.adm-tile-rejected:hover  { border-color: #dc2626; }
+
+/* Job Postings status tiles — same treatment: themed border on hover. */
+.adm-tile-active:hover   { border-color: #059669; }
+.adm-tile-inactive:hover { border-color: #d97706; }
+.adm-tile-expiring:hover { border-color: #f97316; }
+.adm-tile-total:hover    { border-color: #7a3f91; }
 .adm-snap-mini-num { font-size: 1.5rem; font-weight: 700; color: #000000; line-height: 1; }
 .adm-snap-mini-lbl { font-size: .75rem; font-weight: 600; color: #333333; text-transform: uppercase; letter-spacing: .04em; margin-top: 4px; }
 
@@ -543,7 +646,10 @@ new #[Layout('app')] class extends Component {
     margin-bottom: 12px;
 }
 @media (max-width: 480px) {
-    .adm-snap-chart-box { height: 130px; }
+    .adm-snap-chart-box { height: 140px; margin-bottom: 10px; }
+}
+@media (max-width: 360px) {
+    .adm-snap-chart-box { height: 125px; margin-bottom: 8px; }
 }
 
 /* ── Course list — bigger, more detail ── */
@@ -560,10 +666,13 @@ new #[Layout('app')] class extends Component {
     border: 1px solid #E8E0F0;
     border-radius: 14px;
     flex-shrink: 0;
+    width: 100%;
+    max-width: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     max-height: 600px; /* sane fallback before JS syncHeight() takes over */
+    box-sizing: border-box;
 }
 .adm-announce-live {
     display: inline-flex; align-items: center; gap: 5px;
@@ -580,6 +689,8 @@ new #[Layout('app')] class extends Component {
 }
 .adm-announce-track {
     display: flex;
+    width: 100%;
+    max-width: 100%;
     overflow-x: auto;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
@@ -594,6 +705,9 @@ new #[Layout('app')] class extends Component {
 .adm-announce-track::-webkit-scrollbar { display: none; }
 .adm-announce-slide {
     flex: 0 0 100%;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     scroll-snap-align: start;
     padding: 20px 16px;
     display: flex;
@@ -606,6 +720,12 @@ new #[Layout('app')] class extends Component {
     height: 100%;
     pointer-events: none; /* whole slide is inert — swiping happens on the track itself */
 }
+@media (max-width: 640px) {
+    .adm-announce-slide { padding: 14px 12px; min-height: 110px; }
+}
+@media (max-width: 360px) {
+    .adm-announce-slide { padding: 10px 10px; min-height: 95px; gap: 5px; }
+}
 .adm-announce-icon {
     width: 44px; height: 44px; border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
@@ -613,21 +733,34 @@ new #[Layout('app')] class extends Component {
     margin-bottom: 2px;
 }
 .adm-announce-icon i { color: #fff; font-size: 1.1rem; }
+@media (max-width: 360px) {
+    .adm-announce-icon { width: 36px; height: 36px; border-radius: 10px; }
+    .adm-announce-icon i { font-size: .95rem; }
+}
 .adm-announce-badge {
     display: inline-flex; align-items: center;
     font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     padding: 3px 10px; border-radius: 999px; border: 1px solid;
 }
 .adm-announce-img {
-    width: 100%; height: 340px; border-radius: 12px;
+    width: 100%; max-width: 100%; height: 340px; border-radius: 12px;
     background-size: cover; background-position: center; background-repeat: no-repeat;
     background-color: #f2eef7;
     margin-bottom: 4px;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+    box-sizing: border-box;
 }
+@media (max-width: 768px) { .adm-announce-img { height: 220px; } }
+@media (max-width: 480px) { .adm-announce-img { height: 170px; } }
+@media (max-width: 360px) { .adm-announce-img { height: 130px; border-radius: 10px; } }
 .adm-announce-title { font-size: .9rem; font-weight: 700; color: #000000; }
 .adm-announce-desc { font-size: .78rem; color: #333333; font-weight: 500; max-width: 320px; }
 .adm-announce-time { font-size: .7rem; color: #333333; font-weight: 600; margin-top: 2px; }
+@media (max-width: 360px) {
+    .adm-announce-title { font-size: .8rem; }
+    .adm-announce-desc { font-size: .7rem; max-width: 260px; }
+    .adm-announce-time { font-size: .64rem; }
+}
 .adm-announce-dots {
     display: flex; align-items: center; justify-content: center; gap: 6px;
     padding: 10px 0 14px;
@@ -648,17 +781,17 @@ new #[Layout('app')] class extends Component {
 </style>
 
 {{-- ══ PAGE HEADER ══ --}}
-<div class="flex items-center justify-between gap-3 mb-3 shrink-0">
-    <div class="flex items-center gap-3">
-        <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+<div class="flex items-center justify-between gap-3 mb-3 shrink-0 flex-wrap">
+    <div class="flex items-center gap-2.5 sm:gap-3 min-w-0">
+        <div class="w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow-lg shrink-0"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-            <i class="fas fa-gauge-high text-white text-base"></i>
+            <i class="fas fa-gauge-high text-white text-sm sm:text-base"></i>
         </div>
-        <div>
-            <h1 class="text-2xl font-semibold leading-tight" style="color:#000000;">
+        <div class="min-w-0">
+            <h1 class="text-lg sm:text-2xl font-semibold leading-tight truncate" style="color:#000000;">
                 {{ $greeting }}, {{ $adminName }}
             </h1>
-            <p class="text-sm font-normal flex flex-wrap items-center gap-x-1.5 mt-0.5">
+            <p class="text-xs sm:text-sm font-normal flex flex-wrap items-center gap-x-1.5 mt-0.5">
                 <i class="fas fa-circle text-[5px] text-emerald-500 align-middle"></i>
                 <span style="color:#000000;">{{ now()->setTimezone('Asia/Manila')->format('l, F j, Y · g:i A') }}</span>
                 <span class="text-[#c0a0d8]">·</span>
@@ -671,7 +804,7 @@ new #[Layout('app')] class extends Component {
 {{-- ══ KPI STRIP — icon left, text right ══ --}}
 <div class="adm-stat-grid">
 
-    <div wire:click="goToAlumni" class="adm-stat-card adm-tip-wrap">
+    <div wire:click="goToAlumni" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#7A3F91;--stat-accent-shadow:rgba(122,63,145,.15);">
         <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View All Alumni</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
             <i class="fas fa-users text-white"></i>
@@ -683,7 +816,7 @@ new #[Layout('app')] class extends Component {
         </div>
     </div>
 
-    <div wire:click="goToAlumni('complete')" class="adm-stat-card adm-tip-wrap">
+    <div wire:click="goToAlumni('complete')" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#059669;--stat-accent-shadow:rgba(5,150,105,.15);">
         <span class="adm-tip"><i class="fas fa-circle-check mr-1.5"></i>View Complete Profiles</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#027a4f,#059669);">
             <i class="fas fa-circle-check text-white"></i>
@@ -695,7 +828,7 @@ new #[Layout('app')] class extends Component {
         </div>
     </div>
 
-    <div wire:click="goToAlumni('pending')" class="adm-stat-card adm-tip-wrap">
+    <div wire:click="goToAlumni('pending')" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#d97706;--stat-accent-shadow:rgba(217,119,6,.15);">
         <span class="adm-tip"><i class="fas fa-clock mr-1.5"></i>Review Pending Profiles</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#b55a05,#d97706);">
             <i class="fas fa-clock text-white"></i>
@@ -707,7 +840,7 @@ new #[Layout('app')] class extends Component {
         </div>
     </div>
 
-    <div wire:click="goToAlumni('this_month')" class="adm-stat-card adm-tip-wrap">
+    <div wire:click="goToAlumni('this_month')" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#2563eb;--stat-accent-shadow:rgba(37,99,235,.15);">
         <span class="adm-tip"><i class="fas fa-calendar-plus mr-1.5"></i>View New Registrations</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#1a4db5,#2563eb);">
             <i class="fas fa-calendar-plus text-white"></i>
@@ -784,7 +917,7 @@ new #[Layout('app')] class extends Component {
             @endphp
 
             {{-- Directors --}}
-            <div wire:click="goToUsers('director')" class="adm-role-tile adm-tip-wrap">
+            <div wire:click="goToUsers('director')" class="adm-role-tile adm-tip-wrap" style="--stat-accent:#6366f1;--stat-accent-shadow:rgba(99,102,241,.15);">
                 <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Directors</span>
                 <div class="adm-role-tile-top">
                     <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#4f46e5,#6366f1);">
@@ -806,7 +939,7 @@ new #[Layout('app')] class extends Component {
             </div>
 
             {{-- Coordinators --}}
-            <div wire:click="goToUsers('coordinator')" class="adm-role-tile adm-tip-wrap">
+            <div wire:click="goToUsers('coordinator')" class="adm-role-tile adm-tip-wrap" style="--stat-accent:#7A3F91;--stat-accent-shadow:rgba(122,63,145,.15);">
                 <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Coordinators</span>
                 <div class="adm-role-tile-top">
                     <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -828,7 +961,7 @@ new #[Layout('app')] class extends Component {
             </div>
 
             {{-- Registrars --}}
-            <div wire:click="goToUsers('registrar')" class="adm-role-tile adm-tip-wrap">
+            <div wire:click="goToUsers('registrar')" class="adm-role-tile adm-tip-wrap" style="--stat-accent:#059669;--stat-accent-shadow:rgba(5,150,105,.15);">
                 <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Registrars</span>
                 <div class="adm-role-tile-top">
                     <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#059669,#10b981);">
@@ -918,8 +1051,12 @@ new #[Layout('app')] class extends Component {
     {{-- ── RIGHT: Snapshot Stack (Employment / Events / Jobs) ── --}}
     <div class="adm-snap-stack adm-scroll">
 
-        {{-- Employment Snapshot --}}
-        <div wire:click="goToEmployment" class="adm-card adm-snap-card">
+        {{-- Employment Snapshot — every tile and the whole card link to the
+             same unfiltered "View All Alumni Employment" destination now
+             (goToEmployment() with no arg), instead of each mini-tile
+             deep-linking into its own status filter. ── --}}
+        <div wire:click="goToEmployment" class="adm-card adm-snap-card adm-snap-card-clickable adm-tip-wrap">
+            <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View All Alumni Employment</span>
             <div class="adm-panel-head">
                 <div class="adm-snap-head-text">
                     <p class="adm-panel-ttl">Employment</p>
@@ -932,28 +1069,24 @@ new #[Layout('app')] class extends Component {
                 </div>
                 <div class="adm-snap-mini-tiles">
                     {{-- Employed --}}
-                    <div wire:click.stop="goToEmployment('employed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
-                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Employed</span>
+                    <div class="adm-snap-mini-tile">
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($empEmployed) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#059669;">Employed</p>
                     </div>
                     {{-- Self-Employed --}}
-                    <div wire:click.stop="goToEmployment('self_employed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
-                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Self-Employed</span>
+                    <div class="adm-snap-mini-tile">
                         <p class="adm-snap-mini-num" style="color:#2563eb;">{{ number_format($empSelf) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#2563eb;">Self-Employed</p>
                     </div>
                     {{-- Unemployed --}}
-                    <div wire:click.stop="goToEmployment('unemployed')" class="adm-snap-mini-tile adm-mini-tip-wrap">
-                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Unemployed</span>
+                    <div class="adm-snap-mini-tile">
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($empUnemployed) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#d97706;">Unemployed</p>
                     </div>
                     {{-- Not Filled --}}
-                    <div wire:click.stop="goToEmployment('no_record')" class="adm-snap-mini-tile adm-mini-tip-wrap">
-                        <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Not Filled</span>
-                        <p class="adm-snap-mini-num" style="color:#9ca3af;">{{ number_format($empNotFilled) }}</p>
-                        <p class="adm-snap-mini-lbl" style="color:#9ca3af;">Not Filled</p>
+                    <div class="adm-snap-mini-tile">
+                        <p class="adm-snap-mini-num" style="color:#4B5563;">{{ number_format($empNotFilled) }}</p>
+                        <p class="adm-snap-mini-lbl" style="color:#4B5563;">Not Filled</p>
                     </div>
                 </div>
                 <p class="text-[.78rem] font-semibold mt-3" style="color:#7A3F91;">
@@ -962,8 +1095,12 @@ new #[Layout('app')] class extends Component {
             </div>
         </div>
 
-        {{-- Events Snapshot --}}
-        <div id="admEventsSnapCard" wire:click="goToEvents" class="adm-card adm-snap-card">
+        {{-- Events Snapshot — the chart/header area is plain display only
+             (not clickable, per request: "yung may guhit sa taas iwan").
+             Each of the 4 status tiles is its own button with an
+             auto-filter link into the Events page (admin_events_filter
+             session value, now read by events.blade.php's mount()). ── --}}
+        <div id="admEventsSnapCard" class="adm-card adm-snap-card">
             <div class="adm-panel-head">
                 <div class="adm-snap-head-text">
                     <p class="adm-panel-ttl">Events</p>
@@ -975,22 +1112,22 @@ new #[Layout('app')] class extends Component {
                     <canvas id="adm_barEventsSnapshot"></canvas>
                 </div>
                 <div class="adm-snap-mini-tiles">
-                    <div wire:click.stop="goToEvents('PENDING')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('PENDING')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-pending adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Pending</span>
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($eventsPending) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#d97706;">Pending</p>
                     </div>
-                    <div wire:click.stop="goToEvents('APPROVED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('APPROVED')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-approved adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Approved</span>
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($eventsApproved) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#059669;">Approved</p>
                     </div>
-                    <div wire:click.stop="goToEvents('COMPLETED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('COMPLETED')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-completed adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Completed</span>
                         <p class="adm-snap-mini-num" style="color:#16a34a;">{{ number_format($eventsCompleted) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#16a34a;">Completed</p>
                     </div>
-                    <div wire:click.stop="goToEvents('REJECTED')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('REJECTED')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-rejected adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Rejected</span>
                         <p class="adm-snap-mini-num" style="color:#dc2626;">{{ number_format($eventsRejected) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#dc2626;">Rejected</p>
@@ -1002,8 +1139,14 @@ new #[Layout('app')] class extends Component {
             </div>
         </div>
 
-        {{-- Jobs Snapshot --}}
-        <div id="admJobsSnapCard" wire:click="goToJobs" class="adm-card adm-snap-card">
+        {{-- Job Postings Snapshot — the chart/header area is plain display
+             only (not clickable, same "iwan lang" treatment as Events).
+             Each of the 4 tiles is its own button: Active/Inactive/
+             Expiring auto-filter into Job Postings by status
+             (admin_jobs_filter session value, now read by
+             job-posts.blade.php's mount()), and Total Postings links to
+             the unfiltered list. ── --}}
+        <div id="admJobsSnapCard" class="adm-card adm-snap-card">
             <div class="adm-panel-head">
                 <div class="adm-snap-head-text">
                     <p class="adm-panel-ttl">Job Postings</p>
@@ -1015,22 +1158,22 @@ new #[Layout('app')] class extends Component {
                     <canvas id="adm_barJobsSnapshot"></canvas>
                 </div>
                 <div class="adm-snap-mini-tiles">
-                    <div wire:click.stop="goToJobs('ACTIVE')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToJobs('ACTIVE')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-active adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Active</span>
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($jobsActive) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#059669;">Active</p>
                     </div>
-                    <div wire:click.stop="goToJobs('INACTIVE')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToJobs('INACTIVE')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-inactive adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Inactive</span>
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($jobsInactive) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#d97706;">Inactive</p>
                     </div>
-                    <div wire:click.stop="goToJobs('EXPIRING')" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToJobs('EXPIRING')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-expiring adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Expiring Soon</span>
                         <p class="adm-snap-mini-num" style="color:#f97316;">{{ number_format($jobsExpiring) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#f97316;">Expiring Soon</p>
                     </div>
-                    <div wire:click.stop="goToJobs" class="adm-snap-mini-tile adm-mini-tip-wrap">
+                    <div wire:click="goToJobs" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-total adm-mini-tip-wrap">
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View All Postings</span>
                         <p class="adm-snap-mini-num" style="color:#7a3f91;">{{ number_format($jobsTotal) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#7a3f91;">Total Postings</p>
@@ -1092,10 +1235,22 @@ new #[Layout('app')] class extends Component {
     }
     function allZero(arr){ return !arr || arr.every(function(v){ return !v || v === 0; }); }
 
+    // Font sizes scale down on narrow viewports so the y-axis category
+    // labels (Pending/Approved/Completed/Rejected, etc.) never get
+    // squeezed/overlapped against the bars on small phone screens.
+    function chartFontSizes(){
+        var w = window.innerWidth || document.documentElement.clientWidth || 1024;
+        if(w <= 360)  return { y: 9,  x: 9,  tooltip: 10 };
+        if(w <= 480)  return { y: 10, x: 10, tooltip: 11 };
+        if(w <= 768)  return { y: 11, x: 11, tooltip: 11 };
+        return { y: 13, x: 12, tooltip: 12 };
+    }
+
     function bar(id, data){
         if(!data || !data.labels || allZero(data.data)){ kill(id); return; }
         var c = document.getElementById(id); if(!c) return;
         kill(id);
+        var fs = chartFontSizes();
         registry[id] = new Chart(c, {
             type: 'bar',
             data: {
@@ -1112,16 +1267,29 @@ new #[Layout('app')] class extends Component {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: { duration: 500, easing: 'easeInOutQuart' },
-                layout: { padding: { right: 10 } },
+                layout: { padding: { right: 10, left: 2 } },
                 scales: {
                     x: {
                         beginAtZero: true,
                         grid: { color: '#F0E8F8' },
-                        ticks: { font: { size: 11 }, color: '#555555', precision: 0 }
+                        ticks: { font: { size: fs.x }, color: '#333333', precision: 0, maxTicksLimit: 5 }
                     },
                     y: {
                         grid: { display: false },
-                        ticks: { font: { size: 12, weight: '600' }, color: '#111111' }
+                        ticks: {
+                            font: { size: fs.y, weight: '600' },
+                            color: '#000000',
+                            // Long labels ("Expiring Soon") get abbreviated to fit
+                            // on very narrow canvases instead of clipping/overlapping.
+                            callback: function(value){
+                                var label = this.getLabelForValue(value);
+                                var w = window.innerWidth || 1024;
+                                if(w <= 360 && label.length > 8){
+                                    return label.slice(0, 7) + '…';
+                                }
+                                return label;
+                            }
+                        }
                     }
                 },
                 plugins: {
@@ -1129,7 +1297,7 @@ new #[Layout('app')] class extends Component {
                     tooltip: {
                         enabled: true,
                         padding: 10,
-                        bodyFont: { size: 12, weight: '600' },
+                        bodyFont: { size: fs.tooltip, weight: '600' },
                         callbacks: {
                             title: function(){ return ''; },
                             label: function(ctx){
@@ -1174,6 +1342,26 @@ new #[Layout('app')] class extends Component {
         bar('adm_barEventsSnapshot', d.eventsSnapshot);
         bar('adm_barJobsSnapshot',   d.jobsSnapshot);
     }
+
+    // Rebuild charts (with recalculated font sizes) when the viewport
+    // crosses a breakpoint — e.g. rotating the phone, or resizing a
+    // browser window — so labels don't stay stuck at the wrong scale.
+    var resizeDebounce = null;
+    var lastBucket = null;
+    function widthBucket(w){
+        if(w <= 360) return 0;
+        if(w <= 480) return 1;
+        if(w <= 768) return 2;
+        return 3;
+    }
+    window.addEventListener('resize', function(){
+        var bucket = widthBucket(window.innerWidth || document.documentElement.clientWidth || 1024);
+        if(lastBucket === null) lastBucket = bucket;
+        if(bucket === lastBucket) return;
+        lastBucket = bucket;
+        if(resizeDebounce) clearTimeout(resizeDebounce);
+        resizeDebounce = setTimeout(function(){ requestAnimationFrame(initAll); }, 150);
+    });
 
     loadChartJs(function(){
         if(document.readyState === 'loading'){
@@ -1356,9 +1544,36 @@ new #[Layout('app')] class extends Component {
     function init(){
         activeIndex = 0;
         bindTrack();
+
+        // Force the track to a clean, exact slide-0 scroll position on
+        // init. Without this, an initial layout pass that's still
+        // settling (fonts/images loading, sidebar/container reflowing,
+        // or a bfcache restore) can leave scrollLeft at a stale/partial
+        // value — which visually looks like two slides' text bleeding
+        // into each other (e.g. "test69690" = "test6969" + "0" from the
+        // next slide creeping in). 'auto' (instant, not smooth) avoids
+        // fighting that settling reflow with an animated scroll.
+        var t = track();
+        if(t) t.scrollTo({ left: 0, behavior: 'auto' });
+
         syncDots(0);
         startAuto();
     }
+
+    // Re-snap to the correct slide once the ENTIRE page (fonts, images,
+    // stylesheets) has finished loading and layout has fully settled.
+    // DOMContentLoaded / requestAnimationFrame alone can fire before
+    // late-loading web fonts or the announcement images finish, which is
+    // exactly when clientWidth/scrollLeft math can be computed against
+    // sizes that are about to shift — producing the pre-refresh vs
+    // post-refresh mismatch. This is a pure no-animation safety re-sync,
+    // not a visible jump.
+    window.addEventListener('load', function(){
+        var t = track();
+        if(!t) return;
+        t.scrollTo({ left: activeIndex * t.clientWidth, behavior: 'auto' });
+        syncDots(activeIndex);
+    });
 
     if(document.readyState === 'loading'){
         document.addEventListener('DOMContentLoaded', init);
@@ -1374,6 +1589,43 @@ new #[Layout('app')] class extends Component {
         if(resumeTimer) clearTimeout(resumeTimer);
         boundTrack = null; // force rebind to the freshly-swapped-in track element
         requestAnimationFrame(init);
+    });
+})();
+</script>
+
+<script>
+(function(){
+    'use strict';
+
+    // ── No-select / no-copy guard ───────────────────────────────────────
+    // CSS (user-select:none) already stops normal click-drag highlighting.
+    // This is the backup layer for the things CSS alone can't stop:
+    // right-click "Copy" from the context menu, Ctrl/Cmd+C & Ctrl/Cmd+X,
+    // and dragging an image out of the dashboard. Scoped to .adm-root via
+    // event delegation (checks e.target.closest), so it works even after
+    // Livewire swaps the DOM on wire:navigate — no rebinding needed.
+    function insideDashboard(target){
+        return !!(target && target.closest && target.closest('.adm-root'));
+    }
+
+    document.addEventListener('contextmenu', function(e){
+        if(insideDashboard(e.target)) e.preventDefault();
+    });
+
+    document.addEventListener('copy', function(e){
+        if(insideDashboard(e.target)) e.preventDefault();
+    });
+
+    document.addEventListener('cut', function(e){
+        if(insideDashboard(e.target)) e.preventDefault();
+    });
+
+    document.addEventListener('selectstart', function(e){
+        if(insideDashboard(e.target)) e.preventDefault();
+    });
+
+    document.addEventListener('dragstart', function(e){
+        if(insideDashboard(e.target)) e.preventDefault();
     });
 })();
 </script>

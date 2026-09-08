@@ -104,6 +104,20 @@ new class extends Component {
 
         $this->loadMetaLists();
         $this->refreshAll();
+
+        // ── Auto-open the filtered detail modal when arriving from the
+        // admin dashboard's Employment Snapshot mini-tiles (goToEmployment()
+        // there stores the target status in session before redirecting
+        // here) — same "click a stat -> land already filtered" pattern as
+        // User Management's admin_alumni_filter handling. Values already
+        // match this page's 'status' modal filters 1:1: employed,
+        // self_employed, unemployed, not_filled.
+        $employmentFilter = session()->pull('admin_employment_filter', '');
+        if ($employmentFilter && array_key_exists($employmentFilter, [
+            'employed' => true, 'self_employed' => true, 'unemployed' => true, 'not_filled' => true,
+        ])) {
+            $this->openEmploymentModal('status', $employmentFilter);
+        }
     }
 
     private function loadMetaLists(): void
