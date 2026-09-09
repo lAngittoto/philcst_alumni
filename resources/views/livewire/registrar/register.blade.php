@@ -222,6 +222,10 @@ new class extends Component {
             $errors[]           = 'Please enter a valid email address.';
             $fieldErrors[]      = 'email';
             $fieldMsgs['email'] = 'Please enter a valid email address.';
+        } elseif (!preg_match('/^[^\s@]+@gmail\.com$/i', $email)) {
+            $errors[]           = 'Only Gmail addresses are accepted.';
+            $fieldErrors[]      = 'email';
+            $fieldMsgs['email'] = 'Only Gmail addresses are accepted (e.g. name@gmail.com).';
         } elseif (Alumni::whereNotNull('email')->whereRaw('LOWER(TRIM(email))=?', [strtolower($email)])->exists()) {
             $errors[]           = 'This email address is already registered.';
             $fieldErrors[]      = 'email';
@@ -411,7 +415,8 @@ public function closeImportModal(): void
 
     private function validateEmail(string $email): bool
     {
-        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false
+            && preg_match('/^[^\s@]+@gmail\.com$/i', $email) === 1;
     }
 
     public function processImport(): void
@@ -1413,7 +1418,7 @@ public function closeImportModal(): void
                           x-data="{
                               fieldStale(key) { return ($wire.fieldErrors || []).includes(key); },
                               isValidEmail(value) {
-                                  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+                                  return /^[^\s@]+@gmail\.com$/i.test(value.trim());
                               },
                               allFilled() {
                                   return $wire.regFirstName.trim() !== '' && $wire.regLastName.trim() !== ''
@@ -1426,7 +1431,7 @@ public function closeImportModal(): void
                               },
                               get tooltip() {
                                   if ($wire.regEmail.trim() !== '' && !this.isValidEmail($wire.regEmail)) {
-                                      return 'Please enter a valid email address (e.g. name@gmail.com)';
+                                      return 'Only Gmail addresses are accepted (e.g. name@gmail.com)';
                                   }
                                   if (!this.allFilled()) return 'Please fill up all required fields *';
                                   return this.isDisabled ? 'Please fix the highlighted field(s) marked in red' : '';

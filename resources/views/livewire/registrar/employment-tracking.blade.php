@@ -1013,13 +1013,16 @@ new class extends Component {
      * Human-readable summary of the CURRENT PAGE-LEVEL filter (Program +
      * Batch Year) — used to build the actual exported PDF/Excel/Print
      * report's "Report scope" line ($filters, passed straight through to
-     * the print/export view). Always includes BOTH a Batch segment and a
-     * Programs segment — "All Batch Years" / "All Programs" are shown
-     * explicitly rather than silently omitted when nothing is picked, so
-     * the exported report's scope line never looks like it's missing
-     * something. (The live "Report will include" preview inside the
-     * Generate Reports dropdown mirrors this exact logic client-side in
-     * Alpine, since that panel sits inside a wire:ignore block.)
+     * the print/export view), and mirrored into the live "Report will
+     * include" preview inside the Generate Reports dropdown (via the
+     * hidden emp-report-summary-source span, same pattern as Alumni
+     * Records' activeFilterSummary()).
+     *
+     * When NEITHER Batch nor Program is actually filtering anything, this
+     * returns the same generic "no filters applied" message Alumni
+     * Records shows in that case, instead of spelling out "All Batch
+     * Years · All Programs" — cleaner, and consistent with how Alumni
+     * Records' own summary collapses to one line when nothing is picked.
      */
     #[Computed]
     public function activeReportFilterSummary(): string
@@ -1035,19 +1038,15 @@ new class extends Component {
             // to the query yet, so say so instead of implying a scope that
             // isn't actually in effect.
             $parts[] = 'Batch range incomplete (not yet applied)';
-        } else {
-            $parts[] = 'All Batch Years';
         }
 
         if (count($this->filterCourse) === 1) {
             $parts[] = $this->filterCourse[0];
         } elseif (count($this->filterCourse) > 1) {
             $parts[] = implode(', ', $this->filterCourse);
-        } else {
-            $parts[] = 'All Programs';
         }
 
-        return implode(' · ', $parts);
+        return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
     }
 
     public function openModal(string $filter = '', ?int $batch = null, string $course = ''): void
@@ -1386,6 +1385,16 @@ new class extends Component {
         font-weight: 700;
     }
     .ar-range-item.active:hover { background: #6B3680 !important; color: #ffffff !important; }
+    /* A year already picked on the OTHER side of the range (e.g. From=2026)
+       is disabled on this side — a same-year range is meaningless (1 year,
+       same as just picking that single year normally). Greyed out + no
+       pointer, same visual language as disabled buttons elsewhere. */
+    .ar-range-item-disabled {
+        color: #C9C0D4 !important;
+        cursor: not-allowed !important;
+        background: #F9F7FC !important;
+    }
+    .ar-range-item-disabled:hover { background: #F9F7FC !important; color: #C9C0D4 !important; }
     .ar-dropdown-trigger {
         display: inline-flex; align-items: center; gap: 6px;
         padding: 9px 12px; border: 1.5px solid #E8E0F0; border-radius: 8px;
@@ -1605,53 +1614,50 @@ new class extends Component {
                 </div>
             </div>
 
+            {{-- Hidden source for the "Report will include" text inside the
+                 wire:ignore'd report dropdown below — same pattern as Alumni
+                 Records' ar-report-summary-source. wire:ignore on the
+                 dropdown means Livewire never touches ITS DOM after first
+                 render, so reading $wire props directly from inside that
+                 subtree was unreliable and kept showing "All Programs"/
+                 the old count regardless of the filter actually applied.
+                 This span sits OUTSIDE the wire:ignore'd block, so it DOES
+                 re-render normally on every filter change; Alpine watches
+                 its data-* attributes via MutationObserver and copies them
+                 into the dropdown, so the summary + count stay live without
+                 needing wire:ignore removed (which would break the Alpine
+                 dropdown/transition state). --}}
+            <span id="emp-report-summary-source" class="hidden"
+                  data-summary="{{ $this->activeReportFilterSummary }}"
+                  data-count="{{ number_format($totalAlumni) }}"></span>
+
             {{-- ══ GENERATE REPORTS BUTTON ══
                  wire:ignore on this whole block is intentional — it stops
                  Livewire from morphing the Alpine dropdown/transition state
-                 out from under itself on every commit. BUT that also means
-                 Livewire will NEVER touch the Blade `{{ }}` interpolations
-                 in here again after first paint — which is exactly why
-                 "Report will include" used to keep showing "All Programs" /
-                 the old alumni count forever after the very first filter
-                 change, no matter what Program/Batch was picked afterward.
-                 Fix: don't interpolate Blade values into this subtree at
-                 all — read $wire.filterCourse / $wire.filterBatchFrom /
-                 $wire.filterBatchTo / $wire.totalAlumni reactively via
-                 Alpine instead, mirroring activeReportFilterSummary()'s
-                 logic client-side so it updates live without needing
-                 Livewire to re-render this block. ── --}}
+                 out from under itself on every commit. --}}
             <div class="relative shrink-0" wire:ignore
                  x-data="{
-                    reportSummary() {
-                        var course = $wire.filterCourse || [];
-                        var from   = $wire.filterBatchFrom || '';
-                        var to     = $wire.filterBatchTo   || '';
-                        var parts  = [];
-                        // Batch segment — only added once the range is
-                        // actually complete (a lone From/To isn't applied
-                        // to the query yet, so don't claim it's in scope).
-                        if (from !== '' && to !== '') {
-                            parts.push('Batch ' + (from === to ? from : from + '–' + to));
-                        } else if (from !== '' || to !== '') {
-                            parts.push('Batch range incomplete (not yet applied)');
-                        } else {
-                            parts.push('All Batch Years');
-                        }
-                        // Programs segment — ALWAYS shown, same as the
-                        // filter bar's own 'All Programs' default, so
-                        // the report scope never silently drops this line
-                        // just because nothing is selected.
-                        if (course.length === 1) {
-                            parts.push(course[0]);
-                        } else if (course.length > 1) {
-                            parts.push(course.join(', '));
-                        } else {
-                            parts.push('All Programs');
-                        }
-                        return parts.join(' · ');
+                    summary: 'All alumni records (no filters applied)',
+                    count: '0',
+                    _observer: null,
+                    syncFromSource(){
+                        const src = document.getElementById('emp-report-summary-source');
+                        if (!src) return;
+                        this.summary = src.dataset.summary;
+                        this.count   = src.dataset.count;
+                    },
+                    watchSource(){
+                        const src = document.getElementById('emp-report-summary-source');
+                        if (!src || this._observer) return;
+                        this._observer = new MutationObserver(() => this.syncFromSource());
+                        this._observer.observe(src, { attributes: true, attributeFilter: ['data-summary', 'data-count'] });
                     }
                  }"
-                 x-init="window.__empEnsureReportStore && window.__empEnsureReportStore()"
+                 x-init="
+                    window.__empEnsureReportStore && window.__empEnsureReportStore();
+                    syncFromSource();
+                    watchSource();
+                 "
                  @click.outside="$store.empReport.open=false" wire:key="emp-report-dropdown">
                 <button type="button" @click.stop="$store.empReport.toggle()" class="ar-report-btn"
                         :disabled="$store.empReport.exporting"
@@ -1668,7 +1674,8 @@ new class extends Component {
 
                     <div class="ar-report-menu-message">
                         <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
-                        <span class="txt" x-text="reportSummary()"></span>
+                        <span class="txt" x-text="summary"></span>
+                        <span class="cnt" x-text="count + ' matching record(s)'"></span>
                     </div>
 
                     <button type="button" @click="$store.empReport.doExport('pdf', $wire)"
@@ -1744,8 +1751,8 @@ new class extends Component {
                     },
                     clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
                     startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
-                    pickFrom(val){ this.rangeFrom = (this.rangeFrom===val ? '' : val); },
-                    pickTo(val){ this.rangeTo = (this.rangeTo===val ? '' : val); },
+                    pickFrom(val){ if (this.rangeTo === val) return; this.rangeFrom = (this.rangeFrom===val ? '' : val); },
+                    pickTo(val){ if (this.rangeFrom === val) return; this.rangeTo = (this.rangeTo===val ? '' : val); },
                     get rangeComplete(){ return this.rangeFrom!=='' && this.rangeTo!==''; },
                     applyRange(){
                         if(!this.rangeComplete) return;
@@ -1821,12 +1828,18 @@ new class extends Component {
                             <div class="flex items-start gap-2">
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickFrom('{{ $year }}')" :class="{'active':rangeFrom==='{{ $year }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
+                                    <button type="button" @click.stop="pickFrom('{{ $year }}')"
+                                            :disabled="rangeTo==='{{ $year }}'"
+                                            :class="{'active':rangeFrom==='{{ $year }}', 'ar-range-item-disabled':rangeTo==='{{ $year }}'}"
+                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickTo('{{ $year }}')" :class="{'active':rangeTo==='{{ $year }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
+                                    <button type="button" @click.stop="pickTo('{{ $year }}')"
+                                            :disabled="rangeFrom==='{{ $year }}'"
+                                            :class="{'active':rangeTo==='{{ $year }}', 'ar-range-item-disabled':rangeFrom==='{{ $year }}'}"
+                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
                             </div>
@@ -1954,17 +1967,6 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Reset — always visible now, not conditional on an active filter --}}
-            <button wire:click="clearFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearFilters"
-                    type="button"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none">
-                <span wire:loading wire:target="clearFilters">
-                    <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>
-                </span>
-                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearFilters"></i>
-                <span>Reset</span>
-            </button>
-
             {{-- Active-scope pill — same treatment as Alumni Records' "Batch
                  2027 — 1 result(s)" badge next to its own Reset button.
                  Only shows once a filter is ACTUALLY in effect (batch range
@@ -1972,9 +1974,9 @@ new class extends Component {
                  alone stays silent here too, consistent with it not being
                  applied to any query yet. Lives outside wire:ignore, so it
                  re-renders normally on every filter change like the rest
-                 of the filter bar. --}}
+                 of the filter bar. Docked to the right, alongside Reset. --}}
             @if($this->batchRangeIsComplete() || count($filterCourse) > 0)
-            <span class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold shrink-0"
+            <span class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold shrink-0"
                   style="background:#F9F7FC;color:#7A3F91;border:1px solid #E8E0F0;">
                 <i class="fas fa-calendar-check" style="font-size:11px;"></i>
                 @php
@@ -1993,6 +1995,19 @@ new class extends Component {
                 {{ implode(' · ', $pillParts) }} — {{ number_format($totalAlumni) }} result(s)
             </span>
             @endif
+
+            {{-- Reset — docked to the right of the filter row, disabled
+                 when no filter is currently active (nothing to reset). --}}
+            <button wire:click="clearFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearFilters"
+                    type="button"
+                    @if(!($this->batchRangeIsComplete() || count($filterCourse) > 0)) disabled @endif
+                    class="{{ ($this->batchRangeIsComplete() || count($filterCourse) > 0) ? '' : 'ml-auto' }} inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed">
+                <span wire:loading wire:target="clearFilters">
+                    <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>
+                </span>
+                <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="clearFilters"></i>
+                <span>Reset</span>
+            </button>
         </div>
     </div>
 
@@ -2680,8 +2695,8 @@ new class extends Component {
                     },
                     clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearModalBatchYear(); this.close(); },
                     startRange(){ this.rangeFrom=$wire.modalBatchFrom||''; this.rangeTo=$wire.modalBatchTo||''; this.rangeMode=true; },
-                    pickFrom(val){ this.rangeFrom = (this.rangeFrom===val ? '' : val); },
-                    pickTo(val){ this.rangeTo = (this.rangeTo===val ? '' : val); },
+                    pickFrom(val){ if (this.rangeTo === val) return; this.rangeFrom = (this.rangeFrom===val ? '' : val); },
+                    pickTo(val){ if (this.rangeFrom === val) return; this.rangeTo = (this.rangeTo===val ? '' : val); },
                     get rangeComplete(){ return this.rangeFrom!=='' && this.rangeTo!==''; },
                     applyRange(){
                         if(!this.rangeComplete) return;
@@ -2741,12 +2756,18 @@ new class extends Component {
                             <div class="flex items-start gap-2">
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickFrom('{{ $year }}')" :class="{'active':rangeFrom==='{{ $year }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
+                                    <button type="button" @click.stop="pickFrom('{{ $year }}')"
+                                            :disabled="rangeTo==='{{ $year }}'"
+                                            :class="{'active':rangeFrom==='{{ $year }}', 'ar-range-item-disabled':rangeTo==='{{ $year }}'}"
+                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
                                 <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickTo('{{ $year }}')" :class="{'active':rangeTo==='{{ $year }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
+                                    <button type="button" @click.stop="pickTo('{{ $year }}')"
+                                            :disabled="rangeFrom==='{{ $year }}'"
+                                            :class="{'active':rangeTo==='{{ $year }}', 'ar-range-item-disabled':rangeFrom==='{{ $year }}'}"
+                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
                             </div>
@@ -2853,10 +2874,12 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Reset — always visible now, not conditional on an active filter --}}
+            {{-- Reset — docked to the right (sm:ml-auto), disabled when no
+                 batch/program filter is currently active (nothing to reset). --}}
             <button wire:click="clearModalFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearModalFilters"
                     type="button"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none sm:ml-auto">
+                    @if(!($this->modalBatchRangeIsComplete() || count($modalCourse) > 0)) disabled @endif
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto">
                 <span wire:loading wire:target="clearModalFilters">
                     <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>
                 </span>

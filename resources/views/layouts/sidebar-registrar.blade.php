@@ -43,6 +43,26 @@
             user-select: none;
         }
 
+        /* ── Disable text selection/copy across the ENTIRE page ───
+           Covers sidebar labels, nav items, headers, everything —
+           no text should be selectable or copyable anywhere in this
+           layout. Buttons/links/clicks still work fine, only
+           selection is blocked. Inputs/textareas/contenteditable
+           are excluded so typing still behaves normally if any are
+           ever added here. */
+        html, body {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        input, textarea, [contenteditable="true"] {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+        }
+
         /* ════════════════════════════════════════════════════════
            SIDEBAR
         ════════════════════════════════════════════════════════ */
@@ -55,6 +75,20 @@
                 transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 0.25s ease,
                 border-color 0.25s ease;
+        }
+        /* ── Kill the transition on first paint / hard refresh ────────
+           Without this, the sidebar paints in its default (expanded,
+           untranslated) state for one frame before Alpine applies
+           is-collapsed / translate-x-0 — and because the transition
+           above is already active, the browser ANIMATES that jump
+           (wide → narrow, or off-screen → in) instead of snapping
+           straight to the correct state. Ugly flash/slide on every
+           refresh. This class is only present until Alpine finishes
+           initializing (removed in the x-init below), so the very
+           first state is always instant, and only USER-triggered
+           toggles afterward get the smooth transition. */
+        .reg-sidebar.no-transition {
+            transition: none !important;
         }
         .reg-hamburger-line { background: #7A3F91; }
 
@@ -1310,7 +1344,14 @@
         if (s) {
             if (s._pollTimer) clearInterval(s._pollTimer);
             s._pollTimer = null;
-            s.open  = false;
+            // NOTE: intentionally NOT forcing s.open = false here anymore —
+            // that used to slam the notif panel shut on every wire:navigate,
+            // even when the user didn't click anything that should close it
+            // (e.g. clicking a notif that navigates keeps navigating=true
+            // via close()'s own guard, but background/other-tab navigations
+            // were also wiping it). The panel now only closes via explicit
+            // user action: toggle(), the outside-click handler, or close()
+            // itself (which still respects the in-flight-navigation guard).
             s.navigating = false; // destination page has landed — drop the spinner now, not before
             s.loadingId  = null;
             s.init();
@@ -1520,13 +1561,18 @@
 </head>
 <body class="antialiased"
       x-data="{
-          sidebarOpen: false,
+          sidebarOpen: localStorage.getItem('reg_sidebar_open') === '1',
           sidebarCollapsed: localStorage.getItem('reg_sidebar_collapsed') === '1',
+          sidebarSettled: false,
           loggingOut: false,
           navClickedRoute: null
       }"
-      x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('reg_sidebar_collapsed', val ? '1' : '0'); })"
-      @@livewire:navigated.window="navClickedRoute = null">
+      x-init="
+          $watch('sidebarCollapsed', function (val) { localStorage.setItem('reg_sidebar_collapsed', val ? '1' : '0'); });
+          $watch('sidebarOpen', function (val) { localStorage.setItem('reg_sidebar_open', val ? '1' : '0'); });
+          requestAnimationFrame(function () { requestAnimationFrame(function () { sidebarSettled = true; }); });
+      "
+      @@livewire:navigated.window="navClickedRoute = null; sidebarOpen = false; sidebarSettled = false; requestAnimationFrame(function () { requestAnimationFrame(function () { sidebarSettled = true; }); });">
 
 
 <div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
@@ -1545,10 +1591,17 @@
     </div>
 
     {{-- ══ SIDEBAR ══════════════════════════════════════════════════════════ --}}
-    <aside :class="{
+    {{-- x-bind:class is evaluated as soon as this element is parsed (Alpine
+         processes x-data/x-bind top-down as it walks the DOM — it doesn't
+         wait for a separate hydration pass), and "is-collapsed" here is
+         seeded synchronously from localStorage in the x-data above. So on
+         desktop the .is-collapsed CSS (narrow width) is already correct on
+         first paint — no flash of the wide sidebar snapping narrow. --}}
+    <aside x-bind:class="{
                 'translate-x-0':  sidebarOpen && !($store.modal && $store.modal.open),
                 'is-collapsed':   sidebarCollapsed,
-                'is-modal-hidden': ($store.modal && $store.modal.open)
+                'is-modal-hidden': ($store.modal && $store.modal.open),
+                'no-transition':  !sidebarSettled
            }"
            class="reg-sidebar fixed inset-y-0 left-0 z-[9995] w-20 min-w-[5rem] lg:w-72 lg:min-w-[18rem] -translate-x-full transform
                   transition-transform duration-300
@@ -1605,7 +1658,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="sidebarOpen = false; navClickedRoute = '{{ $link['route'] }}';"
+                   @click="navClickedRoute = '{{ $link['route'] }}';"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
                     <div class="reg-nav-icon {{ $link['color'] }}">

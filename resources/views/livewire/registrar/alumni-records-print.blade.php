@@ -12,11 +12,11 @@
        overhead on every text node. sans-serif uses dompdf's native font
        directly, no substitution step needed. */
     body {
-        font-family: sans-serif;
+        font-family: "Times New Roman", Times, serif;
         color: #111111;
         margin: 0;
         padding: 0;
-        font-size: 11px;
+        font-size: 12px;
     }
 
     .rp-header {
@@ -31,9 +31,9 @@
         vertical-align: bottom;
     }
     .rp-header-right { text-align: right; }
-    .rp-header h1 { font-size: 16px; margin: 0; color: #7A3F91; }
-    .rp-header p  { margin: 2px 0 0; font-size: 10px; color: #555555; }
-    .rp-meta      { font-size: 10px; color: #555555; white-space: nowrap; line-height: 1.5; }
+    .rp-header h1 { font-size: 12px; margin: 0; color: #7A3F91; }
+    .rp-header p  { margin: 2px 0 0; font-size: 12px; color: #555555; }
+    .rp-meta      { font-size: 12px; color: #555555; white-space: nowrap; line-height: 1.5; }
 
     /* FIX (borders kept vanishing / landing randomly): dompdf's
        border-collapse:collapse has known bugs where shared borders
@@ -55,7 +55,7 @@
     thead th {
         background: #F5F0FA;
         color: #333333;
-        font-size: 8.5px;
+        font-size: 12px;
         text-transform: uppercase;
         letter-spacing: .01em;
         text-align: left;
@@ -70,10 +70,11 @@
     tbody td {
         padding: 5px 7px;
         border-bottom: 1px solid #E5E5E5;
-        font-size: 10.5px;
+        font-size: 12px;
         vertical-align: top;
         background: #ffffff;
         overflow: hidden;
+        word-break: break-word;
     }
 
     tbody tr:first-child td { border-top: none; }
@@ -86,7 +87,7 @@
     .rp-badge {
         display: inline;
         padding: 0;
-        font-size: 9px;
+        font-size: 12px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .02em;
@@ -160,13 +161,13 @@
     <table>
         <thead>
             <tr>
-                <th style="width:17%;">Name</th>
-                <th style="width:11%;">Student ID</th>
-                <th style="width:14%;">Standard Abbreviation</th>
-                <th style="width:7%;">Batch</th>
-                <th style="width:19%;">Email</th>
+                <th style="width:16%;">Name</th>
+                <th style="width:10%;">Student ID</th>
+                <th style="width:9%;">Programs</th>
+                <th style="width:8%;">Batch</th>
+                <th style="width:26%;">Email</th>
                 <th style="width:16%;">Employment Status</th>
-                <th style="width:16%;">Status</th>
+                <th style="width:15%;">Status</th>
             </tr>
         </thead>
         <tbody>

@@ -19,7 +19,7 @@
     ──────────────────────────────────────────────────────────────────── */
     * { box-sizing: border-box; }
     body {
-        font-family: {{ !empty($excelMode) ? 'Arial, sans-serif' : "'DejaVu Sans', Arial, sans-serif" }};
+        font-family: 'Times New Roman', Times, serif;
         color: #111111;
         margin: 0;
         padding: 20px;
@@ -35,29 +35,29 @@
     }
     .header h1 { font-size: 20px; margin: 0 0 2px; color: #7A3F91; }
     .header p { margin: 0; font-size: 12px; color: #333333; }
-    .meta { text-align: right; font-size: 11px; color: #333333; }
+    .meta { text-align: right; font-size: 12px; color: #333333; }
     .filters-box {
         background: #F9F7FC; border: 1px solid #E8E0F0; border-radius: 6px;
-        padding: 8px 12px; margin-bottom: 14px; font-size: 11.5px; color: #333333;
+        padding: 8px 12px; margin-bottom: 14px; font-size: 12px; color: #333333;
     }
     .filters-box strong { color: #7A3F91; }
 
     table { width: 100%; border-collapse: collapse; }
     thead th {
         background: #7A3F91; color: #ffffff; text-align: left; padding: 6px 8px;
-        font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+        font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
     }
-    tbody td { padding: 5px 8px; border-bottom: 1px solid #eeeeee; font-size: 11.5px; vertical-align: top; color: #111111; }
+    tbody td { padding: 5px 8px; border-bottom: 1px solid #eeeeee; font-size: 12px; vertical-align: top; color: #111111; }
     tbody tr:nth-child(even) { background: #FAFAFA; }
 
-    .badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 10.5px; font-weight: bold; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 12px; font-weight: bold; }
     .badge-employed      { background: #ECFDF5; color: #059669; }
     .badge-self_employed { background: #EFF6FF; color: #2563EB; }
     .badge-unemployed    { background: #FFFBEB; color: #D97706; }
     .badge-none          { background: #F3F4F6; color: #333333; }
 
     .footer {
-        margin-top: 16px; font-size: 10.5px; color: #333333; text-align: center;
+        margin-top: 16px; font-size: 12px; color: #333333; text-align: center;
         border-top: 1px solid #eeeeee; padding-top: 8px;
     }
 
@@ -67,8 +67,8 @@
         width: 25%; vertical-align: top; background: #FFFFFF;
     }
     .stat-num { font-size: 20px; font-weight: bold; color: #111111; line-height: 1.1; }
-    .stat-lbl { font-size: 10.5px; font-weight: bold; color: #333333; margin-top: 3px; }
-    .stat-rate { font-size: 10px; font-weight: bold; margin-top: 2px; }
+    .stat-lbl { font-size: 12px; font-weight: bold; color: #333333; margin-top: 3px; }
+    .stat-rate { font-size: 12px; font-weight: bold; margin-top: 2px; }
     .c-submitted  .stat-rate { color: #7A3F91; }
     .c-working    .stat-rate { color: #059669; }
     .c-unemployed .stat-rate { color: #D97706; }
@@ -84,7 +84,7 @@
         padding: 8px 12px; font-size: 12px; font-weight: bold; color: #111111;
         text-transform: uppercase; letter-spacing: .03em;
     }
-    .section-block-sub { font-size: 10.5px; font-weight: normal; color: #333333; text-transform: none; letter-spacing: 0; }
+    .section-block-sub { font-size: 12px; font-weight: normal; color: #333333; text-transform: none; letter-spacing: 0; }
     .section-block-body { padding: 12px 14px; }
     .section-total { font-size: 12px; font-weight: bold; color: #111111; margin-bottom: 8px; }
 
@@ -92,7 +92,7 @@
     .seg-bar { height: 14px; border-radius: 7px; overflow: hidden; background: #E5E7EB; white-space: nowrap; font-size: 0; }
     .seg-bar-fill { display: inline-block; height: 14px; }
 
-    .legend-row { font-size: 11px; color: #111111; padding: 3px 0; }
+    .legend-row { font-size: 12px; color: #111111; padding: 3px 0; }
     .legend-dot {
         display: inline-block; width: 8px; height: 8px; border-radius: 50%;
         margin-right: 6px; vertical-align: middle;
@@ -100,23 +100,23 @@
     .legend-label { color: #333333; font-weight: 600; }
     .legend-value { font-weight: bold; color: #111111; float: right; }
 
-    .loc-split-nums { font-size: 11.5px; margin-bottom: 6px; }
+    .loc-split-nums { font-size: 12px; margin-bottom: 6px; }
     .loc-split-nums .n-local  { color: #7A3F91; font-weight: bold; }
     .loc-split-nums .n-abroad { color: #C084FC; font-weight: bold; float: right; }
 
     .rank-row { margin-bottom: 9px; }
     .rank-row:last-child { margin-bottom: 0; }
-    .rank-row-label { font-size: 11.5px; font-weight: bold; color: #111111; margin-bottom: 3px; }
+    .rank-row-label { font-size: 12px; font-weight: bold; color: #111111; margin-bottom: 3px; }
     .rank-row-label .rank-count { float: right; color: #7A3F91; font-weight: bold; }
     .rank-bar-track { height: 12px; border-radius: 6px; background: #F3F4F6; overflow: hidden; }
     .rank-bar-fill { height: 12px; border-radius: 6px; }
 
     .mini-bar-track { height: 10px; border-radius: 5px; background: #F3F4F6; overflow: hidden; white-space: nowrap; font-size: 0; }
     .mini-bar-fill { display: inline-block; height: 10px; }
-    .rate-cell-num { font-size: 11.5px; font-weight: bold; color: #111111; }
+    .rate-cell-num { font-size: 12px; font-weight: bold; color: #111111; }
 
     .section-title-standalone {
-        font-size: 12.5px; font-weight: bold; color: #7A3F91; margin: 0 0 6px;
+        font-size: 12px; font-weight: bold; color: #7A3F91; margin: 0 0 6px;
         text-transform: uppercase; letter-spacing: .03em;
     }
 
@@ -131,9 +131,9 @@
     .xl-table { margin-bottom: 4px; border: 1px solid #D9D9D9; }
     .xl-table th {
         background: #F0E6F8; color: #7A3F91; text-align: left; padding: 5px 8px;
-        font-size: 11px; text-transform: uppercase; border: 1px solid #D9D9D9;
+        font-size: 12px; text-transform: uppercase; border: 1px solid #D9D9D9;
     }
-    .xl-table td { padding: 5px 8px; font-size: 11.5px; border: 1px solid #D9D9D9; }
+    .xl-table td { padding: 5px 8px; font-size: 12px; border: 1px solid #D9D9D9; }
     .xl-spacer td { padding: 4px 0; border: none; }
 
     @media print {
@@ -520,7 +520,7 @@
                         </div>
                     </div>
                 @empty
-                    <p style="font-size:11.5px;color:#333333;margin:0;">No employment data yet for this scope.</p>
+                    <p style="font-size:12px;color:#333333;margin:0;">No employment data yet for this scope.</p>
                 @endforelse
             </div>
         </div>

@@ -6,6 +6,7 @@ use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Renderless;
 use Livewire\WithPagination;
+use Livewire\WithoutUrlPagination;
 use Livewire\WithFileUploads;
 use App\Models\Alumni;
 use App\Models\Course;
@@ -13,7 +14,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 
 new class extends Component {
-    use WithPagination, WithFileUploads;
+    use WithPagination, WithoutUrlPagination, WithFileUploads;
 
     protected function queryString(): array { return []; }
 
@@ -759,13 +760,23 @@ new class extends Component {
 
     /**
      * Derive profile completeness from required fields regardless of DB flag.
-     * Required: first_name, last_name, middle_initial, student_id, course_code, batch, email
+     * Mirrors the same required-field set the alumni's own profile editor
+     * uses to compute `profile_completed` on save: contact info, DOB,
+     * gender, both parents' names, and full home address. A freshly
+     * registered alumnus only has name/student ID/course/batch/email on
+     * file — none of the above — so they correctly read as Pending until
+     * they actually fill out the rest of their profile.
      */
     public function isProfileComplete(array $profile): bool
     {
         if (!empty($profile['profile_completed'])) return true;
 
-        $required = ['first_name', 'last_name', 'middle_initial', 'student_id', 'course_code', 'batch', 'email'];
+        $required = [
+            'email', 'gender', 'date_of_birth', 'contact_number',
+            'father_last_name', 'father_given_name', 'father_middle_name',
+            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
+        ];
         foreach ($required as $field) {
             if (empty(trim($profile[$field] ?? ''))) return false;
         }
@@ -974,7 +985,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
        CSS container — so the Email column drops out (and the others
        reflow to use the freed space) purely based on how narrow the
        table's own box actually is right now. */
-    .ar-table-container { container-type: inline-size; container-name: ar-table; }
+    .ar-table-container { container-type: inline-size; container-name: ar-table; overflow: hidden; min-height: 0; }
+    #alumni-scroll { min-height: 0; }
     @container ar-table (max-width: 760px) {
         .ar-col-email { display: none !important; }
         /* table-fixed with % <col> widths won't reflow on its own once
@@ -2112,7 +2124,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                         <tr class="bg-[#F5F5F5] border-b-2 border-[#E8E0F0] sticky top-0 z-10">
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Name</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Student ID</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Standard Abbreviation</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Programs</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Batch</th>
                             <th class="px-4 py-3 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Employment Status</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest ar-col-email">Email</th>
@@ -2280,35 +2292,38 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                  whole block disappearing. shrink-0 keeps this row from
                  ever being squeezed/overlapped by the "Showing…" text
                  above it now that the layout stacks earlier (560px). --}}
-            <div class="flex items-center gap-1.5 flex-wrap shrink-0 min-h-[26px]">
+            <div class="flex items-center gap-1.5 flex-wrap shrink-0 min-h-[26px]"
+                 wire:loading.class="opacity-60 pointer-events-none" wire:target="goToAlumniPage,previousAlumniPage,nextAlumniPage">
+                @if($this->alumniRecords->onFirstPage())
+                    <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
+                @else
+                    <button wire:click="previousAlumniPage" wire:loading.attr="disabled" wire:target="previousAlumniPage,goToAlumniPage,nextAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
+                @endif
                 @if($lastPage > 1)
-                    @if($this->alumniRecords->onFirstPage())
-                        <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-                    @else
-                        <button wire:click="previousAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
-                    @endif
                     @if($pgStart > 1)
-                        <button wire:click="goToAlumniPage(1)" class="ar-pg-btn ar-pg-nav">1</button>
+                        <button wire:click="goToAlumniPage(1)" wire:loading.attr="disabled" wire:target="previousAlumniPage,goToAlumniPage,nextAlumniPage" class="ar-pg-btn ar-pg-nav">1</button>
                         @if($pgStart > 2)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
                     @endif
                     @for($p = $pgStart; $p <= $pgEnd; $p++)
                         @if($p === $cp)
                             <span class="ar-pg-btn ar-pg-active">{{ $p }}</span>
                         @else
-                            <button wire:click="goToAlumniPage({{ $p }})" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
+                            <button wire:click="goToAlumniPage({{ $p }})" wire:loading.attr="disabled" wire:target="previousAlumniPage,goToAlumniPage,nextAlumniPage" class="ar-pg-btn ar-pg-nav">{{ $p }}</button>
                         @endif
                     @endfor
                     @if($pgEnd < $lastPage)
                         @if($pgEnd < $lastPage - 1)<span class="text-white/50 text-sm font-bold px-1">…</span>@endif
-                        <button wire:click="goToAlumniPage({{ $lastPage }})" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
+                        <button wire:click="goToAlumniPage({{ $lastPage }})" wire:loading.attr="disabled" wire:target="previousAlumniPage,goToAlumniPage,nextAlumniPage" class="ar-pg-btn ar-pg-nav">{{ $lastPage }}</button>
                     @endif
-                    @if($this->alumniRecords->hasMorePages())
-                        <button wire:click="nextAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-                    @else
-                        <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
-                    @endif
-                    <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $cp }}/{{ $lastPage }}</span>
+                @else
+                    <span class="ar-pg-btn ar-pg-active">1</span>
                 @endif
+                @if($this->alumniRecords->hasMorePages())
+                    <button wire:click="nextAlumniPage" wire:loading.attr="disabled" wire:target="previousAlumniPage,goToAlumniPage,nextAlumniPage" class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
+                @else
+                    <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-right text-xs"></i></button>
+                @endif
+                <span class="text-white/60 text-xs font-semibold ml-1 hidden sm:inline">Page {{ $cp }}/{{ $lastPage }}</span>
             </div>
         </div>
 
@@ -3164,5 +3179,6 @@ compressImage(file, maxW, maxH, quality) {
     }
     cleanAlumniPageParam();
     document.addEventListener('livewire:updated', cleanAlumniPageParam);
+    document.addEventListener('livewire:navigated', cleanAlumniPageParam);
 })();
 </script>
