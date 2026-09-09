@@ -127,6 +127,38 @@ class AdminEmploymentTrackingExportController extends Controller
     }
 
     /**
+     * Applies the Batch Year range (From/To) to any query builder as a
+     * whereBetween on the given column — single source of truth for
+     * batch-range filtering in this controller, used everywhere a batch
+     * condition is built (baseQ() and every ad-hoc query below that
+     * can't just clone baseQ()).
+     *
+     * Normalizes lo/hi regardless of which order From/To arrive in —
+     * mirrors applyBatchRange() in the Livewire component. Without this
+     * swap, a range applied as e.g. batch_from=2026&batch_to=2025 (the
+     * "Add Range" picker lets From/To be picked in either order, and
+     * only the on-screen label — not the values written to the hidden
+     * inputs — swaps them back to display correctly) turned into
+     * `batch >= 2026 AND batch <= 2025` here, which can never match any
+     * row. That's why the exported report could show all-zero figures
+     * for a scope the live dashboard displayed correctly: the Livewire
+     * side already had this normalization, this controller didn't.
+     */
+    private function applyBatchRange(\Illuminate\Database\Query\Builder $q, string $column, string $batchFrom, string $batchTo): void
+    {
+        $from = trim($batchFrom);
+        $to   = trim($batchTo);
+        if ($from === '' && $to === '') return;
+
+        if ($from !== '' && $to !== '') {
+            [$lo, $hi] = $from <= $to ? [$from, $to] : [$to, $from];
+            $q->whereBetween($column, [$lo, $hi]);
+        } else {
+            $q->where($column, (string) ($from !== '' ? $from : $to));
+        }
+    }
+
+    /**
      * Alumni-level base query — batch range / college / program filters
      * only. Mirrors the Livewire component's baseQ() (minus $search,
      * which no longer scopes anything here — see class docblock).
@@ -135,10 +167,7 @@ class AdminEmploymentTrackingExportController extends Controller
     {
         $q = DB::table('alumni as a')->whereNull('a.deleted_at');
 
-        if ($batchFrom !== '' && $batchTo !== '') {
-            $q->where('a.batch', '>=', $batchFrom)
-              ->where('a.batch', '<=', $batchTo);
-        }
+        $this->applyBatchRange($q, 'a.batch', $batchFrom, $batchTo);
 
         if ($college !== '') {
             $q->whereIn('a.course_code', $this->courseCodesForCollege($college));
@@ -247,27 +276,47 @@ class AdminEmploymentTrackingExportController extends Controller
         ];
 
         // ── Employment by College ───────────────────────────────────────
-        $colleges    = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values();
-        $collegeData = $colleges->map(function ($col) use ($batchFrom, $batchTo) {
-            $codes = DB::table('courses')->where('college', $col)->pluck('code');
-            $base  = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
-            if ($batchFrom !== '' && $batchTo !== '') {
-                $base->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
-            }
-            $total = (clone $base)->count();
+        // Single grouped query instead of a per-college loop (previously
+        // ~4 queries per college — a school with many colleges meant
+        // dozens of round-trips just for this chart, which is why report
+        // generation felt slow). Join alumni -> courses to get each
+        // row's college directly, apply the same batch-range and program
+        // filters as baseQ(), then one GROUP BY + conditional SUMs
+        // produces every college's totals at once.
+        $collegeQ = DB::table('alumni as a')
+            ->join('courses as c', 'a.course_code', '=', 'c.code')
+            ->leftJoin('employment_trackings as et', function ($j) {
+                $j->on('a.id', '=', 'et.alumni_id')->whereNull('et.deleted_at');
+            })
+            ->whereNull('a.deleted_at')
+            ->whereNotNull('c.college');
+        $this->applyBatchRange($collegeQ, 'a.batch', $batchFrom, $batchTo);
+        if (!empty($courses)) $collegeQ->whereIn('a.course_code', $courses);
 
-            $emp = DB::table('alumni as a')
-                ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
-                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                ->whereIn('a.course_code', $codes);
-            if ($batchFrom !== '' && $batchTo !== '') {
-                $emp->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
-            }
-            $employed   = (clone $emp)->where('et.employment_status', 'employed')->count();
-            $self_emp   = (clone $emp)->where('et.employment_status', 'self_employed')->count();
-            $unemployed = (clone $emp)->where('et.employment_status', 'unemployed')->count();
+        $collegeRows = $collegeQ
+            ->select(
+                'c.college',
+                DB::raw("SUM(CASE WHEN et.employment_status='employed'      THEN 1 ELSE 0 END) as employed"),
+                DB::raw("SUM(CASE WHEN et.employment_status='self_employed' THEN 1 ELSE 0 END) as self_emp"),
+                DB::raw("SUM(CASE WHEN et.employment_status='unemployed'    THEN 1 ELSE 0 END) as unemployed"),
+                DB::raw('COUNT(DISTINCT a.id) as total')
+            )
+            ->groupBy('c.college')->orderBy('c.college')->get();
 
-            return compact('col', 'total', 'employed', 'self_emp', 'unemployed');
+        // Colleges with zero matching alumni under the current filters
+        // won't appear in $collegeRows — fill those back in as zeroes so
+        // the chart still lists every college, same as the old loop did.
+        $allColleges = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values();
+        $collegeRows = $collegeRows->keyBy('college');
+        $collegeData = $allColleges->map(function ($col) use ($collegeRows) {
+            $row = $collegeRows->get($col);
+            return [
+                'col'        => $col,
+                'total'      => (int) ($row->total ?? 0),
+                'employed'   => (int) ($row->employed ?? 0),
+                'self_emp'   => (int) ($row->self_emp ?? 0),
+                'unemployed' => (int) ($row->unemployed ?? 0),
+            ];
         });
 
         $collegeChart = [
@@ -283,9 +332,7 @@ class AdminEmploymentTrackingExportController extends Controller
             ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
             ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
             ->whereIn('et.employment_status', ['employed', 'self_employed']);
-        if ($batchFrom !== '' && $batchTo !== '') {
-            $courseQ->where('a.batch', '>=', $batchFrom)->where('a.batch', '<=', $batchTo);
-        }
+        $this->applyBatchRange($courseQ, 'a.batch', $batchFrom, $batchTo);
         if ($college !== '') {
             $courseQ->whereIn('a.course_code', $this->courseCodesForCollege($college));
         }

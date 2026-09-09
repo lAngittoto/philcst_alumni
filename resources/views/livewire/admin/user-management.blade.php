@@ -37,11 +37,18 @@ new class extends Component {
     public $vPhoto       = null;
     public bool $vPhotoSave = false;
 
-    public ?int   $ueId     = null;
-    public string $ueName   = '';
-    public string $ueEmail  = '';
-    public array  $ueErrors = [];
-    public bool   $ueSave   = false;
+    public ?int   $ueId      = null;
+    public string $ueName    = '';
+    public string $ueEmail   = '';
+    public array  $ueErrors  = [];
+    public bool   $ueSave    = false;
+    // Inline confirmation shown right inside the modal the moment a
+    // save succeeds — the global toast (7s auto-dismiss, top of the
+    // page) was easy to miss while looking at the modal itself, which
+    // made a successful update feel indistinguishable from "nothing
+    // happened yet" until the admin looked elsewhere. This sits right
+    // next to the input so success is unmistakable immediately.
+    public string $ueSuccess = '';
 
     public ?int   $cpId     = null;
     public string $cpName   = '';
@@ -103,129 +110,196 @@ new class extends Component {
     #[Computed]
     public function stats(): array
     {
-        $rows = DB::table('users')
-            ->selectRaw("role, COUNT(*) as cnt")
-            ->groupBy('role')
-            ->pluck('cnt', 'role');
+        // Livewire re-renders this WHOLE component after every action in
+        // the page — including things that have nothing to do with the
+        // stat cards, like saving an email in the View Profile modal.
+        // Before this cache, that meant clicking "Update" in the email
+        // modal also re-ran every COUNT() query below on every single
+        // click, which is most of why that save felt slow. A short
+        // cache means those unrelated actions reuse the last computed
+        // numbers instead of re-querying; any action that actually
+        // changes what these numbers count (toggle active/inactive,
+        // email/username update affecting verified/pending counts, a
+        // new photo doesn't affect this one) busts it immediately via
+        // bustUserListCache() so nothing goes stale.
+        return \Illuminate\Support\Facades\Cache::remember('admin_users_stats', 15, function () {
+            $rows = DB::table('users')
+                ->selectRaw("role, COUNT(*) as cnt")
+                ->groupBy('role')
+                ->pluck('cnt', 'role');
 
-        $dirActive   = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
-        $dirInactive = DB::table('director')->where('status', 'INACTIVE')->whereNull('deleted_at')->count();
+            $dirActive   = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
+            $dirInactive = DB::table('director')->where('status', 'INACTIVE')->whereNull('deleted_at')->count();
 
-        $coordActive   = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
-        $coordInactive = DB::table('organizer')->where('status', 'INACTIVE')->whereNull('deleted_at')->count();
+            $coordActive   = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
+            $coordInactive = DB::table('organizer')->where('status', 'INACTIVE')->whereNull('deleted_at')->count();
 
-        $regActive   = DB::table('users')->where('role','registrar')->where('user_status','ACTIVE')->count();
-        $regInactive = DB::table('users')->where('role','registrar')->where('user_status','INACTIVE')->count();
+            $regActive   = DB::table('users')->where('role','registrar')->where('user_status','ACTIVE')->count();
+            $regInactive = DB::table('users')->where('role','registrar')->where('user_status','INACTIVE')->count();
 
-        $alumniTotal    = $rows->get('alumni', 0);
-        $alumniVerified = DB::table('alumni')->whereNotNull('password_changed_at')->count();
-        $alumniPending  = $alumniTotal - $alumniVerified;
+            $alumniTotal    = $rows->get('alumni', 0);
+            $alumniVerified = DB::table('alumni')->whereNotNull('password_changed_at')->count();
+            $alumniPending  = $alumniTotal - $alumniVerified;
 
-        // Newly registered alumni — created_at falls within the current
-        // calendar month (Asia/Manila), read straight off the users table
-        // since that's where the registration timestamp lives.
-        $alumniNewThisMonth = DB::table('users')
-            ->where('role', 'alumni')
-            ->whereMonth('created_at', now('Asia/Manila')->month)
-            ->whereYear('created_at', now('Asia/Manila')->year)
-            ->count();
+            // Newly registered alumni — created_at falls within the current
+            // calendar month (Asia/Manila), read straight off the users table
+            // since that's where the registration timestamp lives.
+            $alumniNewThisMonth = DB::table('users')
+                ->where('role', 'alumni')
+                ->whereMonth('created_at', now('Asia/Manila')->month)
+                ->whereYear('created_at', now('Asia/Manila')->year)
+                ->count();
 
-        return [
-            'total'              => $rows->sum(),
-            'alumni'             => $alumniTotal,
-            'alumniVerified'     => $alumniVerified,
-            'alumniPending'      => $alumniPending,
-            'alumniNewThisMonth' => $alumniNewThisMonth,
-            'director'           => $rows->get('director',  0),
-            'dirActive'          => $dirActive,
-            'dirInactive'        => $dirInactive,
-            'coordinator'        => $rows->get('organizer', 0),
-            'coordActive'        => $coordActive,
-            'coordInactive'      => $coordInactive,
-            'registrar'          => $rows->get('registrar', 0),
-            'regActive'          => $regActive,
-            'regInactive'        => $regInactive,
-        ];
+            return [
+                'total'              => $rows->sum(),
+                'alumni'             => $alumniTotal,
+                'alumniVerified'     => $alumniVerified,
+                'alumniPending'      => $alumniPending,
+                'alumniNewThisMonth' => $alumniNewThisMonth,
+                'director'           => $rows->get('director',  0),
+                'dirActive'          => $dirActive,
+                'dirInactive'        => $dirInactive,
+                'coordinator'        => $rows->get('organizer', 0),
+                'coordActive'        => $coordActive,
+                'coordInactive'      => $coordInactive,
+                'registrar'          => $rows->get('registrar', 0),
+                'regActive'          => $regActive,
+                'regInactive'        => $regInactive,
+            ];
+        });
+    }
+
+    /**
+     * Cache key for users() — varies by every input that changes its
+     * result (role tab, status filter, search text, page) so cached
+     * results never leak across different views of the table.
+     */
+    private function usersCacheKey(): string
+    {
+        // admin_users_list_version must be folded in here — it's what
+        // bustUserListCache() bumps. Without it, incrementing the
+        // version does nothing because every filter/page combo still
+        // resolves to the same key it always did, so updates (email,
+        // username, activate/deactivate, photo) kept serving stale
+        // cached rows until the 15s TTL expired on its own.
+        $version = \Illuminate\Support\Facades\Cache::get('admin_users_list_version', 1);
+        return 'admin_users_list:' . $version . ':' . md5(implode('|', [
+            $this->activeRole, $this->statusFilter, $this->search, $this->currentPage,
+        ]));
+    }
+
+    /**
+     * Clears both cached blocks — called by every action that actually
+     * changes data these two queries read (email/username update,
+     * activate/deactivate toggle, new profile photo). Password changes
+     * don't touch anything either of these counts or lists, so
+     * saveChangePassword() doesn't need to call this.
+     */
+    private function bustUserListCache(): void
+    {
+        \Illuminate\Support\Facades\Cache::forget('admin_users_stats');
+        // users() is keyed per filter/page combination, so a single
+        // forget() can't reach every possible key — instead this bumps
+        // a version tag that's folded into usersCacheKey(), which
+        // invalidates every previous key at once without needing to
+        // enumerate them.
+        \Illuminate\Support\Facades\Cache::increment('admin_users_list_version');
     }
 
     #[Computed]
     public function users()
     {
-        $st = "(CASE
-            WHEN users.role='alumni'    THEN IF(al.password_changed_at IS NOT NULL,'VERIFIED','PENDING')
-            WHEN users.role='organizer' THEN COALESCE(org.status,'ACTIVE')
-            WHEN users.role='director'  THEN COALESCE(dir.status,'ACTIVE')
-            WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
-            ELSE 'ACTIVE'
-        END)";
+        // Same reasoning as stats() above: this runs on every Livewire
+        // request regardless of which action fired, including saving an
+        // email in a completely separate modal. Cached briefly, keyed by
+        // every input that changes its result (see usersCacheKey()) so
+        // different tabs/filters/pages never collide, and busted
+        // immediately by bustUserListCache() whenever an action actually
+        // changes a row this query reads.
+        $result = \Illuminate\Support\Facades\Cache::remember($this->usersCacheKey(), 15, function () {
+            $st = "(CASE
+                WHEN users.role='alumni'    THEN IF(al.password_changed_at IS NOT NULL,'VERIFIED','PENDING')
+                WHEN users.role='organizer' THEN COALESCE(org.status,'ACTIVE')
+                WHEN users.role='director'  THEN COALESCE(dir.status,'ACTIVE')
+                WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
+                ELSE 'ACTIVE'
+            END)";
 
-        $q = DB::table('users')
-            ->select([
-                'users.id','users.name','users.email','users.role','users.created_at',
-                'users.user_status',
-                DB::raw("{$st} as computed_status"),
-                DB::raw("COALESCE(al.student_id,'')          as student_id"),
-                DB::raw("COALESCE(al.email,'')               as record_email"),
-                DB::raw("COALESCE(dir.email,'')               as director_email"),
-                DB::raw("COALESCE(org.id_number,'')          as id_number"),
-                DB::raw("COALESCE(org.department,'')         as department"),
-                DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
-                DB::raw("COALESCE(al.first_name,'')          as alumni_first_name"),
-                DB::raw("COALESCE(al.middle_initial,'')      as alumni_middle_name"),
-                DB::raw("COALESCE(al.last_name,'')           as alumni_last_name"),
-                DB::raw("COALESCE(org.first_name,'')         as org_first_name"),
-                DB::raw("COALESCE(org.last_name,'')          as org_last_name"),
-                DB::raw("COALESCE(dir.first_name,'')         as dir_first_name"),
-                DB::raw("COALESCE(dir.middle_name,'')        as dir_middle_name"),
-                DB::raw("COALESCE(dir.last_name,'')          as dir_last_name"),
-                DB::raw("COALESCE(dir.suffix,'')              as dir_suffix"),
-            ])
-            ->leftJoin('alumni as al', 'al.user_id', '=', 'users.id')
-            ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
-            ->leftJoin('director as dir',  fn($j) => $j->on('dir.user_id','=','users.id')->whereNull('dir.deleted_at'));
+            $q = DB::table('users')
+                ->select([
+                    'users.id','users.name','users.email','users.role','users.created_at',
+                    'users.user_status',
+                    DB::raw("{$st} as computed_status"),
+                    DB::raw("COALESCE(al.student_id,'')          as student_id"),
+                    DB::raw("COALESCE(al.email,'')               as record_email"),
+                    DB::raw("COALESCE(dir.email,'')               as director_email"),
+                    DB::raw("COALESCE(org.id_number,'')          as id_number"),
+                    DB::raw("COALESCE(org.department,'')         as department"),
+                    DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
+                    DB::raw("COALESCE(al.first_name,'')          as alumni_first_name"),
+                    DB::raw("COALESCE(al.middle_initial,'')      as alumni_middle_name"),
+                    DB::raw("COALESCE(al.last_name,'')           as alumni_last_name"),
+                    DB::raw("COALESCE(org.first_name,'')         as org_first_name"),
+                    DB::raw("COALESCE(org.last_name,'')          as org_last_name"),
+                    DB::raw("COALESCE(dir.first_name,'')         as dir_first_name"),
+                    DB::raw("COALESCE(dir.middle_name,'')        as dir_middle_name"),
+                    DB::raw("COALESCE(dir.last_name,'')          as dir_last_name"),
+                    DB::raw("COALESCE(dir.suffix,'')              as dir_suffix"),
+                ])
+                ->leftJoin('alumni as al', 'al.user_id', '=', 'users.id')
+                ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
+                ->leftJoin('director as dir',  fn($j) => $j->on('dir.user_id','=','users.id')->whereNull('dir.deleted_at'));
 
-        $q->where('users.role', '!=', 'admin');
+            $q->where('users.role', '!=', 'admin');
 
-        $map = ['alumni'=>'alumni','director'=>'director','coordinator'=>'organizer','registrar'=>'registrar'];
-        if ($this->activeRole !== 'all' && isset($map[$this->activeRole]))
-            $q->where('users.role', $map[$this->activeRole]);
+            $map = ['alumni'=>'alumni','director'=>'director','coordinator'=>'organizer','registrar'=>'registrar'];
+            if ($this->activeRole !== 'all' && isset($map[$this->activeRole]))
+                $q->where('users.role', $map[$this->activeRole]);
 
-        if ($this->activeRole === 'alumni' && in_array($this->statusFilter, ['complete', 'pending', 'new_this_month'], true)) {
-            if ($this->statusFilter === 'complete') {
-                $q->whereNotNull('al.password_changed_at');
-            } elseif ($this->statusFilter === 'pending') {
-                $q->whereNull('al.password_changed_at');
-            } else { // new_this_month
-                $q->whereMonth('users.created_at', now('Asia/Manila')->month)
-                  ->whereYear('users.created_at', now('Asia/Manila')->year);
+            if ($this->activeRole === 'alumni' && in_array($this->statusFilter, ['complete', 'pending', 'new_this_month'], true)) {
+                if ($this->statusFilter === 'complete') {
+                    $q->whereNotNull('al.password_changed_at');
+                } elseif ($this->statusFilter === 'pending') {
+                    $q->whereNull('al.password_changed_at');
+                } else { // new_this_month
+                    $q->whereMonth('users.created_at', now('Asia/Manila')->month)
+                      ->whereYear('users.created_at', now('Asia/Manila')->year);
+                }
             }
-        }
 
-        if ($this->search) {
-            $t = '%'.$this->search.'%';
-            $q->where(fn($s) => $s->where('users.name','like',$t)->orWhere('users.email','like',$t));
-        }
-        $q->orderBy('users.created_at', 'desc');
+            if ($this->search) {
+                $t = '%'.$this->search.'%';
+                $q->where(fn($s) => $s->where('users.name','like',$t)->orWhere('users.email','like',$t));
+            }
+            $q->orderBy('users.created_at', 'desc');
 
-        $pp    = $this->perPage();
-        $total = $q->count();
-        $lp    = (int) ceil($total / $pp);
-        $cp    = max(1, min($this->currentPage, max($lp, 1)));
-        $this->currentPage = $cp;
+            $pp    = $this->perPage();
+            $total = $q->count();
+            $lp    = (int) ceil($total / $pp);
+            $cp    = max(1, min($this->currentPage, max($lp, 1)));
 
-        $items = $q->offset(($cp - 1) * $pp)->limit($pp)->get();
+            $items = $q->offset(($cp - 1) * $pp)->limit($pp)->get();
 
-        return (object)[
-            'items'       => $items,
-            'total'       => $total,
-            'perPage'     => $pp,
-            'currentPage' => $cp,
-            'lastPage'    => $lp,
-            'from'        => $total > 0 ? ($cp - 1) * $pp + 1 : 0,
-            'to'          => min($cp * $pp, $total),
-            'hasPrev'     => $cp > 1,
-            'hasNext'     => $cp < $lp,
-        ];
+            return (object)[
+                'items'       => $items,
+                'total'       => $total,
+                'perPage'     => $pp,
+                'currentPage' => $cp,
+                'lastPage'    => $lp,
+                'from'        => $total > 0 ? ($cp - 1) * $pp + 1 : 0,
+                'to'          => min($cp * $pp, $total),
+                'hasPrev'     => $cp > 1,
+                'hasNext'     => $cp < $lp,
+            ];
+        });
+
+        // Cache::remember() can return a plain stdClass after
+        // (de)serialization depending on cache driver — currentPage still
+        // needs to land back on the component the same way the original
+        // uncached version did, so pagination controls stay in sync.
+        $this->currentPage = $result->currentPage;
+
+        return $result;
     }
 
     public function openModal(string $m): void {
@@ -239,7 +313,7 @@ new class extends Component {
         $this->activeModal=''; $this->vData=null;
         $this->tId=null;
         $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[];
-        $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[];
+        $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
         $this->vPhoto=null; $this->vPhotoSave=false;
     }
 
@@ -250,7 +324,9 @@ new class extends Component {
             if (!trim($this->dFn))       $errors[] = 'First name is required.';
             if (!trim($this->dMn))       $errors[] = 'Middle name is required.';
             if (!trim($this->dLn))       $errors[] = 'Last name is required.';
-            if (!trim($this->dUsername)) $errors[] = 'Username is required.';
+            if (!trim($this->dUsername)) $errors[] = 'Teacher ID is required.';
+            elseif (!preg_match('/^\d{8}$/', trim($this->dUsername)))
+                                         $errors[] = 'Teacher ID must be exactly 8 digits.';
             if (!trim($this->dEmail))    $errors[] = 'Email address is required.';
             elseif (!filter_var(trim($this->dEmail), FILTER_VALIDATE_EMAIL))
                                          $errors[] = 'Please enter a valid email address.';
@@ -263,7 +339,7 @@ new class extends Component {
 
             $loginEmail = trim($this->dUsername).'@director.internal';
             if (DB::table('users')->where('email', $loginEmail)->exists()) {
-                $this->dErrs = ['general' => ['That username is already taken. Please choose a different one.']];
+                $this->dErrs = ['general' => ['That Teacher ID is already taken. Please choose a different one.']];
                 return;
             }
 
@@ -300,7 +376,7 @@ new class extends Component {
             ], function ($m) { $m->to(trim($this->dEmail))->subject("Your Director Account – Philcst Alumni Connect"); });
 
             $this->dOk = "Director <strong>{$full}</strong> created successfully!"
-                . "|Login username: <code class='font-mono bg-green-100 px-1.5 py-0.5 rounded text-green-800'>{$uname}</code>"
+                . "|Login Teacher ID: <code class='font-mono bg-green-100 px-1.5 py-0.5 rounded text-green-800'>{$uname}</code>"
                 . "|Auto-generated password: <code class='font-mono bg-yellow-100 px-1.5 py-0.5 rounded text-yellow-800'>{$autoPassword}</code>"
                 . "|<span class='text-amber-700 font-medium'>⚠ Please share the password with the director and advise them to change it upon first login.</span>";
 
@@ -363,6 +439,7 @@ new class extends Component {
         $this->vPhoto = null;
         $this->ueEmail  = '';
         $this->ueErrors = [];
+        $this->ueSuccess = '';
         $this->cpNew = $this->cpConfirm = '';
         $this->cpErrs = [];
         if ($r->role === 'alumni' && !empty($r->record_email) && !str_contains($r->record_email,'@pending.local')) {
@@ -391,9 +468,16 @@ new class extends Component {
     public function ueCooldownDaysLeft(): int {
         $last = $this->vData['email_updated_at'] ?? null;
         if (!$last) return 0;
-        $elapsedDays = now()->diffInDays(\Carbon\Carbon::parse($last));
+        // Was off by one: diffInDays() on the exact same moment returns 0,
+        // so "30 - 0" made the cooldown effectively last a full 30 days
+        // PLUS however much of "day 0" was left — 31 days end to end
+        // before a change was allowed again. Anchoring both sides to
+        // start-of-day before diffing removes that partial-day carry, so
+        // the window is exactly 30 calendar days from the update.
+        $elapsedDays = \Carbon\Carbon::parse($last)->startOfDay()
+            ->diffInDays(now()->startOfDay());
         $remaining   = 30 - $elapsedDays;
-        return $remaining > 0 ? (int) ceil($remaining) : 0;
+        return $remaining > 0 ? (int) $remaining : 0;
     }
 
     public function savePhoto(): void {
@@ -427,6 +511,9 @@ new class extends Component {
             };
             $this->vData['photo'] = $path;
             $this->vPhoto = null;
+            // Photo is also shown in the users table row, so bust the
+            // cached list so it doesn't keep showing the old photo.
+            $this->bustUserListCache();
             $this->flash('success', 'Profile photo updated successfully!');
         } catch (\Exception $e) {
             $this->flash('error', 'Failed to upload photo: ' . $e->getMessage());
@@ -434,7 +521,7 @@ new class extends Component {
     }
 
     public function saveUpdateEmail(): void {
-        $this->ueErrors = []; $this->ueSave = true;
+        $this->ueErrors = []; $this->ueSuccess = ''; $this->ueSave = true;
         try {
             $role = $this->vData['role'] ?? '';
 
@@ -463,6 +550,17 @@ new class extends Component {
                 if ($this->vData) { $this->vData['email'] = $loginEmail; $this->vData['email_updated_at'] = now(); }
 
                 $this->ueErrors = [];
+                // Keep the field showing the username that was actually
+                // saved (not just whatever was typed) — same as the
+                // alumni/director branch below — so the input itself
+                // visibly reflects the new state, not just the toast.
+                $this->ueEmail = $uname;
+
+                // Bust the cached stats/list immediately — otherwise the
+                // table and stat cards keep serving the pre-update
+                // snapshot for up to 15s, which is what made this feel
+                // slow/broken even though the DB write already succeeded.
+                $this->bustUserListCache();
 
                 // ── DISPATCH: username updated notification ─────────────────────
                 $this->dispatch('__admin-user-username-rich', [
@@ -471,7 +569,9 @@ new class extends Component {
                     'username' => $uname,
                 ]);
 
-                $this->flash('success', "Username updated for {$this->ueName}. They will be required to reset their password on next login.");
+                $msg = "Username updated for {$this->ueName}. They will be required to reset their password on next login.";
+                $this->ueSuccess = $msg;
+                $this->flash('success', $msg);
                 return;
             }
 
@@ -498,6 +598,15 @@ new class extends Component {
                 if ($this->vData) { $this->vData['record_email'] = $email; $this->vData['email_updated_at'] = now(); }
             }
             $this->ueErrors = [];
+            // Same reasoning as the registrar branch above: keep the
+            // field showing the email that actually got saved.
+            $this->ueEmail = $email;
+
+            // Bust the cached stats/list immediately — otherwise the
+            // table and stat cards keep serving the pre-update snapshot
+            // for up to 15s, which is what made this feel slow/broken
+            // even though the DB write already succeeded.
+            $this->bustUserListCache();
 
             // ── DISPATCH: email updated notification ─────────────────────────
             $this->dispatch('__admin-user-email-rich', [
@@ -510,6 +619,7 @@ new class extends Component {
             $msg = $role === 'director'
                 ? "Email updated for {$this->ueName}."
                 : "Email updated for {$this->ueName}. They will be required to reset their password on next login.";
+            $this->ueSuccess = $msg;
             $this->flash('success', $msg);
         } catch (\Illuminate\Database\QueryException $e) {
             $this->ueErrors = ($e->errorInfo[1] ?? null) === 1062
@@ -553,6 +663,11 @@ new class extends Component {
             $s = $this->tAction==='activate' ? 'ACTIVE' : 'INACTIVE';
             if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='registrar') DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
+
+            // Status shown in the table/stats cards, so bust the cache
+            // right away — otherwise the row keeps showing the old
+            // Active/Inactive state for up to 15s after this succeeds.
+            $this->bustUserListCache();
 
             // ── DISPATCH: activate / deactivate notification ─────────────────
             $this->dispatch('__admin-user-toggled-rich', [
@@ -645,6 +760,8 @@ new class extends Component {
 
 <div class="flex flex-col mu-page-root" style="height:90vh; overflow:hidden;">
 
+<div id="mu-hover-tip" class="mu-row-tip">View Details</div>
+
 <style>
 .mu-filter-input {
     border: 1px solid #E8E0F0;
@@ -671,6 +788,22 @@ select.mu-filter-input.mu-active {
     border-color: #7a3f91; background-color: #f5f0fa; color: #7a3f91; font-weight: 600;
 }
 
+/* "Smooth" polish for the Create Director form: slightly springier
+   focus transition than the base .mu-filter-input, and a subtle
+   press/lift on the submit button so saving feels responsive rather
+   than instant/jarring. */
+.mu-smooth-input {
+    transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease;
+}
+.mu-smooth-input:focus {
+    box-shadow: 0 0 0 3px rgba(122,63,145,.12);
+}
+.mu-smooth-btn {
+    transition: opacity .15s ease, transform .1s ease, box-shadow .15s ease;
+}
+.mu-smooth-btn:active:not(:disabled) { transform: scale(0.98); }
+.mu-smooth-btn:disabled { opacity: .7; cursor: wait; }
+
 .mu-stat-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -679,7 +812,10 @@ select.mu-filter-input.mu-active {
 }
 @media (max-width: 1100px) { .mu-stat-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 768px)  { .mu-stat-grid { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 480px)  { .mu-stat-grid { grid-template-columns: 1fr; } }
+/* Was 1fr (single column, 5 stacked full-width cards — the tallest
+   possible arrangement) below 480px. Now that cards are shrunk on
+   mobile, staying at 2 columns keeps the block to 3 short rows
+   instead of 5 tall ones, freeing up real space for the table. */
 
 /* ── Mobile: let the whole layout use more of the real viewport height ── */
 @media (max-width: 640px) {
@@ -716,6 +852,21 @@ select.mu-filter-input.mu-active {
 .mu-stat-lbl  { font-size: .8rem; font-weight: 700; margin-top: 2px; color: #000000; }
 .mu-stat-sub  { font-size: .75rem; font-weight: 600; margin-top: 1px; color: #000000; }
 
+/* ── Mobile: shrink the stat cards themselves — smaller icon, tighter
+   padding, smaller type — so the 5-card block takes noticeably less
+   vertical space, leaving more of the screen for the table below.
+   Placed after the base rules above so it correctly overrides them
+   at this breakpoint instead of losing to source order. ── */
+@media (max-width: 640px) {
+    .mu-stat-grid { gap: 0.4rem; }
+    .mu-stat-card { padding: 7px 9px; gap: 8px; min-height: 0; border-radius: 10px; }
+    .mu-stat-icon-lg { width: 30px; height: 30px; border-radius: 8px; }
+    .mu-stat-icon-lg i { font-size: 0.85rem; }
+    .mu-stat-num  { font-size: 1.05rem; }
+    .mu-stat-lbl  { font-size: .62rem; margin-top: 0; }
+    .mu-stat-sub  { font-size: .58rem; margin-top: 0; }
+}
+
 .mu-table-block {
     display: flex; flex-direction: column;
     border-radius: 1rem; overflow: hidden;
@@ -724,12 +875,13 @@ select.mu-filter-input.mu-active {
     flex: 1; min-height: 0;
 }
 
-/* ── Mobile: give the table far more of the viewport, shrink the
-     surrounding chrome (stat cards, header) so the table reads full-length
-     instead of a short strip with a fixed page scroll underneath. ── */
-@media (max-width: 640px) {
-    .mu-table-block { min-height: 60vh; }
-}
+/* ── Mobile: the table block already gets all remaining space via
+   flex:1 from its parent (.mu-main-layout is a fixed-height flex
+   column) — forcing an extra min-height here made the block taller
+   than that available space, so it overflowed the parent's
+   overflow:hidden and pushed the pagination footer off-screen
+   entirely. Letting min-height stay at 0 (the base rule) keeps the
+   block correctly sized to its share of the layout instead. ── */
 .mu-table-block-filter {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
     padding: 0.6rem 0.875rem; flex-shrink: 0;
@@ -737,10 +889,17 @@ select.mu-filter-input.mu-active {
 .mu-table-block-pagination {
     flex-shrink: 0;
     background: linear-gradient(to right, #7a3f91, #9b59b6);
-    padding: 0 1rem; min-height: 48px;
+    padding: 0.5rem 1rem; min-height: 48px;
     display: flex; align-items: center; justify-content: space-between;
     gap: 0.5rem; flex-wrap: wrap;
     border-top: 1px solid rgba(122,63,145,.3);
+}
+/* Narrow screens: stack the "Showing X-Y of Z" line above the page
+   buttons instead of squeezing both onto one row, and shorten the
+   label itself so it doesn't wrap mid-number. */
+@media (max-width: 480px) {
+    .mu-table-block-pagination { justify-content: center; text-align: center; }
+    .mu-table-block-pagination > p { width: 100%; text-align: center; }
 }
 
 .mu-tbl-row {
@@ -748,6 +907,13 @@ select.mu-filter-input.mu-active {
     transition: background-color .15s ease;
 }
 .mu-tbl-row:hover { background-color: #f5f0fa !important; }
+
+/* Auto layout: each column sizes to its own content (badges, dates,
+   names) instead of being forced into a fixed 1% sliver — that fixed
+   layout was what caused "Identifier"/"Role" headers to truncate into
+   "ID R…"/"…N…" on desktop. Columns that must never wrap mid-word
+   (badges, dates) get white-space: nowrap individually instead. */
+.mu-users-table { table-layout: auto; }
 
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
@@ -789,6 +955,20 @@ select.mu-filter-input.mu-active {
     opacity: 0; transition: opacity .15s ease; z-index: 99999;
 }
 .mu-close-tooltip:hover::after, .mu-close-tooltip:hover::before { opacity: 1; }
+
+/* Row "View Details" tooltip — same black-bg/white-text pattern as
+   mu-close-tooltip above, just anchored to a table row instead of a
+   button, and shown near the cursor via the mousemove-tracked
+   left/top offsets set in the script at the bottom of this file. */
+.mu-row-tip {
+    position: fixed; z-index: 99999;
+    background: #1a1a1a; color: #fff;
+    font-size: 11px; font-weight: 600; letter-spacing: .03em;
+    padding: 5px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .1s ease;
+    transform: translate(14px, 18px);
+}
+.mu-row-tip.visible { opacity: 1; }
 
 /* ── Profile modal body: scroll still works (wheel/swipe/keys), scrollbar
      track just isn't drawn, so the full-screen view reads as scroll-free ── */
@@ -1037,14 +1217,14 @@ select.mu-filter-input.mu-active {
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c transition-opacity duration-200" style="background:#fff;"
                  wire:loading.class="opacity-50 pointer-events-none"
                  wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage">
-                <table class="w-full bg-white border-collapse">
+                <table class="w-full bg-white border-collapse mu-users-table">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow:0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest" style="color:#000000;">User</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell" style="color:#000000;">Identifier</th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Role</th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest" style="color:#000000;">Status</th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden xl:table-cell" style="color:#000000;">Email</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest whitespace-nowrap" style="color:#000000;">User</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell whitespace-nowrap" style="color:#000000;">Identifier</th>
+                            <th class="px-2 sm:px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden sm:table-cell whitespace-nowrap" style="color:#000000;">Role</th>
+                            <th class="px-2 sm:px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest whitespace-nowrap" style="color:#000000;">Status</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden xl:table-cell whitespace-nowrap" style="color:#000000;">Email</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5]">
@@ -1054,7 +1234,12 @@ select.mu-filter-input.mu-active {
                             $identifier = match($u->role) {
                                 'alumni'    => $u->student_id ?: '—',
                                 'organizer' => $u->id_number  ?: '—',
-                                'director'  => $u->name ?: '—',
+                                // Teacher ID is the director's login username, stored as the
+                                // local part of their @director.internal email. Directors
+                                // created before this change won't have a .internal email,
+                                // so adminUsername() falls back to their name — no backfill
+                                // needed, existing records are left exactly as they are.
+                                'director'  => $this->adminUsername($u->email, $u->name),
                                 default     => $this->adminUsername($u->email, $u->name),
                             };
                             $rowDisplayName = match($u->role) {
@@ -1073,16 +1258,22 @@ select.mu-filter-input.mu-active {
                             };
                         @endphp
                         <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
-                            wire:key="mu-row-{{ $u->id }}">
-                            <td class="px-4 py-3.5">
-                                <div class="flex items-center gap-3">
+                            wire:key="mu-row-{{ $u->id }}" data-mu-row>
+                            <td class="px-3 sm:px-4 py-3.5 min-w-0">
+                                <div class="flex items-center gap-2 sm:gap-3 min-w-0">
                                     @unless($u->role === 'registrar')
                                     <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $rowDisplayName }}"
-                                         class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
+                                         class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                     @endunless
                                     <div class="min-w-0">
-                                        <p class="font-semibold text-sm leading-snug truncate uppercase" style="color:#000000;">
+                                        <p class="font-semibold text-xs sm:text-sm leading-snug truncate uppercase" style="color:#000000;">
                                             {!! $this->highlightText($rowDisplayName) !!}
+                                        </p>
+                                        {{-- Role shows inline here only on the narrowest screens, where
+                                             the dedicated Role column is hidden, so the info isn't lost
+                                             — just relocated to keep the row from getting cramped. --}}
+                                        <p class="sm:hidden text-[10px] font-semibold uppercase tracking-wide mt-0.5" style="color:#7a3f91;">
+                                            {{ $roleDisplay }}
                                         </p>
                                     </div>
                                 </div>
@@ -1092,13 +1283,13 @@ select.mu-filter-input.mu-active {
                                     {{ $identifier }}
                                 </span>
                             </td>
-                            <td class="px-4 py-3.5 text-center">
+                            <td class="px-2 sm:px-4 py-3.5 text-center hidden sm:table-cell">
                                 <span class="mu-role-badge {{ $roleCss }}">
                                     {{ $roleDisplay }}
                                 </span>
                             </td>
-                            <td class="px-4 py-3.5 text-center">
-                                <span class="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-semibold border {{ $this->statusBadge($rowStatus) }}">
+                            <td class="px-2 sm:px-4 py-3.5 text-center">
+                                <span class="inline-flex items-center px-2 sm:px-2.5 py-1 rounded-xl text-[10px] sm:text-xs font-semibold border whitespace-nowrap {{ $this->statusBadge($rowStatus) }}">
                                     {{ $rowStatus === 'VERIFIED' ? 'COMPLETE' : $rowStatus }}
                                 </span>
                             </td>
@@ -1256,7 +1447,10 @@ select.mu-filter-input.mu-active {
 @endphp
 <div class="fixed inset-0"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     @keydown.escape.window="$wire.closeModal()">
+     x-data="{ muClosing: false }"
+     x-show="!muClosing"
+     x-init="muClosing = false"
+     @keydown.escape.window="muClosing = true; $wire.closeModal()">
     <div class="w-full h-full flex flex-col" style="background:#F2F2F2;overflow:hidden;">
 
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1273,10 +1467,9 @@ select.mu-filter-input.mu-active {
                     <p class="text-xs text-white/70 mt-0.5 truncate">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
                 </div>
             </div>
-            <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
                     class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
-                <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-base"></i></span>
-                <span wire:loading.remove wire:target="closeModal"><i class="fa-solid fa-xmark text-base"></i></span>
+                <i class="fa-solid fa-xmark text-base"></i>
             </button>
         </div>
 
@@ -1430,6 +1623,12 @@ select.mu-filter-input.mu-active {
                         ['Middle Name', $vd['middle_name'] ?? '—'],
                         ['Last Name',   $vd['last_name']   ?? '—'],
                         ['Suffix',      $vd['suffix']      ?? '—'],
+                        // Same as Coordinator's Teacher ID — the director's login
+                        // username, read from the local part of their
+                        // @director.internal email. Directors made before this
+                        // change won't have one, so this reads '—' for them;
+                        // nothing about their existing record is touched.
+                        ['Teacher ID',  $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
                     ] as [$lbl,$val])
                     <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
                         <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
@@ -1505,6 +1704,12 @@ select.mu-filter-input.mu-active {
                         </p>
                     </div>
                     @endif
+                    @if($ueSuccess)
+                    <div class="mb-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                        <i class="fas fa-circle-check text-emerald-600 text-xs mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
+                    </div>
+                    @endif
                     @if(count($ueErrors))
                     <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
                         @foreach($ueErrors as $msgs)
@@ -1569,6 +1774,12 @@ select.mu-filter-input.mu-active {
                         <p class="text-xs font-semibold leading-snug" style="color:#7A3F91;">
                             Email was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.
                         </p>
+                    </div>
+                    @endif
+                    @if($ueSuccess)
+                    <div class="mb-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                        <i class="fas fa-circle-check text-emerald-600 text-xs mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
                     </div>
                     @endif
                     @if(count($ueErrors))
@@ -1687,7 +1898,10 @@ select.mu-filter-input.mu-active {
 @if($activeModal === 'createDirector')
 <div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
      style="z-index:9995;"
-     @keydown.escape.window="$wire.closeModal()">
+     x-data="{ muClosing: false }"
+     x-show="!muClosing"
+     x-init="muClosing = false"
+     @keydown.escape.window="muClosing = true; $wire.closeModal()">
     <div class="bg-white rounded-2xl w-full max-w-xl my-4 flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]">
 
         <div class="flex items-center justify-between px-5 py-4 flex-shrink-0" style="background:#7A3F91;">
@@ -1700,10 +1914,9 @@ select.mu-filter-input.mu-active {
                     <p class="text-xs text-white/70 mt-0.5">Fill in the details below</p>
                 </div>
             </div>
-            <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
                     class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-base"></i></span>
-                <span wire:loading.remove wire:target="closeModal"><i class="fa-solid fa-xmark text-base"></i></span>
+                <i class="fa-solid fa-xmark text-base"></i>
             </button>
         </div>
 
@@ -1721,9 +1934,8 @@ select.mu-filter-input.mu-active {
                     </div>
                 </div>
             </div>
-            <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
                     class="w-full py-3 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
-                <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                 <span>Done</span>
             </button>
             @endif
@@ -1741,101 +1953,109 @@ select.mu-filter-input.mu-active {
             @endif
 
             @if(!$dOk)
-            <div class="mb-5">
-                <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">
-                    Profile Photo <span class="font-normal normal-case" style="color:#000000;">(optional)</span>
-                </p>
-                <div class="flex items-center gap-4"
-                     x-data="{ dragging: false }"
-                     @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false"
-                     @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
-                    <div class="w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 ring-1 ring-[#E8E0F0] bg-gray-100 flex items-center justify-center">
-                        @if($vPhoto)
-                            <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
-                        @else
-                            <i class="fas fa-user-tie text-2xl text-gray-300"></i>
-                        @endif
-                    </div>
-                    <label for="dPhotoInput"
-                           :class="dragging ? 'border-[#7A3F91] bg-purple-50' : 'border-[#E8E0F0] bg-[#F9F7FC] hover:border-[#7A3F91]'"
-                           class="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-all">
-                        <i class="fas fa-cloud-arrow-up text-sm" style="color:#7A3F91;"></i>
-                        <div>
-                            <p class="text-sm font-semibold" style="color:#000000;">Click or drag &amp; drop</p>
-                            <p class="text-xs font-semibold" style="color:#000000;">JPG, PNG — max 2 MB</p>
-                        </div>
-                        <input id="dPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
-                    </label>
-                </div>
-                <div wire:loading wire:target="vPhoto" class="mt-2 flex items-center gap-2 text-xs font-medium" style="color:#7A3F91;">
-                    <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
-                </div>
-            </div>
+            <div class="space-y-4" wire:loading.class="opacity-60 pointer-events-none" wire:target="createDirector" style="transition: opacity .15s ease;">
 
-            <div class="space-y-5">
-                <div>
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-3" style="color:#000000;">
-                        Full Name <span class="text-red-500">*</span>
-                    </p>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <input wire:model.defer="dFn" type="text" placeholder="First Name" class="mu-filter-input w-full" autocomplete="off">
-                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">First Name <span class="text-red-400">*</span></p>
+                {{-- PERSONAL INFORMATION card --}}
+                <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
+                    <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Personal Information</p>
+                    </div>
+                    <div class="p-4 flex flex-col sm:flex-row gap-4">
+                        <div class="flex flex-col items-center gap-1.5 shrink-0 mx-auto sm:mx-0"
+                             x-data="{ dragging: false }"
+                             @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false"
+                             @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
+                            <label for="dPhotoInput"
+                                   :class="dragging ? 'border-[#7A3F91] bg-purple-50' : 'border-[#E8E0F0] bg-[#F9F7FC] hover:border-[#7A3F91]'"
+                                   class="w-28 h-28 rounded-xl border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-1 text-center px-2 overflow-hidden">
+                                @if($vPhoto)
+                                    <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
+                                @else
+                                    <i class="fas fa-arrow-up-from-bracket text-sm" style="color:#8a8a8a;"></i>
+                                    <span class="text-xs font-bold" style="color:#000000;">Profile Photo</span>
+                                    <span class="text-[10px] font-medium" style="color:#8a8a8a;">JPG, PNG, WebP · 5 MB</span>
+                                @endif
+                                <input id="dPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
+                            </label>
+                            <div wire:loading wire:target="vPhoto" class="flex items-center gap-1.5 text-[11px] font-semibold" style="color:#7A3F91;">
+                                <i class="fas fa-spinner animate-spin text-[10px]"></i> Uploading…
+                            </div>
+                            <span class="text-[11px] font-medium" style="color:#7A3F91;">Optional — leave blank for default</span>
                         </div>
-                        <div>
-                            <input wire:model.defer="dLn" type="text" placeholder="Last Name" class="mu-filter-input w-full" autocomplete="off">
-                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">Last Name <span class="text-red-400">*</span></p>
-                        </div>
-                        <div>
-                            <input wire:model.defer="dMn" type="text" placeholder="Middle Name" class="mu-filter-input w-full" autocomplete="off">
-                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">Middle Name <span class="text-red-400">*</span></p>
-                        </div>
-                        <div>
-                            <input wire:model.defer="dSfx" type="text" placeholder="e.g. Jr., Sr., III" class="mu-filter-input w-full" autocomplete="off">
-                            <p class="text-xs mt-1 font-semibold" style="color:#000000;">Suffix <span class="font-normal" style="color:#000000;">(optional)</span></p>
+
+                        <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="dFn" type="text" placeholder="e.g. Juan" class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
+                            </div>
+                            <div>
+                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="dLn" type="text" placeholder="e.g. dela Cruz" class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
+                            </div>
+                            <div>
+                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
+                                <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos" class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
+                            </div>
+                            <div>
+                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Suffix</p>
+                                <select wire:model.defer="dSfx" class="mu-filter-input w-full mu-smooth-input">
+                                    <option value="">None</option>
+                                    <option value="Jr.">Jr.</option>
+                                    <option value="Sr.">Sr.</option>
+                                    <option value="II">II</option>
+                                    <option value="III">III</option>
+                                    <option value="IV">IV</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
-                </div>
-
-                <div>
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-2" style="color:#000000;">
-                        Username <span class="text-red-500">*</span>
-                        <span class="font-normal normal-case ml-1" style="color:#000000;">— used to log in</span>
-                    </p>
-                    <input wire:model.defer="dUsername" type="text" placeholder="e.g. jdelacruz2024" class="mu-filter-input w-full" autocomplete="off">
                 </div>
 
-                <div>
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-2" style="color:#000000;">
-                        Email Address <span class="text-red-500">*</span>
-                        <span class="font-normal normal-case ml-1" style="color:#000000;">— for records &amp; credentials</span>
-                    </p>
-                    <div class="relative">
-                        <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                        <input wire:model.defer="dEmail" type="email" placeholder="e.g. director@email.com"
-                               class="mu-filter-input w-full" style="padding-left:2.25rem;" autocomplete="off">
+                {{-- ACCOUNT CREDENTIALS card --}}
+                <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
+                    <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Account Credentials</p>
                     </div>
-                    <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-circle-info text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
-                            A secure password will be <strong>auto-generated</strong> and sent to this email.
-                            The director logs in using their <strong>username</strong>.
-                        </p>
+                    <div class="p-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Teacher ID <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="dUsername" type="text" inputmode="numeric" maxlength="8"
+                                       placeholder="e.g. 20240001" class="mu-filter-input w-full mu-smooth-input font-mono" autocomplete="off">
+                                <p class="text-[11px] font-medium mt-1" style="color:#8a8a8a;">Must be exactly 8 digits</p>
+                            </div>
+                            <div>
+                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="dEmail" type="email" placeholder="director@example.com"
+                                       class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
+                                <p class="text-[11px] font-medium mt-1" style="color:#7A3F91;">Login credentials will be sent here</p>
+                            </div>
+                        </div>
+                        <div class="mt-3 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                            <i class="fas fa-circle-info text-amber-500 text-xs mt-0.5 shrink-0"></i>
+                            <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
+                                A secure password will be <strong>auto-generated</strong> and sent to this email.
+                                The director logs in using their <strong>Teacher ID</strong>.
+                            </p>
+                        </div>
                     </div>
                 </div>
 
                 <div class="flex gap-2 pt-1">
-                    <button type="button" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,createDirector"
+                    <button type="button" @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,createDirector"
                             class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
                             style="color:#000000;border-color:#E8E0F0;">
-                        <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                         <span>Cancel</span>
                     </button>
                     <button wire:click="createDirector" wire:loading.attr="disabled" wire:target="createDirector"
-                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2"
+                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2 mu-smooth-btn"
                             style="background:#7A3F91;">
-                        <span wire:loading wire:target="createDirector"><i class="fas fa-spinner animate-spin text-xs"></i> Creating…</span>
-                        <span wire:loading.remove wire:target="createDirector"><i class="fas fa-user-tie text-xs"></i> Create Director</span>
+                        <span wire:loading.remove wire:target="createDirector" class="flex items-center gap-2">
+                            <i class="fas fa-user-tie text-xs"></i> Create Director
+                        </span>
+                        <span wire:loading wire:target="createDirector" class="flex items-center gap-2">
+                            <i class="fas fa-spinner animate-spin text-xs"></i> Creating…
+                        </span>
                     </button>
                 </div>
             </div>
@@ -1853,7 +2073,10 @@ select.mu-filter-input.mu-active {
 @if($activeModal === 'toggleConfirm' && $tId)
 <div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm"
      style="z-index:9996;"
-     @keydown.escape.window="$wire.closeModal()">
+     x-data="{ muClosing: false }"
+     x-show="!muClosing"
+     x-init="muClosing = false"
+     @keydown.escape.window="muClosing = true; $wire.closeModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-[#E8E0F0]"
          x-transition:enter="transition ease-out duration-150"
          x-transition:enter-start="opacity-0 scale-95"
@@ -1879,10 +2102,9 @@ select.mu-filter-input.mu-active {
                 @endif
             </p>
             <div class="flex gap-2">
-                <button wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,executeToggle"
+                <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,executeToggle"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
                         style="color:#000000;border-color:#E8E0F0;">
-                    <span wire:loading wire:target="closeModal"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                     <span>Cancel</span>
                 </button>
                 <button wire:click="executeToggle" wire:loading.attr="disabled" wire:target="executeToggle"

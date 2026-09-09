@@ -510,34 +510,53 @@ new class extends Component {
             'total'      => $batchRows->pluck('total')->values(),
         ]);
 
-        $colleges    = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values();
-        $collegeData = $colleges->map(function ($col) {
-            $codes = DB::table('courses')->where('college', $col)->pluck('code');
-            // When a Program filter is active, a college only contributes
-            // rows for the selected program(s) — intersecting the
-            // college's codes with the filtered set still narrows
-            // correctly since course_code is unique per program.
-            if (!empty($this->filterCourses)) {
-                $codes = $codes->intersect($this->filterCourses)->values();
-                if ($codes->isEmpty()) {
-                    return ['col' => $col, 'total' => 0, 'employed' => 0, 'self_emp' => 0, 'unemployed' => 0];
-                }
-            }
+        // Employment by College — one grouped query instead of a
+        // per-college loop. The old version ran ~6 queries for every
+        // college in the system (a courses lookup + a count + 4
+        // alumni/employment_trackings queries each), so a school with
+        // many colleges meant dozens of round-trips just for this one
+        // chart — the main reason page/report generation felt slow.
+        // This does it in a single pass: join alumni -> courses to get
+        // each row's college directly, apply the exact same batch-range
+        // and program filters as baseQ() (via the same applyBatchRange()
+        // helper and an equivalent course-code scoping), then let one
+        // GROUP BY + conditional SUMs produce every college's totals at
+        // once — identical numbers, same filter semantics, one query.
+        $collegeQ = DB::table('alumni as a')
+            ->join('courses as c', 'a.course_code', '=', 'c.code')
+            ->leftJoin('employment_trackings as et', function ($j) {
+                $j->on('a.id', '=', 'et.alumni_id')->whereNull('et.deleted_at');
+            })
+            ->whereNull('a.deleted_at')
+            ->whereNotNull('c.college');
+        $this->applyBatchRange($collegeQ, 'a.batch');
+        if (!empty($this->filterCourses)) $collegeQ->whereIn('a.course_code', $this->filterCourses);
 
-            $base = DB::table('alumni as a')->whereNull('a.deleted_at')->whereIn('a.course_code', $codes);
-            $this->applyBatchRange($base, 'a.batch');
-            $total = (clone $base)->count();
+        $collegeRows = $collegeQ
+            ->select(
+                'c.college',
+                DB::raw("SUM(CASE WHEN et.employment_status='employed'      THEN 1 ELSE 0 END) as employed"),
+                DB::raw("SUM(CASE WHEN et.employment_status='self_employed' THEN 1 ELSE 0 END) as self_emp"),
+                DB::raw("SUM(CASE WHEN et.employment_status='unemployed'    THEN 1 ELSE 0 END) as unemployed"),
+                DB::raw('COUNT(DISTINCT a.id) as total')
+            )
+            ->groupBy('c.college')->orderBy('c.college')->get();
 
-            $emp = DB::table('alumni as a')
-                ->join('employment_trackings as et', 'a.id', '=', 'et.alumni_id')
-                ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                ->whereIn('a.course_code', $codes);
-            $this->applyBatchRange($emp, 'a.batch');
-
-            $employed   = (clone $emp)->where('et.employment_status', 'employed')->count();
-            $self_emp   = (clone $emp)->where('et.employment_status', 'self_employed')->count();
-            $unemployed = (clone $emp)->where('et.employment_status', 'unemployed')->count();
-            return compact('col', 'total', 'employed', 'self_emp', 'unemployed');
+        // Colleges with zero matching alumni under the current filters
+        // won't appear in $collegeRows at all (the join/group produces
+        // no row for them) — fill those back in as zeroes so the chart
+        // still lists every college, same as the old loop always did.
+        $allColleges = DB::table('courses')->distinct()->orderBy('college')->pluck('college')->filter()->values();
+        $collegeRows = $collegeRows->keyBy('college');
+        $collegeData = $allColleges->map(function ($col) use ($collegeRows) {
+            $row = $collegeRows->get($col);
+            return [
+                'col'        => $col,
+                'total'      => (int) ($row->total ?? 0),
+                'employed'   => (int) ($row->employed ?? 0),
+                'self_emp'   => (int) ($row->self_emp ?? 0),
+                'unemployed' => (int) ($row->unemployed ?? 0),
+            ];
         });
 
         $this->chartCollegeData = json_encode([
@@ -845,7 +864,7 @@ new class extends Component {
             </div>
             <div>
                 <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Employment Analytics</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#555555]">
+                <p class="text-xs leading-relaxed mt-0.5 font-medium" style="color:#7a3f91;">
                     System-wide employment intelligence
                 </p>
             </div>
@@ -1046,20 +1065,19 @@ new class extends Component {
                 if (el) el.style.display = 'flex';
             };
 
-            // ── Reset-on-refresh: the server already used
-            // batch_from/batch_to/course from the URL to render THIS
-            // page (that's how picking a filter works — a real
-            // navigation so the server sees it). Immediately after
-            // that render, replace the URL with the bare route so it
-            // never carries filter params going forward. This means a
-            // plain refresh (F5) always hits the clean URL and comes
-            // back showing All Batches / All Programs, while the
-            // filter controls above still work exactly the same (each
-            // pick still does its own full navigation with params,
-            // which is what actually applies the filter). replaceState
-            // only swaps the address bar — it does not reload or
-            // re-render, so nothing about the just-rendered filtered
-            // view changes.
+            // ── Clean-URL-on-load: the server already used
+            // batch_from/batch_to/course from the query string to render
+            // THIS page (that's how the filter actually applies — a real
+            // navigation so the server sees it). Immediately after that,
+            // replace the URL with the bare route so the address bar
+            // always shows the clean path (e.g. /employment/tracking
+            // instead of /employment/tracking?batch_from=2025&batch_to=2020),
+            // regardless of which filters are active. replaceState only
+            // swaps the address bar — it does not reload or re-render, so
+            // nothing about the just-rendered filtered view changes. Note:
+            // a plain refresh (F5) after this point lands back on the
+            // unfiltered view, since the query string is gone from the
+            // bar by then — that's expected with this behavior.
             if (window.location.search) {
                 window.history.replaceState(null, '', window.location.pathname);
             }
@@ -1227,6 +1245,19 @@ new class extends Component {
                 open: false,
                 selected: @js($filterCourses),
                 allCodes: @js(collect($courses)->pluck('code')->values()),
+                // Snapshot of what's actually applied server-side right
+                // now (i.e. what's in the URL / hidden input) — compared
+                // against `selected` (the in-progress checkbox state) so
+                // Clear/Apply only light up once there's a real pending
+                // change to act on, instead of always being clickable.
+                appliedSelection: @js($filterCourses),
+                hasChanges() {
+                    if (this.selected.length !== this.appliedSelection.length) return true;
+                    var a = this.selected.slice().sort();
+                    var b = this.appliedSelection.slice().sort();
+                    for (var i = 0; i < a.length; i++) { if (a[i] !== b[i]) return true; }
+                    return false;
+                },
                 toggle(code) {
                     var i = this.selected.indexOf(code);
                     if (i === -1) this.selected.push(code); else this.selected.splice(i, 1);
@@ -1238,11 +1269,13 @@ new class extends Component {
                     return this.allCodes.length > 0 && this.selected.length === this.allCodes.length;
                 },
                 apply() {
+                    if (!this.hasChanges()) return;
                     this.$refs.courseInput.value = this.selected.join(',');
                     this.open = false;
                     window.__admEmpCleanSubmit(this.$el.closest('form'));
                 },
                 clearAll() {
+                    if (this.selected.length === 0) return;
                     this.selected = [];
                 },
                 label() {
@@ -1286,11 +1319,13 @@ new class extends Component {
 
                 <div class="flex items-center gap-2 px-3 py-2 border-t border-[#F0EAF5]">
                     <button type="button" @click="clearAll()"
-                            class="text-[0.78rem] font-semibold text-[#666666] hover:text-[#333333]">
+                            :disabled="selected.length === 0"
+                            class="text-[0.78rem] font-semibold text-[#666666] hover:text-[#333333] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[#666666]">
                         Clear
                     </button>
                     <button type="button" @click="apply()"
-                            class="ml-auto text-[0.78rem] font-bold text-[#7a3f91] hover:text-[#5f3172]">
+                            :disabled="!hasChanges()"
+                            class="ml-auto text-[0.78rem] font-bold text-[#7a3f91] hover:text-[#5f3172] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-[#7a3f91]">
                         Apply
                     </button>
                 </div>
@@ -1299,12 +1334,16 @@ new class extends Component {
 
         {{-- Reset — a plain link back to the bare route (no query string
              at all), which is itself a full page navigation, so it
-             always lands with both filters genuinely empty. ── --}}
+             always lands with both filters genuinely empty. Pinned to
+             the far right of the filter bar with ml-auto (the bar is
+             flex flex-wrap, so this pushes it past every filter control
+             regardless of how many are added before it) and given the
+             purple brand treatment instead of the plain gray it had. ── --}}
         <a href="{{ route('employment.tracking') }}"
            onclick="window.__admEmpShowFilterLoading()"
-           class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                  bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer no-underline"
-           style="color:#333333;">
+           class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                  bg-white border transition active:scale-95 cursor-pointer no-underline hover:bg-[#faf7fc]"
+           style="color:#7a3f91; border-color:#E0D3EC;">
             <i class="fas fa-rotate-left text-sm"></i>
             <span class="hidden sm:inline">Reset</span>
         </a>
@@ -1671,15 +1710,33 @@ new class extends Component {
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 flex-shrink-0">
 
         @php
-            $allColleges = collect($colleges)->map(function($col) {
-                $codes    = DB::table('courses')->where('college',$col)->pluck('code');
-                $total    = DB::table('alumni')->whereNull('deleted_at')->whereIn('course_code',$codes)->count();
-                $employed = DB::table('alumni as a')
-                    ->join('employment_trackings as et','a.id','=','et.alumni_id')
-                    ->whereNull('a.deleted_at')->whereNull('et.deleted_at')
-                    ->whereIn('a.course_code',$codes)
-                    ->whereIn('et.employment_status',['employed','self_employed'])->count();
-                return ['name'=>$col,'total'=>$total,'employed'=>$employed,'rate'=>$total>0?round($employed/$total*100):0];
+            // Same N+1 problem as the "Employment by College" chart had:
+            // this ran 2 fresh queries for every college in the system
+            // (a courses lookup + a total count + an employed count) on
+            // every single page render, unconditionally — a big chunk of
+            // why the page felt slow overall, separate from the filter
+            // apply itself. Single grouped query instead: join alumni ->
+            // courses to get each row's college directly, one GROUP BY
+            // with a conditional SUM for "employed or self-employed".
+            $collegeRateRows = DB::table('alumni as a')
+                ->join('courses as c', 'a.course_code', '=', 'c.code')
+                ->leftJoin('employment_trackings as et', function ($j) {
+                    $j->on('a.id', '=', 'et.alumni_id')->whereNull('et.deleted_at');
+                })
+                ->whereNull('a.deleted_at')
+                ->whereNotNull('c.college')
+                ->select(
+                    'c.college',
+                    DB::raw('COUNT(DISTINCT a.id) as total'),
+                    DB::raw("SUM(CASE WHEN et.employment_status IN ('employed','self_employed') THEN 1 ELSE 0 END) as employed")
+                )
+                ->groupBy('c.college')->get()->keyBy('college');
+
+            $allColleges = collect($colleges)->map(function ($col) use ($collegeRateRows) {
+                $row      = $collegeRateRows->get($col);
+                $total    = (int) ($row->total ?? 0);
+                $employed = (int) ($row->employed ?? 0);
+                return ['name' => $col, 'total' => $total, 'employed' => $employed, 'rate' => $total > 0 ? round($employed / $total * 100) : 0];
             })->sortByDesc('rate')->values();
 
             $topCourses = DB::table('alumni as a')
