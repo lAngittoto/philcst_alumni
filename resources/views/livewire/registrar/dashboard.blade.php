@@ -433,6 +433,88 @@ new class extends Component {
         @media (max-width: 1023px) {
             .ar-tip { display: none !important; }
         }
+
+        /* ── Dashboard card click spinner ───────────────────────────
+           Purple "..." dot loader — one consistent loading interface
+           across the app. Card content blurs + dims underneath
+           instead of being fully covered, so it still reads as
+           "this card is busy" not an empty gap. Uses plain CSS dots
+           instead of an icon font glyph so the color is never at
+           the mercy of icon-font fallback rendering. */
+        .dash-card-clickable { position: relative; }
+        .dash-card-clickable.is-loading > *:not(.dash-card-spinner) {
+            filter: blur(4px);
+            opacity: 0.5;
+            pointer-events: none;
+            user-select: none;
+        }
+        .dash-card-spinner {
+            position: absolute;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            z-index: 40;
+        }
+        .dash-card-spinner span {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #7A3F91;
+            animation: dashDotPulse 1.1s ease-in-out infinite;
+        }
+        .dash-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+        .dash-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+        .dash-card-spinner--sm span {
+            width: 5px;
+            height: 5px;
+        }
+        @keyframes dashDotPulse {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+        .dash-card-clickable.is-loading .dash-card-spinner {
+            display: flex;
+        }
+        .dash-card-clickable.is-loading {
+            pointer-events: none;
+        }
+
+        /* ── Chart card loading overlay ──────────────────────────────
+           Same dot-loader language again, and the same blur-the-
+           content treatment as the stat cards above, used inside the
+           Employment Overview (pie) and Alumni by Batch (bar) chart
+           panels while their underlying data request is in flight. */
+        .dash-chart-loading-wrap { position: relative; }
+        .dash-chart-loading-wrap.is-loading > *:not(.dash-chart-loading-overlay) {
+            filter: blur(4px);
+            opacity: 0.5;
+            pointer-events: none;
+            user-select: none;
+        }
+        .dash-chart-loading-overlay {
+            position: absolute;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            z-index: 30;
+            border-radius: inherit;
+        }
+        .dash-chart-loading-wrap.is-loading .dash-chart-loading-overlay {
+            display: flex;
+        }
+        .dash-chart-loading-overlay span {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #7A3F91;
+            animation: dashDotPulse 1.1s ease-in-out infinite;
+        }
+        .dash-chart-loading-overlay span:nth-child(2) { animation-delay: 0.15s; }
+        .dash-chart-loading-overlay span:nth-child(3) { animation-delay: 0.3s; }
     </style>
 
     <div id="__dash_batch_data" class="hidden"
@@ -463,8 +545,9 @@ new class extends Component {
 
             {{-- Total Alumni --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=all"
-               class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] block no-underline">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -492,8 +575,9 @@ new class extends Component {
 
             {{-- Profile Complete --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=complete"
-               class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200 active:scale-[.985] block no-underline">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -520,8 +604,9 @@ new class extends Component {
 
             {{-- Profile Pending --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=incomplete"
-               class="relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] block no-underline">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -548,8 +633,10 @@ new class extends Component {
 
             {{-- Total Programs --}}
             <div wire:click="openAlumniModal('courses')"
-                 class="relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+                 wire:loading.class="is-loading" wire:target="openAlumniModal('courses')"
+                 class="dash-card-clickable relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                         hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985]">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
                              bg-[#1a1a1a] text-white text-[10px] font-bold tracking-wide
                              px-[11px] py-[5px] rounded-[7px] whitespace-nowrap pointer-events-none
@@ -613,9 +700,12 @@ new class extends Component {
                     </div>
 
                     {{-- PIE CHART CANVAS --}}
-                    <div class="relative flex items-center justify-center" wire:ignore
+                    <div id="dashEmpPieChartWrap" class="dash-chart-loading-wrap relative flex items-center justify-center" wire:ignore
                          style="width:100%; height:200px;">
                         <canvas id="dashEmpPieChart" style="max-width:100%; max-height:100%;"></canvas>
+                        <div class="dash-chart-loading-overlay">
+                            <span></span><span></span><span></span>
+                        </div>
                     </div>
 
                     {{-- Legend — click a row to jump straight to Alumni Records filtered by that status --}}
@@ -630,7 +720,8 @@ new class extends Component {
                         @endphp
                         @foreach($legendRows as $leg)
                         <a href="{{ route('registrar.alumni') }}?employment_status={{ $leg['status'] }}"
-                           class="flex items-center gap-2 px-2 py-1.5 rounded-lg no-underline hover:bg-[#F5F5F5] transition-colors duration-100">
+                           class="dash-card-clickable flex items-center gap-2 px-2 py-1.5 rounded-lg no-underline hover:bg-[#F5F5F5] transition-colors duration-100">
+                            <div class="dash-card-spinner dash-card-spinner--sm"><span></span><span></span><span></span></div>
                             <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $leg['color'] }};"></span>
                             <span class="text-[11px] font-semibold text-[#111111] truncate">{{ $leg['label'] }}</span>
                             <span class="text-[11px] font-bold ml-auto shrink-0" style="color:{{ $leg['color'] }};">{{ number_format($leg['count']) }}</span>
@@ -670,8 +761,11 @@ new class extends Component {
                         </button>
                     </div>
                 </div>
-                <div class="p-[10px] flex-1 min-h-[200px] max-h-[400px]" wire:ignore>
+                <div id="dashChartBatchWrap" class="dash-chart-loading-wrap relative p-[10px] flex-1 min-h-[200px] max-h-[400px]" wire:ignore>
                     <canvas id="dashChartBatch" style="width:100%;height:100%;"></canvas>
+                    <div class="dash-chart-loading-overlay">
+                        <span></span><span></span><span></span>
+                    </div>
                 </div>
             </div>
             @endif
@@ -1424,6 +1518,35 @@ new class extends Component {
 (function () {
     'use strict';
 
+    // ─── CARD CLICK SPINNER (plain <a> nav cards) ──────────────────────────────
+    // Shows a spinner inside the clicked stat/legend card the instant it's
+    // tapped, and clears it once the new page has loaded via Livewire's
+    // page navigation. Falls back to a plain 'pagehide' clear too, in case
+    // this app isn't using wire:navigate for these particular links.
+    function initDashCardSpinners() {
+        document.querySelectorAll('a.dash-card-clickable[href]').forEach(function (card) {
+            if (card.__dashSpinnerBound) return;
+            card.__dashSpinnerBound = true;
+            card.addEventListener('click', function () {
+                // Clear any other card that might still be mid-navigation.
+                document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
+                    if (el !== card) el.classList.remove('is-loading');
+                });
+                card.classList.add('is-loading');
+            });
+        });
+    }
+
+    function clearAllDashCardSpinners() {
+        document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
+            el.classList.remove('is-loading');
+        });
+    }
+
+    // Safety net: if navigation fails or the page is restored from bfcache,
+    // don't leave a card stuck spinning forever.
+    window.addEventListener('pageshow', clearAllDashCardSpinners);
+
     // ─── BATCH BAR CHART ─────────────────────────────────────────────────────
 
     var BAR_COLORS = [
@@ -1557,6 +1680,7 @@ new class extends Component {
                         if (batch === undefined || batch === null) return;
                         var baseRoute = getAlumniRoute();
                         if (!baseRoute) return;
+                        showChartLoading('bar');
                         window.location.href = baseRoute + '?profile_filter=all&batch=' + parseInt(batch);
                     }
                 },
@@ -1748,6 +1872,7 @@ new class extends Component {
                     var filter    = PIE_FILTERS[idx];
                     var baseRoute = getAlumniRoute();
                     if (!baseRoute) return;
+                    showChartLoading('pie');
                     window.location.href = baseRoute + '?employment_status=' + encodeURIComponent(filter);
                 },
                 onHover: function (event, elements) {
@@ -1761,6 +1886,18 @@ new class extends Component {
 
     // ─── INIT & LIVEWIRE HOOKS ───────────────────────────────────────────────
 
+    // Bind card spinners right away — doesn't need Chart.js and shouldn't
+    // wait on it, otherwise clicks right after page load could feel unresponsive.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDashCardSpinners);
+    } else {
+        initDashCardSpinners();
+    }
+    document.addEventListener('livewire:navigated', function () {
+        clearAllDashCardSpinners();
+        initDashCardSpinners();
+    });
+
     function loadChartJs(cb) {
         if (window.Chart) { cb(); return; }
         var s    = document.createElement('script');
@@ -1769,11 +1906,59 @@ new class extends Component {
         document.head.appendChild(s);
     }
 
+    // Defined outside the Chart.js gate so charts show their loading
+    // dots immediately on page load — even while Chart.js itself is
+    // still downloading — instead of only once Chart.js is ready.
+    // `which` scopes it to just one chart ('pie' or 'bar'); omit it
+    // (or pass nothing) to affect both, used for whole-page refreshes.
+    function showChartLoading(which) {
+        var pie = document.getElementById('dashEmpPieChartWrap');
+        var bar = document.getElementById('dashChartBatchWrap');
+        if ((!which || which === 'pie') && pie) {
+            pie.classList.add('is-loading');
+            dashPieLoadingShownAt = Date.now();
+        }
+        if ((!which || which === 'bar') && bar) {
+            bar.classList.add('is-loading');
+            dashBarLoadingShownAt = Date.now();
+        }
+    }
+
+    // Guarantees the dots stay visible for at least this long once shown,
+    // so a fast/cached render doesn't just flash them for one frame.
+    var DASH_CHART_MIN_LOADING_MS = 400;
+    var dashPieLoadingShownAt     = 0;
+    var dashBarLoadingShownAt     = 0;
+
+    function hideChartLoading(which) {
+        if (!which || which === 'pie') {
+            var pieWait = Math.max(0, DASH_CHART_MIN_LOADING_MS - (Date.now() - dashPieLoadingShownAt));
+            setTimeout(function () {
+                var pie = document.getElementById('dashEmpPieChartWrap');
+                if (pie) pie.classList.remove('is-loading');
+            }, pieWait);
+        }
+        if (!which || which === 'bar') {
+            var barWait = Math.max(0, DASH_CHART_MIN_LOADING_MS - (Date.now() - dashBarLoadingShownAt));
+            setTimeout(function () {
+                var bar = document.getElementById('dashChartBatchWrap');
+                if (bar) bar.classList.remove('is-loading');
+            }, barWait);
+        }
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', showChartLoading);
+    } else {
+        showChartLoading();
+    }
+
     loadChartJs(function () {
         function initAll() {
             requestAnimationFrame(function () {
                 initDashCharts();
                 buildEmpPieChart();
+                hideChartLoading();
             });
         }
 
@@ -1786,18 +1971,21 @@ new class extends Component {
         document.addEventListener('livewire:navigated', function () {
             dashBatchAll   = null;
             dashBatchIndex = 0;
+            showChartLoading();
             initAll();
         });
 
         function hookLivewire() {
             if (!window.Livewire) return;
             Livewire.hook('commit', function (payload) {
+                showChartLoading();
                 var succeed = payload.succeed || function (cb) { cb({}); };
                 if (typeof succeed === 'function') {
                     succeed(function () {
                         requestAnimationFrame(function () {
                             initDashCharts();
                             buildEmpPieChart();
+                            hideChartLoading();
                         });
                     });
                 }
