@@ -6,6 +6,7 @@ use Livewire\Volt\Component;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -74,6 +75,38 @@ new class extends Component {
             $this->activeRole = $tab;
         }
         session()->forget('admin_users_status');
+
+        // ── Auto-open View Details when arriving from an "Email Updated"
+        // notification (sidebar notif panel routes here with
+        // ?highlight_user={id}) — same "click a notif -> land with the
+        // record already open" pattern as Job Postings' highlight_job
+        // and Events' highlight_event handling. Only opens if the user
+        // still exists; a deleted account's notif link just lands on
+        // the plain table instead of erroring.
+        $highlightUserId = request()->query('highlight_user');
+        if ($highlightUserId && DB::table('users')->where('id', $highlightUserId)->exists()) {
+            $this->showProfile((int) $highlightUserId);
+
+            // Strip ?highlight_user=... from the address bar once the
+            // modal is open — same reasoning as the job/event cases:
+            // the query param has done its job, and leaving it there
+            // means a manual refresh or reshare of the URL keeps
+            // popping the same modal back open, plus it's just noise
+            // in the URL bar. history.replaceState swaps it out in
+            // place with no reload and no extra navigation entry.
+            $this->js(<<<'JS'
+                window.history.replaceState({}, '', window.location.pathname);
+            JS);
+        }
+    }
+
+    // Same-page notif click: the sidebar dispatches this directly (instead
+    // of a full navigate) when the admin is already on User Management, so
+    // the View Details modal opens immediately with no page flash.
+    #[On('open-view-user')]
+    public function openViewUserFromNotif(int $id): void
+    {
+        $this->showProfile($id);
     }
 
     private function perPage(): int
@@ -760,7 +793,9 @@ new class extends Component {
 
 <div class="flex flex-col mu-page-root" style="height:90vh; overflow:hidden;">
 
-<div id="mu-hover-tip" class="mu-row-tip">View Details</div>
+<div id="mu-hover-tip" class="mu-row-tip">
+    <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Details
+</div>
 
 <style>
 .mu-filter-input {
@@ -956,19 +991,40 @@ select.mu-filter-input.mu-active {
 }
 .mu-close-tooltip:hover::after, .mu-close-tooltip:hover::before { opacity: 1; }
 
-/* Row "View Details" tooltip — same black-bg/white-text pattern as
-   mu-close-tooltip above, just anchored to a table row instead of a
-   button, and shown near the cursor via the mousemove-tracked
-   left/top offsets set in the script at the bottom of this file. */
+/* Row "View Details" hover tooltip — black bg / white text, follows
+   the cursor, desktop only (see JS + media query below). Same pattern
+   as the Alumni Records page's #ar-hover-tip. Shown for every role
+   (Alumni, Director, Coordinator, Registrar) since they all share
+   this same .mu-tbl-row markup. */
 .mu-row-tip {
-    position: fixed; z-index: 99999;
-    background: #1a1a1a; color: #fff;
-    font-size: 11px; font-weight: 600; letter-spacing: .03em;
-    padding: 5px 10px; border-radius: 6px; white-space: nowrap;
-    pointer-events: none; opacity: 0; transition: opacity .1s ease;
-    transform: translate(14px, 18px);
+    position: fixed;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    padding: 5px 11px;
+    border-radius: 7px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s ease;
+    z-index: 500;
+    box-shadow: 0 4px 14px rgba(0,0,0,.30);
+    transform: translate(12px, -110%);
 }
 .mu-row-tip.visible { opacity: 1; }
+.mu-row-tip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 14px;
+    border: 5px solid transparent;
+    border-top-color: #1a1a1a;
+}
+@media (max-width: 768px), (hover: none) {
+    .mu-row-tip { display: none !important; }
+}
 
 /* ── Profile modal body: scroll still works (wheel/swipe/keys), scrollbar
      track just isn't drawn, so the full-screen view reads as scroll-free ── */
@@ -1127,6 +1183,16 @@ select.mu-filter-input.mu-active {
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">Filters</div>
 
+            <div class="relative flex-1 min-w-[160px] max-w-xs"
+                 wire:ignore
+                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#000000;z-index:1;"></i>
+                <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
+                       placeholder="Search name or email…"
+                       class="mu-filter-input w-full" style="padding-left:2.25rem;padding-right:1rem;"
+                       autocomplete="off" maxlength="100" spellcheck="false">
+            </div>
+
             <div class="flex gap-1 bg-gray-100 p-0.5 rounded-xl flex-shrink-0">
                 @foreach([
                     ['director','Directors','fa-user-tie'],
@@ -1150,16 +1216,35 @@ select.mu-filter-input.mu-active {
                         };
                     @endphp
                     <div class="mu-tab-pill {{ $activeRole==='alumni' ? 'mu-tab-active' : 'mu-tab-inactive' }} pr-6">
-                        <i class="fas fa-graduation-cap text-xs"></i>
-                        <span class="hidden sm:inline">Alumni</span>
-                        <span class="inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-bold border"
-                              style="background:{{ $aBadge[2] }};color:{{ $aBadge[1] }};border-color:{{ $aBadge[1] }};">{{ $aBadge[0] }}</span>
+                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-bold border"
+                              style="background:{{ $aBadge[2] }};color:{{ $aBadge[1] }};border-color:{{ $aBadge[1] }};">
+                            <i class="fas fa-graduation-cap"></i>{{ $aBadge[0] }}
+                        </span>
                         <i class="fas fa-chevron-down text-xs" style="opacity:.7;"></i>
                     </div>
                     <select wire:key="alumni-status-select-{{ $activeRole }}-{{ $statusFilter }}"
                             wire:change="setStatusFilter($event.target.value)"
                             class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
-                        <option value="all"            {{ $activeRole==='alumni' ? ($statusFilter==='all'            ? 'selected' : '') : 'selected' }}>All Alumni</option>
+                        {{-- When we're on another role tab, the browser still
+                             needs SOME option to treat as "currently shown"
+                             even with none marked selected — and it silently
+                             falls back to the first <option> in the list,
+                             which was "All Alumni" (value="all"). So picking
+                             "All Alumni" again from Director/Coordinator/
+                             Registrar looked like no change to the browser
+                             (still "all" before and after) and wire:change
+                             never fired — the tab never switched back.
+                             This hidden, disabled placeholder is what the
+                             browser falls back to instead whenever we're off
+                             the Alumni tab, so it's never the same option as
+                             "All Alumni" — picking "All Alumni" is always a
+                             real change and always fires. It's disabled so
+                             it can never be picked on purpose, and it isn't
+                             rendered at all while already on Alumni. --}}
+                        @unless($activeRole === 'alumni')
+                        <option value="" selected disabled hidden></option>
+                        @endunless
+                        <option value="all"            {{ $activeRole==='alumni' && $statusFilter==='all'            ? 'selected' : '' }}>All Alumni</option>
                         <option value="complete"       {{ $activeRole==='alumni' && $statusFilter==='complete'       ? 'selected' : '' }}>Complete</option>
                         <option value="pending"        {{ $activeRole==='alumni' && $statusFilter==='pending'        ? 'selected' : '' }}>Pending</option>
                         <option value="new_this_month" {{ $activeRole==='alumni' && $statusFilter==='new_this_month' ? 'selected' : '' }}>Newly Registered</option>
@@ -1176,22 +1261,12 @@ select.mu-filter-input.mu-active {
                 @endforeach
             </div>
 
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#000000;z-index:1;"></i>
-                <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
-                       placeholder="Search name or email…"
-                       class="mu-filter-input w-full" style="padding-left:2.25rem;padding-right:1rem;"
-                       autocomplete="off" maxlength="100" spellcheck="false">
-            </div>
-
             <button wire:click="switchTab('all')"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="switchTab('all')"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer disabled:pointer-events-none"
+                           bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer disabled:pointer-events-none ml-auto"
                     style="color:#000000;">
                 <span wire:loading.remove wire:target="switchTab('all')">
                     <i class="fas fa-rotate-left text-sm"></i>
@@ -1349,6 +1424,7 @@ select.mu-filter-input.mu-active {
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        title="Previous Page"
                         @if(!$pu->hasPrev) disabled @endif>
                     <i class="fas fa-chevron-left text-xs"></i>
                 </button>
@@ -1357,7 +1433,8 @@ select.mu-filter-input.mu-active {
                     <button wire:click="goToPage(1)"
                             wire:loading.attr="disabled" wire:target="goToPage(1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50">
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50"
+                            title="Go to Page 1">
                         <span wire:loading wire:target="goToPage(1)"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                         <span wire:loading.remove wire:target="goToPage(1)">1</span>
                     </button>
@@ -1372,7 +1449,8 @@ select.mu-filter-input.mu-active {
                         <button wire:click="goToPage({{ $p }})"
                                 wire:loading.attr="disabled" wire:target="goToPage({{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50">
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50"
+                                title="Go to Page {{ $p }}">
                             <span wire:loading wire:target="goToPage({{ $p }})"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                             <span wire:loading.remove wire:target="goToPage({{ $p }})">{{ $p }}</span>
                         </button>
@@ -1384,7 +1462,8 @@ select.mu-filter-input.mu-active {
                     <button wire:click="goToPage({{ $pu->lastPage }})"
                             wire:loading.attr="disabled" wire:target="goToPage({{ $pu->lastPage }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50">
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition disabled:opacity-50"
+                            title="Go to Page {{ $pu->lastPage }}">
                         <span wire:loading wire:target="goToPage({{ $pu->lastPage }})"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                         <span wire:loading.remove wire:target="goToPage({{ $pu->lastPage }})">{{ $pu->lastPage }}</span>
                     </button>
@@ -1395,6 +1474,7 @@ select.mu-filter-input.mu-active {
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        title="Next Page"
                         @if(!$pu->hasNext) disabled @endif>
                     <i class="fas fa-chevron-right text-xs"></i>
                 </button>
@@ -1450,7 +1530,7 @@ select.mu-filter-input.mu-active {
      x-data="{ muClosing: false }"
      x-show="!muClosing"
      x-init="muClosing = false"
-     @keydown.escape.window="muClosing = true; $wire.closeModal()">
+     @keydown.escape.window="$wire.closeModal(); setTimeout(() => muClosing = true, 220)">
     <div class="w-full h-full flex flex-col" style="background:#F2F2F2;overflow:hidden;">
 
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1467,9 +1547,10 @@ select.mu-filter-input.mu-active {
                     <p class="text-xs text-white/70 mt-0.5 truncate">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
                 </div>
             </div>
-            <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal"
                     class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
-                <i class="fa-solid fa-xmark text-base"></i>
+                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-base"></i>
+                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-base"></i>
             </button>
         </div>
 
@@ -1896,31 +1977,49 @@ select.mu-filter-input.mu-active {
      CREATE DIRECTOR MODAL
      ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'createDirector')
-<div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm overflow-y-auto"
-     style="z-index:9995;"
-     x-data="{ muClosing: false }"
+<div class="fixed inset-0"
+     style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
+     x-data="{ muClosing: false, dPhotoFull: false }"
      x-show="!muClosing"
      x-init="muClosing = false"
-     @keydown.escape.window="muClosing = true; $wire.closeModal()">
-    <div class="bg-white rounded-2xl w-full max-w-xl my-4 flex flex-col overflow-hidden shadow-2xl border border-[#E8E0F0]">
+     @keydown.escape.window="dPhotoFull ? (dPhotoFull = false) : ($wire.closeModal(), setTimeout(() => muClosing = true, 220))">
+    <div class="w-full h-full flex flex-col" style="background:#FFFFFF;overflow:hidden;">
 
-        <div class="flex items-center justify-between px-5 py-4 flex-shrink-0" style="background:#7A3F91;">
-            <div class="flex items-center gap-3">
-                <div class="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+        <div class="flex items-center justify-between px-6 sm:px-8 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 ring-2 ring-white/30">
                     <i class="fas fa-user-tie text-white text-base"></i>
                 </div>
-                <div>
-                    <p class="font-semibold text-white text-sm">Create New Director</p>
-                    <p class="text-xs text-white/70 mt-0.5">Fill in the details below</p>
+                <div class="min-w-0">
+                    <p class="font-bold text-lg text-white leading-snug truncate">Create New Director</p>
+                    <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
                 </div>
             </div>
-            <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
-                    class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-base"></i>
+            <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal"
+                    class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
+                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-lg"></i>
+                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-lg"></i>
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 scroll-c" style="scrollbar-width:thin;scrollbar-color:#d9c9e8 #F9F7FC;">
+        {{-- Fullscreen profile photo preview --}}
+        <div x-show="dPhotoFull" x-cloak
+             class="fixed inset-0 flex items-center justify-center bg-black/90"
+             style="z-index:9999;"
+             x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+             x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+             @click="dPhotoFull = false">
+            <button @click.stop="dPhotoFull = false"
+                    class="absolute top-4 right-4 w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center transition text-white">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+            @if($vPhoto)
+            <img src="{{ $vPhoto->temporaryUrl() }}" alt="Profile photo preview"
+                 class="max-w-[92vw] max-h-[88vh] object-contain rounded-lg" @click.stop>
+            @endif
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 mu-vp-scroll max-w-4xl mx-auto w-full" style="scrollbar-width:thin;scrollbar-color:#cccccc #F5F5F5;">
 
             @if($dOk)
             @php $parts = explode('|', $dOk); @endphp
@@ -1929,13 +2028,14 @@ select.mu-filter-input.mu-active {
                     <i class="fas fa-circle-check text-emerald-500 mt-0.5 shrink-0"></i>
                     <div class="space-y-1.5">
                         @foreach($parts as $part)
-                        <p class="text-sm text-emerald-800">{!! $part !!}</p>
+                        <p class="text-base text-emerald-800">{!! $part !!}</p>
                         @endforeach
                     </div>
                 </div>
             </div>
-            <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal"
-                    class="w-full py-3 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
+            <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal"
+                    class="w-full py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
+                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-sm"></i>
                 <span>Done</span>
             </button>
             @endif
@@ -1944,8 +2044,8 @@ select.mu-filter-input.mu-active {
             <div class="mb-5 p-4 rounded-xl bg-red-50 border border-red-200 space-y-1.5">
                 @foreach($dErrs as $msgs)
                     @foreach($msgs as $msg)
-                    <p class="text-sm text-red-700 flex items-start gap-2">
-                        <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span>
+                    <p class="text-base text-red-700 flex items-start gap-2">
+                        <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-sm"></i><span>{{ $msg }}</span>
                     </p>
                     @endforeach
                 @endforeach
@@ -1956,49 +2056,57 @@ select.mu-filter-input.mu-active {
             <div class="space-y-4" wire:loading.class="opacity-60 pointer-events-none" wire:target="createDirector" style="transition: opacity .15s ease;">
 
                 {{-- PERSONAL INFORMATION card --}}
-                <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
-                    <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Personal Information</p>
+                <div class="rounded-xl border overflow-hidden" style="border-color:#E5E5E5;">
+                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Personal Information</p>
                     </div>
-                    <div class="p-4 flex flex-col sm:flex-row gap-4">
-                        <div class="flex flex-col items-center gap-1.5 shrink-0 mx-auto sm:mx-0"
+                    <div class="p-5 flex flex-col sm:flex-row gap-5">
+                        <div class="flex flex-col items-center gap-2 shrink-0 mx-auto sm:mx-0"
                              x-data="{ dragging: false }"
                              @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false"
                              @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
-                            <label for="dPhotoInput"
-                                   :class="dragging ? 'border-[#7A3F91] bg-purple-50' : 'border-[#E8E0F0] bg-[#F9F7FC] hover:border-[#7A3F91]'"
-                                   class="w-28 h-28 rounded-xl border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-1 text-center px-2 overflow-hidden">
+                            <div class="relative w-32 h-32">
+                                <label for="dPhotoInput"
+                                       :class="dragging ? 'border-black bg-black/5' : 'border-[#E5E5E5] bg-[#FAFAFA] hover:border-black'"
+                                       class="w-32 h-32 rounded-xl border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-1 text-center px-2 overflow-hidden">
+                                    @if($vPhoto)
+                                        <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
+                                    @else
+                                        <i class="fas fa-arrow-up-from-bracket text-base" style="color:#8a8a8a;"></i>
+                                        <span class="text-sm font-bold" style="color:#000000;">Profile Photo</span>
+                                        <span class="text-xs font-medium" style="color:#8a8a8a;">JPG, PNG, WebP · 5 MB</span>
+                                    @endif
+                                    <input id="dPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
+                                </label>
                                 @if($vPhoto)
-                                    <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
-                                @else
-                                    <i class="fas fa-arrow-up-from-bracket text-sm" style="color:#8a8a8a;"></i>
-                                    <span class="text-xs font-bold" style="color:#000000;">Profile Photo</span>
-                                    <span class="text-[10px] font-medium" style="color:#8a8a8a;">JPG, PNG, WebP · 5 MB</span>
+                                <button type="button" @click.prevent="dPhotoFull = true"
+                                        class="absolute bottom-1 right-1 w-7 h-7 rounded-lg bg-black/60 hover:bg-black/80 flex items-center justify-center transition text-white">
+                                    <i class="fas fa-expand text-xs"></i>
+                                </button>
                                 @endif
-                                <input id="dPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
-                            </label>
-                            <div wire:loading wire:target="vPhoto" class="flex items-center gap-1.5 text-[11px] font-semibold" style="color:#7A3F91;">
-                                <i class="fas fa-spinner animate-spin text-[10px]"></i> Uploading…
                             </div>
-                            <span class="text-[11px] font-medium" style="color:#7A3F91;">Optional — leave blank for default</span>
+                            <div wire:loading wire:target="vPhoto" class="flex items-center gap-1.5 text-xs font-semibold" style="color:#000000;">
+                                <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                            </div>
+                            <span class="text-xs font-medium" style="color:#6b6b6b;">Optional — leave blank for default</span>
                         </div>
 
-                        <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dFn" type="text" placeholder="e.g. Juan" class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="dFn" type="text" placeholder="e.g. Juan" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
                             </div>
                             <div>
-                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dLn" type="text" placeholder="e.g. dela Cruz" class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="dLn" type="text" placeholder="e.g. dela Cruz" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
                             </div>
                             <div>
-                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
-                                <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos" class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
+                                <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
                             </div>
                             <div>
-                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Suffix</p>
-                                <select wire:model.defer="dSfx" class="mu-filter-input w-full mu-smooth-input">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix</p>
+                                <select wire:model.defer="dSfx" class="mu-filter-input w-full mu-smooth-input text-base">
                                     <option value="">None</option>
                                     <option value="Jr.">Jr.</option>
                                     <option value="Sr.">Sr.</option>
@@ -2012,28 +2120,28 @@ select.mu-filter-input.mu-active {
                 </div>
 
                 {{-- ACCOUNT CREDENTIALS card --}}
-                <div class="rounded-xl border border-[#E8E0F0] overflow-hidden">
-                    <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Account Credentials</p>
+                <div class="rounded-xl border overflow-hidden" style="border-color:#E5E5E5;">
+                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Account Credentials</p>
                     </div>
-                    <div class="p-4">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="p-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Teacher ID <span class="text-red-500">*</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Teacher ID <span class="text-red-500">*</span></p>
                                 <input wire:model.defer="dUsername" type="text" inputmode="numeric" maxlength="8"
-                                       placeholder="e.g. 20240001" class="mu-filter-input w-full mu-smooth-input font-mono" autocomplete="off">
-                                <p class="text-[11px] font-medium mt-1" style="color:#8a8a8a;">Must be exactly 8 digits</p>
+                                       placeholder="e.g. 20240001" class="mu-filter-input w-full mu-smooth-input font-mono text-base" autocomplete="off">
+                                <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Must be exactly 8 digits</p>
                             </div>
                             <div>
-                                <p class="text-xs font-bold mb-1.5" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
                                 <input wire:model.defer="dEmail" type="email" placeholder="director@example.com"
-                                       class="mu-filter-input w-full mu-smooth-input" autocomplete="off">
-                                <p class="text-[11px] font-medium mt-1" style="color:#7A3F91;">Login credentials will be sent here</p>
+                                       class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <p class="text-xs font-medium mt-1.5" style="color:#6b6b6b;">Login credentials will be sent here</p>
                             </div>
                         </div>
-                        <div class="mt-3 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                            <i class="fas fa-circle-info text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                            <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
+                        <div class="mt-4 p-4 rounded-xl flex items-start gap-2.5" style="background:#fffbeb;border:1px solid #fde68a;">
+                            <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                            <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
                                 A secure password will be <strong>auto-generated</strong> and sent to this email.
                                 The director logs in using their <strong>Teacher ID</strong>.
                             </p>
@@ -2041,20 +2149,21 @@ select.mu-filter-input.mu-active {
                     </div>
                 </div>
 
-                <div class="flex gap-2 pt-1">
-                    <button type="button" @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,createDirector"
-                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
-                            style="color:#000000;border-color:#E8E0F0;">
+                <div class="flex gap-3 pt-1">
+                    <button type="button" @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal,createDirector"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition hover:bg-black/5 flex items-center justify-center gap-2"
+                            style="color:#000000;border-color:#E5E5E5;">
+                        <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-sm"></i>
                         <span>Cancel</span>
                     </button>
                     <button wire:click="createDirector" wire:loading.attr="disabled" wire:target="createDirector"
-                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2 mu-smooth-btn"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2 mu-smooth-btn"
                             style="background:#7A3F91;">
                         <span wire:loading.remove wire:target="createDirector" class="flex items-center gap-2">
-                            <i class="fas fa-user-tie text-xs"></i> Create Director
+                            <i class="fas fa-user-tie text-sm"></i> Create Director
                         </span>
                         <span wire:loading wire:target="createDirector" class="flex items-center gap-2">
-                            <i class="fas fa-spinner animate-spin text-xs"></i> Creating…
+                            <i class="fas fa-spinner animate-spin text-sm"></i> Creating…
                         </span>
                     </button>
                 </div>
@@ -2076,7 +2185,7 @@ select.mu-filter-input.mu-active {
      x-data="{ muClosing: false }"
      x-show="!muClosing"
      x-init="muClosing = false"
-     @keydown.escape.window="muClosing = true; $wire.closeModal()">
+     @keydown.escape.window="$wire.closeModal(); setTimeout(() => muClosing = true, 220)">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-[#E8E0F0]"
          x-transition:enter="transition ease-out duration-150"
          x-transition:enter-start="opacity-0 scale-95"
@@ -2102,9 +2211,10 @@ select.mu-filter-input.mu-active {
                 @endif
             </p>
             <div class="flex gap-2">
-                <button @click="muClosing = true" wire:click="closeModal" wire:loading.attr="disabled" wire:target="closeModal,executeToggle"
+                <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal,executeToggle"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
                         style="color:#000000;border-color:#E8E0F0;">
+                    <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
                     <span>Cancel</span>
                 </button>
                 <button wire:click="executeToggle" wire:loading.attr="disabled" wire:target="executeToggle"
@@ -2179,22 +2289,46 @@ select.mu-filter-input.mu-active {
 <script>
 (function () {
     var tip = document.getElementById('mu-hover-tip');
-    function bindRows() {
-        document.querySelectorAll('[data-mu-row]').forEach(function (row) {
-            if (row._muTipBound) return;
-            row._muTipBound = true;
-            row.addEventListener('mousemove', function (e) {
-                if (!tip) return;
-                tip.style.left = e.clientX + 'px';
-                tip.style.top  = e.clientY + 'px';
-                tip.classList.add('visible');
-            });
-            row.addEventListener('mouseleave', function () { if (tip) tip.classList.remove('visible'); });
-            row.addEventListener('click',      function () { if (tip) tip.classList.remove('visible'); });
-        });
+
+    function isHoverCapable() {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+            && window.innerWidth > 768;
     }
-    bindRows();
-    document.addEventListener('livewire:updated', bindRows);
+
+    // ONE delegated 'mousemove' listener on the document, same fix as
+    // the Alumni Records page's #ar-hover-tip: binding listeners
+    // directly on each row means every Livewire morph (tab switch,
+    // filter, search, pagination) either leaves a stale listener on a
+    // removed row or needs a fresh listener rebound on a new one —
+    // fragile either way. A delegated listener re-checks "what's
+    // under the mouse right now" on every movement, so it works
+    // immediately on freshly-morphed rows with no rebinding at all —
+    // this is what made "View Details" not show up when switching to
+    // the Director tab.
+    document.addEventListener('mousemove', function (e) {
+        if (!tip || !isHoverCapable()) return;
+        var row = e.target.closest ? e.target.closest('[data-mu-row]') : null;
+        if (row) {
+            tip.style.left = e.clientX + 'px';
+            tip.style.top  = e.clientY + 'px';
+            tip.classList.add('visible');
+        } else {
+            tip.classList.remove('visible');
+        }
+    }, { passive: true });
+
+    function hideHoverTip() {
+        if (tip) tip.classList.remove('visible');
+    }
+    hideHoverTip();
+    document.addEventListener('livewire:navigating', hideHoverTip);
+    document.addEventListener('livewire:navigated', hideHoverTip);
+    document.addEventListener('livewire:load', hideHoverTip);
+
+    // Hide the instant a row is clicked (opening the profile modal).
+    document.addEventListener('click', function (e) {
+        if (e.target.closest('[data-mu-row]')) hideHoverTip();
+    });
 })();
 </script>
 

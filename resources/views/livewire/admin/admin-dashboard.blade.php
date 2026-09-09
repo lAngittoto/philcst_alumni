@@ -261,7 +261,14 @@ new #[Layout('app')] class extends Component {
 
     private function loadAnnouncements(): void
     {
-        $this->announcements = Cache::remember('dashboard_announcements_feed', 60, function () {
+        // Lowered from 60s to 15s — at 60s, a wire:navigate hit and a
+        // hard refresh a few seconds apart could straddle the cache
+        // boundary and show two DIFFERENT announcement items/slides,
+        // which looked like a rendering bug (image mismatch) but was
+        // actually just two different cached snapshots being served.
+        // 15s keeps DB load low while making that mismatch window much
+        // less likely to be noticed during normal use/testing.
+        $this->announcements = Cache::remember('dashboard_announcements_feed', 15, function () {
             $items = collect();
 
             AdminEvent::withoutTrashed()
@@ -362,6 +369,14 @@ new #[Layout('app')] class extends Component {
 .adm-root {
     display: flex; flex-direction: column; min-height: 100%;
     max-width: 100%; overflow-x: hidden;
+}
+/* Consistent box model everywhere in the dashboard — without this,
+   padding on cards/chart boxes can push their rendered width past
+   the parent's visible edge on some mobile browsers, which is what
+   was clipping the right side of the stat cards and the "1,000"
+   tick label on the Employment bar chart. */
+.adm-root, .adm-root *, .adm-root *::before, .adm-root *::after {
+    box-sizing: border-box;
 }
 
 /* ══════════════════════════════════════════════
@@ -644,6 +659,7 @@ new #[Layout('app')] class extends Component {
 .adm-snap-chart-box {
     width: 100%; height: 150px; position: relative;
     margin-bottom: 12px;
+    overflow: visible; /* never clip Chart.js tick labels (e.g. "1,000") */
 }
 @media (max-width: 480px) {
     .adm-snap-chart-box { height: 140px; margin-bottom: 10px; }
@@ -1267,12 +1283,22 @@ new #[Layout('app')] class extends Component {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: { duration: 500, easing: 'easeInOutQuart' },
-                layout: { padding: { right: 10, left: 2 } },
+                layout: { padding: { right: 18, left: 2 } },
                 scales: {
                     x: {
                         beginAtZero: true,
                         grid: { color: '#F0E8F8' },
-                        ticks: { font: { size: fs.x }, color: '#333333', precision: 0, maxTicksLimit: 5 }
+                        ticks: {
+                            font: { size: fs.x }, color: '#333333', precision: 0, maxTicksLimit: 5,
+                            // Drop the last (rightmost) auto-generated tick label so a
+                            // 4-digit max value ("1,000") never gets its final digit
+                            // shaved off against the canvas edge on narrow phones.
+                            callback: function(value, index, ticks){
+                                var w = window.innerWidth || 1024;
+                                if(w <= 480 && index === ticks.length - 1){ return ''; }
+                                return value.toLocaleString();
+                            }
+                        }
                     },
                     y: {
                         grid: { display: false },
@@ -1575,6 +1601,29 @@ new #[Layout('app')] class extends Component {
         syncDots(activeIndex);
     });
 
+    // Re-snap on viewport resize (window resize, orientation change, or
+    // devtools responsive-mode resize). This is the missing piece that
+    // made the carousel look right after a hard refresh but wrong after
+    // wire:navigate: a hard refresh always fires 'load' at the FINAL
+    // viewport size, so the initial scrollTo math above is correct for
+    // that size. wire:navigate never fires 'load' — it just paints the
+    // swapped-in DOM at whatever size the browser is currently at, which
+    // is fine UNLESS the viewport was resized earlier in the session,
+    // because scrollLeft math (idx * clientWidth) computed by an earlier
+    // init()/goTo() call doesn't automatically re-run just because the
+    // window changed size later. Debounced so continuous drag-resizing
+    // doesn't spam re-snaps.
+    var carouselResizeDebounce = null;
+    window.addEventListener('resize', function(){
+        if (carouselResizeDebounce) clearTimeout(carouselResizeDebounce);
+        carouselResizeDebounce = setTimeout(function(){
+            var t = track();
+            if (!t) return;
+            t.scrollTo({ left: activeIndex * t.clientWidth, behavior: 'auto' });
+            syncDots(activeIndex);
+        }, 120);
+    });
+
     if(document.readyState === 'loading'){
         document.addEventListener('DOMContentLoaded', init);
     } else {
@@ -1589,6 +1638,41 @@ new #[Layout('app')] class extends Component {
         if(resumeTimer) clearTimeout(resumeTimer);
         boundTrack = null; // force rebind to the freshly-swapped-in track element
         requestAnimationFrame(init);
+
+        // The window 'load' event only fires once, on the very first hard
+        // page load — it never fires again on subsequent wire:navigate
+        // swaps. That's exactly why a fresh SPA navigation could show a
+        // slide that hasn't measured itself against the now-loaded slide
+        // image yet (mismatched pre-refresh vs post-refresh sizing), while
+        // an actual browser refresh re-triggers 'load' and looks correct.
+        // Re-run the same late safety re-snap here, once this navigation's
+        // slide images finish loading, so both paths behave identically.
+        var t = track();
+        if (t) {
+            var imgs = t.querySelectorAll('.adm-announce-img');
+            var pending = imgs.length;
+            if (pending === 0) {
+                // No background-image slides on this page — nothing to wait on.
+            } else {
+                var resnap = function(){
+                    pending--;
+                    if (pending > 0) return;
+                    var t2 = track();
+                    if (!t2) return;
+                    t2.scrollTo({ left: activeIndex * t2.clientWidth, behavior: 'auto' });
+                    syncDots(activeIndex);
+                };
+                imgs.forEach(function(el){
+                    var bg = el.style.backgroundImage;
+                    var url = bg && bg.slice(5, -2); // strip url("...")
+                    if (!url) { resnap(); return; }
+                    var probe = new Image();
+                    probe.onload = resnap;
+                    probe.onerror = resnap;
+                    probe.src = url;
+                });
+            }
+        }
     });
 })();
 </script>

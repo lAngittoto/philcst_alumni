@@ -4,6 +4,7 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\On;
 use Livewire\WithPagination;
 use App\Models\AdminEvent;
 use App\Models\AuditLog;
@@ -60,6 +61,37 @@ new class extends Component {
         // and recently approved (APPROVED) events — mirrors the job-posts
         // dispatchJobNotifications() pattern.
         $this->dispatchEventNotifications();
+
+        // ── Auto-apply the status filter when arriving from the admin
+        // dashboard's Events Snapshot mini-tiles (goToEvents() there
+        // stores the target status in session before redirecting here) —
+        // same "click a stat -> land already filtered" pattern as Job
+        // Postings' admin_jobs_filter handling.
+        $eventsFilter = session()->pull('admin_events_filter', '');
+        if ($eventsFilter !== '') {
+            $this->filterStatus = $eventsFilter;
+        }
+
+        // ── Auto-open View Details when arriving from a notification
+        // (sidebar notif panel routes here with ?highlight_event={id}) —
+        // same "click a notif -> land with the record already open"
+        // pattern as Job Postings' highlight_job handling. Only opens if
+        // the event still exists; a deleted event's notif link just
+        // lands on the plain table instead of erroring.
+        $highlightEventId = request()->query('highlight_event');
+        if ($highlightEventId && AdminEvent::withoutTrashed()->whereKey($highlightEventId)->exists()) {
+            $this->viewEvent((int) $highlightEventId);
+
+            // Strip ?highlight_event=... from the address bar once the
+            // modal is open — the query param has done its job, and
+            // leaving it there means a manual refresh or reshare of the
+            // URL keeps popping the same modal back open, plus it's just
+            // noise in the URL bar. history.replaceState swaps it out in
+            // place with no reload and no extra navigation entry.
+            $this->js(<<<'JS'
+                window.history.replaceState({}, '', window.location.pathname);
+            JS);
+        }
     }
 
     private function autoRejectExpiredPendingEvents(): void
@@ -237,6 +269,15 @@ new class extends Component {
     {
         $this->viewingEventId = $id;
         $this->showViewModal  = true;
+    }
+
+    // Same-page notif click: the sidebar dispatches this directly (instead
+    // of a full navigate) when the admin is already on Events, so the
+    // View Details modal opens immediately with no page flash.
+    #[On('open-view-event')]
+    public function openViewEventFromNotif(int $id): void
+    {
+        $this->viewEvent($id);
     }
 
     public function closeViewModal(): void

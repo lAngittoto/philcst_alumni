@@ -1322,14 +1322,6 @@ select.adm-select-arrow {
                     @endif
                 </div>
 
-                @if($vj->updated_by)
-                <div class="vw-field">
-                    <p class="vw-label">Last Updated By</p>
-                    <p class="vw-value">{{ $vj->updated_by }}</p>
-                    <p class="vw-subvalue">{{ \Carbon\Carbon::parse($vj->updated_at)->setTimezone('Asia/Manila')->format('M d, Y g:i A') }}</p>
-                </div>
-                @endif
-
                 <p class="text-xs text-center text-[#111111] pt-1 font-semibold">
                     Submitted {{ $vCreatedPH->diffForHumans() }} · {{ $vCreatedPH->format('M d, Y g:i A') }}
                 </p>

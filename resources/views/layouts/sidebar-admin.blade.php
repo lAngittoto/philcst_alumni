@@ -497,6 +497,15 @@
                         var isUserToggledEvent  = rawDedup.startsWith('user-toggled::');
                         var isUserEmailEvent    = rawDedup.startsWith('user-email::');
                         var isUserUsernameEvent = rawDedup.startsWith('user-username::');
+                        // user_id lives right after the prefix in dedup_key
+                        // (user-email::{uid}::{minute}) — parsed here the
+                        // same way job_id/event_id are parsed above, so
+                        // clicking an "Email Updated" notif can jump
+                        // straight to that alumni's View Details instead
+                        // of just landing on the unfiltered user list.
+                        var userIdFromEmailDedup = isUserEmailEvent
+                            ? (rawDedup.split('::')[1] || null)
+                            : null;
 
                         // Generic user management update (still groups by day)
                         var isUserEvent = (
@@ -542,6 +551,14 @@
                         var isCompletedEvent = isEventStatusRow
                             ? (n.title === 'Event Completed')
                             : rawDedup.startsWith('event-completed::');
+                        // event_id lives right after the prefix in dedup_key
+                        // (event-status::{id} / event-approved::{id} /
+                        // event-completed::{id}) — parsed here the same way
+                        // job_id is parsed above, since the API payload
+                        // doesn't carry a separate event_id field either.
+                        var eventIdFromDedup = (isApprovedEvent || isCompletedEvent)
+                            ? (rawDedup.split('::')[1] || null)
+                            : null;
 
                         // COURSE — capped at 2 rows a day (AM / PM slot), dedup_key already
                         // encodes course::{day}::{am|pm} so the map naturally caps it.
@@ -613,6 +630,27 @@
                                 _isUserEmail:      isUserEmailEvent,
                                 _isUserUsername:   isUserUsernameEvent,
                                 job_id:            n.job_id || jobIdFromDedup || null,
+                                event_id:          n.event_id || eventIdFromDedup || null,
+                                user_id:           n.user_id || userIdFromEmailDedup || null,
+                                // ── Force the correct destination for a
+                                //    "New Job Posting" row instead of
+                                //    trusting whatever link_route is
+                                //    sitting on the DB row. A job posting
+                                //    always goes to Job Posts — but some
+                                //    rows created before an earlier fix
+                                //    (a client-side race between two
+                                //    competing dispatches) got saved with
+                                //    the wrong link_route and silently
+                                //    kept sending their click to the
+                                //    dashboard instead, forever, since
+                                //    nothing here used to correct it.
+                                //    Normalizing it here — the same way
+                                //    title/icon are already normalized
+                                //    above — means it self-heals for any
+                                //    old bad rows too, not just new ones. ──
+                                link_route:        isNewJobEvent ? 'job.posts'
+                                                  : (isApprovedEvent || isCompletedEvent) ? 'events'
+                                                  : n.link_route,
                             }));
                         }
                     });
@@ -646,7 +684,6 @@
 
             async markRead(item) {
                 if (item.read) return;
-                item.read = true;
                 var ids     = Array.isArray(item._ids) ? item._ids : [item.id];
                 var csrf    = document.querySelector('meta[name="csrf-token"]').content;
                 var allOk   = true;
@@ -664,14 +701,17 @@
                         allOk = false;
                     }
                 }
-                // ── If the PATCH didn't actually succeed, don't leave the
-                //    item optimistically marked read in memory — the next
-                //    poll (every 1.5s) re-fetches from the DB, which still
-                //    has it unread, and silently "resets" it back to
-                //    unread on screen. Revert now instead so the UI stays
-                //    honest, and let the row be clickable again. ──
-                if (!allOk) {
-                    item.read = false;
+                // ── Only flip the item to "read" once the PATCH has
+                //    actually confirmed. Flipping it optimistically before
+                //    the request resolves used to change the item's look
+                //    (background, badges, the "Already Read" divider on a
+                //    neighboring row) WHILE the loading spinner overlay was
+                //    still showing on top of it — a jarring flash/glitch
+                //    right under the spinner. Setting it here instead means
+                //    all of that visual change happens in one clean step,
+                //    right as the spinner is about to be removed. ──
+                if (allOk) {
+                    item.read = true;
                 }
             },
 
@@ -708,6 +748,10 @@
                 var url  = window.__adminRouteMap[item.link_route] || '/admin/dashboard';
                 if (item.link_route === 'job.posts' && item.job_id) {
                     url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_job=' + encodeURIComponent(item.job_id);
+                } else if (item.link_route === 'events' && item.event_id) {
+                    url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_event=' + encodeURIComponent(item.event_id);
+                } else if (item.link_route === 'user.management' && item._isUserEmail && item.user_id) {
+                    url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_user=' + encodeURIComponent(item.user_id);
                 }
 
                 var targetPath    = url.split('?')[0];
@@ -722,6 +766,28 @@
                 //    fire. ──
                 if (isSameLocation && item.link_route === 'job.posts' && item.job_id && window.Livewire) {
                     Livewire.dispatch('open-view-job', { id: Number(item.job_id) });
+                    setTimeout(function () {
+                        self.navigating = false;
+                        self.loadingId  = null;
+                        self.open       = false;
+                    }, 400);
+                    return true;
+                } else if (isSameLocation && item.link_route === 'events' && item.event_id && window.Livewire) {
+                    // Same as the Job Posts case above — already on
+                    // Events, so dispatch straight to the mounted
+                    // component instead of a full navigate/reload.
+                    Livewire.dispatch('open-view-event', { id: Number(item.event_id) });
+                    setTimeout(function () {
+                        self.navigating = false;
+                        self.loadingId  = null;
+                        self.open       = false;
+                    }, 400);
+                    return true;
+                } else if (isSameLocation && item.link_route === 'user.management' && item._isUserEmail && item.user_id && window.Livewire) {
+                    // Same as the Job Posts / Events cases above — already
+                    // on User Management, so dispatch straight to the
+                    // mounted component instead of a full navigate/reload.
+                    Livewire.dispatch('open-view-user', { id: Number(item.user_id) });
                     setTimeout(function () {
                         self.navigating = false;
                         self.loadingId  = null;
