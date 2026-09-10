@@ -1427,9 +1427,17 @@ new class extends \Livewire\Volt\Component {
         $this->pinnedMessages = collect($rows)->map(function ($p) use ($aMap,$oMap,$self) {
             $isCoord = in_array($p->sender_type,['organizer','coordinator'],true);
             $s = $isCoord ? $oMap->get((int)$p->sender_id) : $aMap->get((int)$p->sender_id);
+            // Same [[JOB:xx]] / [[EVENT:TYPE:xx]] resolution used for the
+            // chat bubble itself, so a pinned job/event share shows the
+            // same picture card + View button instead of the raw marker
+            // text, and the plain snippet (for non-post pins) never leaks
+            // the marker either.
+            $preview = $self->resolvePostPreview($p->body);
             return [
                 'id'           => $p->id,
-                'body'         => $p->body,
+                'body'         => $preview ? null : $p->body,
+                'snippet'      => $self->stripPostMarkerForSnippet($p->body),
+                'post_preview' => $preview,
                 'from'         => $s ? trim($s->first_name.' '.$s->last_name) : ($isCoord ? 'Coordinator' : 'Alumni'),
                 'pinned_at'    => Carbon::parse($p->pinned_at)->setTimezone('Asia/Manila')->format('M d, Y h:i A'),
                 'pinned_by_me' => $p->pinned_by_type === 'alumni' && (int) $p->pinned_by_id === $self->alumniId,
@@ -1744,6 +1752,12 @@ new class extends \Livewire\Volt\Component {
         }
         .msgr-post-card.is-mine { border-color: rgba(255,255,255,.28); }
         .msgr-post-card.is-unavailable { opacity: .82; }
+
+        /* Compact variant — pinned-messages side panel is narrower than
+           the chat column, so the thumbnail is shorter here to keep the
+           whole card comfortably in view without scrolling the panel. */
+        .msgr-post-card-compact { max-width: 100%; }
+        .msgr-post-card-compact .msgr-post-thumb { height: 110px; }
 
         .msgr-post-thumb {
             position: relative;
@@ -2891,7 +2905,75 @@ new class extends \Livewire\Volt\Component {
                                 </span>
                                 @endif
                             </div>
+
+                            @if($pin['post_preview'])
+                                {{-- Pinned job/event share — same purple picture card as the
+                                     chat bubble, shrunk to fit the side panel. Clicking
+                                     "View Job/Event" navigates AND closes this pins panel
+                                     (and the pins overlay) instead of leaving it open behind
+                                     the new page. --}}
+                                @php $pp = $pin['post_preview']; $ppAvailable = $pp['available'] ?? true; $ppIsEvent = ($pp['type'] ?? 'job') === 'event'; @endphp
+                                <div class="msgr-bubble msgr-post-card msgr-post-card-compact {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
+                                    <div class="msgr-post-thumb">
+                                        @if($ppAvailable)
+                                            @if(! empty($pp['image']))
+                                            <img src="{{ $pp['image'] }}" alt="{{ $pp['title'] }}"
+                                                 onerror="this.onerror=null;this.parentElement.querySelector('img').remove();">
+                                            @elseif($ppIsEvent)
+                                            <div class="msgr-post-thumb-gradient">
+                                                <i class="fa-solid fa-calendar-days"></i>
+                                            </div>
+                                            @else
+                                            <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="{{ $pp['title'] }}">
+                                            @endif
+                                        @else
+                                        <div class="msgr-post-thumb-placeholder">
+                                            <i class="fa-solid {{ $pp['type'] === 'job' ? 'fa-briefcase' : 'fa-calendar-xmark' }}"></i>
+                                        </div>
+                                        @endif
+
+                                        @if(! $ppAvailable)
+                                        <span class="msgr-post-tag unavailable-tag">Unavailable</span>
+                                        @endif
+
+                                        <div class="msgr-post-overlay-strip">
+                                            <p>
+                                                @if($ppAvailable)
+                                                    <span class="accent">{{ $pp['type'] === 'job' ? 'Now Hiring' : 'Save the Date' }}:</span> {{ $pp['title'] }}
+                                                @else
+                                                    <span class="accent">{{ $pp['type'] === 'job' ? 'Job Posting' : 'Event' }}:</span> No longer available
+                                                @endif
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div class="msgr-post-caption">
+                                        <p class="headline">{{ $pp['title'] }}</p>
+                                        @if($pp['subtitle'])
+                                        <p class="subline">{{ $pp['subtitle'] }}</p>
+                                        @endif
+                                        <div class="msgr-post-source-row">
+                                            <span class="src-icon"><i class="fa-solid fa-graduation-cap"></i></span>
+                                            <span>PHILCST</span>
+                                        </div>
+
+                                        @if($ppAvailable)
+                                        <a href="{{ $pp['url'] }}" wire:navigate
+                                           wire:click="closeSidePanel"
+                                           x-data="{ going: false }"
+                                           @click="going = true"
+                                           class="msgr-post-view-btn-static mt-2.5 w-full px-3 py-2 rounded-lg bg-white/15 hover:bg-white/25 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer transition-colors duration-150">
+                                            <i class="fa-solid fa-eye" x-show="!going"></i>
+                                            <i class="fa-solid fa-spinner fa-spin" x-show="going" x-cloak></i>
+                                            <span x-text="going ? 'Loading…' : 'View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}'"></span>
+                                        </a>
+                                        @endif
+                                    </div>
+                                </div>
+                            @else
                             <p class="text-sm text-[#333333] leading-snug break-words">{{ Str::limit($pin['body'], 140) }}</p>
+                            @endif
+
                             <p class="text-xs text-[#999999] mt-1.5">{{ $pin['pinned_at'] }}</p>
                         </div>
                         @empty

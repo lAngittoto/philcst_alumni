@@ -119,6 +119,48 @@
         }
         .notif-item { cursor: pointer; position: relative; }
 
+        /* ── In-place loading spinner while a notif click is navigating ──
+           Same treatment as the registrar sidebar: the item's own content
+           blurs out instead of being fully hidden, and a centered spinner
+           overlay fades in on top — so the panel stays open and visibly
+           "busy" on the clicked item until the destination page actually
+           lands (see the click handler's is-navigating flag +
+           livewire:navigated listener below), instead of closing
+           immediately on click.
+
+           FIX (glitch on click): the blur/opacity here now transition on
+           the SAME property list and duration as the overlay's own fade
+           (150ms), instead of relying on the item's `transition-colors`
+           (which only tweens background-color) while blur/opacity snapped
+           instantly — that mismatch was the visible "jump" the instant
+           a notif was clicked. The overlay itself also now fades in via
+           x-transition (see the markup) rather than being hard
+           inserted/removed by x-if, which was causing a one-frame
+           layout flash. ── */
+        .notif-item.is-loading > *:not(.notif-item-loading-overlay) {
+            filter: blur(4px);
+            opacity: 0.5;
+            pointer-events: none;
+            user-select: none;
+            transition: filter 0.15s ease, opacity 0.15s ease;
+        }
+        .notif-item > *:not(.notif-item-loading-overlay) {
+            transition: filter 0.15s ease, opacity 0.15s ease;
+        }
+        .notif-item-loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(255,255,255,0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 5;
+        }
+        .notif-item-spinner {
+            font-size: 22px;
+            color: #7A3F91;
+        }
+
         /* ── Per-notification unread dot — blue, scales up on hover, and
              pulses a soft expanding "wave" ring while unread. Mirrors the
              registrar sidebar's notif-unread-dot exactly. ── */
@@ -213,7 +255,23 @@
         .alm-sidebar {
             width: 18rem;
             min-width: 18rem;
-            transition: width 0.2s ease, min-width 0.2s ease;
+            transition:
+                width 0.2s ease,
+                min-width 0.2s ease,
+                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        /* ── Kill the transition on first paint / hard refresh ────────
+           Without this, the sidebar paints in its default (expanded,
+           untranslated) state for one frame before Alpine applies
+           is-collapsed / translate-x-0 — and because the transition
+           above is already active, the browser ANIMATES that jump
+           instead of snapping straight to the correct state. This
+           class is only present until Alpine finishes initializing
+           (removed in the x-init below), so the very first state is
+           always instant, and only USER-triggered toggles afterward
+           get the smooth transition. Same fix as the registrar sidebar. */
+        .alm-sidebar.no-transition {
+            transition: none !important;
         }
 
         .alm-sidebar-header {
@@ -434,9 +492,34 @@
             .alm-sidebar.is-collapsed .alm-nav-icon {
                 margin-right: 0 !important;
             }
+            .alm-sidebar.is-collapsed nav.flex-1 {
+                padding-left: 0;
+                padding-right: 0;
+            }
             .alm-sidebar.is-collapsed .alm-nav-section-row {
                 justify-content: center;
-                padding: 0 0.5rem;
+                padding: 0;
+                position: relative;
+            }
+            /* The collapse-toggle icon must land in EXACTLY the same
+               horizontal spot as the graduation-cap badge above it, and
+               must NOT drift/recenter along with the row when the label
+               fades out — it should stay fixed in that one spot before
+               and after collapsing (only the label disappears). The cap
+               badge is centered relative to the collapsed sidebar's own
+               width (5rem, padding stripped to 0 — see .alm-sidebar-header
+               above), so this icon is centered the same way: relative to
+               the row's own full width, which spans the same 5rem rail
+               once the row's left/right padding is removed. Matching
+               paddings (both 0 here) is what keeps the two icons in the
+               same column instead of one sitting on a wider effective
+               center than the other. */
+            .alm-sidebar.is-collapsed .alm-nav-section-row .alm-collapse-icon-btn {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                margin: 0;
             }
             .alm-sidebar.is-collapsed .alm-logout-btn {
                 gap: 0;
@@ -636,6 +719,41 @@
         }
     });
 
+    // FIX ("This page has expired" pagka-logout): dati plain native form
+    // POST lang ang logout button. Kapag laos na ang CSRF token (matagal
+    // nang bukas ang tab, lumipas na ang session lifetime, o galing sa
+    // bfcache/Livewire cache na luma na ang baked-in @csrf value), sinasagot
+    // ito ng Laravel ng sarili niyang 419 whoops page - kahit successful
+    // naman talaga ang logout intent ng user.
+    //
+    // Fix: gawing AJAX ang submit. Anuman ang mangyari sa sagot ng server
+    // (200 OK talagang na-logout, o 419 dahil laos na ang session, na
+    // effectively logged-out na rin naman), palaging derecho na lang sa
+    // login page ang user, hindi na makikita ang 419 error screen.
+    //
+    // Nilagay ito dito sa script block (hindi sa loob ng HTML attribute)
+    // para walang panganib na masira ang quoting kapag maraming special
+    // characters o comments.
+    window.__alumniLoginUrl = '{{ route("login") }}';
+
+    window.__alumniLogout = function (isAlreadyLoggingOut, setLoggingOut, formEl) {
+        if (isAlreadyLoggingOut) return;
+        setLoggingOut(true);
+        var tokenMeta = document.querySelector('meta[name="csrf-token"]');
+        var token = tokenMeta ? tokenMeta.content : '';
+        fetch(formEl.action, {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': token,
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json'
+            },
+            credentials: 'same-origin'
+        }).catch(function () {}).finally(function () {
+            window.location.href = window.__alumniLoginUrl;
+        });
+    };
+
     // ─────────────────────────────────────────────────────────────────────────
     //  ROUTE MAP
     // ─────────────────────────────────────────────────────────────────────────
@@ -746,6 +864,8 @@
             items:      [],
             _pollTimer: null,
             _navigating: false, // guards against double-click/double-tap firing two navigations for the same notif (the "kidyam"/double-open flicker)
+            navigating: false, // true while a clicked notif's navigation is in flight — drives the in-place item spinner AND keeps the panel open until livewire:navigated (or a same-page click) clears it
+            loadingId:  null,  // id of the notif currently mid-navigation (drives which item shows the spinner)
             deleteToast: { show: false, message: '' },
             deletingId: null, // id of the notif currently mid-delete (drives its spinner)
 
@@ -826,14 +946,14 @@
                                 g.read = false;
                             }
 
-                            g.message = g.count + ' new message(s) today.';
-                            g.title   = g.count + ' New Messages';
+                            g.message = 'You received ' + g.count + ' new messages today.';
+                            g.title   = 'Batch Chat';
                         } else {
                             msgMap.set(groupKey, Object.assign({}, n, {
                                 read:  n.read || localReads.has(n.id),
                                 count: n.count || 1,
                                 _ids:  [n.id],
-                                title: n.title || 'New Message',
+                                title: 'Batch Chat',
                                 icon:  'comments',
                             }));
                         }
@@ -857,7 +977,30 @@
             },
 
             toggle() { this.open = !this.open; },
-            close()  { this.open = false; },
+            close()  {
+                // Don't let the panel be closed (outside click, X button,
+                // etc.) while a notif click is still navigating/loading —
+                // it should only close once livewire:navigated fires (or
+                // the click turned out not to navigate anywhere).
+                if (this.navigating) return;
+                this.open = false;
+            },
+
+            // FIX (glitch before navigate): returns whether THIS notif
+            // should currently LOOK read (background, title weight, dot),
+            // as opposed to `notif.read` itself which flips true the
+            // instant markRead() runs — before the destination page has
+            // actually landed. While this specific item is mid-navigation
+            // (spinner overlay showing), its visual state stays frozen at
+            // whatever it looked like the moment it was clicked, so no
+            // color/weight change is visible peeking out from under the
+            // overlay before the fade finishes covering it.
+            isVisuallyRead(item) {
+                if (this.navigating && this.loadingId === item.id) {
+                    return this._preClickRead === true;
+                }
+                return !!item.read;
+            },
 
             async markRead(item) {
                 if (item.read) return;
@@ -990,58 +1133,160 @@
         return null;
     };
 
-    window.__bootAlumniNotifsStore = function () {
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SINGLE BOOT PATH
+    // ─────────────────────────────────────────────────────────────────────────
+    // FIX (glitch: notif panel/badge randomly flashing wrong content on
+    // refresh): there used to be FIVE separate listeners (alpine:init,
+    // alpine:initialized, window.load, livewire:navigated, and a plain
+    // IIFE) that could each independently create the store and call
+    // .init(), with no coordination between them. On a slow refresh or a
+    // slow network, two or more of these fired close together, so two
+    // overlapping _fetch() calls resolved out of order — the OLDER
+    // response could land AFTER the newer one, so the panel/badge briefly
+    // showed a stale item count before "correcting" itself a moment
+    // later. That flicker is exactly the "biglang may lumalabas" bug.
+    //
+    // Fix: one _bootedOnce flag. Only the FIRST ready signal (whichever
+    // of alpine:init / window.load fires first) creates the store and
+    // calls init(). Every other signal just re-syncs an ALREADY-existing
+    // store — it never fires a second overlapping init().
+    window.__alumniNotifsBootedOnce = false;
+
+    window.__bootAlumniNotifsStoreOnce = function () {
+        if (window.__alumniNotifsBootedOnce) return;
         if (!window.Alpine || typeof Alpine.store !== 'function') return;
+        window.__alumniNotifsBootedOnce = true;
         if (!Alpine.store('alumniNotifs')) {
             Alpine.store('alumniNotifs', window.__makeAlumniNotifsStore());
         }
-        var s = Alpine.store('alumniNotifs');
-        if (s && !s._pollTimer) s.init();
+        Alpine.store('alumniNotifs').init();
     };
 
     document.addEventListener('alpine:init', function () {
-        Alpine.store('alumniNotifs', window.__makeAlumniNotifsStore());
+        if (!Alpine.store('alumniNotifs')) {
+            Alpine.store('alumniNotifs', window.__makeAlumniNotifsStore());
+        }
     });
 
     document.addEventListener('alpine:initialized', function () {
-        setTimeout(function () {
-            var s = window.__safeAlumniNotifsStore();
-            if (s && !s._pollTimer) s.init();
-        }, 0);
+        window.__bootAlumniNotifsStoreOnce();
     });
 
     window.addEventListener('load', function () {
-        var s = window.__safeAlumniNotifsStore();
-        if (s) { if (s.items.length === 0) s.init(); }
-        else    { window.__bootAlumniNotifsStore(); }
+        window.__bootAlumniNotifsStoreOnce();
     });
+
+    // A fresh hard refresh may run this whole script before alpine:initialized
+    // has fired yet in some browsers — this fallback catches that case without
+    // creating a second competing boot.
+    setTimeout(function () { window.__bootAlumniNotifsStoreOnce(); }, 200);
+
+    // FIX (walang notif pagka-login): kung sakaling naka-eval na si Alpine
+    // (alpine:init/alpine:initialized already fired) BAGO pa umabot dito
+    // ang script na 'to — halimbawa kapag late ma-inject itong partial
+    // pagkatapos ng login redirect — subukan ring mag-boot agad ngayon,
+    // hindi lang umasa sa mga listener/timeout sa taas.
+    if (window.Alpine && typeof Alpine.store === 'function') {
+        window.__bootAlumniNotifsStoreOnce();
+    }
 
     document.addEventListener('livewire:navigated', function () {
-        setTimeout(function () {
-            if (!window.Alpine || typeof Alpine.store !== 'function') return;
-            var s = Alpine.store('alumniNotifs');
-            if (s) {
-                if (s._pollTimer) clearInterval(s._pollTimer);
-                s._pollTimer = null;
-                s.open  = false;
-                s.init();
-            } else {
-                Alpine.store('alumniNotifs', window.__makeAlumniNotifsStore());
-                var ns = Alpine.store('alumniNotifs');
-                if (ns) ns.init();
-            }
-        }, 150);
-    });
-
-    ;(function () {
-        if (!window.Alpine || typeof Alpine.store !== 'function') return;
+        // FIX (glitch): the spinner should finish first, THEN the whole
+        // panel closes with its own smooth fade — never before, never
+        // fighting Livewire's DOM morph for the same paint frame.
+        //
+        // Sequence that actually gets this right:
+        //   1. Drop the in-place item spinner immediately (nothing to
+        //      do with the DOM morph, safe to clear right away).
+        //   2. Wait one rAF (next paint) for Livewire's morph to settle
+        //      before touching s.open. No extra setTimeout buffer on
+        //      top anymore — that padding was the sluggish/delayed
+        //      feel on close, and one rAF is enough for the morph to
+        //      have already painted.
+        //   3. Only THEN set s.open = false — by this point the morph
+        //      is done, so Alpine's x-transition:leave (100ms fade)
+        //      gets a clean, already-painted frame to animate from,
+        //      and the panel closes quickly and cleanly instead of
+        //      lingering open or getting cut off mid-fade.
+        if (!window.Alpine || typeof Alpine.store !== 'function') {
+            // FIX (walang notif pagka-login): kapag ang login->dashboard
+            // redirect ay isa ring wire:navigate, posibleng umabot dito
+            // ang event BAGO pa maging ready si Alpine (script loading
+            // pa / hindi pa na-eval). Dati diretso itong `return` at
+            // wala nang sumusubok ulit dito — aasa na lang sa ibang
+            // listener na baka late o na-miss. Ngayon, mag-retry ng
+            // ilang beses (kada 50ms) hanggang maging ready si Alpine,
+            // saka lang mag-boot.
+            var tries = 0;
+            var retry = setInterval(function () {
+                tries++;
+                if (window.Alpine && typeof Alpine.store === 'function') {
+                    clearInterval(retry);
+                    window.__bootAlumniNotifsStoreOnce();
+                } else if (tries >= 20) { // ~1s ceiling, huwag mag-loop forever
+                    clearInterval(retry);
+                }
+            }, 50);
+            return;
+        }
         var s = Alpine.store('alumniNotifs');
         if (!s) {
-            Alpine.store('alumniNotifs', window.__makeAlumniNotifsStore());
-            s = Alpine.store('alumniNotifs');
+            // Store never got created (edge case) — boot it now.
+            window.__bootAlumniNotifsStoreOnce();
+            return;
         }
-        if (s && !s._pollTimer) setTimeout(function () { s.init(); }, 100);
-    })();
+        if (s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
+
+        // FIX (glitch: notif modal flashing on the LEFT SIDE right after
+        // navigating): Livewire's navigate morph re-renders this panel's
+        // markup from the server response, which resets its inline
+        // top/left back to the hardcoded template fallback
+        // (top:88px; left:12px — see the panel's style="" block below).
+        // That fallback position is exactly the "left side" the user
+        // sees flash. The panel's own x-effect is supposed to re-run
+        // positionAlumniPanel() whenever it's open, but it's gated on
+        // $store.alumniNotifs.open CHANGING value — and during this
+        // whole navigate flow .open stays `true` the entire time (it
+        // only flips to false a bit further down, on its own delay),
+        // so the effect never re-fires after the morph to correct it.
+        // Force the reposition here too, unconditionally and as early
+        // as possible in this handler, so the panel snaps back to its
+        // correct spot under the bell BEFORE the browser paints the
+        // fallback position.
+        if (s.open) positionAlumniPanel();
+
+        // Destination page has landed — drop the spinner now, not before.
+        s.navigating   = false;
+        s.loadingId    = null;
+        s._navigating  = false;
+
+        // FIX (glitch: panel/badge flashing open again after landing):
+        // s.init() calls _fetch(), which reassigns s.items. That
+        // reassignment re-renders anything bound to s.items/s.unread
+        // (the badge, the panel list) — including x-show/x-transition
+        // blocks tied to the panel. Previously init() was fired WITHOUT
+        // waiting for it, and the panel close (s.open = false) was
+        // scheduled on its own unrelated 60ms timer. Whichever finished
+        // first raced the other: if the fetch resolved WHILE the panel
+        // was still open (or right as it was closing), the items
+        // reassignment kicked off a fresh transition/re-render on an
+        // already-open panel — visually reads as the panel "popping"
+        // open again at the corner before it disappears.
+        //
+        // Fix: close the panel FIRST (on its own settle timer, same
+        // pattern as the sidebar's own settle-after-navigate fix), and
+        // only run init()/_fetch() — which touches items/unread — AFTER
+        // the panel has already finished closing. That way the items
+        // reassignment never lands while the panel is still visible or
+        // mid-transition.
+        requestAnimationFrame(function () {
+            s.open = false;
+            // Let the close transition actually start before we
+            // mutate items/unread underneath it.
+            setTimeout(function () { s.init(); }, 60);
+        });
+    });
 
     document.addEventListener('visibilitychange', function () {
         if (document.visibilityState === 'visible') {
@@ -1210,13 +1455,12 @@
             var count  = Number(d.count) || 1;
 
             var msgText = count > 1
-                ? sender + ' and others sent ' + count + ' new messages in ' + room + '.'
-                : sender + ' sent a message in ' + room +
-                  (body ? ': "' + body.substring(0, 50) + (body.length > 50 ? '…' : '') + '"' : '.');
+                ? 'You received ' + count + ' new messages.'
+                : 'You received a message.';
 
             _saveAlumniNotif({
                 icon:       'comments',
-                title:      count > 1 ? count + ' New Messages' : 'New Message',
+                title:      'Batch Chat',
                 message:    msgText,
                 link_route: 'alumni.messenger',
                 link_label: 'Open Messenger',
@@ -1247,17 +1491,46 @@
         // as the registrar sidebar — so if it was collapsed before you
         // reloaded, it stays collapsed. Icon/notif colors and design are
         // untouched; this only restores the last collapsed/expanded value.
-        sidebarCollapsed: localStorage.getItem('alm_sidebar_collapsed') === '1',
+        //
+        // FIX: localStorage is shared by the whole BROWSER, not per
+        // account — a plain 'alm_sidebar_collapsed' key meant that
+        // logging out and logging into a different alumni account on
+        // the same device/browser inherited whichever collapsed state
+        // the previous account last left behind. Keyed by the logged-in
+        // user's id instead, so each account remembers its own
+        // preference independently.
+        sidebarStorageKey: 'alm_sidebar_collapsed_{{ auth()->id() }}',
+        sidebarCollapsed: localStorage.getItem('alm_sidebar_collapsed_{{ auth()->id() }}') === '1',
+        // FIX (glitch: sidebar visibly jumping/flashing on refresh and
+        // on livewire:navigate): a double requestAnimationFrame is NOT a
+        // reliable the-browser-has-painted signal — on a busy page
+        // (lots of Alpine components, a long notif list) two rAF ticks
+        // can fire before the FIRST paint ever happens, so no-transition
+        // was being removed too early and the width/translate transition
+        // animated the initial state instead of snapping to it instantly.
+        // Fix: wait for the actual 'load'-equivalent readiness via
+        // requestAnimationFrame + a short setTimeout fallback, which
+        // reliably lands after first paint regardless of page weight.
+        sidebarSettled: false,
         loggingOut: false,
         navClickedRoute: null,
         profileComplete: {{ (bool)(auth()->user()?->alumni?->profile_completed ?? false) ? 'true' : 'false' }},
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
+        },
+        settleSidebar() {
+            this.sidebarSettled = false;
+            requestAnimationFrame(() => {
+                setTimeout(() => { this.sidebarSettled = true; }, 50);
+            });
         }
     }"
-    x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('alm_sidebar_collapsed', val ? '1' : '0'); })"
+    x-init="
+        $watch('sidebarCollapsed', function (val) { localStorage.setItem(sidebarStorageKey, val ? '1' : '0'); });
+        settleSidebar();
+    "
     x-on:profile-updated.window="profileComplete = $event.detail.completed"
-    @@livewire:navigated.window="navClickedRoute = null"
+    @@livewire:navigated.window="navClickedRoute = null; open = false; settleSidebar();"
     @click="$store.alumniNotifs && $store.alumniNotifs.open && $store.alumniNotifs.close()">
 
 <div class="alm-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
@@ -1281,12 +1554,42 @@
         :class="{
             'translate-x-0': open,
             '-translate-x-full': !open,
-            'is-collapsed': sidebarCollapsed
+            'is-collapsed': sidebarCollapsed,
+            'no-transition': !sidebarSettled
         }"
         class="alm-sidebar fixed inset-y-0 left-0 z-50 transform
                lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
         style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0;">
+
+    <script>
+        // FIX (glitch: sidebar visibly opening/closing on hard refresh
+        // while collapsed): Alpine's :class bindings (is-collapsed,
+        // no-transition above) only get applied once Alpine has parsed
+        // and evaluated x-data on <body> — the <aside> itself paints
+        // in its plain default state (expanded, full 18rem width) for
+        // however many frames that takes on a heavier page. The user
+        // sees: expanded sidebar → snaps to collapsed → (transition
+        // was still enabled during that gap) briefly animates the
+        // width change — which reads as the sidebar "opening and
+        // closing" on refresh.
+        //
+        // Fix: read the SAME localStorage key Alpine will read a
+        // moment later, and — synchronously, before this <script> tag
+        // even finishes executing (which blocks the browser from
+        // painting anything below it) — apply 'is-collapsed' and
+        // 'no-transition' directly to the raw DOM node right now. By
+        // the time Alpine's x-data initializes and takes over the
+        // class binding, the node already matches, so there is
+        // nothing left to visibly snap into place.
+        (function () {
+            var aside = document.getElementById('alumni-sidebar-aside');
+            if (!aside) return;
+            var collapsed = localStorage.getItem('alm_sidebar_collapsed_{{ auth()->id() }}') === '1';
+            aside.classList.add('no-transition');
+            if (collapsed) aside.classList.add('is-collapsed');
+        })();
+    </script>
 
         {{-- Sidebar header — graduate-themed (purple, cap badge).
              Text elements use `.alm-collapsible-text` (opacity + max-width
@@ -1390,7 +1693,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="open = false; navClickedRoute = '{{ $link['route'] }}';"
+                   @click="navClickedRoute = '{{ $link['route'] }}';"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="alm-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
@@ -1430,7 +1733,7 @@
         <div class="p-2 lg:p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST"
                   action="{{ route('logout') }}"
-                  @submit="loggingOut = true">
+                  @submit.prevent="window.__alumniLogout(loggingOut, function(v){ loggingOut = v; }, $event.target)">
                 @csrf
                 <button type="submit"
                         :disabled="loggingOut"
@@ -1526,11 +1829,25 @@
     id="alumni-notif-panel"
     x-show="$store.alumniNotifs && $store.alumniNotifs.open"
     x-cloak
-    x-effect="if ($store.alumniNotifs && $store.alumniNotifs.open) $nextTick(() => positionAlumniPanel())"
+    x-effect="
+        // FIX (glitch: panel jumping to a corner right before it
+        // vanishes on navigate): this used to re-run positionAlumniPanel()
+        // on ANY reactive change while open (items/unread updates count
+        // as reactive changes too, since Alpine's dependency tracking
+        // isn't scoped to just .open). So the items reassignment from
+        // s.init()/_fetch() — even one that lands milliseconds before
+        // s.open flips to false — triggered one more repositioning pass,
+        // which is what looked like the panel 'popping over to the
+        // side' right before it disappeared. Reading $store.alumniNotifs.open
+        // into a local first, and gating on ONLY that read, stops
+        // unrelated items/unread changes from re-triggering this effect.
+        let isOpen = $store.alumniNotifs && $store.alumniNotifs.open;
+        if (isOpen) $nextTick(() => positionAlumniPanel());
+    "
     x-transition:enter="transition ease-out duration-200"
     x-transition:enter-start="opacity-0 scale-95 -translate-y-2"
     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave="transition ease-out duration-75"
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
     x-transition:leave-end="opacity-0 scale-95 -translate-y-2"
     @click.stop
@@ -1645,7 +1962,13 @@
             <template x-for="(notif, notifIdx) in $store.alumniNotifs.items" :key="notif.id">
                 <div>
                     <div class="notif-divider"
-                         x-show="notif.read && notifIdx > 0 && !$store.alumniNotifs.items[notifIdx - 1].read"
+                         x-show="notif.read && notifIdx > 0 && !$store.alumniNotifs.items[notifIdx - 1].read && !$store.alumniNotifs.navigating"
+                         x-transition:enter="transition ease-out duration-200"
+                         x-transition:enter-start="opacity-0"
+                         x-transition:enter-end="opacity-100"
+                         x-transition:leave="transition ease-in duration-150"
+                         x-transition:leave-start="opacity-100"
+                         x-transition:leave-end="opacity-0"
                          x-cloak>
                         <span class="notif-divider-label">Already Read</span>
                     </div>
@@ -1654,20 +1977,67 @@
                         class="notif-item flex items-start gap-4 px-5 py-4
                                border-b border-[#F5F5F5] last:border-b-0
                                transition-colors duration-150 select-none"
-                        :class="notif.read ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]'"
+                        :class="[
+                            // FIX (glitch before navigate): while this item is
+                            // navigating/loading, its read/unread look is FROZEN
+                            // at whatever it was the instant it was clicked —
+                            // `markRead()` flips `notif.read` to true right away
+                            // (so the server/local-read state is correct even if
+                            // navigation is slow), but that used to also flip the
+                            // background, title weight, and unread dot the exact
+                            // same instant, all visible underneath the overlay
+                            // before the fade had a chance to cover it. Now those
+                            // visual bits only react to the frozen isVisuallyRead
+                            // value below, so nothing changes color/weight until
+                            // the destination page has actually landed and the
+                            // overlay has fully faded in and back out.
+                            $store.alumniNotifs.isVisuallyRead(notif) ? 'bg-white hover:bg-[#FAFAFA]' : 'bg-[#FAF6FE] hover:bg-[#F3EBFA]',
+                            ($store.alumniNotifs.navigating && $store.alumniNotifs.loadingId === notif.id) ? 'is-loading' : ''
+                        ]"
                         @click.stop="
                             if ($store.alumniNotifs._navigating) return;
+                            $store.alumniNotifs._preClickRead = !!notif.read;
                             $store.alumniNotifs._navigating = true;
+                            $store.alumniNotifs.navigating   = true;
+                            $store.alumniNotifs.loadingId    = notif.id;
                             $store.alumniNotifs.markRead(notif).then(() => {
-                                $store.alumniNotifs.close();
                                 if (notif.link_route) {
                                     const url = window.__alumniNotifTargetUrl(notif);
-                                    window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                                    // Sequence: let the spinner actually show for a
+                                    // beat first, THEN close the panel, and only
+                                    // navigate once the panel's own close transition
+                                    // has finished — instead of firing the navigate
+                                    // immediately and letting the panel close in the
+                                    // background while the page is already loading.
+                                    setTimeout(() => {
+                                        $store.alumniNotifs.open = false;
+                                        setTimeout(() => {
+                                            window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                                        }, 80); // matches the panel's leave transition duration
+                                    }, 150); // spinner-visible beat before closing
                                 } else {
                                     $store.alumniNotifs._navigating = false;
+                                    $store.alumniNotifs.navigating  = false;
+                                    $store.alumniNotifs.loadingId   = null;
                                 }
-                            }).catch(() => { $store.alumniNotifs._navigating = false; });
+                            }).catch(() => {
+                                $store.alumniNotifs._navigating = false;
+                                $store.alumniNotifs.navigating  = false;
+                                $store.alumniNotifs.loadingId   = null;
+                            });
                         ">
+
+                        <div class="notif-item-loading-overlay"
+                             x-show="$store.alumniNotifs.navigating && $store.alumniNotifs.loadingId === notif.id"
+                             x-transition:enter="transition ease-out duration-150"
+                             x-transition:enter-start="opacity-0"
+                             x-transition:enter-end="opacity-100"
+                             x-transition:leave="transition ease-in duration-100"
+                             x-transition:leave-start="opacity-100"
+                             x-transition:leave-end="opacity-0"
+                             x-cloak>
+                            <i class="fas fa-spinner fa-spin notif-item-spinner"></i>
+                        </div>
 
                         <div class="notif-icon-wrap" style="background:#F3EBFA;">
                             <i class="fas text-[#7A3F91]"
@@ -1678,7 +2048,7 @@
                         <div class="flex-1 min-w-0">
                             <div class="flex items-start justify-between gap-2">
                                 <div class="flex items-center gap-1.5 flex-wrap">
-                                    <p :class="notif.read ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
+                                    <p :class="$store.alumniNotifs.isVisuallyRead(notif) ? 'font-semibold text-[#555555]' : 'font-bold text-[#1a1a1a]'"
                                        style="font-size:13px;line-height:1.4;"
                                        x-text="notif.title"></p>
 
@@ -1693,7 +2063,7 @@
                                     </span>
 
                                     <span
-                                        x-show="notif.icon === 'briefcase' && !notif.read"
+                                        x-show="notif.icon === 'briefcase' && !$store.alumniNotifs.isVisuallyRead(notif)"
                                         x-cloak
                                         class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                         style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1702,7 +2072,7 @@
                                     </span>
 
                                     <span
-                                        x-show="(notif.icon === 'calendar' || notif.icon === 'circle-check') && !notif.read"
+                                        x-show="(notif.icon === 'calendar' || notif.icon === 'circle-check') && !$store.alumniNotifs.isVisuallyRead(notif)"
                                         x-cloak
                                         class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                         style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1711,7 +2081,7 @@
                                     </span>
 
                                     <span
-                                        x-show="notif.icon === 'comments' && !notif.read"
+                                        x-show="notif.icon === 'comments' && !$store.alumniNotifs.isVisuallyRead(notif)"
                                         x-cloak
                                         class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
                                         style="font-size:9px;font-weight:800;letter-spacing:0.06em;
@@ -1720,7 +2090,7 @@
                                     </span>
                                 </div>
 
-                                <span x-show="!notif.read" x-cloak
+                                <span x-show="!$store.alumniNotifs.isVisuallyRead(notif)" x-cloak
                                       class="notif-unread-dot"></span>
                             </div>
 

@@ -302,7 +302,8 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height"
+<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height yb-no-select"
+     oncontextmenu="return false;"
      x-data="{
         setAvailHeight() {
             const rect = this.$el.getBoundingClientRect();
@@ -524,6 +525,22 @@ new class extends Component {
 
 
 <style>
+/* ── Block text selection/copy across the whole page ──────
+   Inputs/textareas are explicitly exempted below so typing,
+   selecting-to-edit, and copy/paste inside the search box or
+   any form field still work normally. ────────────────────── */
+.yb-no-select, .yb-no-select * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+}
+.yb-no-select input,
+.yb-no-select textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    user-select: text;
+}
+
 /* ── Base ──────────────────────────────────────────────── */
 .yb-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
 .yb-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
@@ -567,6 +584,10 @@ new class extends Component {
 .yb-search-input::placeholder { color: #999999; font-weight: 400; }
 .yb-search-input:hover  { border-color: #c4b5d4; }
 .yb-search-input:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+/* Light-blue fill while a search term is active, so it's clear at a
+   glance a filter is applied — even before the field is focused. */
+.yb-search-input-active { background: #eef6fd; border-color: #bfe0f7; }
+.yb-search-input-active:focus { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
 
 /* ── Dropdown button ────────────────────────────────────── */
 .yb-dd-btn {
@@ -770,37 +791,12 @@ new class extends Component {
     }
 }
 
-/* ── Floating background bubbles (whole scroll area) ─────────
-   Layered, gently drifting white/lavender circles behind the
-   alumni cards — NOT on the card headers themselves, so every
-   card stays a clean, readable solid purple. This lives on the
-   scroll container background only. ──────────────────────────── */
+/* ── Scroll area background ───────────────────────────────────
+   Plain white behind the alumni cards — floating bubble effect
+   removed per request. ────────────────────────────────────────── */
 .yb-bubble-bg {
     position: relative;
     background-color: #FFFFFF;
-}
-.yb-bubble-bg::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background-image:
-        radial-gradient(circle, rgba(243,232,255,0.6) 0, rgba(243,232,255,0.6) 6px, transparent 7px),
-        radial-gradient(circle, rgba(243,232,255,0.45) 0, rgba(243,232,255,0.45) 4px, transparent 5px),
-        radial-gradient(circle, rgba(216,180,254,0.25) 0, rgba(216,180,254,0.25) 5px, transparent 6px),
-        radial-gradient(circle, rgba(243,232,255,0.5) 0, rgba(243,232,255,0.5) 3px, transparent 4px);
-    background-repeat: repeat;
-    background-size: 340px 340px, 260px 260px, 300px 300px, 220px 220px;
-    background-position: 20px 40px, 180px 120px, 90px 220px, 250px 60px;
-    animation: ybBubbleDrift 22s linear infinite;
-}
-@keyframes ybBubbleDrift {
-    from { background-position: 20px 40px, 180px 120px, 90px 220px, 250px 60px; }
-    to   { background-position: 20px -300px, 180px -140px, 90px -80px, 250px -260px; }
-}
-@media (prefers-reduced-motion: reduce) {
-    .yb-bubble-bg::before { animation: none; }
 }
 
 /* ── Card click affordance ─────────────────────────────────
@@ -951,6 +947,21 @@ new class extends Component {
     display: flex; gap: 6px;
     z-index: 3;
 }
+/* ── Small always-visible "click to change" hint under the ring —
+     the .yb-modal-photo-overlay above only shows on :hover, so touch
+     devices (no hover) never see any cue that the photo is clickable.
+     This sits under the header photo, over the purple banner. ────── */
+.yb-modal-photo-hint {
+    position: relative;
+    z-index: 2;
+    margin-top: 8px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    color: rgba(255,255,255,.85);
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+}
 .yb-modal-photo-action-btn {
     width: 30px; height: 30px; border-radius: 9999px;
     border: 1.5px solid #E0E0E0;
@@ -1034,8 +1045,8 @@ new class extends Component {
                     <i class="fas fa-book-open text-white text-lg"></i>
                 </div>
                 <div>
-                    <h1 class="yb-mobile-title text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                    <p class="yb-mobile-subtitle text-xs leading-relaxed mt-0.5" style="color:#555555;">
+                    <h1 class="yb-mobile-title text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Alumni Yearbook</h1>
+                    <p class="yb-mobile-subtitle text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
                         A digital collection of PhilCST graduates
                     </p>
                 </div>
@@ -1106,8 +1117,9 @@ new class extends Component {
                 <input type="text"
                        x-model="q"
                        @input.debounce.300ms="$wire.set('search', q)"
-                       placeholder="Search name, ID, email…"
+                       placeholder="Search…"
                        class="yb-search-input"
+                       :class="{ 'yb-search-input-active': q !== '' }"
                        autocomplete="off" spellcheck="false">
             </div>
 
@@ -1149,13 +1161,17 @@ new class extends Component {
             </div>
 
             {{-- Reset --}}
+            @php $hasActiveFilters = $search !== '' || $course !== ''; @endphp
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
-                    style="color:#333333;">
+                    @disabled(!$hasActiveFilters)
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                           border transition active:scale-95
+                           {{ $hasActiveFilters
+                                ? 'bg-white border-[#E8E0F0] text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
+                                : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm"></i>
                 </span>
@@ -1416,6 +1432,16 @@ new class extends Component {
                                  onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
                         </template>
                     </div>
+                    {{-- Small persistent hint below the ring — the overlay
+                         above only reveals on hover, which never shows on
+                         touch devices, so this makes it clear at a glance
+                         that the photo itself is clickable to change it. --}}
+                    <template x-if="profileData.isMe">
+                        <p class="yb-modal-photo-hint">
+                            <i class="fas fa-camera" style="font-size:9px;"></i>
+                            Click photo to change
+                        </p>
+                    </template>
                 </div>
 
                 <div class="yb-modal-body">
