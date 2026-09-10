@@ -71,14 +71,14 @@ new class extends Component {
     public array  $career_path         = [];
     public string $course_relevance    = '';
     public string $unemployment_status = '';
-    public string $education_status    = '';
+    public string $unemployment_reason = '';
 
     public array $employmentSnapshot = [];
 
     private const EMP_SNAP_KEYS = [
         'employment_status', 'company_name', 'job_title', 'custom_job_title',
-        'employment_type', 'work_location', 'career_path', 'education_status',
-        'course_relevance', 'unemployment_status',
+        'employment_type', 'work_location', 'career_path',
+        'course_relevance', 'unemployment_status', 'unemployment_reason',
     ];
 
     // Fields that must NOT contain digits (people's names / place names).
@@ -511,6 +511,43 @@ new class extends Component {
         foreach ($yes[$group] ?? [] as $kw) { if (str_contains($t, strtolower($kw))) return 'yes'; }
         foreach ($partial[$group] ?? [] as $kw) { if (str_contains($t, strtolower($kw))) return 'partially'; }
 
+        // ── Self-employed / business-owner detection ─────────────────
+        // A self-employed alumnus describes their work as a BUSINESS, not a
+        // job title (e.g. "Computer Shop Owner" instead of "IT Support
+        // Specialist"). The $yes/$partial keyword lists above are built
+        // around job-title phrasing, so a business-owner title can slip
+        // through and wrongly land on "Not Related" even when the business
+        // is clearly in the alumnus's field. This checks whether the
+        // subject/domain keywords for the alumnus's course group appear
+        // anywhere in the business description, regardless of "owner",
+        // "shop", "freelancer", "services", etc. wording around it.
+        $domainKeywords = [
+            'technology'     => ['computer','it ','ict','software','web','network','tech','cybersecurity','programming','digital','gadget','system'],
+            'nursing'        => ['nursing','health','clinical','care','medical','wellness'],
+            'education'      => ['tutor','review center','training','tutorial','learning'],
+            'accounting'     => ['accounting','bookkeeping','tax','payroll','audit'],
+            'business'       => ['trading','retail','store','merchandise','wholesale','distribution','sari-sari','franchise'],
+            'engineering'    => ['construction','fabrication','engineering','electrical','mechanical','contracting'],
+            'healthcare'     => ['pharmacy','clinic','medical','dental','therapy'],
+            'criminology'    => ['security'],
+            'hospitality'    => ['restaurant','eatery','food','catering','bakeshop','bake','travel','tours','lodging','hotel'],
+            'psychology'     => ['counseling','hr','recruitment','training'],
+            'communications' => ['content','writer','copywriter','social media','photography','videography','advertising','media'],
+            'architecture'   => ['architectural','interior design','drafting','cad','renovation','design'],
+            'law'            => ['legal','notarial'],
+            'general'        => [],
+        ];
+        $businessOwnerKeywords = ['owner','shop','store','freelancer','freelance','consultant','consultancy','business','agency','services','trading','founder','seller'];
+        $looksLikeBusiness = false;
+        foreach ($businessOwnerKeywords as $kw) {
+            if (str_contains($t, $kw)) { $looksLikeBusiness = true; break; }
+        }
+        if ($looksLikeBusiness) {
+            foreach ($domainKeywords[$group] ?? [] as $kw) {
+                if (str_contains($t, $kw)) return 'yes';
+            }
+        }
+
         // ── Cross-field teaching detection ──────────────────────────
         // Catches titles like "College Instructor" or "IT Trainer" for an
         // alumnus whose program group's own $yes/$partial lists above didn't
@@ -574,9 +611,63 @@ new class extends Component {
             'law'=>['Lawyer / Attorney','Legal Officer','Court Interpreter','Paralegal','Legal Researcher','Law Professor / Bar Reviewer'],
             'general'=>['Administrative Officer','Office Staff','Customer Service Representative','Sales Representative'],
         ];
-        $titles = $map[$this->getCourseGroup($this->course_code)] ?? $map['general'];
+        $group  = $this->getCourseGroup($this->course_code);
+        $titles = $map[$group] ?? $map['general'];
         $titles[] = 'Other';
         return $titles;
+    }
+
+    /**
+     * Occupation/Role options for SELF-EMPLOYED alumni.
+     *
+     * A self-employed alumnus is the owner/operator of a business, not a
+     * rank-and-file employee — so the options here describe the kind of
+     * business or freelance practice they run (e.g. "Computer Shop Owner"),
+     * not job titles like "IT Support Specialist" that only make sense for
+     * someone employed by a company. Grouped by the alumnus's course so the
+     * list still feels relevant to their program, with generic entrepreneur
+     * options always available regardless of course.
+     */
+    protected function buildSelfEmployedJobOptions(): array
+    {
+        $map = [
+            'technology'=>['Computer Shop Owner','Computer / Gadget Repair Shop Owner','IT Freelancer / Consultant','Web Development Freelancer','Software Development Freelancer','Graphic / Multimedia Design Freelancer','Tech Startup Founder','Online Tech Seller (Gadgets / Parts)','Social Media / Digital Marketing Freelancer'],
+            'nursing'=>['Home Care / Caregiving Service Owner','Freelance Private Nurse','Wellness / Massage Clinic Owner','Medical Supplies Trading'],
+            'education'=>['Tutorial / Review Center Owner','Freelance Tutor','Training Consultant','School Supplies / Learning Materials Business'],
+            'accounting'=>['Bookkeeping / Accounting Services Owner','Freelance Accountant / Auditor','Tax Consultant','Payroll Services Provider'],
+            'business'=>['Retail Store Owner','Online Seller / E-commerce Owner','Trading Business Owner','Sari-Sari Store Owner','Marketing / Business Consultant','Franchise Owner','Wholesale / Distribution Business'],
+            'engineering'=>['Construction Supplies / Contracting Business','Engineering Consultancy','Fabrication / Machine Shop Owner','Electrical / Mechanical Services Provider'],
+            'healthcare'=>['Pharmacy Owner','Medical / Dental Clinic Owner','Freelance Therapist','Medical Supplies Trading'],
+            'criminology'=>['Security Agency Owner','Private Investigation Services','Security Consultancy'],
+            'hospitality'=>['Restaurant / Eatery Owner','Food Cart / Food Stall Business','Catering Services Owner','Bakeshop / Bake Business Owner','Travel & Tours Agency Owner','Home-Based Lodging / Airbnb Host'],
+            'psychology'=>['Private Counseling Practice','HR / Recruitment Consultancy','Training & Development Consultant'],
+            'communications'=>['Content Creator / Influencer','Freelance Writer / Copywriter','Social Media Management Services','Photography / Videography Business','Advertising / Events Agency Owner'],
+            'architecture'=>['Architectural / Design Consultancy','Interior Design Services','Drafting / CAD Services Freelancer','Construction / Renovation Business'],
+            'law'=>['Private Legal Practice','Notarial Services','Legal Consultancy'],
+            'general'=>['Sari-Sari Store Owner','Online Seller / E-commerce Owner','Small Business Owner','Freelancer (General Services)'],
+        ];
+        $group  = $this->getCourseGroup($this->course_code);
+        $titles = $map[$group] ?? $map['general'];
+
+        // Generic entrepreneurial options that make sense regardless of course.
+        $titles[] = 'General Merchandise / Retail Business';
+        $titles[] = 'Freelancer (General Services)';
+        $titles[] = 'Other';
+
+        return array_values(array_unique($titles));
+    }
+
+    /**
+     * Returns the correct Occupation/Role option list for whatever
+     * employment_status is currently selected, so the blade never has to
+     * decide this itself. Falls back to the Employed list when status is
+     * blank/unemployed so the select never renders empty.
+     */
+    public function getCurrentJobOptionsProperty(): array
+    {
+        return $this->employment_status === 'self_employed'
+            ? $this->buildSelfEmployedJobOptions()
+            : $this->jobOptions;
     }
 
     protected function loadEmploymentRecord(): void
@@ -584,7 +675,6 @@ new class extends Component {
         $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based','internship'=>'Internship'];
         $workLocLabels= ['local'=>'Local / PH','abroad'=>'OFW / Abroad'];
         $careerLabels = ['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Professional'];
-        $eduLabels    = ['none'=>'None','pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate'];
         $relLabels    = ['yes'=>'Related to Program','no'=>'Not Related','partially'=>'Partially Related'];
         $unLabels     = ['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'];
         $statusLabels = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'];
@@ -608,7 +698,7 @@ new class extends Component {
                 'career_path_labels'    => array_values(array_filter(array_map(fn($v) => $careerLabels[$v] ?? null, $cp))),
                 'course_relevance'      => $relLabels[$current->course_relevance ?? ''] ?? '',
                 'unemployment_status'   => $unLabels[$current->unemployment_status ?? ''] ?? '',
-                'education_status'      => $eduLabels[$current->education_status ?? ''] ?? '',
+                'unemployment_reason'   => $current->unemployment_reason ?? '',
                 'submitted_at'          => $current->created_at ? \Carbon\Carbon::parse($current->created_at)->format('F j, Y') : '',
             ];
 
@@ -619,12 +709,15 @@ new class extends Component {
             $this->employment_type        = $current->employment_type     ?? '';
             $this->work_location          = $current->work_location       ?? '';
             $this->career_path            = $current->career_path ? json_decode($current->career_path, true) : [];
-            $this->education_status       = $current->education_status    ?? '';
             $this->course_relevance       = $current->course_relevance    ?? '';
             $this->unemployment_status    = $current->unemployment_status ?? '';
+            $this->unemployment_reason    = $current->unemployment_reason ?? '';
 
             $loaded = $current->job_title ?? '';
-            if ($loaded && !in_array($loaded, $this->jobOptions, true)) {
+            $optionsForLoaded = ($current->employment_status ?? '') === 'self_employed'
+                ? $this->buildSelfEmployedJobOptions()
+                : $this->jobOptions;
+            if ($loaded && !in_array($loaded, $optionsForLoaded, true)) {
                 $this->job_title = 'Other'; $this->custom_job_title = $loaded;
             } else {
                 $this->job_title = $loaded; $this->custom_job_title = '';
@@ -673,9 +766,35 @@ new class extends Component {
             $this->work_location = $this->course_relevance = $this->custom_job_title = '';
             $this->career_path = [];
         } else {
+            $this->unemployment_reason = '';
             $this->unemployment_status = '';
+            // "Internship" isn't a valid employment type for a business/
+            // self-employed alumnus — clear it if they had it selected
+            // before switching from Employed to Self-Employed.
+            if ($this->employment_status === 'self_employed' && $this->employment_type === 'internship') {
+                $this->employment_type = '';
+            }
+            // Employed and Self-Employed use two DIFFERENT Occupation/Role
+            // option lists (job titles vs. business/owner roles). A title
+            // picked under one status may not exist in the other's list, so
+            // clear the selection whenever the alumnus switches between the
+            // two — forces a fresh, correct pick instead of silently
+            // carrying over a mismatched value.
+            if (in_array($this->job_title, $this->currentJobOptions, true) === false) {
+                $this->job_title = '';
+                $this->custom_job_title = '';
+                $this->course_relevance = '';
+            }
         }
         $this->resetValidation();
+    }
+
+    public function updatedUnemploymentStatus(): void
+    {
+        if ($this->unemployment_status !== 'not_looking') {
+            $this->unemployment_reason = '';
+        }
+        $this->resetValidation('unemployment_reason');
     }
 
     public function updatedJobTitle(): void
@@ -696,9 +815,10 @@ new class extends Component {
         }
     }
 
-    protected function hasEmploymentChanged(): bool
+    public function hasEmploymentChanged(): bool
     {
         if (empty($this->employmentSnapshot)) return true;
+
         $isOther  = ($this->job_title === 'Other');
         $finalJob = $isOther ? $this->custom_job_title : $this->job_title;
         $snapJob  = $this->employmentSnapshot['job_title'] === 'Other'
@@ -712,9 +832,9 @@ new class extends Component {
             'employment_type'     => $this->employment_type,
             'work_location'       => $this->work_location,
             'career_path'         => $this->career_path,
-            'education_status'    => $this->education_status,
             'course_relevance'    => $this->course_relevance,
             'unemployment_status' => $this->unemployment_status,
+            'unemployment_reason' => trim($this->unemployment_reason),
         ];
         $snap = [
             'employment_status'   => $this->employmentSnapshot['employment_status']   ?? '',
@@ -723,13 +843,45 @@ new class extends Component {
             'employment_type'     => $this->employmentSnapshot['employment_type']     ?? '',
             'work_location'       => $this->employmentSnapshot['work_location']       ?? '',
             'career_path'         => $this->employmentSnapshot['career_path']         ?? [],
-            'education_status'    => $this->employmentSnapshot['education_status']    ?? '',
             'course_relevance'    => $this->employmentSnapshot['course_relevance']    ?? '',
             'unemployment_status' => $this->employmentSnapshot['unemployment_status'] ?? '',
+            'unemployment_reason' => trim($this->employmentSnapshot['unemployment_reason'] ?? ''),
         ];
         sort($current['career_path']);
         sort($snap['career_path']);
         return $current !== $snap;
+    }
+
+    // ── Mirrors the required-field rules in saveEmployment() so the Save
+    //    button can be disabled ahead of time, before the alumnus even hits
+    //    submit, whenever a required field for the current step is still
+    //    blank. ──
+    public function employmentRequiredFieldsFilled(): bool
+    {
+        if ($this->employment_status === '') return false;
+
+        $working = in_array($this->employment_status, ['employed', 'self_employed'], true);
+
+        if ($working) {
+            if ($this->company_name === '' || $this->job_title === '' ||
+                $this->employment_type === '' || $this->work_location === '') {
+                return false;
+            }
+            if ($this->job_title === 'Other' && trim($this->custom_job_title) === '') {
+                return false;
+            }
+        }
+
+        if ($this->employment_status === 'unemployed') {
+            if ($this->unemployment_status === '') {
+                return false;
+            }
+            if ($this->unemployment_status === 'not_looking' && trim($this->unemployment_reason) === '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function saveEmployment(): void
@@ -758,20 +910,22 @@ new class extends Component {
         $working = in_array($this->employment_status, ['employed', 'self_employed']);
         if ($working && $this->job_title && !$isOther) { $this->course_relevance = 'yes'; }
 
-        // NOTE: education_status is intentionally OPTIONAL — the alumnus can
-        // simply leave "Further Education" unanswered if it doesn't apply.
         $rules = [
             'employment_status' => 'required|in:employed,self_employed,unemployed',
-            'education_status'  => 'nullable|in:none,pursuing_masteral,pursuing_doctorate',
         ];
         $msgs = [
             'employment_status.required' => 'Please select your employment status.',
         ];
+        $isSelfEmployed = $this->employment_status === 'self_employed';
+        $employmentTypeOptions = $isSelfEmployed
+            ? 'full_time,part_time,contractual,project_based'
+            : 'full_time,part_time,contractual,project_based,internship';
+
         if ($working) {
             $rules += [
                 'company_name'    => 'required|string|max:255',
                 'job_title'       => 'required|string|max:255',
-                'employment_type' => 'required|in:full_time,part_time,contractual,project_based,internship',
+                'employment_type' => 'required|in:' . $employmentTypeOptions,
                 'work_location'   => 'required|in:local,abroad',
             ];
             $msgs += [
@@ -789,6 +943,12 @@ new class extends Component {
         if ($this->employment_status === 'unemployed') {
             $rules['unemployment_status'] = 'required|in:seeking_employment,not_looking';
             $msgs['unemployment_status.required'] = 'Please select your unemployment status.';
+
+            if ($this->unemployment_status === 'not_looking') {
+                $rules['unemployment_reason'] = ['required', 'string', 'max:255', 'regex:/[A-Za-z]/'];
+                $msgs['unemployment_reason.required'] = 'Please specify your reason.';
+                $msgs['unemployment_reason.regex']    = 'Reason cannot be just numbers — please enter a valid reason.';
+            }
         }
 
         try {
@@ -809,7 +969,6 @@ new class extends Component {
             $data = [
                 'alumni_id'           => $this->alumniId,
                 'employment_status'   => $this->employment_status,
-                'education_status'    => $this->education_status ?: null,
                 'company_name'        => $working ? ($this->company_name ?: null) : null,
                 'job_title'           => $working ? ($finalJobTitle ?: null) : null,
                 'employment_type'     => $working ? ($this->employment_type ?: null) : null,
@@ -818,6 +977,8 @@ new class extends Component {
                 'career_path'         => $working && count($this->career_path) ? json_encode(array_values($this->career_path)) : null,
                 'course_relevance'    => $finalRelevance,
                 'unemployment_status' => $this->employment_status === 'unemployed' ? ($this->unemployment_status ?: null) : null,
+                'unemployment_reason' => ($this->employment_status === 'unemployed' && $this->unemployment_status === 'not_looking')
+                    ? (trim($this->unemployment_reason) ?: null) : null,
                 'created_at'          => $now,
                 'updated_at'          => $now,
             ];
@@ -920,11 +1081,11 @@ new class extends Component {
 }
 
 .field-label {
-    font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     color: #333333; margin: 0; line-height: 1.4; padding-top: 1px;
 }
-.field-value { font-size: 1.05rem; font-weight: 600; color: #333333; word-break: break-word; margin: 0; }
-.field-value-empty { font-size: 0.95rem; font-style: italic; font-weight: 400; color: #333333; margin: 0; }
+.field-value { font-size: 1rem; font-weight: 600; color: #333333; word-break: break-word; margin: 0; }
+.field-value-empty { font-size: 0.9rem; font-style: italic; font-weight: 400; color: #333333; margin: 0; }
 
 .addr-toggle {
     display: inline-flex; align-items: center; background: #f3f4f6; border: 1px solid #dcdcdc;
@@ -1097,7 +1258,7 @@ input[type="date"].field-input:disabled {
 /* Section headers — clearly bigger than the field labels inside the card,
    so it reads as a header, not just another label. */
 .emp-card-title {
-    font-size: 1rem;
+    font-size: 1.15rem;
     font-weight: 700;
     text-transform: none;
     letter-spacing: 0;
@@ -1109,8 +1270,8 @@ input[type="date"].field-input:disabled {
     align-items: baseline;
     gap: 6px;
 }
-/* Back button — plain, sits at the very bottom of column 1 (after the
-   Further Education card), small and left-aligned (not full-width).
+/* Back button — plain, sits at the very bottom of column 1,
+   small and left-aligned (not full-width).
    No hover-shift/box-shadow effects — just the icon swapping to a
    spinner while $set is loading. */
 .emp-back-btn-bottom {
@@ -1127,23 +1288,23 @@ input[type="date"].field-input:disabled {
 .emp-card-body { padding: 0.7rem 0.85rem; }
 .emp-radio-tile {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
-    font-size: 0.8rem; font-weight: 500; color: #333333;
-    padding: 5px 9px; border-radius: 999px; border: 1.5px solid #e5e7eb;
+    font-size: 0.95rem; font-weight: 500; color: #333333;
+    padding: 6px 11px; border-radius: 999px; border: 1.5px solid #e5e7eb;
     transition: border-color .15s, background .15s;
     white-space: nowrap;
 }
 .emp-radio-tile:hover { border-color: #c9b3d6; }
 .emp-radio-tile input:checked ~ span { color: #5e2f72; font-weight: 600; }
 .emp-input-sm {
-    width: 100%; box-sizing: border-box; font-size: 0.85rem; font-weight: 500; color: #1f2937;
-    background: #f9fafb; border: 1.5px solid #e5e7eb; border-radius: 0.5rem; padding: 0.4rem 0.6rem;
+    width: 100%; box-sizing: border-box; font-size: 1rem; font-weight: 500; color: #1f2937;
+    background: #f9fafb; border: 1.5px solid #e5e7eb; border-radius: 0.5rem; padding: 0.45rem 0.65rem;
     outline: none; transition: border-color .15s, background .15s, box-shadow .15s;
 }
 .emp-input-sm:hover { border-color: #cbd5e1; }
 .emp-input-sm:focus { border-color: #7a3f91; box-shadow: 0 0 0 3px rgba(122,63,145,.1); background: #fff; }
 /* Softer, more readable field labels — no longer overly bold/loud */
 .emp-label-sm {
-    display: block; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+    display: block; font-size: 0.85rem; font-weight: 600; text-transform: uppercase;
     letter-spacing: .025em; color: #333333; margin-bottom: 0.35rem;
 }
 </style>
@@ -1365,14 +1526,14 @@ function phAddress(initial) {
             </div>
             <div>
                 <div class="flex items-center gap-2.5 flex-wrap">
-                    <h1 class="text-base sm:text-lg font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Professional &amp; Personal Information</h1>
+                    <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Professional &amp; Personal Information</h1>
                     @if($editingProfile)
                         <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-300">
                             <i class="fas fa-pen text-[9px]"></i> Edit Mode
                         </span>
                     @endif
                 </div>
-                <p class="text-[11px] sm:text-xs leading-relaxed mt-0.5 text-gray-800" style="user-select:none;-webkit-user-select:none;">
+                <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
                     @if($editingProfile)
                         Complete your details below. Fields marked <span class="text-red-500 font-semibold">*</span> are required.
                     @else
@@ -1452,9 +1613,9 @@ function phAddress(initial) {
         </div>
     @endif
     @if($profileComplete && !$editingProfile && !$this->canEditProfile)
-        <div class="rounded-xl px-4 py-2 text-xs border bg-gray-50 text-gray-600 border-gray-200 flex items-center gap-2 flex-shrink-0">
+        <div class="rounded-xl px-4 py-2 text-xs border bg-gray-50 text-gray-700 border-gray-200 flex items-center gap-2 flex-shrink-0">
             <i class="fas fa-lock flex-shrink-0"></i>
-            <span>Profile is locked. You can update it again in {{ $this->profileCooldownDaysLeft }} day(s).</span>
+            <span class="font-semibold">Profile is locked. You can update it again in {{ $this->profileCooldownDaysLeft }} day(s).</span>
         </div>
     @endif
 
@@ -1701,7 +1862,7 @@ function phAddress(initial) {
                                     </select>
                                     <input x-show="mode === 'manual'" wire:model="address_province" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input uppercase {{ $errors->has('address_province') ? 'field-error' : '' }}">
-                                    <p class="text-[11px] text-[#333333] m-0" x-show="mode === 'dropdown' && !loading && provinces.length === 0">No provinces loaded. Switch to Type instead.</p>
+                                    <p class="text-[12.5px] text-[#333333] m-0" x-show="mode === 'dropdown' && !loading && provinces.length === 0">No provinces loaded. Switch to Type instead.</p>
                                     @error('address_province') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
                                 @else
                                     @if($address_province)<p class="field-value">{{ strtoupper($address_province) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
@@ -1720,7 +1881,7 @@ function phAddress(initial) {
                                     </select>
                                     <input x-show="mode === 'manual'" wire:model="address_municipality" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input uppercase {{ $errors->has('address_municipality') ? 'field-error' : '' }}">
-                                    <p class="text-[11px] text-[#333333] m-0" x-show="mode === 'dropdown' && !selected.provinceCode">Select province first.</p>
+                                    <p class="text-[12.5px] text-[#333333] m-0" x-show="mode === 'dropdown' && !selected.provinceCode">Select province first.</p>
                                     @error('address_municipality') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
                                 @else
                                     @if($address_municipality)<p class="field-value">{{ strtoupper($address_municipality) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
@@ -1739,7 +1900,7 @@ function phAddress(initial) {
                                     </select>
                                     <input x-show="mode === 'manual'" wire:model="address_barangay" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input uppercase {{ $errors->has('address_barangay') ? 'field-error' : '' }}">
-                                    <p class="text-[11px] text-[#333333] m-0" x-show="mode === 'dropdown' && !selected.cityCode">Select municipality/city first.</p>
+                                    <p class="text-[12.5px] text-[#333333] m-0" x-show="mode === 'dropdown' && !selected.cityCode">Select municipality/city first.</p>
                                     @error('address_barangay') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
                                 @else
                                     @if($address_barangay)<p class="field-value">{{ strtoupper($address_barangay) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
@@ -1856,10 +2017,16 @@ function phAddress(initial) {
                                         <p class="field-value">{{ implode(' · ', array_filter([$currentRecord['employment_type'], $currentRecord['work_location']])) ?: '—' }}</p>
                                     </div>
                                 @else
-                                    <div class="flex flex-col gap-1 sm:col-span-3 field-block">
+                                    <div class="flex flex-col gap-1 field-block">
                                         <p class="field-label">Job Search Status</p>
                                         <p class="field-value">{{ $currentRecord['unemployment_status'] ?: '—' }}</p>
                                     </div>
+                                    @if(($currentRecord['unemployment_reason'] ?? '') !== '')
+                                    <div class="flex flex-col gap-1 field-block">
+                                        <p class="field-label">Reason</p>
+                                        <p class="field-value">{{ $currentRecord['unemployment_reason'] }}</p>
+                                    </div>
+                                    @endif
                                 @endif
                             </div>
                             <p class="text-xs text-[#333333] mt-3">Submitted: {{ $currentRecord['submitted_at'] }}</p>
@@ -1942,12 +2109,15 @@ function phAddress(initial) {
                 </div>
             </div>
             <div class="flex items-center gap-2">
+                @php $empCanSave = $this->employmentRequiredFieldsFilled() && $this->hasEmploymentChanged(); @endphp
                 <div class="emp-hdr-btn-wrap">
-                    <button type="button" @click="showEmpConfirm = true"
-                            class="emp-hdr-btn bg-emerald-500 text-white hover:bg-emerald-600">
+                    <button type="button"
+                            @click="if (!$el.disabled) { showEmpConfirm = true }"
+                            {{ $empCanSave ? '' : 'disabled' }}
+                            class="emp-hdr-btn {{ $empCanSave ? 'bg-emerald-500 text-white hover:bg-emerald-600 cursor-pointer' : 'bg-white/10 text-white/40 cursor-not-allowed' }}">
                         <i class="fas fa-floppy-disk text-sm"></i>
                     </button>
-                    <span class="emp-hdr-tip">Save</span>
+                    <span class="emp-hdr-tip">{{ $empCanSave ? 'Save' : 'No changes yet' }}</span>
                 </div>
                 <div class="emp-hdr-btn-wrap">
                     <button wire:click="cancelEditingEmployment" type="button"
@@ -1986,44 +2156,39 @@ function phAddress(initial) {
                                 </label>
                                 @endforeach
                             </div>
-                            @error('employment_status') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
+                            @error('employment_status') <p class="text-[12.5px] text-red-500 mt-1.5">{{ $message }}</p> @enderror
                         </div>
                     </div>
 
                     @if($employment_status === 'unemployed')
                     <div class="emp-card">
                         <div class="emp-card-title">Unemployment Status</div>
-                        <div class="emp-card-body">
-                            <label class="emp-label-sm">Job Search Status <span class="text-red-500">*</span></label>
-                            <div class="flex flex-wrap gap-2">
-                                @foreach(['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'] as $val=>$lbl)
-                                <label class="emp-radio-tile">
-                                    <input wire:model="unemployment_status" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
-                                    <span>{{ $lbl }}</span>
-                                </label>
-                                @endforeach
+                        <div class="emp-card-body flex flex-col gap-3">
+                            <div>
+                                <label class="emp-label-sm">Job Search Status <span class="text-red-500">*</span></label>
+                                <div class="flex flex-wrap gap-2">
+                                    @foreach(['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'] as $val=>$lbl)
+                                    <label class="emp-radio-tile">
+                                        <input wire:model.live="unemployment_status" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
+                                        <span>{{ $lbl }}</span>
+                                    </label>
+                                    @endforeach
+                                </div>
+                                @error('unemployment_status') <p class="text-[12.5px] text-red-500 mt-1.5">{{ $message }}</p> @enderror
                             </div>
-                            @error('unemployment_status') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
+
+                            @if($unemployment_status === 'not_looking')
+                            <div>
+                                <label class="emp-label-sm">Please Specify Reason <span class="text-red-500">*</span></label>
+                                <input wire:model.live.debounce.400ms="unemployment_reason" type="text" maxlength="255"
+                                       placeholder="e.g. Further studies, health reasons, taking care of family"
+                                       class="emp-input-sm {{ $errors->has('unemployment_reason') ? 'field-error' : '' }}">
+                                @error('unemployment_reason') <p class="text-[12.5px] text-red-500 mt-1">{{ $message }}</p> @enderror
+                            </div>
+                            @endif
                         </div>
                     </div>
                     @endif
-
-                    <div class="emp-card">
-                        <div class="emp-card-title">Further Education <span class="emp-card-optional">(optional)</span></div>
-                        <div class="emp-card-body">
-                            <label class="emp-label-sm">Education Status</label>
-                            <div class="flex flex-wrap gap-2">
-                                @foreach(['none'=>'None','pursuing_masteral'=>'Pursuing Masteral','pursuing_doctorate'=>'Pursuing Doctorate'] as $val=>$lbl)
-                                <label class="emp-radio-tile">
-                                    <input wire:model="education_status" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
-                                    <span>{{ $lbl }}</span>
-                                </label>
-                                @endforeach
-                            </div>
-                            <p class="text-[11px] text-[#333333] mt-1.5">You may leave this unanswered if it doesn't apply to you.</p>
-                            @error('education_status') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
-                        </div>
-                    </div>
 
                     @if($employment_status)
                     <button type="button"
@@ -2047,21 +2212,21 @@ function phAddress(initial) {
                         <div class="emp-card-body flex flex-col gap-3">
                             <div>
                                 <label class="emp-label-sm">{{ $isSelf ? 'Business Name' : 'Company Name' }} <span class="text-red-500">*</span></label>
-                                <input wire:model="company_name" type="text"
+                                <input wire:model.live.debounce.400ms="company_name" type="text"
                                        oninput="this.value=this.value.toUpperCase()"
                                        class="emp-input-sm uppercase {{ $errors->has('company_name') ? 'field-error' : '' }}">
-                                @error('company_name') <p class="text-[11px] text-red-400 mt-1">{{ $message }}</p> @enderror
+                                @error('company_name') <p class="text-[12.5px] text-red-500 mt-1">{{ $message }}</p> @enderror
                             </div>
                             <div>
                                 <label class="emp-label-sm">{{ $isSelf ? 'Occupation / Role' : 'Job Title' }} <span class="text-red-500">*</span></label>
                                 <select wire:model.live="job_title"
                                         class="emp-input-sm {{ $errors->has('job_title') ? 'field-error' : '' }}">
-                                    <option value="">Select Job Title</option>
-                                    @foreach($jobOptions as $title)<option value="{{ $title }}">{{ $title }}</option>@endforeach
+                                    <option value="">{{ $isSelf ? 'Select Business / Role' : 'Select Job Title' }}</option>
+                                    @foreach($this->currentJobOptions as $title)<option value="{{ $title }}">{{ $title }}</option>@endforeach
                                 </select>
-                                @error('job_title') <p class="text-[11px] text-red-400 mt-1">{{ $message }}</p> @enderror
+                                @error('job_title') <p class="text-[12.5px] text-red-500 mt-1">{{ $message }}</p> @enderror
                                 @if($job_title && $job_title !== 'Other')
-                                    <p class="text-[11px] text-[#333333] mt-1 font-medium">Auto-detected: Related to your program.</p>
+                                    <p class="text-[12.5px] text-[#333333] mt-1 font-medium">Auto-detected: Related to your program.</p>
                                 @endif
                                 @if($job_title === 'Other')
                                 <div class="mt-2 space-y-2">
@@ -2069,7 +2234,7 @@ function phAddress(initial) {
                                         <label class="emp-label-sm">Please Specify <span class="text-red-500">*</span></label>
                                         <input wire:model.live="custom_job_title" type="text" maxlength="255"
                                                class="emp-input-sm {{ $errors->has('custom_job_title') ? 'field-error' : '' }}">
-                                        @error('custom_job_title') <p class="text-[11px] text-red-400 mt-1">{{ $message }}</p> @enderror
+                                        @error('custom_job_title') <p class="text-[12.5px] text-red-500 mt-1">{{ $message }}</p> @enderror
                                     </div>
                                     @if($custom_job_title)
                                     @php
@@ -2100,33 +2265,37 @@ function phAddress(initial) {
                             <div>
                                 <label class="emp-label-sm">Employment Type <span class="text-red-500">*</span></label>
                                 <div class="flex flex-wrap gap-2">
-                                    @foreach(['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based','internship'=>'Internship'] as $val=>$lbl)
+                                    @php
+                                        $empTypeOptions = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based'];
+                                        if (!$isSelf) { $empTypeOptions['internship'] = 'Internship'; }
+                                    @endphp
+                                    @foreach($empTypeOptions as $val=>$lbl)
                                     <label class="emp-radio-tile">
-                                        <input wire:model="employment_type" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
+                                        <input wire:model.live="employment_type" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
                                         <span>{{ $lbl }}</span>
                                     </label>
                                     @endforeach
                                 </div>
-                                @error('employment_type') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
+                                @error('employment_type') <p class="text-[12.5px] text-red-500 mt-1.5">{{ $message }}</p> @enderror
                             </div>
                             <div>
                                 <label class="emp-label-sm">Work Location <span class="text-red-500">*</span></label>
                                 <div class="flex flex-wrap gap-2">
                                     @foreach(['local'=>'Local / PH','abroad'=>'OFW / Abroad'] as $val=>$lbl)
                                     <label class="emp-radio-tile">
-                                        <input wire:model="work_location" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
+                                        <input wire:model.live="work_location" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
                                         <span>{{ $lbl }}</span>
                                     </label>
                                     @endforeach
                                 </div>
-                                @error('work_location') <p class="text-[11px] text-red-400 mt-1.5">{{ $message }}</p> @enderror
+                                @error('work_location') <p class="text-[12.5px] text-red-500 mt-1.5">{{ $message }}</p> @enderror
                             </div>
                             <div>
                                 <label class="emp-label-sm">Career Path <span class="normal-case font-normal text-[#333333]">(optional)</span></label>
                                 <div class="flex flex-wrap gap-2">
                                     @foreach(['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Pro'] as $val=>$lbl)
                                     <label class="emp-radio-tile">
-                                        <input wire:model="career_path" type="checkbox" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
+                                        <input wire:model.live="career_path" type="checkbox" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
                                         <span>{{ $lbl }}</span>
                                     </label>
                                     @endforeach

@@ -16,7 +16,7 @@
         color: #111111;
         margin: 0;
         padding: 0;
-        font-size: 12px;
+        font-size: 11px;
     }
 
     .rp-header {
@@ -31,9 +31,9 @@
         vertical-align: bottom;
     }
     .rp-header-right { text-align: right; }
-    .rp-header h1 { font-size: 12px; margin: 0; color: #7A3F91; }
-    .rp-header p  { margin: 2px 0 0; font-size: 12px; color: #555555; }
-    .rp-meta      { font-size: 12px; color: #555555; white-space: nowrap; line-height: 1.5; }
+    .rp-header h1 { font-size: 13px; margin: 0; color: #7A3F91; }
+    .rp-header p  { margin: 2px 0 0; font-size: 10.5px; color: #555555; }
+    .rp-meta      { font-size: 10.5px; color: #555555; white-space: nowrap; line-height: 1.5; }
 
     /* FIX (borders kept vanishing / landing randomly): dompdf's
        border-collapse:collapse has known bugs where shared borders
@@ -55,7 +55,7 @@
     thead th {
         background: #F5F0FA;
         color: #333333;
-        font-size: 12px;
+        font-size: 10.5px;
         text-transform: uppercase;
         letter-spacing: .01em;
         text-align: left;
@@ -63,18 +63,19 @@
         border-bottom: 1.5px solid #E0D3EC;
         white-space: normal;
         word-break: break-word;
-        line-height: 1.25;
+        line-height: 1.3;
         vertical-align: bottom;
     }
 
     tbody td {
         padding: 5px 7px;
         border-bottom: 1px solid #E5E5E5;
-        font-size: 12px;
+        font-size: 11px;
         vertical-align: top;
         background: #ffffff;
         overflow: hidden;
         word-break: break-word;
+        line-height: 1.35;
     }
 
     tbody tr:first-child td { border-top: none; }
@@ -87,7 +88,7 @@
     .rp-badge {
         display: inline;
         padding: 0;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .02em;
@@ -95,15 +96,34 @@
     .rp-complete { color: #059669; }
     .rp-pending  { color: #D97706; }
 
+    .rp-emp-badge {
+        display: inline;
+        padding: 0;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .02em;
+    }
     .rp-emp-employed      { color: #7A3F91; }
     .rp-emp-self_employed { color: #1D4ED8; }
     .rp-emp-unemployed    { color: #B45309; }
     .rp-emp-no_record     { color: #6B7280; }
 
+    .rp-emp-sub {
+        display: block;
+        margin-top: 2px;
+        font-size: 9.5px;
+        font-weight: 400;
+        text-transform: none;
+        color: #111111;
+        white-space: normal;
+        word-break: break-word;
+    }
+
     .rp-page-block { page-break-after: always; }
     .rp-page-block:last-child { page-break-after: auto; }
 
-    .rp-empty { text-align: center; padding: 60px 0; color: #999999; font-size: 12px; }
+    .rp-empty { text-align: center; padding: 60px 0; color: #999999; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -141,6 +161,20 @@
         'unemployed'    => ['Unemployed',    'rp-emp-unemployed'],
         default         => ['No Record',     'rp-emp-no_record'],
     };
+
+    // Same sub-line shown under the on-screen Unemployed badge:
+    // "Actively Seeking Employment" as-is, or the alumnus's own typed
+    // reason ("Nag-aaral pa", etc.) when they picked "Not Currently
+    // Looking". Mirrors unemploymentSubline() in the Volt component so
+    // the PDF/print export always matches what's on screen.
+    $empSubline = fn($row) => match (true) {
+        ($row->employment_status ?? null) !== 'unemployed' => '',
+        ($row->unemployment_status ?? null) === 'seeking_employment' => 'Actively Seeking Employment',
+        ($row->unemployment_status ?? null) === 'not_looking' => trim((string) ($row->unemployment_reason ?? '')) !== ''
+            ? trim((string) $row->unemployment_reason)
+            : 'Not Currently Looking',
+        default => '',
+    };
 @endphp
 
 @forelse($chunks as $pageIndex => $chunk)
@@ -161,13 +195,13 @@
     <table>
         <thead>
             <tr>
-                <th style="width:16%;">Name</th>
-                <th style="width:10%;">Student ID</th>
-                <th style="width:9%;">Programs</th>
-                <th style="width:8%;">Batch</th>
-                <th style="width:26%;">Email</th>
-                <th style="width:16%;">Employment Status</th>
-                <th style="width:15%;">Status</th>
+                <th style="width:15%;">Name</th>
+                <th style="width:11%;">Student ID</th>
+                <th style="width:11%;">Programs</th>
+                <th style="width:7%;">Batch</th>
+                <th style="width:22%;">Email</th>
+                <th style="width:18%;">Employment Status</th>
+                <th style="width:16%;">Status</th>
             </tr>
         </thead>
         <tbody>
@@ -179,8 +213,14 @@
                 <td>{{ $item->batch }}</td>
                 <td>{{ $item->email }}</td>
                 <td>
-                    @php [$empLabel, $empClass] = $empStatusLabel($item); @endphp
-                    <span class="rp-badge {{ $empClass }}">{{ $empLabel }}</span>
+                    @php
+                        [$empLabel, $empClass] = $empStatusLabel($item);
+                        $empSub = $empSubline($item);
+                    @endphp
+                    <span class="rp-emp-badge {{ $empClass }}">{{ $empLabel }}</span>
+                    @if($empSub !== '')
+                        <span class="rp-emp-sub">{{ $empSub }}</span>
+                    @endif
                 </td>
                 <td>
                     @if($isComplete($item))

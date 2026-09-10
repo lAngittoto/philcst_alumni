@@ -53,6 +53,28 @@ class RegistrarAlumniExportController extends Controller
             ->limit(1),
         ]);
 
+        // Same "latest wins" lookup for the two Unemployment sub-fields
+        // — needed so the PDF/print export can show "Actively Seeking
+        // Employment" or the alumnus's own typed reason ("Nag-aaral pa",
+        // etc.) under the Unemployed badge, matching what's on screen
+        // in the Volt component's table.
+        $q->addSelect(['unemployment_status' => DB::table('employment_trackings')
+            ->select('unemployment_status')
+            ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
+            ->whereNull('employment_trackings.deleted_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(1),
+        ]);
+        $q->addSelect(['unemployment_reason' => DB::table('employment_trackings')
+            ->select('unemployment_reason')
+            ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
+            ->whereNull('employment_trackings.deleted_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(1),
+        ]);
+
         $search = trim((string) $request->query('search', ''));
         $filter = (string) $request->query('profile_filter', 'all');
 
@@ -251,6 +273,26 @@ class RegistrarAlumniExportController extends Controller
         };
     }
 
+    /** Text for the extra "Job Search Status / Reason" Excel column —
+     *  mirrors unemploymentSubline() in the Volt component: "Actively
+     *  Seeking Employment" as-is, or the alumnus's own typed reason
+     *  (e.g. "Nag-aaral pa") when they picked "Not Currently Looking".
+     *  Blank for every status other than Unemployed. */
+    private function unemploymentSublineLabel($item): string
+    {
+        if (($item->employment_status ?? null) !== 'unemployed') {
+            return '';
+        }
+
+        return match ($item->unemployment_status ?? null) {
+            'seeking_employment' => 'Actively Seeking Employment',
+            'not_looking' => trim((string) ($item->unemployment_reason ?? '')) !== ''
+                ? trim((string) $item->unemployment_reason)
+                : 'Not Currently Looking',
+            default => '',
+        };
+    }
+
     public function export(Request $request)
     {
         $type = $request->query('type', 'pdf');
@@ -274,10 +316,12 @@ class RegistrarAlumniExportController extends Controller
 
     /*
      * Columns: Name, Student ID, Standard Abbreviation, Batch, Email,
-     * Employment Status, Status. Status reflects the real
-     * profile_completed value per row; Employment Status now reflects
-     * the latest employment_trackings row instead of being missing
-     * entirely.
+     * Employment Status, Job Search Status / Reason, Status. Status
+     * reflects the real profile_completed value per row; Employment
+     * Status now reflects the latest employment_trackings row instead
+     * of being missing entirely. Job Search Status / Reason is blank
+     * unless Employment Status is Unemployed — then it shows either
+     * "Actively Seeking Employment" or the alumnus's own typed reason.
      */
     private function toXlsx($records): \Symfony\Component\HttpFoundation\StreamedResponse
     {
@@ -291,10 +335,10 @@ class RegistrarAlumniExportController extends Controller
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Alumni Records');
 
-        $headers = ['Name', 'Student ID', 'Standard Abbreviation', 'Batch', 'Email', 'Employment Status', 'Status'];
+        $headers = ['Name', 'Student ID', 'Standard Abbreviation', 'Batch', 'Email', 'Employment Status', 'Job Search Status / Reason', 'Status'];
         $sheet->fromArray($headers, null, 'A1');
 
-        $headerRange = 'A1:G1';
+        $headerRange = 'A1:H1';
         $sheet->getStyle($headerRange)->getFont()->setBold(true)->getColor()->setRGB('333333');
         $sheet->getStyle($headerRange)->getFill()
             ->setFillType(Fill::FILL_SOLID)
@@ -314,6 +358,7 @@ class RegistrarAlumniExportController extends Controller
                 $item->batch,
                 $item->email,
                 $this->employmentStatusLabel($item),
+                $this->unemploymentSublineLabel($item),
                 $isComplete ? 'Complete' : 'Pending',
             ];
         }
@@ -321,14 +366,14 @@ class RegistrarAlumniExportController extends Controller
             $sheet->fromArray($rows, null, 'A2');
         }
 
-        foreach (['A', 'B', 'C', 'D', 'E', 'F', 'G'] as $col) {
+        foreach (['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as $col) {
             $sheet->getColumnDimension($col)->setAutoSize(true);
         }
         $sheet->freezePane('A2');
 
         $rowNum = 2;
         foreach ($statusFlags as $isComplete) {
-            $cell = 'G' . $rowNum;
+            $cell = 'H' . $rowNum;
             $sheet->getStyle($cell)->getFont()->setBold(true)
                 ->getColor()->setRGB($isComplete ? '059669' : 'D97706');
             $sheet->getStyle($cell)->getFill()

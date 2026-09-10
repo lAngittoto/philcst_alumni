@@ -373,6 +373,24 @@ new class extends Component {
         };
     }
 
+    /** Small sub-line shown under the Unemployed badge in the table:
+     *  "Actively Seeking Employment" as-is, or the alumnus's own typed
+     *  reason (e.g. "Nag-aaral pa") when they picked "Not Currently
+     *  Looking". Returns '' when there's nothing to show (not
+     *  unemployed, or no unemployment_status recorded yet). */
+    public function unemploymentSubline(?string $status, ?string $unemploymentStatus, ?string $unemploymentReason): string
+    {
+        if ($status !== 'unemployed') return '';
+
+        return match ($unemploymentStatus) {
+            'seeking_employment' => 'Actively Seeking Employment',
+            'not_looking'        => trim((string) $unemploymentReason) !== ''
+                ? trim((string) $unemploymentReason)
+                : 'Not Currently Looking',
+            default => '',
+        };
+    }
+
     /** Clears both the row-highlight AND the notif-scoped table view.
      *  Called any time the user takes an action that means "I'm done
      *  with whatever the notification pointed me to" — typing a search,
@@ -618,6 +636,27 @@ new class extends Component {
         // join. Same "latest wins" ordering as viewProfile()'s lookup.
         $q->addSelect(['employment_status' => DB::table('employment_trackings')
             ->select('employment_status')
+            ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
+            ->whereNull('employment_trackings.deleted_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(1),
+        ]);
+
+        // Same "latest wins" lookup for the two Unemployment sub-fields —
+        // needed so the table can show "Actively Seeking Employment" vs.
+        // the alumnus's own typed-in reason ("Nag-aaral pa", etc.) right
+        // under the Unemployed badge, without a full join.
+        $q->addSelect(['unemployment_status' => DB::table('employment_trackings')
+            ->select('unemployment_status')
+            ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
+            ->whereNull('employment_trackings.deleted_at')
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(1),
+        ]);
+        $q->addSelect(['unemployment_reason' => DB::table('employment_trackings')
+            ->select('unemployment_reason')
             ->whereColumn('employment_trackings.alumni_id', 'alumni.id')
             ->whereNull('employment_trackings.deleted_at')
             ->orderByDesc('created_at')
@@ -2167,11 +2206,21 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             <td class="px-4 py-3 text-center overflow-hidden">
                                 <span class="font-mono text-[#333333] text-sm font-semibold uppercase">{{ $item->batch }}</span>
                             </td>
-                            <td class="px-4 py-3 text-center overflow-hidden">
-                                @php [$arEmpLabel, $arEmpClasses, $arEmpIcon] = $this->employmentStatusBadge($item->employment_status ?? null); @endphp
-                                <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap {{ $arEmpClasses }}">
-                                    <i class="fas {{ $arEmpIcon }} text-[10px]"></i>{{ $arEmpLabel }}
-                                </span>
+                            <td class="px-4 py-3 text-center">
+                                @php
+                                    [$arEmpLabel, $arEmpClasses, $arEmpIcon] = $this->employmentStatusBadge($item->employment_status ?? null);
+                                    $arUnempSub = $this->unemploymentSubline($item->employment_status ?? null, $item->unemployment_status ?? null, $item->unemployment_reason ?? null);
+                                @endphp
+                                <div class="flex flex-col items-center gap-1">
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border whitespace-nowrap {{ $arEmpClasses }}">
+                                        <i class="fas {{ $arEmpIcon }} text-[9px]"></i>{{ $arEmpLabel }}
+                                    </span>
+                                    @if($arUnempSub !== '')
+                                    <span class="text-[11px] leading-snug text-[#333333] font-medium" style="white-space:normal;word-break:break-word;max-width:100%;">
+                                        {{ $arUnempSub }}
+                                    </span>
+                                    @endif
+                                </div>
                             </td>
                             <td class="px-4 py-3 overflow-hidden ar-col-email">
                                 <span class="text-[#333333] text-sm font-normal truncate block">
@@ -2228,11 +2277,19 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                 <span class="text-[#CCCCCC] text-xs">&bull;</span>
                                 <span class="font-mono text-[#333333] text-xs font-semibold">Batch {{ $item->batch }}</span>
                             </div>
-                            @php [$arEmpLabelM, $arEmpClassesM, $arEmpIconM] = $this->employmentStatusBadge($item->employment_status ?? null); @endphp
-                            <div class="mt-1.5">
+                            @php
+                                [$arEmpLabelM, $arEmpClassesM, $arEmpIconM] = $this->employmentStatusBadge($item->employment_status ?? null);
+                                $arUnempSubM = $this->unemploymentSubline($item->employment_status ?? null, $item->unemployment_status ?? null, $item->unemployment_reason ?? null);
+                            @endphp
+                            <div class="mt-1.5 flex flex-col gap-1 items-start">
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border {{ $arEmpClassesM }}">
                                     <i class="fas {{ $arEmpIconM }} text-[9px]"></i>{{ $arEmpLabelM }}
                                 </span>
+                                @if($arUnempSubM !== '')
+                                <span class="text-[10.5px] leading-snug text-[#333333] font-medium" style="white-space:normal;word-break:break-word;">
+                                    {{ $arUnempSubM }}
+                                </span>
+                                @endif
                             </div>
                         </div>
                         <i class="fas fa-chevron-right text-[#CCCCCC] text-xs shrink-0"></i>
@@ -2805,8 +2862,15 @@ compressImage(file, maxW, maxH, quality) {
 
                                 @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']))
                                 <div class="ar-cell">
-                                    <p class="ar-field-label">Unemployment Reason</p>
+                                    <p class="ar-field-label">Job Search Status</p>
                                     <p class="ar-field-value">{{ $unempMap[$emp['unemployment_status']] ?? '—' }}</p>
+                                </div>
+                                @endif
+
+                                @if($empStatus === 'unemployed' && ($emp['unemployment_status'] ?? '') === 'not_looking' && !empty($emp['unemployment_reason']))
+                                <div class="ar-cell">
+                                    <p class="ar-field-label">Reason</p>
+                                    <p class="ar-field-value">{{ $emp['unemployment_reason'] }}</p>
                                 </div>
                                 @endif
 

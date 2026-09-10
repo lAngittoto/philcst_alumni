@@ -255,6 +255,28 @@ new class extends Component {
         return asset('storage/job/default-photo-job.jpg');
     }
 
+    // Wraps the part of $text that matches the current search term in a
+    // light-blue highlight span. Escapes the text itself first so this
+    // is safe to output with {!! !!} even though $text comes from user
+    // input (job postings) — only the match wrapper is real HTML.
+    public function highlightMatch(?string $text): string
+    {
+        $text = (string) $text;
+        $escaped = e($text);
+
+        $term = trim($this->search);
+        if ($term === '') {
+            return $escaped;
+        }
+
+        $escapedTerm = e($term);
+        return preg_replace(
+            '/(' . preg_quote($escapedTerm, '/') . ')/i',
+            '<mark class="bg-sky-100 text-inherit rounded px-0.5">$1</mark>',
+            $escaped
+        );
+    }
+
     // Same marker scheme used in messenger.blade.php's chat_rooms table:
     // the college-wide room is stored with course_code = 'CLG_' + a short
     // hash of the college name, and batch = 0.
@@ -566,10 +588,49 @@ select.filter-input {
     stroke-linecap: round; stroke-linejoin: round;
 }
 
-[data-jb-card] { transition: border-color .15s ease, box-shadow .15s ease; }
+[data-jb-card] { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
 [data-jb-card]:hover {
     border-color: #c4b5d4 !important;
     box-shadow: 0 4px 20px rgba(122,63,145,.12) !important;
+}
+
+/* ── Job card click spinner ───────────────────────────
+   Same purple "..." dot loader used on the Alumni Dashboard
+   (.dash-card-clickable), applied here to the job card since
+   it opens the detail view via wire:click instead of a page nav. */
+[data-jb-card].is-loading > *:not(.jb-card-spinner) {
+    filter: blur(4px);
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
+}
+.jb-card-spinner {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    z-index: 40;
+}
+.jb-card-spinner span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #7A3F91;
+    animation: jbDotPulse 1.1s ease-in-out infinite;
+}
+.jb-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+.jb-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes jbDotPulse {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+[data-jb-card].is-loading .jb-card-spinner {
+    display: flex;
+}
+[data-jb-card].is-loading {
+    pointer-events: none;
 }
 
 .card-share-btn {
@@ -817,7 +878,7 @@ select.filter-input {
             </div>
             <div>
                 <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Job Opportunities</h1>
-                <p class="text-sm leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+                <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
                     Openings available for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
                         {{ $alumniCollege ?: 'your college' }}
@@ -831,7 +892,7 @@ select.filter-input {
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
+        <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
 
             <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
 
@@ -840,7 +901,7 @@ select.filter-input {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
                 <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
-                       placeholder="Title, company, location…"
+                       placeholder="Search…"
                        class="filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                               hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
@@ -869,13 +930,17 @@ select.filter-input {
                 <option value="Expert Level (5+ Years)">Expert Level (5+ Years)</option>
             </select>
 
+            @php $hasActiveFilters = $search !== '' || $filterType !== '' || $filterLevel !== '' || $filterSort !== 'recent'; @endphp
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    @disabled(!$hasActiveFilters)
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold
-                           bg-white border border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300
-                           transition active:scale-95 cursor-pointer">
+                           border transition active:scale-95
+                           {{ $hasActiveFilters
+                                ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
+                                : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-xs"></i>
                 </span>
@@ -926,6 +991,8 @@ select.filter-input {
                      role="button" tabindex="0"
                      onkeypress="if(event.key==='Enter')this.click()">
 
+                    <div class="jb-card-spinner"><span></span><span></span><span></span></div>
+
                     <div class="relative w-full h-40 bg-gray-50 flex-shrink-0 overflow-hidden pointer-events-none">
                         <img src="{{ $cardImageUrl }}" alt="{{ $job->job_title }}"
                              loading="lazy"
@@ -940,7 +1007,7 @@ select.filter-input {
 
                     <div class="flex flex-col flex-1 p-4 gap-2.5">
 
-                        <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{{ $job->job_title }}</h3>
+                        <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{!! $this->highlightMatch($job->job_title) !!}</h3>
 
                         @if($descPreview)
                         <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
@@ -1168,7 +1235,7 @@ select.filter-input {
                 @endif
 
                 <div>
-                    <p class="text-[9px] font-bold uppercase tracking-[.16em] mb-1" style="color:#666;">Job Title</p>
+                    <p class="text-[11px] font-bold uppercase tracking-[.16em] mb-1" style="color:#666;">Job Title</p>
                     <h2 class="text-xl font-semibold leading-snug mb-1.5" style="color:#333333;">{{ $job->job_title }}</h2>
                     <p class="text-sm font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $job->company_name }}</p>
                 </div>
@@ -1302,7 +1369,7 @@ select.filter-input {
 
                     <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
                         <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                            <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Job Description</span>
+                            <span class="text-[11px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Job Description</span>
                         </div>
                         <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->description }}</div>
                     </div>
@@ -1312,7 +1379,7 @@ select.filter-input {
                         @if($hasQual)
                         <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
                             <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                                <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Qualifications</span>
+                                <span class="text-[11px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Qualifications</span>
                             </div>
                             <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->qualifications }}</div>
                         </div>
@@ -1320,7 +1387,7 @@ select.filter-input {
                         @if($hasInstr)
                         <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
                             <div class="px-5 py-3 border-b border-gray-100 bg-emerald-50">
-                                <span class="text-[9px] font-bold uppercase tracking-[.14em] detail-label text-emerald-700">How to Apply</span>
+                                <span class="text-[11px] font-bold uppercase tracking-[.14em] detail-label text-emerald-700">How to Apply</span>
                             </div>
                             <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->application_instructions }}</div>
                         </div>
@@ -1610,7 +1677,7 @@ select.filter-input {
 
             {{-- LEFT: Preview --}}
             <div class="md:flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 md:overflow-y-auto scroll-thin">
-                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
+                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($shareImageUrl)
                 <div class="share-photo-preview">
@@ -1625,8 +1692,8 @@ select.filter-input {
 
                 <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
                     <div class="px-4 py-3 overflow-y-auto scroll-thin" style="max-height:140px;">
-                        <p class="pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
-                        <p class="pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
+                        <p class="pre-wrap leading-relaxed" style="font-size:clamp(12px,1vw,14px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
+                        <p class="pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(12px,1vw,14px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
                     <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
                 </div>
@@ -1642,7 +1709,7 @@ select.filter-input {
 
             {{-- RIGHT: Share buttons --}}
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 md:overflow-y-auto scroll-thin">
-                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
+                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 <template x-if="nativeShareSupported">
                     <button type="button" @click="nativeShare()" class="share-option-btn" style="background:#7a3f91;">
@@ -1681,7 +1748,7 @@ select.filter-input {
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
+                        <span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
                     </div>
                 </div>
 
@@ -1693,11 +1760,11 @@ select.filter-input {
                     </span>
                     <div class="flex-1 min-w-0 text-left">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
+                        <p class="text-xs truncate" style="color:#333333;">Copies the post text (photo not included)</p>
                     </div>
                 </button>
 
-                <p class="text-[10px] text-center" style="color:#333333;">Sharing is disabled for expired postings.</p>
+                <p class="text-xs text-center" style="color:#333333;">Sharing is disabled for expired postings.</p>
             </div>
         </div>
     </div>
@@ -1872,6 +1939,35 @@ select.filter-input {
         function onShareEnter() { hide(); }
         function onShareLeave() { if (activeCard) show(); }
 
+        // ── Card click spinner (mirrors .dash-card-clickable on the
+        //    Alumni Dashboard) — this card has no page nav to key off,
+        //    it opens the detail view via a Livewire commit, so the
+        //    spinner is cleared on that commit's succeed/fail instead
+        //    of livewire:navigated. ──────────────────────────────────
+        function clearOtherJbCardSpinners(except) {
+            document.querySelectorAll('[data-jb-card].is-loading').forEach(el => {
+                if (el !== except) el.classList.remove('is-loading');
+            });
+        }
+
+        function clearAllJbCardSpinners() {
+            document.querySelectorAll('[data-jb-card].is-loading').forEach(el => {
+                el.classList.remove('is-loading');
+            });
+        }
+
+        function onCardClick(e) {
+            if (e.target.closest('[data-jb-share]')) return;
+            const card = e.currentTarget;
+            clearOtherJbCardSpinners(card);
+            card.classList.add('is-loading');
+            hide();
+        }
+
+        // Safety net: don't leave a card stuck spinning if something
+        // goes wrong or the page is restored from bfcache.
+        window.addEventListener('pageshow', clearAllJbCardSpinners);
+
         function attachListeners() {
             document.querySelectorAll('[data-jb-card]').forEach(card => {
                 if (card._jbBound) return;
@@ -1879,6 +1975,7 @@ select.filter-input {
 
                 card.addEventListener('mouseenter', onCardEnter);
                 card.addEventListener('mouseleave', onCardLeave);
+                card.addEventListener('click', onCardClick);
 
                 const shareBtn = card.querySelector('[data-jb-share]');
                 if (shareBtn) {
@@ -1914,12 +2011,15 @@ select.filter-input {
         }
 
         document.addEventListener('livewire:navigated', queueRebind);
+        document.addEventListener('livewire:navigated', clearAllJbCardSpinners);
 
         if (window.Livewire) {
             window.Livewire.hook('morph.updated', () => queueRebind());
             try {
-                window.Livewire.hook('commit', ({ succeed }) => {
-                    succeed(() => queueRebind());
+                window.Livewire.hook('commit', ({ succeed, fail }) => {
+                    succeed(() => clearAllJbCardSpinners());
+                    fail(() => clearAllJbCardSpinners());
+                    queueRebind();
                 });
             } catch(e) {}
         }

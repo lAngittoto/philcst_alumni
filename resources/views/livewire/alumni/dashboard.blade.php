@@ -420,6 +420,53 @@ new class extends Component {
             font-size: 2.4rem !important;
         }
     }
+
+    /* ── Dashboard card click spinner ───────────────────────────
+       Purple "..." dot loader — same loading interface used on the
+       Registrar Dashboard, applied here for consistency. Card content
+       blurs + dims underneath instead of being fully covered, so it
+       still reads as "this card is busy" not an empty gap. Uses plain
+       CSS dots instead of an icon font glyph so the color is never at
+       the mercy of icon-font fallback rendering. */
+    .dash-card-clickable { position: relative; }
+    .dash-card-clickable.is-loading > *:not(.dash-card-spinner) {
+        filter: blur(4px);
+        opacity: 0.5;
+        pointer-events: none;
+        user-select: none;
+    }
+    .dash-card-spinner {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        z-index: 40;
+    }
+    .dash-card-spinner span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7A3F91;
+        animation: dashDotPulse 1.1s ease-in-out infinite;
+    }
+    .dash-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+    .dash-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+    .dash-card-spinner--sm span {
+        width: 5px;
+        height: 5px;
+    }
+    @keyframes dashDotPulse {
+        0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    .dash-card-clickable.is-loading .dash-card-spinner {
+        display: flex;
+    }
+    .dash-card-clickable.is-loading {
+        pointer-events: none;
+    }
 </style>
 
 {{-- ═══ DASHBOARD ROOT ════════════════════════════════════════════ --}}
@@ -432,7 +479,7 @@ new class extends Component {
         </div>
         <div>
             <h1 class="text-xl font-semibold tracking-tight text-gray-900">Alumni Dashboard</h1>
-            <p class="text-sm leading-relaxed mt-0.5 text-gray-700">{{ now()->format('l, F j, Y') }}</p>
+            <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700">{{ now()->format('l, F j, Y') }}</p>
         </div>
 
         {{-- Only show this banner for an incomplete PROFILE.
@@ -443,7 +490,8 @@ new class extends Component {
             <i class="fas fa-triangle-exclamation text-sm text-[#7A3F91] shrink-0"></i>
             <span class="flex-1">Complete your profile</span>
             <a href="{{ route('alumni.information') }}"
-               class="px-2.5 py-1 rounded-lg text-white text-xs font-semibold transition hover:opacity-90 bg-[#7A3F91] shrink-0">
+               class="dash-card-clickable px-2.5 py-1 rounded-lg text-white text-xs font-semibold transition hover:opacity-90 bg-[#7A3F91] shrink-0">
+                <div class="dash-card-spinner dash-card-spinner--sm"><span></span><span></span><span></span></div>
                 Go <i class="fas fa-arrow-right text-xs ml-0.5"></i>
             </a>
         </div>
@@ -530,8 +578,9 @@ new class extends Component {
 
             {{-- Card 1: Upcoming Events --}}
             <button wire:click="goToUpcomingEvents"
-               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="dash-stat-card dash-card-clickable dash-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Upcoming Events</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
@@ -545,8 +594,9 @@ new class extends Component {
 
             {{-- Card 2: Total Events --}}
             <button wire:click="goToAllEvents"
-               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="dash-stat-card dash-card-clickable dash-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-green-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Total Events</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
@@ -560,8 +610,9 @@ new class extends Component {
 
             {{-- Card 3: Active Jobs --}}
             <button wire:click="goToJobs"
-               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="dash-stat-card dash-card-clickable dash-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Job Opportunities</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-600">
@@ -584,9 +635,10 @@ new class extends Component {
                 $empCard = $empCardMap[$employmentStatus] ?? null;
             @endphp
             <button type="button" wire:click="goToUpdateEmployment"
-               class="dash-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="dash-stat-card dash-card-clickable dash-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full
                       {{ $hasEmployment ? 'hover:shadow-md hover:border-[#7A3F91]/40' : 'hover:shadow-md hover:border-red-300' }}">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>{{ $hasEmployment ? 'Update Employment Status' : 'Add Employment Record' }}</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow shrink-0"
@@ -796,7 +848,8 @@ new class extends Component {
         </div>
         <div class="flex items-center gap-2 shrink-0 ml-2 sm:ml-4">
             <a href="{{ route('alumni.information') }}"
-               class="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
+               class="dash-card-clickable inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-white/12 border border-white/20 text-white text-[0.78rem] font-semibold hover:bg-white/22 transition no-underline">
+                <div class="dash-card-spinner dash-card-spinner--sm"><span></span><span></span><span></span></div>
                 <i class="fas fa-pen text-xs"></i><span class="hidden sm:inline ml-1">Update Profile</span>
             </a>
             <div class="close-btn-wrap">
@@ -943,7 +996,8 @@ new class extends Component {
 
         <div class="flex flex-wrap gap-2">
             <a href="{{ route('alumni.information') }}"
-               class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 bg-[#7A3F91]">
+               class="dash-card-clickable inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition hover:opacity-90 bg-[#7A3F91]">
+                <div class="dash-card-spinner dash-card-spinner--sm"><span></span><span></span><span></span></div>
                 <i class="fas fa-pen text-xs"></i> Update Profile
             </a>
             <button wire:click="closeModal"
@@ -957,3 +1011,67 @@ new class extends Component {
 @endif
 
 </div>{{-- end root --}}
+
+<script>
+(function () {
+    'use strict';
+
+    // ─── CARD CLICK SPINNER (nav cards — plain <a> links AND wire:click
+    //     buttons that redirect with navigate:true) ─────────────────────────
+    // Shows a spinner inside the clicked stat/legend card the instant it's
+    // tapped, and keeps it spinning until the NEW page has actually finished
+    // loading (livewire:navigated) — not just until the Livewire request
+    // that kicked off the redirect finishes. wire:loading.class was tried
+    // first but it clears as soon as the component's action call returns,
+    // which happens well before the wire:navigate page swap completes, so
+    // the spinner was flashing off immediately instead of staying on
+    // through the whole transition. Plain click listeners + livewire:navigated
+    // don't have that gap.
+    function initDashCardSpinners() {
+        document.querySelectorAll('a.dash-card-clickable[href]').forEach(function (card) {
+            if (card.__dashSpinnerBound) return;
+            card.__dashSpinnerBound = true;
+            card.addEventListener('click', function () {
+                clearOtherDashCardSpinners(card);
+                card.classList.add('is-loading');
+            });
+        });
+        document.querySelectorAll('button.dash-card-nav-btn').forEach(function (card) {
+            if (card.__dashSpinnerBound) return;
+            card.__dashSpinnerBound = true;
+            card.addEventListener('click', function () {
+                clearOtherDashCardSpinners(card);
+                card.classList.add('is-loading');
+            });
+        });
+    }
+
+    function clearOtherDashCardSpinners(except) {
+        document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
+            if (el !== except) el.classList.remove('is-loading');
+        });
+    }
+
+    function clearAllDashCardSpinners() {
+        document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
+            el.classList.remove('is-loading');
+        });
+    }
+
+    // Safety net: if navigation fails or the page is restored from bfcache,
+    // don't leave a card stuck spinning forever.
+    window.addEventListener('pageshow', clearAllDashCardSpinners);
+
+    // Bind card spinners right away so clicks right after page load feel
+    // responsive.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDashCardSpinners);
+    } else {
+        initDashCardSpinners();
+    }
+    document.addEventListener('livewire:navigated', function () {
+        clearAllDashCardSpinners();
+        initDashCardSpinners();
+    });
+})();
+</script>
