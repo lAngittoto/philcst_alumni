@@ -1760,7 +1760,6 @@ select.filter-input {
                     </span>
                     <div class="flex-1 min-w-0 text-left">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-xs truncate" style="color:#333333;">Copies the post text (photo not included)</p>
                     </div>
                 </button>
 

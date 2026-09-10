@@ -39,9 +39,12 @@ new class extends \Livewire\Volt\Component {
     public array $typingUsers = [];
 
     // ── Profanity filter (English + Tagalog) ──────────────────────────────
-    // Matches whole words only (so "class" won't trigger on "ass"), case
-    // insensitive, and tolerates simple letter-repeat spam (e.g. "puuuta").
-    // Matched words are replaced with asterisks of the same length so the
+    // Plain substring match (case insensitive), tolerant of simple
+    // letter-repeat spam (e.g. "puuuta") and spaced-out evasion. Catches
+    // a banned root even when glued onto other letters (e.g. "boboka"),
+    // which also means it can flag a root embedded in an innocent word
+    // (e.g. "ass" inside "class") — accepted trade-off, chosen on purpose.
+    // Matched spans are replaced with asterisks of the same length so the
     // message length/shape stays roughly intact without revealing the word.
     private static array $bannedWords = [
         // English
@@ -78,8 +81,12 @@ new class extends \Livewire\Volt\Component {
     {
         foreach (self::$bannedWords as $word) {
             // Allow spaces/dashes/underscores BETWEEN letters (basic evasion
-            // resistance) and repeated letters (e.g. "puuutangina"), without
-            // swallowing the whitespace that follows the whole word.
+            // resistance) and repeated letters (e.g. "puuutangina").
+            // No \b word-boundary anchors — this is now a plain substring
+            // match, on purpose: words with a banned root glued onto other
+            // letters (e.g. "boboka") get caught too. Accepted trade-off:
+            // this also catches banned roots embedded in otherwise-innocent
+            // words (e.g. "ass" inside "class", "password").
             $letters = preg_split('//u', $word, -1, PREG_SPLIT_NO_EMPTY);
             $last    = count($letters) - 1;
             $pattern = implode('', array_map(
@@ -89,7 +96,7 @@ new class extends \Livewire\Volt\Component {
             ));
 
             $text = preg_replace_callback(
-                '/\b' . $pattern . '\b/iu',
+                '/' . $pattern . '/iu',
                 fn($m) => str_repeat('*', mb_strlen($m[0])),
                 $text
             ) ?? $text;
@@ -329,6 +336,32 @@ new class extends \Livewire\Volt\Component {
         }
 
         return null;
+    }
+
+    /**
+     * ── Strips the [[JOB:xx]] / [[EVENT:TYPE:xx]] marker out of a message
+     * body for any place that shows a short plain-text snippet of it (the
+     * "Replying to ..." composer bar, and the small quoted reply preview
+     * inside a bubble) — those spots never render the full purple card,
+     * so the raw marker must never leak into them either. Falls back to
+     * "Shared a job posting" / "Shared an event" when the marker was the
+     * whole message, so the snippet is never empty.
+     */
+    private function stripPostMarkerForSnippet(?string $body): string
+    {
+        if (! $body) return '';
+        $isJob   = (bool) preg_match('/\[\[JOB:\d+\]\]/i', $body);
+        $isEvent = (bool) preg_match('/\[\[EVENT:(ADMIN|ORGANIZER):\d+\]\]/i', $body);
+        $clean = preg_replace(
+            ['/\[\[JOB:\d+\]\]/i', '/\[\[EVENT:(ADMIN|ORGANIZER):\d+\]\]/i', '/\[\[[^\]]*\]\]/i'],
+            '',
+            $body
+        );
+        $clean = trim(preg_replace('/\s+/', ' ', $clean));
+        if ($clean === '') {
+            $clean = $isJob ? 'Shared a job posting' : ($isEvent ? 'Shared an event' : '');
+        }
+        return $clean;
     }
 
     /**
@@ -671,9 +704,13 @@ new class extends \Livewire\Volt\Component {
         $this->loadCoordinators();
         $this->loadTypingIndicators();
         $this->loadRooms();
-        // Force scroll: switching rooms should always land at the latest
-        // message regardless of where the previous room's list was scrolled.
-        $this->dispatch('chat-scroll-bottom-force');
+        // Instant (not smooth) jump: opening a room for the first time has
+        // no "previous position" to glide from, so animating it just shows
+        // an unnecessary flicker of motion right as the thread appears.
+        // The x-init on #msg-list also jumps instantly, but that only
+        // covers first paint of the whole component — this covers
+        // switching between rooms without a full page reload.
+        $this->dispatch('chat-scroll-bottom-instant');
         $this->dispatch('chat-open-mobile');
     }
 
@@ -746,15 +783,27 @@ new class extends \Livewire\Volt\Component {
         $isHeavyTick = ($this->pollTick % 4 === 0);
 
         if ($this->roomId) {
+            // Snapshot the last message id BEFORE reloading, so we only
+            // dispatch the scroll-to-bottom event when something actually
+            // arrived. Dispatching it unconditionally every 1.5s re-ran the
+            // smooth scrollTo() on an already-settled list, which is what
+            // made the scrollbar thumb visibly twitch up/down on every
+            // poll tick even though nothing new had come in.
+            $prevLastId = ! empty($this->messages) ? (int) end($this->messages)['id'] : 0;
+
             $this->loadMessages();
             $this->loadTypingIndicators();
             $this->markRoomAsRead($this->roomId);
-            // Soft scroll: only actually jumps to the bottom if the user
-            // is already near the bottom of the thread (handled client
-            // side) — otherwise it leaves their current scroll position
-            // alone so background polling never yanks them back down
-            // while they're reading older messages.
-            $this->dispatch('chat-scroll-bottom');
+
+            $newLastId = ! empty($this->messages) ? (int) end($this->messages)['id'] : 0;
+            if ($newLastId !== $prevLastId) {
+                // Soft scroll: only actually jumps to the bottom if the user
+                // is already near the bottom of the thread (handled client
+                // side) — otherwise it leaves their current scroll position
+                // alone so background polling never yanks them back down
+                // while they're reading older messages.
+                $this->dispatch('chat-scroll-bottom');
+            }
         }
 
         $this->pingPresence();
@@ -1160,6 +1209,18 @@ new class extends \Livewire\Volt\Component {
             }
         }
 
+        // ── Also clear the quoted-reply preview on any OTHER message that
+        // was replying to this one. loadMessages() already excludes
+        // deleted messages from the reply map on a fresh DB query, but
+        // this in-place patch skips that full reload — without this loop
+        // any reply pointing at the just-deleted message would keep
+        // showing its old quoted text/name until the next poll tick.
+        foreach ($this->messages as $i => $m) {
+            if (($m['reply_to']['id'] ?? null) === $id) {
+                $this->messages[$i]['reply_to'] = null;
+            }
+        }
+
         // Only the sidebar preview needs updating if this was the room's
         // most recent message — and even then it's one cheap lookup, not
         // a full loadRooms() pass over every room + its member counts.
@@ -1247,7 +1308,11 @@ new class extends \Livewire\Volt\Component {
             $data[] = ['name'=>$name,'photo'=>$photo,'reaction'=>$r->reaction,'type'=>$type,
                 'is_me'=>$r->reactor_type==='alumni'&&(int)$r->reactor_id===$this->alumniId];
         }
-        $this->reactionsPopupData = collect($data)->groupBy('reaction')->toArray();
+        // Messenger-style: a flat list of people (not grouped into an emoji
+        // section each), each row showing that person's own reaction next
+        // to their name. The per-emoji counts still get shown, but as a
+        // summary strip up top, not as separate buckets the names sit under.
+        $this->reactionsPopupData = $data;
     }
 
     public function closeReactionsPopup(): void { $this->reactionsPopupMsgId=null; $this->reactionsPopupData=[]; }
@@ -1481,14 +1546,10 @@ new class extends \Livewire\Volt\Component {
 
         /* ── Chat composer while editing an existing message — solid,
              clearly blue border (explicit hex, not a Tailwind shade that
-             can read washed-out/cyan on some screens) with a matching
-             glow ring on focus. ── */
+             can read washed-out/cyan on some screens). No focus glow. ── */
         .msgr-input-editing {
             border-color: #1D4ED8 !important;
             background-color: #ffffff;
-        }
-        .msgr-input-editing:focus {
-            box-shadow: 0 0 0 4px rgba(29,78,216,0.28);
         }
         .msgr-bubble {
             -webkit-user-select: none;
@@ -1509,6 +1570,21 @@ new class extends \Livewire\Volt\Component {
             to   { opacity: 1; transform: scale(1); }
         }
 
+        /* Jump-to-reply highlight — Messenger-style: a brief shadow/ring
+           flash around the bubble a reply-quote scrolled to, so it's
+           obvious which message you landed on. Purely additive (outline +
+           shadow), so it doesn't shift layout or fight the bubble's own
+           background color for either sender side. */
+        @keyframes msgrJumpFlash {
+            0%   { box-shadow: 0 0 0 0 rgba(122,63,145,0); }
+            15%  { box-shadow: 0 0 0 4px rgba(122,63,145,.35), 0 6px 18px rgba(58,27,77,.25); }
+            100% { box-shadow: 0 0 0 0 rgba(122,63,145,0); }
+        }
+        .msgr-jump-highlight {
+            animation: msgrJumpFlash 1.6s ease-out;
+            border-radius: 1rem;
+        }
+
         button:not(:disabled),
         [role="button"],
         .msgr-pin-btn,
@@ -1518,7 +1594,13 @@ new class extends \Livewire\Volt\Component {
 
         #msgr-room-list { overflow-x: hidden; }
 
-        .overflow-y-auto { scroll-behavior: smooth; }
+        /* Smooth scroll is applied only to #msg-list via JS (scrollTo with
+           behavior:'smooth'), not globally. A blanket rule on every
+           .overflow-y-auto panel meant any tiny height change from the
+           1.5s poll's DOM morph (a re-rendered timestamp, a toggled class)
+           animated the scrollbar thumb — reading as an unwanted up/down
+           jitter even when the user never touched the scrollbar. */
+        #msg-list { scroll-behavior: auto; }
 
         /* ── Tooltips: desktop/hover only ─────────────────────────────────
            Mobile has no real hover state, so these used to just appear
@@ -1554,9 +1636,42 @@ new class extends \Livewire\Volt\Component {
         .msgr-reaction-toolbar { z-index: 300; }
         .msgr-reaction-toolbar .msgr-tooltip { z-index: 301; }
 
-        .msgr-reactions-popup { z-index: 300; }
+        /* ── Reactions popup — now a centered fixed modal (like the delete
+             confirm modal) instead of an absolute dropdown anchored to the
+             message. An absolute/top-full popup on a message near the
+             bottom of the scroll container had nowhere to expand into and
+             got clipped/hidden behind the composer, forcing users to
+             scroll just to see who reacted. Centering it in the viewport
+             guarantees it's always fully visible with zero extra scrolling
+             or manual adjustment, regardless of the message's position. ── */
+        .msgr-reactions-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(26,15,34,.45);
+            backdrop-filter: blur(2px);
+            z-index: 400;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+        .msgr-reactions-popup {
+            width: 100%;
+            max-width: 320px;
+            background: #ffffff;
+            border-radius: 1.1rem;
+            box-shadow: 0 20px 50px rgba(58,27,77,.35);
+            overflow: hidden;
+            animation: msgrModalIn .16s ease-out;
+        }
         .msgr-reactions-popup-list {
-            height: 230px;
+            /* Fixed height (not max-height) — box stays the same size
+               whether there's 1 reactor or 20; it just scrolls internally
+               once content overflows, instead of shrinking to fit like
+               before. Raised from 230 to 360 so more reactors fit before
+               scrolling kicks in. */
+            height: 360px;
+            max-height: 60vh;
             overflow-y: auto;
             scrollbar-width: thin;
             scrollbar-color: #c9aee0 #f5f0fa;
@@ -1833,7 +1948,7 @@ new class extends \Livewire\Volt\Component {
                         wire:loading.attr="disabled" wire:target="selectRoom({{ $r['id'] }})"
                         wire:loading.class="opacity-60 cursor-wait" wire:target="selectRoom({{ $r['id'] }})"
                         class="w-full text-left rounded-xl px-3 py-3 transition-all duration-200 border cursor-pointer relative
-                               @if($isActive)      border-[#d9c9e8] bg-[#f3eef8]
+                               @if($isActive)      border-[#d9c9e8] bg-[#f3eef8] border-l-4 border-l-[#7a3f91]
                                @elseif($hasUnread) border-[#d9b8ef] bg-[#ede5f7] hover:bg-[#e4d8f2]
                                @else               border-transparent hover:border-[#E8E0F0] hover:bg-[#fafafa] @endif">
 
@@ -2009,6 +2124,33 @@ new class extends \Livewire\Volt\Component {
                          nearBottom: true,
                          onScroll(el) {
                              this.nearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 120;
+                         },
+                         scrollToBottom(el, smooth = true) {
+                             /* el.scrollTo({behavior:'smooth'}) animates the
+                                glide instead of the old instant scrollTop=
+                                snap, which is what made new-message polling
+                                feel like an abrupt up/down jump. Falls back
+                                to an instant jump on first paint (room
+                                switch) so the chat doesn't visibly animate
+                                open from the top every time. */
+                             el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+                         },
+                         jumpToMessage(id) {
+                             /* Messenger-style tap-the-quoted-reply-to-jump.
+                                Finds the original message by its data-msg-id,
+                                scrolls it smoothly into view, then flashes a
+                                brief shadow/ring highlight so it's obvious
+                                which bubble is the one being pointed to —
+                                the flash class is removed after the
+                                animation so tapping the same reply again
+                                re-triggers it instead of doing nothing. */
+                             const target = document.querySelector(`#msg-list [data-msg-id='${id}']`);
+                             if (! target) return;
+                             target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                             target.classList.remove('msgr-jump-highlight');
+                             void target.offsetWidth; // restart animation if already applied
+                             target.classList.add('msgr-jump-highlight');
+                             setTimeout(() => target.classList.remove('msgr-jump-highlight'), 1600);
                          }
                      }">
 
@@ -2024,14 +2166,66 @@ new class extends \Livewire\Volt\Component {
                          latest message. Background polling ('chat-scroll-bottom')
                          only auto-scrolls when nearBottom is true, so reading
                          older messages never gets interrupted by new incoming
-                         ones. Sending a message or switching rooms fires
-                         'chat-scroll-bottom-force' instead, which always jumps
-                         to the bottom regardless of where you were scrolled. --}}
+                         ones. Sending or editing a message fires
+                         'chat-scroll-bottom-force' (smooth, always jumps).
+                         Opening/switching a room fires 'chat-scroll-bottom-instant'
+                         instead — no smooth animation, since there's no prior
+                         scroll position to glide from and animating it just
+                         flickered visibly right as the thread appeared. --}}
                     <div id="msg-list"
                          class="flex-1 overflow-y-auto px-3 sm:px-4 py-4"
-                         x-init="$el.scrollTop = $el.scrollHeight; $el.addEventListener('scroll', () => onScroll($el));"
-                         @chat-scroll-bottom.window="if (nearBottom) { $nextTick(() => { $el.scrollTop = $el.scrollHeight; }); }"
-                         @chat-scroll-bottom-force.window="$nextTick(() => { $el.scrollTop = $el.scrollHeight; nearBottom = true; })"
+                         x-init="
+                             $nextTick(() => { $el.scrollTop = $el.scrollHeight; });
+                             /* Images (hiring cards, avatars, etc.) finishing
+                                their load after the initial paint change
+                                scrollHeight again, which is what made the
+                                list visibly settle/drop a second time right
+                                after it opened. Re-snapping instantly (not
+                                smoothly) whenever one finishes keeps it
+                                pinned to the bottom without any visible
+                                glide. */
+                             $el.querySelectorAll('img').forEach(img => {
+                                 if (! img.complete) {
+                                     img.addEventListener('load', () => { if (nearBottom) $el.scrollTop = $el.scrollHeight; }, { once: true });
+                                 }
+                             });
+                             $el.addEventListener('scroll', () => onScroll($el));
+
+                             /* The 1.5s wire:poll re-renders the WHOLE
+                                component (needed for online counts, typing,
+                                unread badges elsewhere on the page), and
+                                Livewire's morph can nudge this list's own
+                                scrollTop by a pixel or two mid-patch even
+                                with wire:key on every row — that tiny,
+                                incidental nudge is what read as the
+                                scrollbar 'twitching' up/down on every poll
+                                tick, separate from the deliberate
+                                scroll-to-bottom calls above. Snapshotting
+                                scrollTop right before each morph and
+                                restoring it right after cancels that out,
+                                without touching the intentional smooth
+                                scrolls (those fire from their own dispatched
+                                events, after this restore already ran).
+                                Scoped to this element only via a plain id
+                                check, and safe to register once since
+                                #msg-list itself is never destroyed/recreated
+                                (only its children are patched by Livewire). */
+                             let savedScroll = null;
+                             document.addEventListener('livewire:morph.updating', (e) => {
+                                 if (e.detail?.el?.id === 'msg-list' || e.detail?.el?.contains?.($el)) {
+                                     savedScroll = $el.scrollTop;
+                                 }
+                             });
+                             document.addEventListener('livewire:morph.updated', (e) => {
+                                 if (savedScroll !== null) {
+                                     $el.scrollTop = savedScroll;
+                                     savedScroll = null;
+                                 }
+                             });
+                         "
+                         @chat-scroll-bottom.window="if (nearBottom) { $nextTick(() => { scrollToBottom($el, true); }); }"
+                         @chat-scroll-bottom-force.window="$nextTick(() => { scrollToBottom($el, true); nearBottom = true; })"
+                         @chat-scroll-bottom-instant.window="$nextTick(() => { scrollToBottom($el, false); nearBottom = true; })"
                          @click="$wire.closeToolbar()">
 
                         @php $prevDate = null; $prevSendKey = null; $lastIdx = count($messages) - 1; @endphp
@@ -2088,14 +2282,16 @@ new class extends \Livewire\Volt\Component {
                                     </div>
                                     @endif
 
-                                    @if($msg['reply_to'])
-                                    <div class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-white border-[#E8E0F0] text-[#666666]' }}">
+                                    @if($msg['reply_to'] && ! $msg['is_deleted'])
+                                    <div @click.stop="jumpToMessage({{ $msg['reply_to']['id'] }})" wire:click.stop="closeToolbar"
+                                         class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug cursor-pointer transition-all duration-150
+                                                {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900 hover:bg-purple-200/80' : 'bg-white border-[#E8E0F0] text-[#666666] hover:bg-[#f5f5f5]' }}">
                                         <span class="font-semibold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
-                                        <span class="truncate block text-xs">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
+                                        <span class="truncate block text-xs">{{ Str::limit($this->stripPostMarkerForSnippet($msg['reply_to']['body']), 70) }}</span>
                                     </div>
                                     @endif
 
-                                    <div class="relative">
+                                    <div class="relative" data-msg-id="{{ $msg['id'] }}">
 
                                         @if($msg['is_deleted'])
                                         <div class="px-3.5 py-2.5 rounded-2xl text-sm italic border border-dashed border-[#D8D8D8] bg-[#F4F4F4] text-[#999999] {{ $msg['is_mine'] ? 'rounded-br-none' : 'rounded-bl-none' }}">
@@ -2135,7 +2331,42 @@ new class extends \Livewire\Volt\Component {
                                             $pp          = $msg['post_preview'];
                                             $ppAvailable = $pp['available'] ?? true;
                                             $ppIsEvent   = ($pp['type'] ?? 'job') === 'event';
+                                            // Caption: whatever text the sender typed alongside the
+                                            // [[JOB:xx]] / [[EVENT:TYPE:xx]] marker (e.g. "@everyone"),
+                                            // with the marker itself stripped out and mentions styled
+                                            // the same way a normal text bubble would. Previously this
+                                            // text was silently dropped whenever a marker was present,
+                                            // so a caption like "@everyone [[JOB:58]]" showed the raw
+                                            // marker as if it had fallen through to the plain-text
+                                            // branch instead of being cleanly separated from the card.
+                                            // Strip the marker itself, then mop up any stray/partial
+                                            // bracket junk left behind (e.g. a marker typed by hand,
+                                            // or a leftover "]]" from an older message) so the raw
+                                            // [[JOB:xx]] / [[EVENT:TYPE:xx]] text can never leak into
+                                            // what the sender sees as their caption — only "@everyone"
+                                            // (or whatever else they typed) should ever show.
+                                            $ppCaptionRaw = preg_replace(
+                                                ['/\[\[JOB:\d+\]\]/i', '/\[\[EVENT:(ADMIN|ORGANIZER):\d+\]\]/i', '/\[\[[^\]]*\]\]/i'],
+                                                '',
+                                                $msg['body']
+                                            );
+                                            $ppCaptionRaw = trim(preg_replace('/\s+/', ' ', $ppCaptionRaw));
+                                            if ($ppCaptionRaw !== '') {
+                                                $ppCaptionSafe = htmlspecialchars($ppCaptionRaw, ENT_QUOTES, 'UTF-8');
+                                                $ppMentionClass = $msg['is_mine']
+                                                    ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
+                                                    : 'font-semibold text-[#7a3f91] bg-[#f3eef8] px-0.5 rounded';
+                                                $ppCaption = preg_replace('/@(everyone|\w+(?:\s\w+)?)/u', '<span class="'.$ppMentionClass.'">@$1</span>', $ppCaptionSafe);
+                                            } else {
+                                                $ppCaption = null;
+                                            }
                                         @endphp
+                                        @if($ppCaption)
+                                        <div class="text-sm leading-relaxed break-words px-3.5 py-2 rounded-2xl mb-1
+                                                    {{ $msg['is_mine'] ? 'text-white bg-[#7a3f91] rounded-br-none' : ($msg['is_coordinator'] ? 'text-white bg-[#7a3f91] rounded-bl-none' : 'bg-white border border-[#E8E0F0] text-[#333333] rounded-bl-none') }}">
+                                            {!! $ppCaption !!}
+                                        </div>
+                                        @endif
                                         <div wire:click.stop="toggleToolbar({{ $msg['id'] }})"
                                              class="msgr-bubble msgr-post-card {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}
                                                     {{ $toolbarOpen ? 'ring-2 ring-white/40' : '' }}"
@@ -2221,8 +2452,7 @@ new class extends \Livewire\Volt\Component {
                                                        : ($msg['is_coordinator']
                                                            ? 'text-white rounded-bl-none bg-[#7a3f91]'
                                                            : 'bg-white border border-[#E8E0F0] text-[#333333] rounded-bl-none') }}
-                                                   {{ $toolbarOpen ? 'ring-2 ring-[#7a3f91]/25' : '' }}
-                                                   {{ $isBeingEdited ? 'ring-2 ring-blue-400' : '' }}">
+                                                   {{ $toolbarOpen ? 'ring-2 ring-[#7a3f91]/25' : '' }}">
                                             {!! $formatted !!}
                                             @if($msg['edited'])
                                                 <span class="text-xs opacity-50 ml-1 italic">(edited)</span>
@@ -2240,7 +2470,25 @@ new class extends \Livewire\Volt\Component {
                                         <div class="msgr-reaction-toolbar absolute bottom-full mb-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }}
                                                     flex items-center gap-0.5 bg-white rounded-2xl
                                                     px-2 py-1.5 shadow-xl whitespace-nowrap animate-[msgrPop_.14s_ease-out]"
-                                             x-data @click.stop>
+                                             x-data @click.stop
+                                             x-init="
+                                                 /* The toolbar pops up ABOVE the bubble (bottom-full).
+                                                    On a message sitting near the top of the scroll
+                                                    container, that popup has nowhere to expand into
+                                                    and gets clipped/cut off behind the header — so
+                                                    scroll it into view the moment it opens, same as
+                                                    the reactors popup already does, instead of making
+                                                    the user scroll up manually to see it. */
+                                                 $nextTick(() => {
+                                                     const list = document.getElementById('msg-list');
+                                                     if (! list) return;
+                                                     const barTop = $el.getBoundingClientRect().top;
+                                                     const listTop = list.getBoundingClientRect().top;
+                                                     if (barTop < listTop + 8) {
+                                                         list.scrollBy({ top: barTop - listTop - 16, behavior: 'smooth' });
+                                                     }
+                                                 });
+                                             ">
 
                                             @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'] as $rk => $re)
                                             <div class="relative msgr-tooltip-wrap" x-data>
@@ -2328,49 +2576,6 @@ new class extends \Livewire\Volt\Component {
                                         </div>
                                         @endif
 
-                                        @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
-                                        <div class="msgr-reactions-popup absolute top-full mt-2 {{ $msg['is_mine'] ? 'right-0' : 'left-0' }}
-                                                    bg-white border border-[#D0C0E0] rounded-2xl shadow-xl w-64 max-w-[80vw] overflow-hidden animate-[msgrPop_.14s_ease-out]"
-                                             wire:click.stop>
-                                            <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#f9f7fc]">
-                                                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
-                                                    <i class="fa-solid fa-face-smile text-[#7a3f91] mr-1.5"></i>Reactions
-                                                </p>
-                                                <button wire:click="closeReactionsPopup"
-                                                        class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition-all duration-150 cursor-pointer">
-                                                    <i class="fa-solid fa-xmark text-xs"></i>
-                                                </button>
-                                            </div>
-                                            <div class="msgr-reactions-popup-list">
-                                                @php $emojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢']; @endphp
-                                                @foreach($reactionsPopupData as $rKey => $rGroup)
-                                                <div class="px-3.5 py-2 border-b border-[#E8E0F0] last:border-0">
-                                                    <div class="flex items-center gap-1.5 mb-1.5">
-                                                        <span class="text-base">{{ $emojiMap[$rKey] ?? '👍' }}</span>
-                                                        <span class="text-xs font-semibold text-[#666666]">{{ count($rGroup) }} {{ count($rGroup) === 1 ? 'person' : 'people' }}</span>
-                                                    </div>
-                                                    @foreach($rGroup as $reactor)
-                                                    <div class="flex items-center gap-2 py-1">
-                                                        <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden bg-[#7a3f91]">
-                                                            <img src="{{ $reactor['photo'] ?? $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
-                                                        </div>
-                                                        <div class="flex-1 min-w-0">
-                                                            <p class="text-xs font-semibold text-[#333333] truncate">
-                                                                {{ $reactor['name'] }}
-                                                                @if($reactor['is_me'])<span class="text-[#7a3f91]"> (You)</span>@endif
-                                                            </p>
-                                                            @if($reactor['type'] === 'coordinator')
-                                                            <p class="text-[10px] font-medium text-[#7a3f91]">Coordinator</p>
-                                                            @endif
-                                                        </div>
-                                                    </div>
-                                                    @endforeach
-                                                </div>
-                                                @endforeach
-                                            </div>
-                                        </div>
-                                        @endif
-
                                     </div>
 
                                     @if(! empty($msg['reactions']) && ! $msg['is_deleted'])
@@ -2431,7 +2636,9 @@ new class extends \Livewire\Volt\Component {
                 </div>
 
                 @if($editingId)
-                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-blue-50 flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
+                <div x-data="{ sending: false }" @message-sending.window="sending = true" @message-sent.window="sending = false"
+                     x-show="! sending" x-transition.opacity.duration.120ms
+                     class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-blue-50 flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
                     <div class="w-1 h-10 rounded-full flex-shrink-0 bg-blue-400"></div>
                     <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-blue-700 truncate uppercase tracking-widest">
@@ -2444,11 +2651,13 @@ new class extends \Livewire\Volt\Component {
                     </button>
                 </div>
                 @elseif($replyTo)
-                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
+                <div x-data="{ sending: false }" @message-sending.window="sending = true" @message-sent.window="sending = false"
+                     x-show="! sending" x-transition.opacity.duration.120ms
+                     class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
                     <div class="w-1 h-10 rounded-full flex-shrink-0 bg-[#7a3f91]"></div>
                     <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-[#7a3f91] truncate uppercase tracking-widest">Replying to {{ $replyTo['name'] }}</p>
-                        <p class="text-xs text-[#666666] truncate">{{ Str::limit($replyTo['body'], 90) }}</p>
+                        <p class="text-xs text-[#666666] truncate">{{ Str::limit($this->stripPostMarkerForSnippet($replyTo['body']), 90) }}</p>
                     </div>
                     <button wire:click="clearReply" class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-red-600 hover:bg-red-50 transition-all duration-150 flex-shrink-0 cursor-pointer">
                         <i class="fa-solid fa-xmark text-base"></i>
@@ -2490,7 +2699,7 @@ new class extends \Livewire\Volt\Component {
                                 placeholder="{{ $editingId ? 'Edit your message…' : ($roomType==='college' ? 'Message '.$alumniCollege.'…' : 'Message '.($room['name']??'group').'…') }}"
                                 rows="1"
                                 :disabled="sending"
-                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); sending = true; const val=$el.value; $el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; });}"
+                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); sending = true; window.dispatchEvent(new CustomEvent('message-sending')); const val=$el.value; $el.value=''; $el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; window.dispatchEvent(new CustomEvent('message-sent')); });}"
                                 @keydown.escape="$wire.cancelEdit()"
                                 @focus-input.window="$el.focus()"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
@@ -2500,7 +2709,7 @@ new class extends \Livewire\Volt\Component {
                         </div>
                         <button type="button"
                                 :disabled="sending"
-                                @click="if (!sending) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); }"
+                                @click="if (!sending) { sending = true; window.dispatchEvent(new CustomEvent('message-sending')); const el=document.getElementById('chat-input'); const val=el.value; el.value=''; el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; window.dispatchEvent(new CustomEvent('message-sent')); }); }"
                                 wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-all duration-150 hover:opacity-90 active:scale-90 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer
                                        {{ $editingId ? '' : 'bg-[#7a3f91]' }}"
@@ -2766,6 +2975,69 @@ new class extends \Livewire\Volt\Component {
                     <span wire:loading.remove wire:target="unsend">Confirm</span>
                     <span wire:loading wire:target="unsend">Deleting…</span>
                 </button>
+            </div>
+        </div>
+    </div>
+    @endif
+
+    {{-- ══ Reactions popup — now a single centered modal ══════════════════
+         Kept OUTSIDE the messages loop and rendered once, same as the
+         delete-confirm modal above and for the same reason: Livewire/Volt
+         needs exactly one root element, and a copy nested per-message
+         inside the scrolling list has no idea how much room is left below
+         it — on a message near the bottom (right above the composer, like
+         in the screenshot) it got clipped and needed a manual scroll to
+         see. Centering it in the viewport via $reactionsPopupMsgId (server
+         state, not a per-row toggle) means it's fully visible immediately
+         on tap, on any message, with zero extra scrolling or adjusting. --}}
+    @if($reactionsPopupMsgId && ! empty($reactionsPopupData))
+    @php $emojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢']; @endphp
+    <div class="msgr-reactions-backdrop" wire:click="closeReactionsPopup">
+        <div class="msgr-reactions-popup" wire:click.stop>
+            <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#f9f7fc]">
+                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest flex items-center gap-2">
+                    <i class="fa-solid fa-face-smile text-[#7a3f91]"></i>
+                    {{ count($reactionsPopupData) }} reacted
+                </p>
+                <button wire:click="closeReactionsPopup"
+                        wire:loading.attr="disabled" wire:target="closeReactionsPopup"
+                        class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition-all duration-150 cursor-pointer disabled:opacity-60">
+                    <i class="fa-solid fa-xmark text-xs" wire:loading.remove wire:target="closeReactionsPopup"></i>
+                    <i class="fa-solid fa-spinner fa-spin text-xs" wire:loading wire:target="closeReactionsPopup"></i>
+                </button>
+            </div>
+            {{-- Summary strip — per-emoji counts, Messenger-style, e.g. "❤️ 3   👍 1" --}}
+            @php $counts = collect($reactionsPopupData)->countBy('reaction'); @endphp
+            @if($counts->count() > 1)
+            <div class="flex items-center gap-3 px-3.5 py-2 border-b border-[#E8E0F0] bg-white">
+                @foreach($counts as $rKey => $c)
+                <span class="inline-flex items-center gap-1 text-xs font-semibold text-[#666666]">
+                    <span class="text-sm">{{ $emojiMap[$rKey] ?? '👍' }}</span>{{ $c }}
+                </span>
+                @endforeach
+            </div>
+            @endif
+            {{-- Flat list of people — each row shows that person's own
+                 reaction right next to their name, not grouped under a
+                 separate section per emoji. --}}
+            <div class="msgr-reactions-popup-list">
+                @foreach($reactionsPopupData as $reactor)
+                <div class="flex items-center gap-2.5 px-3.5 py-2 border-b border-[#E8E0F0] last:border-0">
+                    <div class="w-8 h-8 rounded-full flex-shrink-0 overflow-hidden bg-[#7a3f91]">
+                        <img src="{{ $reactor['photo'] ?? $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm font-semibold text-[#333333] truncate">
+                            {{ $reactor['name'] }}
+                            @if($reactor['is_me'])<span class="text-[#7a3f91]"> (You)</span>@endif
+                        </p>
+                        @if($reactor['type'] === 'coordinator')
+                        <p class="text-[10px] font-medium text-[#7a3f91]">Coordinator</p>
+                        @endif
+                    </div>
+                    <span class="text-lg flex-shrink-0">{{ $emojiMap[$reactor['reaction']] ?? '👍' }}</span>
+                </div>
+                @endforeach
             </div>
         </div>
     </div>

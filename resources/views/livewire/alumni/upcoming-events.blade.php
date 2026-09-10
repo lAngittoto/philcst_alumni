@@ -646,21 +646,19 @@ select.filter-input {
 }
 .detail-top-btn:active { transform: scale(.93); }
 .detail-top-btn .tip {
-    position: absolute; top: calc(100% + 10px); right: 0;
+    position: absolute; top: calc(100% + 6px); right: 0;
     background: #111827; color: #fff;
     font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     padding: 4px 10px; border-radius: 6px; white-space: nowrap;
-    pointer-events: none; opacity: 0; transform: translateY(-4px);
-    transition: opacity .15s, transform .15s; z-index: 99999;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
     font-family: ui-sans-serif, system-ui, sans-serif;
-    box-shadow: 0 4px 12px rgba(0,0,0,.35);
-    isolation: isolate;
 }
 .detail-top-btn .tip::before {
     content: ''; position: absolute; bottom: 100%; right: 10px;
     border: 4px solid transparent; border-bottom-color: #111827;
 }
-.detail-top-btn:hover .tip { opacity: 1; transform: translateY(0); }
+.detail-top-btn:hover .tip { opacity: 1; }
+.detail-top-btn .tip.tip-pinned { opacity: 1; }
 
 .detail-top-btn.share-btn { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.2); color: #fff; }
 .detail-top-btn.share-btn:hover { background: rgba(255,255,255,.24); }
@@ -694,6 +692,7 @@ select.filter-input {
     border: 4px solid transparent; border-bottom-color: #111827;
 }
 .share-close-btn:hover .tip { opacity: 1; }
+.share-close-btn .tip.tip-pinned { opacity: 1; }
 
 /* Simplified share option row — icon + label only (no subtext paragraph) */
 .share-option-btn {
@@ -1034,7 +1033,7 @@ select.filter-input {
                                 <span wire:loading wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')">
                                     <i class="fas fa-spinner fa-spin text-[11px]"></i>
                                 </span>
-                                <span class="tip" wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')">Share</span>
+                                <span class="tip">Share</span>
                             </button>
                         </div>
                     </div>
@@ -1170,7 +1169,7 @@ select.filter-input {
 <div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-y-auto lg:overflow-hidden"
      @keydown.escape.window="$wire.closeViewModal()">
 
-    <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
+    <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4 relative z-[9500]">
 
         <div class="flex items-center gap-3 flex-1 min-w-0">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
@@ -1190,7 +1189,7 @@ select.filter-input {
                 <span wire:loading wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')">
                     <i class="fas fa-spinner fa-spin text-[13px] text-white"></i>
                 </span>
-                <span class="tip" wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')">Share</span>
+                <span class="tip">Share</span>
             </button>
             @if(!$isCompleted)
             <button type="button" wire:click="openRsvpModal"
@@ -1203,7 +1202,7 @@ select.filter-input {
                 <span wire:loading wire:target="openRsvpModal">
                     <i class="fas fa-spinner fa-spin text-[13px] text-white"></i>
                 </span>
-                <span class="tip" wire:loading.remove wire:target="openRsvpModal">{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}</span>
+                <span class="tip">{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}</span>
             </button>
             @endif
             <button type="button" wire:click="closeViewModal"
@@ -1214,7 +1213,7 @@ select.filter-input {
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
                 <i class="fas fa-spinner fa-spin text-[13px] text-white" wire:loading wire:target="closeViewModal"></i>
-                <span class="tip" wire:loading.remove wire:target="closeViewModal">Close</span>
+                <span class="tip">Close</span>
             </button>
         </div>
     </div>
@@ -1722,7 +1721,7 @@ select.filter-input {
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
                 <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeShareModal"></i>
-                <span class="tip" wire:loading.remove wire:target="closeShareModal">Close</span>
+                <span class="tip">Close</span>
             </button>
         </div>
 
@@ -1811,7 +1810,6 @@ select.filter-input {
                     </span>
                     <div class="flex-1 text-left min-w-0">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-xs truncate" style="color:#333333;">Copies the post text (photo not included)</p>
                     </div>
                 </button>
 
@@ -1873,7 +1871,7 @@ select.filter-input {
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
                 <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeForwardModal"></i>
-                <span class="tip" wire:loading.remove wire:target="closeForwardModal">Close</span>
+                <span class="tip">Close</span>
             </button>
         </div>
 
@@ -2024,6 +2022,7 @@ select.filter-input {
         // Safety net: don't leave a card stuck spinning if something
         // goes wrong or the page is restored from bfcache.
         window.addEventListener('pageshow', clearAllEvCardSpinners);
+        window.addEventListener('pageshow', unpinAllTips);
 
         function attachListeners() {
             document.querySelectorAll('[data-ev-card]').forEach(card => {
@@ -2070,13 +2069,31 @@ select.filter-input {
 
         document.addEventListener('livewire:navigated', queueRebind);
         document.addEventListener('livewire:navigated', clearAllEvCardSpinners);
+        document.addEventListener('livewire:navigated', unpinAllTips);
+
+        // ── Pin header tooltips (Share / RSVP / Close) on click ──────
+        // These tips are :hover-driven, but the button they sit on gets
+        // disabled the instant a Livewire action starts, which drops
+        // :hover immediately — the tip would flash and vanish mid-click
+        // instead of staying up while the action runs. Pin it manually
+        // on click and only release it once that commit settles.
+        function unpinAllTips() {
+            document.querySelectorAll('.tip.tip-pinned').forEach(t => t.classList.remove('tip-pinned'));
+        }
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('.detail-top-btn, .share-close-btn');
+            if (!btn) return;
+            const tip = btn.querySelector('.tip');
+            if (tip) tip.classList.add('tip-pinned');
+        });
 
         if (window.Livewire) {
             window.Livewire.hook('morph.updated', () => queueRebind());
             try {
                 window.Livewire.hook('commit', ({ succeed, fail }) => {
-                    succeed(() => clearAllEvCardSpinners());
-                    fail(() => clearAllEvCardSpinners());
+                    succeed(() => { clearAllEvCardSpinners(); unpinAllTips(); });
+                    fail(() => { clearAllEvCardSpinners(); unpinAllTips(); });
                     queueRebind();
                 });
             } catch(e) {}
