@@ -295,16 +295,23 @@ new class extends Component {
     .org-mini-card .org-mini-tip { display: none !important; }
 }
 
-/* ── Main grid — align-items: start so the profile card only takes its
-     own natural height, no stretching to match the taller right column ── */
-.org-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: start; }
+/* ── Main grid — align-items: stretch so the profile card grows to
+     match the right column's full height instead of stopping short ── */
+.org-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: stretch; }
 @media (max-width: 1023px) {
-    .org-main-grid { grid-template-columns: 1fr; gap: 0.85rem; }
+    .org-main-grid { grid-template-columns: 1fr; gap: 0.85rem; align-items: start; }
 }
 
-/* ── Profile column — natural height, no forced stretch ── */
-.org-profile-col { display: flex; flex-direction: column; }
-.org-profile-card { display: flex; flex-direction: column; }
+/* ── Profile column — stretches to full grid row height on desktop;
+     the info body (below the photo) grows to absorb the extra space
+     and its rows spread out evenly instead of leaving dead space
+     bunched at the bottom ── */
+.org-profile-col { display: flex; flex-direction: column; height: 100%; }
+.org-profile-card { display: flex; flex-direction: column; height: 100%; }
+@media (max-width: 1023px) {
+    .org-profile-col { height: auto; }
+    .org-profile-card { height: auto; }
+}
 
 /* ── No copy/select ANYWHERE on the dashboard — greeting header,
    stat cards, profile card, chips, tables, everything. Buttons and
@@ -321,12 +328,16 @@ new class extends Component {
 /* ── Right col ── */
 .org-right-col { display: flex; flex-direction: column; gap: 1rem; }
 
-/* ── 2x2 stat grid: equal height on desktop, 1-col on phone ── */
-.org-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-.org-stat-grid .org-stat-card { display: flex; flex-direction: column; justify-content: center; }
+/* ── 2x2 stat grid: equal height, cards level at the bottom ──
+   align-items: stretch (explicit) makes every card in a row match the
+   tallest card's height; height:100% + flex column + space-between on
+   each card then pins each card's bottom line flush across the row,
+   even when one card has an extra caption line and another doesn't. ── */
+.org-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; align-items: stretch; }
+.org-stat-grid .org-stat-card { display: flex; flex-direction: column; justify-content: space-between; height: 100%; box-sizing: border-box; }
 @media (max-width: 639px) {
     .org-stat-grid { grid-template-columns: 1fr; gap: 0.65rem; }
-    .org-stat-grid .org-stat-card { padding: 1rem !important; }
+    .org-stat-grid .org-stat-card { padding: 1rem !important; height: auto; }
     .org-stat-grid .org-stat-card .org-stat-num { font-size: 2.1rem !important; }
 }
 @media (min-width: 640px) and (max-width: 1023px) {
@@ -334,7 +345,7 @@ new class extends Component {
 }
 
 /* ── Info rows — dark, readable text (no gray) ── */
-.org-info-body { display: flex; flex-direction: column; }
+.org-info-body { display: flex; flex-direction: column; flex: 1 1 auto; }
 .org-info-row {
     display: flex; align-items: center; justify-content: space-between;
     padding: 0.6rem 1rem; border-bottom: 1px solid #EDE0F5; gap: 0.5rem;
@@ -346,6 +357,7 @@ new class extends Component {
 
 /* ── Chips section wrapper ── */
 .org-chips-section { padding: 0.65rem 1rem; }
+.org-chips-section:last-child { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: flex-start; padding-bottom: 1rem; }
 .org-chips-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #333333; margin-bottom: 0.4rem; }
 
 /* ── Chips — base shape, color comes from status-specific classes below ──
@@ -389,7 +401,44 @@ new class extends Component {
 @keyframes orgFadeUp { from { opacity:0; transform:translateY(14px) } to { opacity:1; transform:none } }
 .org-fade-up { animation: orgFadeUp .4s cubic-bezier(.25,.8,.25,1) both; }
 .org-fade-1 { animation-delay:.04s } .org-fade-2 { animation-delay:.08s }
-.org-fade-3 { animation-delay:.12s } .org-fade-4 { animation-delay:.16s }
+/* ── Dashboard card click spinner ───────────────────────────
+   Purple "..." dot loader — same loading interface used on the
+   Alumni Dashboard, applied here for consistency. Card content
+   blurs + dims underneath instead of being fully covered, so it
+   still reads as "this card is busy" not an empty gap. ── */
+.dash-card-clickable { position: relative; }
+.dash-card-clickable.is-loading > *:not(.dash-card-spinner) {
+    filter: blur(4px);
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
+}
+.dash-card-spinner {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    z-index: 40;
+    border-radius: inherit;
+}
+.dash-card-spinner span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #7A3F91;
+    animation: dashDotPulse 1.1s ease-in-out infinite;
+}
+.dash-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+.dash-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+.dash-card-spinner--sm span { width: 5px; height: 5px; }
+@keyframes dashDotPulse {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+.dash-card-clickable.is-loading .dash-card-spinner { display: flex; }
+.dash-card-clickable.is-loading { pointer-events: none; }
 </style>
 
 {{-- ── PAGE HEADER ── --}}
@@ -490,9 +539,10 @@ new class extends Component {
 
             {{-- Total Alumni --}}
             <button type="button" wire:click="goToEmployment('', '')"
-               class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="org-stat-card dash-card-clickable dash-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
+               <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Total Alumni</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow"
@@ -504,13 +554,24 @@ new class extends Component {
                 </div>
                 <p class="org-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($totalAlumni) }}</p>
                 <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Total Alumni</p>
+                @if($pendingAlumni > 0)
+                    <p class="text-[#7A3F91] font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                        <i class="fas fa-circle text-[8px]"></i> {{ $verifiedAlumni }} Verified
+                        <span class="text-[#333333] font-normal">· {{ $pendingAlumni }} Pending</span>
+                    </p>
+                @else
+                    <p class="text-[#7A3F91] font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
+                        <i class="fas fa-circle text-[8px]"></i> {{ $verifiedAlumni }} Verified
+                    </p>
+                @endif
             </button>
 
             {{-- Total Events --}}
             <a href="{{ route('organizer.event/organizer') }}" wire:navigate
-               class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="org-stat-card dash-card-clickable bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Events</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
@@ -536,9 +597,10 @@ new class extends Component {
 
             {{-- Job Postings --}}
             <a href="{{ route('organizer.job/management') }}" wire:navigate
-               class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="org-stat-card dash-card-clickable bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-blue-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Job Postings</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
@@ -557,9 +619,10 @@ new class extends Component {
 
             {{-- Employment — zigzag monthly trend --}}
             <button type="button" wire:click="goToEmployment('employed', '')"
-               class="org-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="org-stat-card dash-card-clickable dash-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-amber-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="org-card-tip"><i class="fas fa-eye mr-1.5"></i>View Employed</span>
                 <div class="flex items-start justify-between mb-2 sm:mb-3">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
@@ -668,7 +731,8 @@ new class extends Component {
                          program on load instead of staying unset. --}}
                     <button type="button"
                             wire:click="goToEmployment('', '{{ $cs->code }}')"
-                            class="org-mini-card org-course-row w-full text-left">
+                            class="org-mini-card org-course-row dash-card-clickable dash-card-nav-btn w-full text-left">
+                        <div class="dash-card-spinner dash-card-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="org-mini-tip"><i class="fas fa-eye mr-1"></i>View {{ $cs->code }}</span>
                         <div class="flex items-center justify-between mb-1">
                             <div class="flex items-center gap-2 min-w-0">
@@ -731,7 +795,8 @@ new class extends Component {
                      employment URL, filter auto-applies on load. --}}
                 <button type="button"
                         wire:click="goToEmployment('{{ $tile['filter'] }}', '')"
-                        class="org-mini-card org-emp-tile rounded-xl border {{ $tile['bg'] }} block w-full text-left">
+                        class="org-mini-card org-emp-tile dash-card-clickable dash-card-nav-btn rounded-xl border {{ $tile['bg'] }} block w-full text-left">
+                    <div class="dash-card-spinner dash-card-spinner--sm"><span></span><span></span><span></span></div>
                     <span class="org-mini-tip"><i class="fas fa-eye mr-1"></i>View {{ $tile['label'] }}</span>
                     <p class="org-emp-num font-extrabold leading-none {{ $tile['color'] }}">{{ number_format($tile['count']) }}</p>
                     <p class="org-emp-label font-bold text-[#333333] uppercase tracking-wide">{{ $tile['label'] }}</p>
@@ -746,3 +811,67 @@ new class extends Component {
 </div>
 
 </div>
+
+<script>
+(function () {
+    'use strict';
+
+    // ─── CARD CLICK SPINNER (nav cards — plain <a> links AND wire:click
+    //     buttons that redirect with navigate:true) ─────────────────────────
+    // Shows a spinner inside the clicked stat/mini card the instant it's
+    // tapped, and keeps it spinning until the NEW page has actually finished
+    // loading (livewire:navigated) — not just until the Livewire request
+    // that kicked off the redirect finishes. wire:loading.class clears as
+    // soon as the component's action call returns, which happens well
+    // before the wire:navigate page swap completes, so the spinner would
+    // flash off immediately instead of staying on through the whole
+    // transition. Plain click listeners + livewire:navigated don't have
+    // that gap. Same pattern as the Alumni Dashboard, for consistency.
+    function initDashCardSpinners() {
+        document.querySelectorAll('a.dash-card-clickable[href]').forEach(function (card) {
+            if (card.__dashSpinnerBound) return;
+            card.__dashSpinnerBound = true;
+            card.addEventListener('click', function () {
+                clearOtherDashCardSpinners(card);
+                card.classList.add('is-loading');
+            });
+        });
+        document.querySelectorAll('button.dash-card-nav-btn').forEach(function (card) {
+            if (card.__dashSpinnerBound) return;
+            card.__dashSpinnerBound = true;
+            card.addEventListener('click', function () {
+                clearOtherDashCardSpinners(card);
+                card.classList.add('is-loading');
+            });
+        });
+    }
+
+    function clearOtherDashCardSpinners(except) {
+        document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
+            if (el !== except) el.classList.remove('is-loading');
+        });
+    }
+
+    function clearAllDashCardSpinners() {
+        document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
+            el.classList.remove('is-loading');
+        });
+    }
+
+    // Safety net: if navigation fails or the page is restored from bfcache,
+    // don't leave a card stuck spinning forever.
+    window.addEventListener('pageshow', clearAllDashCardSpinners);
+
+    // Bind card spinners right away so clicks right after page load feel
+    // responsive.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDashCardSpinners);
+    } else {
+        initDashCardSpinners();
+    }
+    document.addEventListener('livewire:navigated', function () {
+        clearAllDashCardSpinners();
+        initDashCardSpinners();
+    });
+})();
+</script>

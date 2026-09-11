@@ -1269,6 +1269,17 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         font-weight: 700;
     }
     .ar-range-item.active:hover { background: #6B3680 !important; color: #ffffff !important; }
+    .ar-range-item.disabled,
+    .ar-range-item:disabled {
+        color: #C9C9C9 !important;
+        cursor: not-allowed !important;
+        background: transparent !important;
+    }
+    .ar-range-item.disabled:hover,
+    .ar-range-item:disabled:hover {
+        background: transparent !important;
+        color: #C9C9C9 !important;
+    }
     .ar-dropdown-trigger {
         display: inline-flex; align-items: center; gap: 6px;
         padding: 8px 11px; border: 1.5px solid #E8E0F0; border-radius: 8px;
@@ -1785,7 +1796,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                         @if($alumniBatchFrom !== '' && $alumniBatchTo !== '' && $alumniBatchFrom !== $alumniBatchTo)
                             Batch {{ $alumniBatchFrom }}–{{ $alumniBatchTo }}
                         @elseif($alumniBatchFrom !== '' && $alumniBatchTo !== '')
-                            Batch {{ $alumniBatchFrom }}
+                            {{ $alumniBatchFrom }}
                         @elseif($alumniBatchFrom !== '')
                             Batch {{ $alumniBatchFrom }} → pick end year
                         @elseif($alumniBatchTo !== '')
@@ -1838,24 +1849,35 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                          the whole range at once. --}}
                     <template x-if="rangeMode">
                         <div class="p-2" style="width:220px;">
-                            {{-- FIX: the From/To labels now show the picked
-                                 year inline (e.g. "From: 2021") instead of
-                                 a bare "From" that gave no confirmation of
-                                 what was actually selected. Blank until a
-                                 year is picked on that side. --}}
-                            <div class="flex items-center gap-2 mb-1">
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
+                            {{-- Live preview of the pending From/To pick —
+                                 updates instantly as each side is tapped,
+                                 BEFORE "Apply" is clicked. Purely local
+                                 Alpine state (rangeFrom/rangeTo), no
+                                 Livewire round-trip. --}}
+                            <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
+                                <template x-if="rangeFrom !== '' || rangeTo !== ''">
+                                    <span>
+                                        <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
+                                        <span style="color:#B9A8CB;"> → </span>
+                                        <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
+                                    </span>
+                                </template>
                             </div>
                             <div class="flex items-start gap-2">
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batches as $b)
-                                    <button type="button" @click.stop="pickFrom('{{ $b }}')" :class="{'active':rangeFrom==='{{ $b }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
+                                    <button type="button" @click.stop="if(rangeTo!=='{{ $b }}') pickFrom('{{ $b }}')"
+                                            :disabled="rangeTo==='{{ $b }}'"
+                                            :class="{'active':rangeFrom==='{{ $b }}', 'disabled':rangeTo==='{{ $b }}'}"
+                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
                                     @endforeach
                                 </div>
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batches as $b)
-                                    <button type="button" @click.stop="pickTo('{{ $b }}')" :class="{'active':rangeTo==='{{ $b }}'}" class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
+                                    <button type="button" @click.stop="if(rangeFrom!=='{{ $b }}') pickTo('{{ $b }}')"
+                                            :disabled="rangeFrom==='{{ $b }}'"
+                                            :class="{'active':rangeTo==='{{ $b }}', 'disabled':rangeFrom==='{{ $b }}'}"
+                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
                                     @endforeach
                                 </div>
                             </div>

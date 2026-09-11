@@ -1769,7 +1769,7 @@ new class extends Component {
                         @if($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo)
                             Batch {{ $filterBatchFrom }}–{{ $filterBatchTo }}
                         @elseif($filterBatchFrom !== '' && $filterBatchTo !== '')
-                            Batch {{ $filterBatchFrom }}
+                            {{ $filterBatchFrom }}
                         @elseif($filterBatchFrom !== '')
                             Batch {{ $filterBatchFrom }} → pick end year
                         @elseif($filterBatchTo !== '')
@@ -1821,12 +1821,17 @@ new class extends Component {
                          auto-swaps From/To if From ends up later than To. --}}
                     <template x-if="rangeMode">
                         <div class="p-2" style="width:220px;">
-                            <div class="flex items-center gap-2 mb-1">
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">From</span>
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">To</span>
+                            <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
+                                <template x-if="rangeFrom !== '' || rangeTo !== ''">
+                                    <span>
+                                        <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
+                                        <span style="color:#B9A8CB;"> → </span>
+                                        <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
+                                    </span>
+                                </template>
                             </div>
                             <div class="flex items-start gap-2">
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
                                     <button type="button" @click.stop="pickFrom('{{ $year }}')"
                                             :disabled="rangeTo==='{{ $year }}'"
@@ -1834,7 +1839,7 @@ new class extends Component {
                                             class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
                                     <button type="button" @click.stop="pickTo('{{ $year }}')"
                                             :disabled="rangeFrom==='{{ $year }}'"
@@ -2713,7 +2718,7 @@ new class extends Component {
                         @if($modalBatchFrom !== '' && $modalBatchTo !== '' && $modalBatchFrom !== $modalBatchTo)
                             Batch {{ $modalBatchFrom }}–{{ $modalBatchTo }}
                         @elseif($modalBatchFrom !== '' && $modalBatchTo !== '')
-                            Batch {{ $modalBatchFrom }}
+                            {{ $modalBatchFrom }}
                         @elseif($modalBatchFrom !== '')
                             Batch {{ $modalBatchFrom }} → pick end year
                         @elseif($modalBatchTo !== '')
@@ -2749,12 +2754,17 @@ new class extends Component {
 
                     <template x-if="rangeMode">
                         <div class="p-2" style="width:220px;">
-                            <div class="flex items-center gap-2 mb-1">
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">From</span>
-                                <span class="flex-1 text-[10px] font-bold uppercase tracking-wide text-[#7A3F91]">To</span>
+                            <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
+                                <template x-if="rangeFrom !== '' || rangeTo !== ''">
+                                    <span>
+                                        <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
+                                        <span style="color:#B9A8CB;"> → </span>
+                                        <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
+                                    </span>
+                                </template>
                             </div>
                             <div class="flex items-start gap-2">
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
                                     <button type="button" @click.stop="pickFrom('{{ $year }}')"
                                             :disabled="rangeTo==='{{ $year }}'"
@@ -2762,7 +2772,7 @@ new class extends Component {
                                             class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
                                     @endforeach
                                 </div>
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                     @foreach($this->batchYears as $year)
                                     <button type="button" @click.stop="pickTo('{{ $year }}')"
                                             :disabled="rangeFrom==='{{ $year }}'"

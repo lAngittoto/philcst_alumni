@@ -40,7 +40,27 @@ new class extends Component {
     public string $contact_email  = '';
     public string $contact_phone  = '';
     public string $notes          = '';
-    public string $batchYear      = '';
+
+    // ── Batch Year — now a FROM/TO range picker (like Alumni Records'
+    //    Batch filter) instead of a free-typed single year. A single
+    //    batch is just a range where From === To. batchYear (single
+    //    string) is gone — everything downstream reads
+    //    batchYearFrom/batchYearTo instead. ──
+    public string $batchYearFrom  = '';
+    public string $batchYearTo    = '';
+
+    /** True only after the user explicitly taps "All Alumni" in the batch
+     *  picker. Lets the trigger button show "All Alumni" instead of the
+     *  ambiguous "Select Batch Year" placeholder — both batchYearFrom and
+     *  batchYearTo are '' in BOTH states, so without this flag the button
+     *  looked identical whether "All Alumni" was chosen or nothing was
+     *  picked yet, making the selection look like it "didn't work". */
+    public bool $allAlumniChosen = false;
+
+    /** Set while setSingleBatchYear()/setBatchRange() are writing to
+     *  batchYearFrom/batchYearTo directly, so the updated*() hooks below
+     *  don't immediately re-trigger and double-fire normalization. */
+    private bool $skipBatchYearHooks = false;
 
     public array  $selectedCourses = [];
 
@@ -54,6 +74,16 @@ new class extends Component {
     public ?int  $viewingEventId = null;
 
     public bool $showNoAlumniModal = false;
+
+    /** True only when the currently open View Details / edit-form modal
+     *  was opened via a notification click or the ?highlight_event= deep
+     *  link (see mount() and openViewEventFromNotif() below) — never for
+     *  an ordinary row click from the table. Only in that case should
+     *  closing the modal snap the FILTERS pill to the event's status;
+     *  otherwise closing a row opened while sitting on "All Statuses" (or
+     *  any other filter) must leave that filter exactly as the organizer
+     *  had it. */
+    public bool $viaNotifOrDeepLink = false;
 
     public bool   $isResubmitting           = false;
     public string $resubmitEventTitle       = '';
@@ -126,6 +156,7 @@ new class extends Component {
                 ->exists();
             if ($owned) {
                 $this->viewEvent($highlightId);
+                $this->viaNotifOrDeepLink = true;
             }
         }
     }
@@ -148,6 +179,7 @@ new class extends Component {
 
         if ($owned) {
             $this->viewEvent($id);
+            $this->viaNotifOrDeepLink = true;
         }
     }
 
@@ -252,6 +284,90 @@ new class extends Component {
         });
     }
 
+    /** Distinct verified-alumni batch years available to pick from, scoped
+     *  to this organizer's college (same scoping as availableCourses()),
+     *  newest first — feeds both sides of the Batch Year range picker. */
+    #[Computed]
+    public function batches(): array
+    {
+        $dept = $this->organizerDepartment;
+
+        $cacheKey = 'organizer_batches_' . ($dept ?: 'all');
+        return Cache::remember($cacheKey, 300, function () use ($dept) {
+            $q = Alumni::where('status', 'VERIFIED');
+            if ($dept) { $q->whereHas('course', fn($c) => $c->where('college', $dept)); }
+            return $q->distinct()->orderByDesc('batch')->pluck('batch')
+                ->map(fn($b) => (string) $b)->toArray();
+        });
+    }
+
+    /** True only once BOTH ends of the batch range are set — a half-picked
+     *  range (only From, or only To) is not applied yet. */
+    private function batchRangeIsComplete(): bool
+    {
+        return $this->batchYearFrom !== '' && $this->batchYearTo !== '';
+    }
+
+    private function normalizeBatchYearRange(): void
+    {
+        if ($this->batchYearFrom !== '' && $this->batchYearTo !== ''
+            && (int) $this->batchYearFrom > (int) $this->batchYearTo) {
+            [$this->batchYearFrom, $this->batchYearTo] = [$this->batchYearTo, $this->batchYearFrom];
+        }
+    }
+
+    /** Single-year quick pick from the plain year list — sets both ends
+     *  of the range to the same year in one round-trip. */
+    public function setSingleBatchYear(string $year): void
+    {
+        $this->skipBatchYearHooks = true;
+        $this->batchYearFrom = $year;
+        $this->batchYearTo   = $year;
+        $this->allAlumniChosen = false;
+        $this->skipBatchYearHooks = false;
+    }
+
+    /** Explicit From/To range pick, applied together in one round-trip
+     *  once both sides are chosen (see the "Apply" button in the picker). */
+    public function setBatchRange(string $from, string $to): void
+    {
+        $this->skipBatchYearHooks = true;
+        $this->batchYearFrom = $from;
+        $this->batchYearTo   = $to;
+        $this->allAlumniChosen = false;
+        $this->skipBatchYearHooks = false;
+        $this->normalizeBatchYearRange();
+    }
+
+    /** "All Alumni" — clears both ends of the range in one round-trip,
+     *  same reasoning as setSingleBatchYear()/setBatchRange() above.
+     *  Also flips allAlumniChosen so the trigger button can tell this
+     *  apart from the never-picked-anything state. */
+    public function chooseAllAlumniBatch(): void
+    {
+        $this->skipBatchYearHooks = true;
+        $this->batchYearFrom = '';
+        $this->batchYearTo   = '';
+        $this->allAlumniChosen = true;
+        $this->skipBatchYearHooks = false;
+    }
+
+    /** The "Clear" link next to the Batch Year label — a true reset back
+     *  to the untouched/nothing-picked state. This is deliberately
+     *  separate from chooseAllAlumniBatch(): both leave batchYearFrom/To
+     *  empty, but only allAlumniChosen tells them apart, so Clear must
+     *  turn that flag back off or clicking Clear while "All Alumni" was
+     *  selected would look like it did nothing (still empty, still
+     *  flagged as All Alumni). */
+    public function clearBatchYear(): void
+    {
+        $this->skipBatchYearHooks = true;
+        $this->batchYearFrom = '';
+        $this->batchYearTo   = '';
+        $this->allAlumniChosen = false;
+        $this->skipBatchYearHooks = false;
+    }
+
     #[Computed]
     public function hasAlumni(): bool
     {
@@ -313,6 +429,21 @@ new class extends Component {
         $this->resetPage();
     }
 
+    // ── Wraps the part of $text that matches the current search term in
+    //    a light-blue <mark>, so the table visibly shows *why* a row
+    //    matched instead of just filtering silently. $text is escaped
+    //    first, so this is safe to output with {!! !!} in the view. ──
+    public function highlightSearch(string $text): string
+    {
+        $term = trim($this->search);
+        $escaped = e($text);
+        if ($term === '') {
+            return $escaped;
+        }
+        $pattern = '/(' . preg_quote(e($term), '/') . ')/i';
+        return preg_replace($pattern, '<mark class="eo-search-hl">$1</mark>', $escaped);
+    }
+
 public function openCreateModal(): void
 {
     if (!$this->hasAlumni) {
@@ -354,8 +485,21 @@ public function openCreateModal(): void
 
         $tp    = $event->target_participants ?? '';
         $parts = explode(' · Batch ', $tp, 2);
-        $coursesPart = trim($parts[0] ?? '');
-        $this->batchYear = trim($parts[1] ?? '');
+        $coursesPart  = trim($parts[0] ?? '');
+        $batchPart    = trim($parts[1] ?? '');
+
+        // Batch part is either a single year ("2026") or a range
+        // ("2021–2026") — split on the en-dash to tell them apart.
+        if ($batchPart !== '' && str_contains($batchPart, '–')) {
+            [$from, $to] = array_map('trim', explode('–', $batchPart, 2));
+            $this->batchYearFrom = $from;
+            $this->batchYearTo   = $to;
+            $this->allAlumniChosen = false;
+        } else {
+            $this->batchYearFrom = $batchPart;
+            $this->batchYearTo   = $batchPart;
+            $this->allAlumniChosen = ($batchPart === '');
+        }
 
         $this->selectedCourses = !empty($coursesPart) && $coursesPart !== 'All Courses'
             ? array_map('trim', explode(',', $coursesPart))
@@ -386,6 +530,13 @@ public function openEditModal(int $id): void
 
 public function viewEvent(int $id): void
 {
+    // ── Ordinary entry point (table row click). Always resets the
+    //    notif/deep-link flag to false first — viaNotifOpen() below is
+    //    the only path that sets it true, and does so AFTER calling this,
+    //    so a plain row click can never accidentally inherit a stale
+    //    true left over from an earlier notif click this session. ──
+    $this->viaNotifOrDeepLink = false;
+
     $event = OrganizerEvent::where('id', $id)->where('organizer_id', $this->organizerId)->firstOrFail();
 
     if ($event->status === 'PENDING') {
@@ -506,8 +657,11 @@ public function closeFormModal(): void
     //    edit/resubmit form for an existing event, snap the filter pill to
     //    that event's current status so the organizer lands back on the
     //    right slice of the table (e.g. resubmitting a REJECTED event
-    //    turns it PENDING again, so the list auto-filters to "Pending"). ──
-    if ($this->editingEventId) {
+    //    turns it PENDING again, so the list auto-filters to "Pending").
+    //    ONLY when the form was opened via a notification/deep-link — an
+    //    ordinary row click (e.g. from "All Statuses") must leave the
+    //    filter exactly as it was. ──
+    if ($this->editingEventId && $this->viaNotifOrDeepLink) {
         $status = OrganizerEvent::where('id', $this->editingEventId)
             ->where('organizer_id', $this->organizerId)
             ->value('status');
@@ -516,6 +670,7 @@ public function closeFormModal(): void
             $this->resetPage();
         }
     }
+    $this->viaNotifOrDeepLink = false;
 
     $this->showFormModal = false;
     $this->resetFormFields();
@@ -666,29 +821,44 @@ public function closeFormModal(): void
             }
         }
 
-        if (trim($this->batchYear) !== '') {
-            if (!preg_match('/^\d{4}$/', trim($this->batchYear))) {
-                $errors['batch_year'] = 'Batch year must be a valid 4-digit year (numbers only, e.g. ' . now()->year . ').';
-            }
+        // Batch year range validation. A half-picked range (only From or
+        // only To) is treated the same as picking a single year on that
+        // side — the picker itself never sends a half-picked range to the
+        // server (see setSingleBatchYear()/setBatchRange() below), but we
+        // still guard here in case both ends aren't in sync for any reason.
+        $batchFrom = trim($this->batchYearFrom);
+        $batchTo   = trim($this->batchYearTo);
+
+        if ($batchFrom !== '' && !preg_match('/^\d{4}$/', $batchFrom)) {
+            $errors['batch_year'] = 'Batch year must be a valid 4-digit year (numbers only, e.g. ' . now()->year . ').';
+        }
+        if ($batchTo !== '' && !preg_match('/^\d{4}$/', $batchTo)) {
+            $errors['batch_year'] = 'Batch year must be a valid 4-digit year (numbers only, e.g. ' . now()->year . ').';
         }
 
-        if (trim($this->batchYear) !== '' && !isset($errors['target']) && !isset($errors['batch_year'])) {
-            $inputYear = (int) trim($this->batchYear);
+        if (($batchFrom !== '' || $batchTo !== '') && !isset($errors['target']) && !isset($errors['batch_year'])) {
+            $fromYear = (int) ($batchFrom !== '' ? $batchFrom : $batchTo);
+            $toYear   = (int) ($batchTo   !== '' ? $batchTo   : $batchFrom);
+            if ($fromYear > $toYear) { [$fromYear, $toYear] = [$toYear, $fromYear]; }
+
             $dept = $this->organizerDepartment;
-            $q = Alumni::where('status', 'VERIFIED')->where('batch', $inputYear);
+            $q = Alumni::where('status', 'VERIFIED')
+                ->where('batch', '>=', $fromYear)
+                ->where('batch', '<=', $toYear);
             if ($dept) { $q->whereHas('course', fn($c) => $c->where('college', $dept)); }
             if (!$q->exists()) {
                 $suggQ = Alumni::where('status', 'VERIFIED');
                 if ($dept) { $suggQ->whereHas('course', fn($c) => $c->where('college', $dept)); }
                 $available = $suggQ->distinct()->orderBy('batch', 'desc')
                     ->pluck('batch')->map(fn($b) => (int)$b)->toArray();
+                $rangeLabel = $fromYear === $toYear ? (string) $fromYear : "{$fromYear}–{$toYear}";
                 if (empty($available)) {
                     $errors['batch_year'] = "No verified alumni found for your college. Leave batch blank to target all alumni.";
                 } else {
-                    $nearest   = collect($available)->sortBy(fn($y) => abs($y - $inputYear))->first();
+                    $nearest   = collect($available)->sortBy(fn($y) => abs($y - $fromYear))->first();
                     $batchList = implode(', ', array_slice($available, 0, 8));
                     if (count($available) > 8) $batchList .= '…';
-                    $errors['batch_year'] = "No verified alumni for batch {$inputYear}."
+                    $errors['batch_year'] = "No verified alumni for batch {$rangeLabel}."
                         . ($nearest ? " Nearest: {$nearest}." : '') . " Available: {$batchList}.";
                 }
             }
@@ -712,9 +882,17 @@ public function closeFormModal(): void
             return;
         }
 
-        $courseStr  = !empty($this->selectedCourses) ? implode(', ', $this->selectedCourses) : 'All Courses';
-        $yearSuffix = trim($this->batchYear) ? ' · Batch ' . trim($this->batchYear) : '';
-        $targetStr  = $courseStr . $yearSuffix;
+        $courseStr = !empty($this->selectedCourses) ? implode(', ', $this->selectedCourses) : 'All Courses';
+
+        $batchFrom = trim($this->batchYearFrom);
+        $batchTo   = trim($this->batchYearTo);
+        $yearSuffix = '';
+        if ($batchFrom !== '' || $batchTo !== '') {
+            $yearSuffix = $batchFrom === $batchTo
+                ? ' · Batch ' . ($batchFrom !== '' ? $batchFrom : $batchTo)
+                : ' · Batch ' . $batchFrom . '–' . $batchTo;
+        }
+        $targetStr = $courseStr . $yearSuffix;
 
         $startDt = \Carbon\Carbon::createFromFormat('Y-m-d H:i', $this->event_date . ' ' . $this->start_time, 'Asia/Manila');
         $endDt   = \Carbon\Carbon::createFromFormat('Y-m-d H:i', $this->event_date . ' ' . $this->end_time,   'Asia/Manila');
@@ -928,8 +1106,11 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
     //    pill to whatever status this event is currently sitting at (e.g.
     //    closing a COMPLETED event's details auto-filters the list to
     //    "Completed") so the organizer lands right back on the relevant
-    //    slice of the table instead of the unfiltered/previous view. ──
-    if ($this->viewingEventId) {
+    //    slice of the table instead of the unfiltered/previous view.
+    //    ONLY when the modal was opened via a notification/deep-link —
+    //    an ordinary row click (e.g. from "All Statuses") must leave the
+    //    filter exactly as it was. ──
+    if ($this->viewingEventId && $this->viaNotifOrDeepLink) {
         $status = OrganizerEvent::where('id', $this->viewingEventId)
             ->where('organizer_id', $this->organizerId)
             ->value('status');
@@ -938,6 +1119,7 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
             $this->resetPage();
         }
     }
+    $this->viaNotifOrDeepLink = false;
 
     $this->showViewModal = false;
     $this->viewingEventId = null;
@@ -1001,12 +1183,28 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $tp    = $this->shareEventTargetParts;
         $parts = explode(' · Batch ', $tp, 2);
         $coursesPart = trim($parts[0] ?? '');
-        $batchYear   = trim($parts[1] ?? '');
+        $batchPart   = trim($parts[1] ?? '');
         $courseCodes = (!empty($coursesPart) && $coursesPart !== 'All Courses')
             ? array_map('trim', explode(',', $coursesPart))
             : [];
 
-        $this->shareTargetBatchYear   = $batchYear;
+        // Batch part is either a single year ("2026") or a range
+        // ("2021–2026") — expand a range into the full list of years it
+        // covers so every matching batch GC within the range gets
+        // auto-ticked, not just the endpoints.
+        $batchYears = [];
+        if ($batchPart !== '') {
+            if (str_contains($batchPart, '–')) {
+                [$rFrom, $rTo] = array_map('trim', explode('–', $batchPart, 2));
+                $rFrom = (int) $rFrom; $rTo = (int) $rTo;
+                if ($rFrom > $rTo) { [$rFrom, $rTo] = [$rTo, $rFrom]; }
+                for ($y = $rFrom; $y <= $rTo; $y++) { $batchYears[] = (string) $y; }
+            } else {
+                $batchYears[] = $batchPart;
+            }
+        }
+
+        $this->shareTargetBatchYear   = $batchPart;
         $this->shareTargetCourseCodes = $courseCodes;
 
         $matched = [];
@@ -1016,9 +1214,9 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
             $roomCourse = strtoupper((string) ($r['course_code'] ?? ''));
             $inTarget   = empty($courseCodes) || in_array($roomCourse, array_map('strtoupper', $courseCodes), true);
 
-            if ($batchYear !== '') {
-                // Specific batch targeted — only that batch's GC(s) qualify.
-                if ($r['type'] === 'batch' && (string) $r['batch'] === $batchYear && $inTarget) {
+            if (!empty($batchYears)) {
+                // Specific batch(es) targeted — only those batch GC(s) qualify.
+                if ($r['type'] === 'batch' && in_array((string) $r['batch'], $batchYears, true) && $inTarget) {
                     $matched[] = (string) $r['id'];
                 }
             } else {
@@ -1276,7 +1474,9 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->venue = $this->venue_address = $this->contact_phone = $this->notes = '';
         $this->contact_person = '';
         $this->contact_email  = '';
-        $this->batchYear      = '';
+        $this->batchYearFrom  = '';
+        $this->batchYearTo    = '';
+        $this->allAlumniChosen = false;
         $this->selectedCourses = [];
         $this->photo          = null;
         $this->existingPhotoUrl = null;
@@ -1301,6 +1501,38 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
      style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
 
 <style>
+/* ── No copy/select on the Event Management list page (header, filters,
+   table rows, pagination) — same behavior as the dashboards. Scoped to
+   .eo-noselect only, so the View Details full-screen modal (rendered
+   outside this wrapper) stays normally selectable/copyable. ── */
+.eo-noselect,
+.eo-noselect * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+/* Inputs/textareas inside filters still need normal text interaction
+   (typing, cursor, native selection while editing). */
+.eo-noselect input,
+.eo-noselect textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
+
+/* ── Search match highlight — light blue, shows which part of the row
+   text matched the current search term (title/venue). ── */
+.eo-search-hl {
+    background: #DBEAFE;
+    color: #1e3a8a;
+    padding: 0 2px;
+    border-radius: 3px;
+    font-weight: inherit;
+}
+
 @keyframes modalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
     to   { opacity:1; transform:none; }
@@ -1359,14 +1591,13 @@ select.tw-select-arrow {
     white-space: nowrap;
 }
 
-/* ── Tooltips: never show on touch / small screens ──
-   Every hover-tooltip bubble in this page uses the "group-hover:opacity-100"
-   utility class (submit/reset/close buttons, row action tooltips, share/
-   close tooltips inside the view modal, etc). Hiding anything that carries
-   that class on touch/small screens means tooltip text can never get stuck
-   visible on mobile, without having to hunt down each one individually. ── */
+/* ── Tooltips: the row action tooltip (#eo-hover-tip) now stays visible
+   on all devices — it no longer needs "hover: hover" support, since the
+   JS below shows it on tap/touch too, not just mouse hover. Other
+   hover-only tooltips (submit/reset/close buttons, share/close tooltips
+   inside the view modal, etc.) still hide on touch/small screens, since
+   those still depend on a real mouse hover to reveal. ── */
 @media (max-width: 768px), (hover: none) {
-    #eo-hover-tip { display: none !important; }
     [class*="group-hover:opacity-100"] { display: none !important; }
 }
 
@@ -1531,6 +1762,69 @@ select.tw-select-arrow {
         overflow-y: visible !important;
     }
 }
+
+/* ── Batch Year dropdown picker (Event form) — same look as the Batch
+   filter dropdown in Alumni Records, scoped under eo- so it doesn't
+   collide with that page's ar- classes. ── */
+.eo-batch-dropdown { position: relative; }
+.eo-batch-trigger {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 8px 11px; border: 1.5px solid #E8E0F0; border-radius: 10px;
+    font-size: .875rem; font-weight: 600; background: #fff; color: #333;
+    cursor: pointer; transition: border-color .15s, background .15s, color .15s;
+    white-space: nowrap; user-select: none;
+}
+.eo-batch-trigger:hover { border-color: #c49ed8; }
+.eo-batch-trigger.has-value { border-color: #7a3f91; background: #F9F7FC; color: #7a3f91; }
+.eo-batch-trigger .eo-batch-chevron { transition: transform .18s; font-size: .65rem; opacity: .6; }
+.eo-batch-trigger.open .eo-batch-chevron { transform: rotate(180deg); }
+.eo-batch-menu {
+    position: absolute; top: calc(100% + 4px); left: 0;
+    min-width: 100%; max-height: 220px; overflow-y: auto;
+    background: #fff; border: 1.5px solid #E8E0F0;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
+    z-index: 500; padding: 4px;
+    scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
+}
+.eo-batch-menu::-webkit-scrollbar { width: 5px; }
+.eo-batch-menu::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+.eo-batch-footer {
+    position: sticky; bottom: -4px; left: 0; right: 0;
+    background: #fff; margin: 0 -4px -4px; padding: 8px 4px 4px;
+    border-top: 1px solid #E8E0F0; border-radius: 0 0 8px 8px;
+}
+.eo-batch-item {
+    display: block; width: 100%; padding: 7px 10px; border-radius: 7px;
+    font-size: .8rem; font-weight: 600; text-align: left; color: #333;
+    transition: background .1s; cursor: pointer; white-space: nowrap;
+    border: none; background: transparent;
+    user-select: none; -webkit-user-select: none;
+}
+.eo-upload-spinner {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 3px solid #E8D9F2; border-top-color: #7a3f91;
+    animation: eo-spin .7s linear infinite;
+}
+@keyframes eo-spin { to { transform: rotate(360deg); } }
+.eo-batch-item:hover { background: #F5F0FA; color: #7a3f91; }
+.eo-batch-item.active { background: #F0E6F8; color: #7a3f91; }
+.eo-batch-range-item.active {
+    background: #7a3f91 !important;
+    color: #ffffff !important;
+    font-weight: 700;
+}
+.eo-batch-range-item.active:hover { background: #6B3680 !important; color: #ffffff !important; }
+.eo-batch-range-item.disabled,
+.eo-batch-range-item:disabled {
+    color: #C9C9C9 !important;
+    cursor: not-allowed !important;
+    background: transparent !important;
+}
+.eo-batch-range-item.disabled:hover,
+.eo-batch-range-item:disabled:hover {
+    background: transparent !important;
+    color: #C9C9C9 !important;
+}
 </style>
 
 {{-- Hover tooltip (desktop only — hidden on mobile via CSS above) --}}
@@ -1566,12 +1860,10 @@ select.tw-select-arrow {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0 eo-noselect">
 
     {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left) ══ --}}
-    <div class="eo-page-header-noselect flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0"
-         style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
-         onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;">
+    <div class="eo-page-header-noselect flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
         <div class="flex items-center gap-3">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1635,7 +1927,7 @@ select.tw-select-arrow {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
                 <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
-                       placeholder="Search title or venue…"
+                       placeholder="Search..."
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] placeholder-[#a78bbd] font-normal
                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
@@ -1681,8 +1973,10 @@ select.tw-select-arrow {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    @if(!$search && !$filterStatus) disabled @endif
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
-                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer
+                           disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
                 </span>
@@ -1705,13 +1999,12 @@ select.tw-select-arrow {
             </div>
 
             <div id="eo-table-scroll"
-                 class="scroll-c h-full overflow-y-auto overflow-x-auto transition-opacity duration-200 bg-white"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,resetFilters,previousPage,nextPage,gotoPage">
+                 class="scroll-c h-full overflow-y-auto overflow-x-auto bg-white">
 
             @if($this->events->count() > 0)
 
                 <table class="w-full bg-white border-collapse">
-                    <thead class="bg-white sticky top-0 z-10" style="box-shadow: 0 1px 0 #E8E0F0;">
+                    <thead class="bg-white sticky top-0 z-10 border-b border-[#E8E0F0]">
                         <tr>
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Date &amp; Time</th>
@@ -1721,7 +2014,8 @@ select.tw-select-arrow {
                             <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]"></th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-[#F5F5F5]">
+                    <tbody class="divide-y divide-[#F5F5F5] transition-opacity duration-200"
+                           wire:loading.class="opacity-50" wire:target="search,filterStatus,resetFilters,previousPage,nextPage,gotoPage">
                         @foreach($this->events as $event)
                         @php
                             $isCompleted = $event->status === 'COMPLETED';
@@ -1748,7 +2042,7 @@ select.tw-select-arrow {
                             <td class="px-4 py-2.5">
                                 <div class="max-w-[240px]">
                                     <div class="flex items-center gap-1.5 flex-wrap">
-                                        <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
+                                        <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{!! $this->highlightSearch($event->title) !!}</p>
                                         @if($isUpcoming)
                                             <span class="eo-upcoming-badge"><i class="fas fa-circle text-[6px]"></i>Upcoming</span>
                                         @endif
@@ -2031,34 +2325,34 @@ select.tw-select-arrow {
      wire:keydown.escape.window="cancelSubmitConfirm">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b border-amber-100 bg-amber-50">
-            <h2 class="text-base font-semibold text-amber-800 flex items-center gap-2.5">
+            <h2 class="text-lg font-semibold text-amber-800 flex items-center gap-2.5">
                 <div class="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-triangle-exclamation text-amber-500 text-sm"></i>
+                    <i class="fas fa-triangle-exclamation text-amber-500 text-base"></i>
                 </div>
                 Confirm Submission
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">You are about to submit:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+            <p class="text-base text-[#555555] mb-1">You are about to submit:</p>
+            <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $title }}
             </p>
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-lock text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-800">Once this event is approved by the Alumni Director, it can no longer be edited. Please review all details carefully before proceeding.</span>
+                <i class="fas fa-lock text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                <span class="text-sm text-amber-800">Once this event is approved by the Alumni Director, it can no longer be edited. Please review all details carefully before proceeding.</span>
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelSubmitConfirm"
                         wire:loading.attr="disabled" wire:target="confirmSubmitEvent"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
-                    <i class="fas fa-xmark mr-1 text-xs"></i>Review Again
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+                    <i class="fas fa-xmark mr-1 text-sm"></i>Review Again
                 </button>
                 <button wire:click="confirmSubmitEvent"
                         wire:loading.attr="disabled"
                         wire:target="confirmSubmitEvent"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-[#7a3f91] hover:bg-[#5e2f72] transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
-                    <span wire:loading wire:target="confirmSubmitEvent"><i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Submitting…</span>
-                    <span wire:loading.remove wire:target="confirmSubmitEvent"><i class="fas fa-paper-plane mr-1 text-xs"></i>Yes, Submit</span>
+                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white bg-[#7a3f91] hover:bg-[#5e2f72] transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
+                    <span wire:loading wire:target="confirmSubmitEvent"><i class="fas fa-spinner fa-spin mr-1 text-sm"></i>Submitting…</span>
+                    <span wire:loading.remove wire:target="confirmSubmitEvent"><i class="fas fa-paper-plane mr-1 text-sm"></i>Yes, Submit</span>
                 </button>
             </div>
         </div>
@@ -2077,21 +2371,21 @@ select.tw-select-arrow {
         <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
                 @if($isResubmitting)
-                    <i class="fas fa-rotate-right text-white text-sm"></i>
+                    <i class="fas fa-rotate-right text-white text-base"></i>
                 @elseif($isEditing)
-                    <i class="fas fa-pen-to-square text-white text-sm"></i>
+                    <i class="fas fa-pen-to-square text-white text-base"></i>
                 @else
-                    <i class="fas fa-calendar-plus text-white text-sm"></i>
+                    <i class="fas fa-calendar-plus text-white text-base"></i>
                 @endif
             </div>
             <div>
-                <h2 class="text-white font-semibold text-lg leading-tight">
+                <h2 class="text-white font-semibold text-xl leading-tight">
                     @if($isResubmitting) Edit &amp; Resubmit Event
                     @elseif($isEditing) Edit Event
                     @else Submit a New Event
                     @endif
                 </h2>
-                <p class="text-white/60 text-xs mt-0.5">
+                <p class="text-white/60 text-sm mt-0.5">
                     @if($isResubmitting) Make changes — saving will resubmit for Alumni Director review
                     @elseif($isEditing) Update event details below
                     @else Fill in details — will be sent for Alumni Director review
@@ -2104,11 +2398,13 @@ select.tw-select-arrow {
             @if(!$isEditing && !$isResubmitting)
             <div class="relative inline-flex group">
                 <button wire:click="resetForm" type="button"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
+                        wire:loading.attr="disabled" wire:target="resetForm"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Reset form">
-                    <i class="fas fa-rotate-left text-white text-sm"></i>
+                    <i class="fas fa-rotate-left text-white text-base" wire:loading.remove wire:target="resetForm"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="resetForm"></i>
                 </button>
-                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-xs font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Reset
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
@@ -2120,10 +2416,10 @@ select.tw-select-arrow {
                         wire:loading.attr="disabled" wire:target="confirmDelete({{ $editingEventId }})"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Delete event">
-                    <i class="fas fa-trash-can text-white text-sm" wire:loading.remove wire:target="confirmDelete({{ $editingEventId }})"></i>
-                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmDelete({{ $editingEventId }})"></i>
+                    <i class="fas fa-trash-can text-white text-base" wire:loading.remove wire:target="confirmDelete({{ $editingEventId }})"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="confirmDelete({{ $editingEventId }})"></i>
                 </button>
-                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-xs font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Delete
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
@@ -2134,10 +2430,10 @@ select.tw-select-arrow {
                         wire:loading.attr="disabled" wire:target="closeFormModal"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
                         aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeFormModal"></i>
-                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeFormModal"></i>
+                    <i class="fas fa-xmark text-white text-base" wire:loading.remove wire:target="closeFormModal"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="closeFormModal"></i>
                 </button>
-                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-xs font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
                     Close
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
@@ -2147,14 +2443,14 @@ select.tw-select-arrow {
 
     @if($isResubmitting)
     <div class="bg-amber-50 border-b border-amber-200 px-6 lg:px-10 py-2 flex-shrink-0 flex items-start gap-3">
-        <i class="fas fa-rotate-right text-amber-500 flex-shrink-0 text-xs mt-1"></i>
+        <i class="fas fa-rotate-right text-amber-500 flex-shrink-0 text-sm mt-1"></i>
         <div class="flex-1 min-w-0">
-            <p class="text-sm text-[#333333]">
+            <p class="text-base text-[#333333]">
                 <strong>Resubmitting:</strong> Edit the details and click <strong>Save &amp; Resubmit</strong> to send back for Alumni Director approval.
             </p>
             @if($resubmitEventRemarks)
-            <p class="text-xs mt-1 text-red-700 flex items-center gap-1.5">
-                <i class="fas fa-circle-xmark text-red-400 text-[10px] flex-shrink-0"></i>
+            <p class="text-sm mt-1 text-red-700 flex items-center gap-1.5">
+                <i class="fas fa-circle-xmark text-red-400 text-xs flex-shrink-0"></i>
                 <strong>Rejection reason:</strong> {{ $resubmitEventRemarks }}
             </p>
             @endif
@@ -2185,15 +2481,25 @@ select.tw-select-arrow {
                     $defaultPhotoExists  = file_exists(public_path($defaultPhotoRelPath));
                 @endphp
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Event Photo
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— Preview</span>
+                        <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— Preview</span>
                     </div>
                     <div class="p-2.5 bg-white">
                         <div x-data="{isDragging:false}"
                              @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false"
-                             class="border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
+                             class="relative border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
                              :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':'{{ ($photo||($existingPhotoUrl&&!$removePhoto))?'border-[#7a3f91] border-solid bg-white':'border-dashed border-gray-300 hover:border-[#7a3f91] hover:bg-white' }}'">
+                            {{-- Uploading overlay — sits directly on top of the preview
+                                 box the moment a file is picked, instead of only a small
+                                 text line below it, so the "something is happening" feel
+                                 is immediate and impossible to miss. --}}
+                            <div wire:loading wire:target="photo"
+                                 class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-xl"
+                                 style="background:rgba(255,255,255,.9);backdrop-filter:blur(1px);">
+                                <div class="eo-upload-spinner"></div>
+                                <p class="text-sm font-semibold text-[#7a3f91]">Uploading…</p>
+                            </div>
                             <label class="cursor-pointer block p-2.5">
                                 <input type="file" wire:model="photo" accept="image/*" class="hidden">
                                 @if($photo)
@@ -2202,7 +2508,7 @@ select.tw-select-arrow {
                                         <div class="w-full rounded-lg overflow-hidden border border-purple-200 bg-white flex items-center justify-center" style="height:150px;">
                                             <img src="{{ $photo->temporaryUrl() }}" class="w-full h-full object-contain">
                                         </div>
-                                        <p class="text-xs font-semibold text-[#7a3f91]"><i class="fas fa-check-circle mr-1 text-[10px]"></i>New photo selected — click to change</p>
+                                        <p class="text-sm font-semibold text-[#7a3f91]"><i class="fas fa-check-circle mr-1 text-xs"></i>New photo selected — click to change</p>
                                     </div>
                                 @elseif($existingPhotoUrl&&!$removePhoto)
                                     {{-- Editing an event that already has a saved photo — always visible --}}
@@ -2210,7 +2516,7 @@ select.tw-select-arrow {
                                         <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:150px;">
                                             <img src="{{ $existingPhotoUrl }}" class="w-full h-full object-contain">
                                         </div>
-                                        <p class="text-xs font-semibold mt-1" style="color:#111111;">Current photo. Click photo to update.</p>
+                                        <p class="text-sm font-semibold mt-1" style="color:#111111;">Current photo. Click photo to update.</p>
                                     </div>
                                 @elseif($defaultPhotoExists)
                                     {{-- New event, no upload yet — show the real default event photo
@@ -2220,8 +2526,8 @@ select.tw-select-arrow {
                                         <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:120px;">
                                             <img src="{{ asset($defaultPhotoRelPath) }}" alt="Default event photo" class="w-full h-full object-contain">
                                         </div>
-                                        <p class="font-semibold text-xs mt-1" style="color:#111111;">JPG, PNG, WEBP — max 5 MB</p>
-                                        <p class="text-[10px] mt-0.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
+                                        <p class="font-semibold text-sm mt-1" style="color:#111111;">JPG, PNG, WEBP — max 5 MB</p>
+                                        <p class="text-xs mt-0.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
                                     </div>
                                 @else
                                     {{-- New event, no upload yet, AND default-photo-event.jpg is
@@ -2236,40 +2542,37 @@ select.tw-select-arrow {
                                                 <path d="M34 52L46 41C47.1 40.05 48.75 40.05 49.85 41L62 52" stroke="#9B59B6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                                             </svg>
                                         </div>
-                                        <p class="font-semibold text-xs mt-1" style="color:#111111;">Click to upload or drag &amp; drop</p>
-                                        <p class="text-[10px] text-center font-medium" style="color:#111111;">JPG, PNG, WEBP — max 5 MB. Click photo to update.</p>
+                                        <p class="font-semibold text-sm mt-1" style="color:#111111;">Click to upload or drag &amp; drop</p>
+                                        <p class="text-xs text-center font-medium" style="color:#111111;">JPG, PNG, WEBP — max 5 MB. Click photo to update.</p>
                                     </div>
                                 @endif
                             </label>
                         </div>
                         @if($existingPhotoUrl&&!$removePhoto&&!$photo)
                             <button type="button" wire:click="$set('removePhoto',true)"
-                                    class="mt-1.5 text-xs text-red-600 hover:text-red-700 font-semibold flex items-center gap-1 px-2 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition">
-                                <i class="fas fa-trash text-[10px]"></i> Remove photo
+                                    class="mt-1.5 text-sm text-red-600 hover:text-red-700 font-semibold flex items-center gap-1 px-2 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition">
+                                <i class="fas fa-trash text-xs"></i> Remove photo
                             </button>
                         @endif
                         @if($removePhoto)
                             <div class="mt-1.5 flex items-center gap-2">
-                                <span class="text-xs text-amber-700 font-semibold"><i class="fas fa-exclamation-circle mr-1 text-[10px]"></i>Photo removed on save</span>
-                                <button type="button" wire:click="$set('removePhoto',false)" class="text-xs text-blue-600 underline">Undo</button>
+                                <span class="text-sm text-amber-700 font-semibold"><i class="fas fa-exclamation-circle mr-1 text-xs"></i>Photo removed on save</span>
+                                <button type="button" wire:click="$set('removePhoto',false)" class="text-sm text-blue-600 underline">Undo</button>
                             </div>
                         @endif
-                        <div wire:loading wire:target="photo" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2 justify-center">
-                            <i class="fas fa-spinner fa-spin text-xs"></i> Uploading…
-                        </div>
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-visible">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest rounded-t-2xl">
                         Programs
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                         @if(count($selectedCourses) > 0)
-                            <span class="ml-auto inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-200 text-purple-800 text-[10px] font-bold">
+                            <span class="ml-auto inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-200 text-purple-800 text-xs font-bold">
                                 {{ count($selectedCourses) }}
                             </span>
                         @else
-                            <span class="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-semibold">
+                            <span class="ml-auto inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-semibold">
                                 None
                             </span>
                         @endif
@@ -2277,8 +2580,8 @@ select.tw-select-arrow {
                     <div class="p-2.5 space-y-2.5 bg-white">
 
                         <div class="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1.5">
-                            <i class="fas fa-building-columns text-purple-500 text-xs flex-shrink-0"></i>
-                            <span class="text-xs font-semibold text-purple-800 truncate">{{ $this->organizerDepartment ?: 'Your College' }}</span>
+                            <i class="fas fa-building-columns text-purple-500 text-sm flex-shrink-0"></i>
+                            <span class="text-sm font-semibold text-purple-800 truncate">{{ $this->organizerDepartment ?: 'Your College' }}</span>
                         </div>
 
                         @if(count($this->availableCourses) > 0)
@@ -2296,38 +2599,38 @@ select.tw-select-arrow {
                                          }
                                      }
                                  }">
-                                <span class="text-xs font-semibold uppercase tracking-wider text-[#555555]">Select programs</span>
+                                <span class="text-sm font-semibold uppercase tracking-wider text-[#555555]">Select programs</span>
                                 <div class="flex items-center gap-3">
                                     <label class="flex items-center gap-1.5 cursor-pointer select-none">
                                         <input type="checkbox"
                                                :checked="allChecked"
                                                @change="toggleAll($event)"
                                                class="accent-purple-600 w-3.5 h-3.5 flex-shrink-0">
-                                        <span class="text-xs font-semibold text-[#7a3f91] leading-none">Select All</span>
+                                        <span class="text-sm font-semibold text-[#7a3f91] leading-none">Select All</span>
                                     </label>
                                     @if(count($selectedCourses) > 0)
                                         <button type="button" wire:click="$set('selectedCourses', [])"
-                                                class="text-xs font-semibold hover:text-red-500 text-[#555555]">Clear</button>
+                                                class="text-sm font-semibold hover:text-red-500 text-[#555555]">Clear</button>
                                     @endif
                                 </div>
                             </div>
 
                             <div class="grid grid-cols-2 gap-1 {{ isset($formErrors['selected_courses']) ? 'p-1.5 rounded-lg border border-red-200 bg-red-50/30' : '' }}">
                                 @foreach($this->availableCourses as $course)
-                                    <label class="flex items-center gap-1 px-2 py-1 border rounded-lg cursor-pointer transition text-xs font-semibold
+                                    <label class="flex items-center gap-1 px-2 py-1 border rounded-lg cursor-pointer transition text-sm font-semibold
                                                   {{ in_array($course, $selectedCourses)
                                                       ? 'border-purple-400 bg-purple-50 text-purple-700'
                                                       : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50/40 bg-white text-[#333333]' }}">
                                         <input type="checkbox" wire:model.live="selectedCourses" value="{{ $course }}"
                                                class="accent-purple-600 w-3 h-3 flex-shrink-0">
-                                        <span class="truncate text-[11px]">{{ $course }}</span>
+                                        <span class="truncate text-sm">{{ $course }}</span>
                                     </label>
                                 @endforeach
                             </div>
 
                             @if(isset($formErrors['selected_courses']))
-                                <p class="text-red-600 text-xs flex items-center gap-1 font-semibold">
-                                    <i class="fas fa-circle-exclamation text-[10px]"></i>
+                                <p class="text-red-600 text-sm flex items-center gap-1 font-semibold">
+                                    <i class="fas fa-circle-exclamation text-xs"></i>
                                     {{ $formErrors['selected_courses'] }}
                                 </p>
                             @endif
@@ -2335,67 +2638,218 @@ select.tw-select-arrow {
                         @else
                             <div class="text-center py-2">
                                 <i class="fas fa-inbox text-xl block mb-1 text-gray-200"></i>
-                                <p class="text-xs text-[#555555]">No programs available yet.</p>
+                                <p class="text-sm text-[#555555]">No programs available yet.</p>
                             </div>
                         @endif
 
+                        {{-- ── Batch Year — dropdown picker. Opens to a 3-choice
+                             landing screen first: "Specific Batch/Year" (plain
+                             year list, pick one, done), "Multiple Batches"
+                             (From/To range picker for consecutive batches like
+                             2021–2026), or "All Alumni" (clears the filter
+                             entirely, no batch scoping). Each sub-screen has a
+                             "Back" row to return to the landing screen.
+                             RANGE IS ALL-OR-NOTHING: picking only From (or
+                             only To) does not apply anything until both
+                             sides are chosen and "Apply" is tapped. ── --}}
                         <div class="pt-2 border-t border-gray-100"
                              x-data="{
-                                 val: '{{ $batchYear ?: now()->year }}',
-                                 init() {
-                                     if (!$wire.batchYear) {
-                                         $wire.set('batchYear', String(new Date().getFullYear()));
-                                         this.val = String(new Date().getFullYear());
+                                 rangeMode: {{ ($batchYearFrom !== '' && $batchYearTo !== '' && $batchYearFrom !== $batchYearTo) ? 'true' : 'false' }},
+                                 rangeFrom: '{{ $batchYearFrom }}',
+                                 rangeTo: '{{ $batchYearTo }}',
+                                 open: false,
+                                 // ── view: which screen the dropdown shows.
+                                 // 'menu'   = the 3-choice landing (Specific Batch/Year,
+                                 //            Multiple Batches, All Alumni) — always the
+                                 //            first thing shown when the dropdown opens.
+                                 // 'single' = the plain year list.
+                                 // 'range'  = the From/To range picker.
+                                 view: 'menu',
+                                 menuStyle: '',
+                                 // ── Positions the teleported dropdown menu using fixed
+                                 // coordinates read from the trigger button's own
+                                 // bounding box, recomputed every time it opens (and on
+                                 // scroll/resize while open) — this is what lets the menu
+                                 // float above the sidebar's own overflow-y-auto scroll
+                                 // area instead of being clipped by it, since a teleported
+                                 // node sits in <body> and is no longer a descendant of
+                                 // that scrolling ancestor at all. ──
+                                 positionMenu(){
+                                     const btn = this.$refs.trigger;
+                                     if(!btn) return;
+                                     const r = btn.getBoundingClientRect();
+                                     this.menuStyle = 'position:fixed; top:'+(r.bottom+4)+'px; left:'+r.left+'px; min-width:'+r.width+'px;';
+                                 },
+                                 toggle(){
+                                     this.open = !this.open;
+                                     if(this.open){
+                                         this.view = 'menu';
+                                         this.$nextTick(() => this.positionMenu());
                                      }
                                  },
-                                 validate(v) {
-                                     if (!v) return true;
-                                     return /^\d{4}$/.test(v) && parseInt(v) >= 1995 && parseInt(v) <= 3030;
+                                 close(){ this.open = false; },
+                                 backToMenu(){ this.view = 'menu'; },
+                                 chooseSpecific(){ this.view = 'single'; },
+                                 chooseMultiple(){
+                                     this.rangeFrom = $wire.batchYearFrom || '';
+                                     this.rangeTo   = $wire.batchYearTo   || '';
+                                     this.rangeMode = true;
+                                     this.view = 'range';
                                  },
-                                 onInput(e) {
-                                     let raw = e.target.value.replace(/\D/g,'').substring(0,4);
-                                     this.val = raw;
-                                     $wire.set('batchYear', raw);
-                                 },
-                                 onBlur(e) {
-                                     let n = parseInt(this.val);
-                                     if (this.val.length === 4 && !isNaN(n)) {
-                                         if (n < 1995) { this.val = '1995'; $wire.set('batchYear','1995'); }
-                                         if (n > 3030) { this.val = '3030'; $wire.set('batchYear','3030'); }
-                                     }
-                                 }
-                             }">
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
-                                Batch Year <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
-                            </label>
-                            <div class="relative">
-                                <input
-                                    type="text"
-                                    inputmode="numeric"
-                                    maxlength="4"
-                                    placeholder="e.g. {{ now()->year }}"
-                                    x-model="val"
-                                    @input="onInput($event)"
-                                    @blur="onBlur($event)"
-                                    class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['batch_year']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                    :class="val && !validate(val) && val.length === 4 ? 'border-red-400 bg-red-50' : ''">
-                                <div class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col gap-0">
-                                    <button type="button"
-                                            @click="let n=parseInt(val)||{{ now()->year }}; if(n<3030){val=String(n+1);$wire.set('batchYear',val);}"
-                                            class="w-5 h-4 flex items-center justify-center text-[#555] hover:text-[#7a3f91] transition">
-                                        <i class="fas fa-chevron-up text-[8px]"></i>
-                                    </button>
-                                    <button type="button"
-                                            @click="let n=parseInt(val)||{{ now()->year }}; if(n>1995){val=String(n-1);$wire.set('batchYear',val);}"
-                                            class="w-5 h-4 flex items-center justify-center text-[#555] hover:text-[#7a3f91] transition">
-                                        <i class="fas fa-chevron-down text-[8px]"></i>
-                                    </button>
-                                </div>
+                                 chooseAllAlumni(){ $wire.chooseAllAlumniBatch(); this.rangeMode=false; this.rangeFrom=''; this.rangeTo=''; this.close(); },
+                                 selectYear(val){ $wire.setSingleBatchYear(val); this.rangeMode=false; this.close(); },
+                                 pickFrom(val){ this.rangeFrom=val; },
+                                 pickTo(val){ this.rangeTo=val; },
+                                 applyRange(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.rangeMode=true; this.close(); } }
+                             }"
+                             @scroll.window="if(open) positionMenu()"
+                             @resize.window="if(open) positionMenu()">
+                            <div class="flex items-center justify-between mb-1">
+                                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333]">
+                                    Batch Year <span class="text-red-500">*</span>
+                                </label>
+                                @if($batchYearFrom !== '' || $batchYearTo !== '' || $allAlumniChosen)
+                                <button type="button" wire:click="clearBatchYear" wire:loading.attr="disabled" wire:target="clearBatchYear"
+                                        class="text-xs font-semibold text-[#7a3f91] hover:text-[#5f3272] transition-colors flex items-center gap-1 disabled:opacity-60 disabled:cursor-wait">
+                                    <span wire:loading wire:target="clearBatchYear">
+                                        <i class="fas fa-spinner fa-spin" style="font-size:10px;"></i>
+                                    </span>
+                                    <i class="fas fa-rotate-left" style="font-size:10px;" wire:loading.remove wire:target="clearBatchYear"></i>
+                                    Clear
+                                </button>
+                                @endif
                             </div>
+
+                            <div class="relative eo-batch-dropdown">
+                                <button type="button" x-ref="trigger" @click.stop="toggle()"
+                                        :class="{ 'has-value': ($wire.batchYearFrom!=='' && $wire.batchYearTo!=='') || $wire.allAlumniChosen, 'open': open }"
+                                        class="eo-batch-trigger {{ isset($formErrors['batch_year']) ? 'border-red-400 bg-red-50' : '' }}">
+                                    <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
+                                    <span class="flex-1 text-left">
+                                        @if($batchYearFrom !== '' && $batchYearTo !== '' && $batchYearFrom !== $batchYearTo)
+                                            Batch {{ $batchYearFrom }}–{{ $batchYearTo }}
+                                        @elseif($batchYearFrom !== '' && $batchYearTo !== '')
+                                            Batch {{ $batchYearFrom }}
+                                        @elseif($batchYearFrom !== '')
+                                            Batch {{ $batchYearFrom }} → pick end year
+                                        @elseif($batchYearTo !== '')
+                                            pick start year → Batch {{ $batchYearTo }}
+                                        @elseif($allAlumniChosen)
+                                            All Alumni
+                                        @else
+                                            Select Batch Year
+                                        @endif
+                                    </span>
+                                    <i class="fas fa-chevron-down eo-batch-chevron"></i>
+                                </button>
+
+                                {{-- Teleported to <body> so this menu is no longer a
+                                     descendant of the sidebar's own overflow-y-auto
+                                     scroll container — that ancestor was clipping the
+                                     dropdown instead of letting it float above the
+                                     content underneath it. Positioned via fixed
+                                     coordinates computed in positionMenu() above. --}}
+                                <template x-teleport="body">
+                                    <div x-show="open"
+                                         x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                                         x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                                         @click.outside="close()"
+                                         :style="menuStyle"
+                                         class="eo-batch-menu" style="display:none;" @click.stop>
+
+                                    {{-- Landing screen: the 3 top-level choices. Always
+                                         the first thing shown on open — no years visible
+                                         here at all, so the person picks a MODE first. --}}
+                                    <template x-if="view === 'menu'">
+                                        <div style="min-width:240px;">
+                                            <button type="button" @click.stop="chooseSpecific()" class="eo-batch-item" style="white-space:normal;display:flex;align-items:center;gap:10px;">
+                                                <i class="fas fa-calendar-day" style="font-size:13px;color:#7a3f91;width:14px;flex-shrink:0;"></i>
+                                                <span>
+                                                    <span class="block">Specific Batch/Year</span>
+                                                    <span class="block text-xs font-normal text-[#777777]">Pick one batch year</span>
+                                                </span>
+                                            </button>
+                                            <button type="button" @click.stop="chooseMultiple()" class="eo-batch-item" style="white-space:normal;display:flex;align-items:center;gap:10px;">
+                                                <i class="fas fa-layer-group" style="font-size:13px;color:#7a3f91;width:14px;flex-shrink:0;"></i>
+                                                <span>
+                                                    <span class="block">Multiple Batches</span>
+                                                    <span class="block text-xs font-normal text-[#777777]">Pick a range of consecutive batches</span>
+                                                </span>
+                                            </button>
+                                            <button type="button" @click.stop="chooseAllAlumni()" :class="{'active': $wire.allAlumniChosen}" class="eo-batch-item" style="white-space:normal;display:flex;align-items:center;gap:10px;">
+                                                <i class="fas fa-users" style="font-size:13px;color:#7a3f91;width:14px;flex-shrink:0;"></i>
+                                                <span>
+                                                    <span class="block">All Alumni</span>
+                                                    <span class="block text-xs font-normal text-[#777777]">Every batch, no filter</span>
+                                                </span>
+                                            </button>
+                                        </div>
+                                    </template>
+
+                                    {{-- Specific Batch/Year: plain year list, with a Back
+                                         row pinned to the bottom to return to the 3-choice
+                                         landing screen. --}}
+                                    <template x-if="view === 'single'">
+                                        <div>
+                                            @forelse($this->batches as $b)
+                                            <button type="button" @click.stop="selectYear('{{ $b }}')" :class="{'active': $wire.batchYearFrom==='{{ $b }}' && $wire.batchYearTo==='{{ $b }}'}" class="eo-batch-item">{{ $b }}</button>
+                                            @empty
+                                            <div class="px-3 py-2 text-xs text-[#777777]">No batch years available yet.</div>
+                                            @endforelse
+                                            <div class="eo-batch-footer">
+                                                <button type="button" @click.stop="backToMenu()"
+                                                        class="eo-batch-item flex items-center gap-1.5 font-semibold" style="color:#7a3f91;">
+                                                    <i class="fas fa-arrow-left" style="font-size:10px;"></i> Back
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    {{-- Multiple Batches: two side-by-side From/To lists,
+                                         applied together via "Apply". --}}
+                                    <template x-if="view === 'range'">
+                                        <div class="p-2" style="width:220px;">
+                                            <div class="flex items-start gap-2">
+                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                                    @foreach($this->batches as $b)
+                                                    <button type="button" @click.stop="if(rangeTo!=='{{ $b }}') pickFrom('{{ $b }}')"
+                                                            :disabled="rangeTo==='{{ $b }}'"
+                                                            :class="{'active':rangeFrom==='{{ $b }}', 'disabled':rangeTo==='{{ $b }}'}"
+                                                            class="eo-batch-item eo-batch-range-item" style="border-radius:0;">{{ $b }}</button>
+                                                    @endforeach
+                                                </div>
+                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                                    @foreach($this->batches as $b)
+                                                    <button type="button" @click.stop="if(rangeFrom!=='{{ $b }}') pickTo('{{ $b }}')"
+                                                            :disabled="rangeFrom==='{{ $b }}'"
+                                                            :class="{'active':rangeTo==='{{ $b }}', 'disabled':rangeFrom==='{{ $b }}'}"
+                                                            class="eo-batch-item eo-batch-range-item" style="border-radius:0;">{{ $b }}</button>
+                                                    @endforeach
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center gap-2 mt-3 eo-batch-footer">
+                                                <button type="button" @click.stop="backToMenu()"
+                                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                                    Back
+                                                </button>
+                                                <button type="button" @click.stop="applyRange()"
+                                                        :disabled="rangeFrom==='' || rangeTo===''"
+                                                        class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
+                                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'border-[#E8E0F0] hover:bg-[#F5F0FA]'"
+                                                        :style="(rangeFrom==='' || rangeTo==='') ? '' : 'color:#7a3f91;'">
+                                                    Apply
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                                </template>
+                            </div>
+
                             @if(isset($formErrors['batch_year']))
-                                <p class="text-red-600 text-xs mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['batch_year'] }}</p>
+                                <p class="text-red-600 text-sm mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['batch_year'] }}</p>
                             @else
-                                <p class="text-[10px] mt-1 text-[#777777]">Leave blank to target all batches. Range: 1995–3030.</p>
+                                <p class="text-xs mt-1 text-[#777777]">Choose a specific batch, multiple batches, or all alumni.</p>
                             @endif
                         </div>
                     </div>
@@ -2409,47 +2863,47 @@ select.tw-select-arrow {
             <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
                 <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest flex-shrink-0">
                         Event Details
                     </div>
                     <div class="flex flex-col flex-1 min-h-0 p-2.5 gap-3 bg-white">
 
                         <div class="flex-shrink-0">
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                            <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                 Event Title <span class="text-red-500">*</span>
                             </label>
                             <input wire:model.defer="title" type="text"
                                    placeholder="e.g. PHILCST Alumni Homecoming 2026" maxlength="200"
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['title']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                            @if(isset($formErrors['title']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['title'] }}</p>@endif
+                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['title']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                            @if(isset($formErrors['title']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['title'] }}</p>@endif
                         </div>
 
                         <div class="flex flex-col" style="flex: 1; min-height: 80px;">
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1 flex-shrink-0">
+                            <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1 flex-shrink-0">
                                 Description <span class="text-red-500">*</span>
                             </label>
                             <textarea wire:model.defer="description"
                                       placeholder="Describe the event, agenda, highlights…" maxlength="5000"
-                                      class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                      class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
                                       style="min-height: 80px;"></textarea>
-                            @if(isset($formErrors['description']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['description'] }}</p>@endif
+                            @if(isset($formErrors['description']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['description'] }}</p>@endif
                         </div>
 
                         <div class="flex-shrink-0 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
 
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Date <span class="text-red-500">*</span>
                                 </label>
                                 <input wire:model="event_date" type="date"
                                        min="{{ now('Asia/Manila')->format('Y-m-d') }}"
                                        onclick="window.__eoOpenDatePicker(this)"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                @if(isset($formErrors['event_date']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['event_date'] }}</p>@endif
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                @if(isset($formErrors['event_date']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['event_date'] }}</p>@endif
                             </div>
 
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Start Time <span class="text-red-500">*</span>
                                 </label>
                                 <div wire:ignore
@@ -2477,14 +2931,14 @@ select.tw-select-arrow {
                                      @reset-time-selects.window="h='6';m='00';p='PM';sync()"
                                      class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['start_time']) ? 'border-red-400 bg-red-50' : 'border-gray-300 focus-within:border-[#7a3f91]' }}">
                                     <span class="flex items-center justify-center px-2 bg-white border-r border-gray-200">
-                                        <i class="fas fa-clock text-gray-300 text-xs"></i>
+                                        <i class="fas fa-clock text-gray-300 text-sm"></i>
                                     </span>
                                     <select x-model="h" @change="sync()" class="border-r border-gray-200 text-[#333333]" title="Hour">
                                         @foreach(['12','1','2','3','4','5','6','7','8','9','10','11'] as $hr)
                                             <option value="{{ $hr }}">{{ $hr }}</option>
                                         @endforeach
                                     </select>
-                                    <span class="flex items-center px-1 bg-white border-x border-gray-200 text-[#555] font-semibold text-sm select-none">:</span>
+                                    <span class="flex items-center px-1 bg-white border-x border-gray-200 text-[#555] font-semibold text-base select-none">:</span>
                                     {{-- Start time minutes: no :59 (only up to :50) --}}
                                     <select x-model="m" @change="sync()" class="text-[#333333]" title="Minute">
                                         @foreach(['00','05','10','15','20','25','30','35','40','45','50'] as $mn)
@@ -2496,11 +2950,11 @@ select.tw-select-arrow {
                                         <option value="PM">PM</option>
                                     </select>
                                 </div>
-                                @if(isset($formErrors['start_time']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['start_time'] }}</p>@endif
+                                @if(isset($formErrors['start_time']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['start_time'] }}</p>@endif
                             </div>
 
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     End Time <span class="text-red-500">*</span>
                                 </label>
                                 <div wire:ignore
@@ -2528,14 +2982,14 @@ select.tw-select-arrow {
                                      @reset-time-selects.window="h='11';m='59';p='PM';sync()"
                                      class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['end_time']) ? 'border-red-400 bg-red-50' : 'border-gray-300 focus-within:border-[#7a3f91]' }}">
                                     <span class="flex items-center justify-center px-2 bg-white border-r border-gray-200">
-                                        <i class="fas fa-clock text-gray-300 text-xs"></i>
+                                        <i class="fas fa-clock text-gray-300 text-sm"></i>
                                     </span>
                                     <select x-model="h" @change="sync()" class="border-r border-gray-200 text-[#333333]" title="Hour">
                                         @foreach(['12','1','2','3','4','5','6','7','8','9','10','11'] as $hr)
                                             <option value="{{ $hr }}">{{ $hr }}</option>
                                         @endforeach
                                     </select>
-                                    <span class="flex items-center px-1 bg-white border-x border-gray-200 text-[#555] font-semibold text-sm select-none">:</span>
+                                    <span class="flex items-center px-1 bg-white border-x border-gray-200 text-[#555] font-semibold text-base select-none">:</span>
                                     <select x-model="m" @change="sync()" class="text-[#333333]" title="Minute">
                                         @foreach(['00','05','10','15','20','25','30','35','40','45','50','59'] as $mn)
                                             <option value="{{ $mn }}">{{ $mn }}</option>
@@ -2546,29 +3000,29 @@ select.tw-select-arrow {
                                         <option value="PM">PM</option>
                                     </select>
                                 </div>
-                                @if(isset($formErrors['end_time']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['end_time'] }}</p>@endif
+                                @if(isset($formErrors['end_time']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['end_time'] }}</p>@endif
                             </div>
 
                         </div>
 
                         <div class="flex-shrink-0 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Venue / Location <span class="text-red-500">*</span>
                                 </label>
                                 <input wire:model.defer="venue" type="text"
                                        placeholder="e.g. PHILCST Main Gym" maxlength="200"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                @if(isset($formErrors['venue']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['venue'] }}</p>@endif
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                @if(isset($formErrors['venue']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue'] }}</p>@endif
                             </div>
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Full Address <span class="text-red-500">*</span>
                                 </label>
                                 <input wire:model.defer="venue_address" type="text"
                                        placeholder="e.g. Old Nalsian Road, Calasiao, Pangasinan" maxlength="200"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue_address']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                @if(isset($formErrors['venue_address']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['venue_address'] }}</p>@endif
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue_address']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                @if(isset($formErrors['venue_address']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue_address'] }}</p>@endif
                             </div>
                         </div>
 
@@ -2576,17 +3030,17 @@ select.tw-select-arrow {
                 </div>
 
                 <div class="flex-shrink-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Notes / Requirements
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
+                        <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-2.5 bg-white">
                         <textarea wire:model.defer="notes"
                                   placeholder="Dress code, special instructions, what to bring, parking info…" maxlength="3000"
-                                  class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
+                                  class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
                                   style="height: 200px;"></textarea>
-                        <p class="text-[10px] mt-1.5 flex items-center gap-1 text-[#777777]">
-                            <i class="fas fa-circle-info text-[9px]"></i>
+                        <p class="text-xs mt-1.5 flex items-center gap-1 text-[#777777]">
+                            <i class="fas fa-circle-info text-[11px]"></i>
                             Visible to alumni on the event page.
                         </p>
                     </div>
@@ -2603,29 +3057,29 @@ select.tw-select-arrow {
                      account details and are NOT editable (read-only display).
                      Only Phone remains an actual input. ── --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Contact Person
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— from your account</span>
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                        <span class="block leading-tight">Contact Person</span>
+                        <span class="block font-normal normal-case tracking-normal text-xs text-[#777777] mt-0.5">from your account</span>
                     </div>
                     <div class="p-2.5 space-y-2.5 bg-white">
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Name</label>
-                            <div class="w-full px-3 py-2 border-[1.5px] border-gray-200 rounded-xl text-sm bg-white text-[#333333] flex items-center gap-2">
-                                <i class="fas fa-user text-[11px] text-[#999999]"></i>
+                            <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Name</label>
+                            <div class="w-full px-3 py-2 border-[1.5px] border-gray-200 rounded-xl text-base bg-white text-[#333333] flex items-center gap-2">
+                                <i class="fas fa-user text-sm text-[#999999]"></i>
                                 <span class="truncate">{{ $contact_person ?: $this->organizerName }}</span>
-                                <i class="fas fa-lock text-[10px] text-[#bbbbbb] ml-auto flex-shrink-0"></i>
+                                <i class="fas fa-lock text-xs text-[#bbbbbb] ml-auto flex-shrink-0"></i>
                             </div>
                         </div>
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Email</label>
-                            <div class="w-full px-3 py-2 border-[1.5px] border-gray-200 rounded-xl text-sm bg-white text-[#333333] flex items-center gap-2">
-                                <i class="fas fa-envelope text-[11px] text-[#999999]"></i>
+                            <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Email</label>
+                            <div class="w-full px-3 py-2 border-[1.5px] border-gray-200 rounded-xl text-base bg-white text-[#333333] flex items-center gap-2">
+                                <i class="fas fa-envelope text-sm text-[#999999]"></i>
                                 <span class="truncate">{{ $contact_email ?: $this->organizerEmail }}</span>
-                                <i class="fas fa-lock text-[10px] text-[#bbbbbb] ml-auto flex-shrink-0"></i>
+                                <i class="fas fa-lock text-xs text-[#bbbbbb] ml-auto flex-shrink-0"></i>
                             </div>
                         </div>
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                            <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                 Phone <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                             </label>
                             <input wire:model.defer="contact_phone" type="text"
@@ -2640,32 +3094,32 @@ select.tw-select-arrow {
                                        if (d.length >= 2 && d.charAt(1) !== '9') { d = '09' + d.slice(2); }
                                        this.value = d.slice(0, 11);
                                    "
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_phone']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                            @if(isset($formErrors['contact_phone']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $formErrors['contact_phone'] }}</p>@endif
+                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_phone']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                            @if(isset($formErrors['contact_phone']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['contact_phone'] }}</p>@endif
                         </div>
                     </div>
                 </div>
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Submission Tips
                     </div>
                     <div class="p-2.5 bg-white">
                         <ul class="space-y-2">
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]">
-                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i>
+                            <li class="flex items-start gap-1.5 text-sm text-[#333333]">
+                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[11px]"></i>
                                 <span>Set a future date — past dates are auto-rejected.</span>
                             </li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]">
-                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i>
+                            <li class="flex items-start gap-1.5 text-sm text-[#333333]">
+                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[11px]"></i>
                                 <span>Choose correct programs so the right alumni are notified.</span>
                             </li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]">
-                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i>
+                            <li class="flex items-start gap-1.5 text-sm text-[#333333]">
+                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[11px]"></i>
                                 <span>Upload a photo — events with photos get more RSVPs.</span>
                             </li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]">
-                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i>
+                            <li class="flex items-start gap-1.5 text-sm text-[#333333]">
+                                <i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[11px]"></i>
                                 <span>Review typically takes 1–2 business days.</span>
                             </li>
                         </ul>
@@ -2677,18 +3131,18 @@ select.tw-select-arrow {
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
                 <button type="button" wire:click="requestSaveEvent"
                         wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent"
-                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
+                        class="w-full px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
                                {{ $isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]' }}">
                     <span wire:loading wire:target="requestSaveEvent,saveEvent">
-                        <i class="fas fa-spinner animate-spin text-xs"></i>
+                        <i class="fas fa-spinner animate-spin text-sm"></i>
                     </span>
                     <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
                         @if($isResubmitting)
-                            <i class="fas fa-rotate-right text-xs"></i>
+                            <i class="fas fa-rotate-right text-sm"></i>
                         @elseif($isEditing)
-                            <i class="fas fa-floppy-disk text-xs"></i>
+                            <i class="fas fa-floppy-disk text-sm"></i>
                         @else
-                            <i class="fas fa-paper-plane text-xs"></i>
+                            <i class="fas fa-paper-plane text-sm"></i>
                         @endif
                     </span>
                     <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
@@ -2700,12 +3154,12 @@ select.tw-select-arrow {
                 </button>
                 <button type="button" wire:click="closeFormModal"
                         wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent,closeFormModal"
-                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">
+                        class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">
                     <span wire:loading.remove wire:target="closeFormModal">
-                        <i class="fas fa-xmark mr-1 text-[10px]"></i>Cancel
+                        <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
                     </span>
                     <span wire:loading wire:target="closeFormModal">
-                        <i class="fas fa-spinner fa-spin mr-1 text-[10px]"></i>Closing…
+                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Closing…
                     </span>
                 </button>
             </div>
@@ -3364,64 +3818,56 @@ select.tw-select-arrow {
     var tipIcon = document.getElementById('eo-hover-tip-icon');
     var tipText = document.getElementById('eo-hover-tip-text');
 
-    function isHoverCapable() {
-        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
-            && window.innerWidth > 768;
+    // ── Event delegation instead of per-row binding ──────────────────
+    // Filtering, searching, and pagination re-render the table rows
+    // (Livewire morphs/replaces the <tr> elements), which used to wipe
+    // out the mousemove/touchstart listeners bound directly to each row
+    // — that's why the tooltip would stop appearing right after a
+    // filter/search/page change. Listening on the document instead
+    // means the tooltip keeps working no matter how many times the
+    // rows underneath get swapped out, with nothing left to rebind.
+    function setTooltip(row, x, y) {
+        if (!tip) return;
+        var isEditable = row.getAttribute('data-eo-row-editable') === '1';
+        if (tipIcon && tipText) {
+            if (isEditable) {
+                tipIcon.className = 'fas fa-pen-to-square mr-1.5';
+                tipText.textContent = 'Edit';
+            } else {
+                tipIcon.className = 'fas fa-eye mr-1.5';
+                tipText.textContent = 'View Details';
+            }
+        }
+        tip.style.left = x + 'px';
+        tip.style.top  = y + 'px';
+        tip.style.opacity = '1';
     }
 
-    function bindRows() {
-        document.querySelectorAll('[data-eo-row]').forEach(function (row) {
-            if (row._eoTipBound) return;
-            row._eoTipBound = true;
-
-            // Editable rows (PENDING / REJECTED) open straight into the Edit
-            // form when clicked, so the tooltip should say "Edit" — not
-            // "View Details" — for those rows. Approved/Completed rows are
-            // read-only and open the View Details screen, so they keep the
-            // original "View Details" tooltip.
-            var isEditable = row.getAttribute('data-eo-row-editable') === '1';
-
-            row.addEventListener('mousemove', function (e) {
-                if (!tip || !isHoverCapable()) return;
-                var shareWrap = e.target.closest('[data-eo-share]');
-                if (shareWrap) {
-                    tip.style.opacity = '0';
-                    return;
-                }
-                if (tipIcon && tipText) {
-                    if (isEditable) {
-                        tipIcon.className = 'fas fa-pen-to-square mr-1.5';
-                        tipText.textContent = 'Edit';
-                    } else {
-                        tipIcon.className = 'fas fa-eye mr-1.5';
-                        tipText.textContent = 'View Details';
-                    }
-                }
-                tip.style.left = e.clientX + 'px';
-                tip.style.top  = e.clientY + 'px';
-                tip.style.opacity = '1';
-            });
-
-            row.addEventListener('mouseleave', function () {
-                if (tip) tip.style.opacity = '0';
-            });
-
-            row.addEventListener('click', function () {
-                if (tip) tip.style.opacity = '0';
-            });
-        });
-
-        document.querySelectorAll('[data-eo-share]').forEach(function (sw) {
-            if (sw._eoShareBound) return;
-            sw._eoShareBound = true;
-            sw.addEventListener('mouseenter', function () {
-                if (tip) tip.style.opacity = '0';
-            });
-        });
+    function hideTooltip() {
+        if (tip) tip.style.opacity = '0';
     }
 
-    bindRows();
-    document.addEventListener('livewire:updated', bindRows);
+    document.addEventListener('mousemove', function (e) {
+        var row = e.target.closest('[data-eo-row]');
+        if (!row) { hideTooltip(); return; }
+        if (e.target.closest('[data-eo-share]')) { hideTooltip(); return; }
+        setTooltip(row, e.clientX, e.clientY);
+    });
+
+    // Touch devices: no mousemove, so show the same tooltip right above
+    // the finger the moment a row is pressed — this is what keeps
+    // "View Details" visible on mobile too, not just desktop hover.
+    document.addEventListener('touchstart', function (e) {
+        var row = e.target.closest('[data-eo-row]');
+        if (!row || e.target.closest('[data-eo-share]')) return;
+        var t = e.touches && e.touches[0];
+        if (!t) return;
+        setTooltip(row, t.clientX, t.clientY);
+    }, { passive: true });
+
+    document.addEventListener('click', function (e) {
+        if (e.target.closest('[data-eo-row]')) hideTooltip();
+    });
 })();
 
 // ── Deep-link cleanup: strip ?highlight_event=ID from the address bar
