@@ -301,6 +301,42 @@ new class extends Component {
         });
     }
 
+    /**
+     * ── Client-side "can submit" gate ──
+     * Mirrors the required-field checks from validateEventForm() so the
+     * Submit/Save button can be disabled the instant something required
+     * is still empty — no need to click Submit first to find out.
+     * Does NOT duplicate the deeper server-side checks (duplicate title,
+     * past-date/time, phone/email format, no-verified-alumni, etc.) —
+     * those still run in validateEventForm() when the button is clicked.
+     */
+    #[Computed]
+    public function isFormValid(): bool
+    {
+        if (trim($this->title) === '')          return false;
+        if (trim($this->description) === '')    return false;
+        if (trim($this->event_date) === '')     return false;
+        if (trim($this->start_time) === '')     return false;
+        if (trim($this->end_time) === '')       return false;
+        if (trim($this->venue) === '')          return false;
+        if (trim($this->venue_address) === '')  return false;
+
+        // Batch Year is marked required (*) in the UI — must have a
+        // complete range, OR the organizer explicitly chose "All Alumni".
+        if (! $this->allAlumniChosen
+            && ($this->batchYearFrom === '' || $this->batchYearTo === '')) {
+            return false;
+        }
+
+        // At least one course/program must be picked when the organizer's
+        // college actually has any (matches validateEventForm()'s check).
+        if (!empty($this->availableCourses) && empty($this->selectedCourses)) {
+            return false;
+        }
+
+        return true;
+    }
+
     /** True only once BOTH ends of the batch range are set — a half-picked
      *  range (only From, or only To) is not applied yet. */
     private function batchRangeIsComplete(): bool
@@ -406,7 +442,13 @@ new class extends Component {
             $q->where('status', $this->filterStatus);
         }
 
-        $q->orderBy('created_at', 'desc');
+        // Order by whichever happened most recently — creating the event,
+        // editing it (e.g. resubmit after REJECTED), or the status changing
+        // (PENDING -> APPROVED/REJECTED, or auto-completed after the event
+        // date passes). This way, whatever the organizer just acted on (or
+        // whatever just got approved/rejected/completed) always floats to
+        // the top of the table instead of staying pinned by creation date.
+        $q->orderBy('updated_at', 'desc');
         return $q->paginate(20);
     }
 
@@ -3129,14 +3171,19 @@ select.tw-select-arrow {
             </div>
 
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
+                {{-- Disabled while: (1) a photo is actively uploading,
+                     (2) the submit/save request itself is in-flight, or
+                     (3) any required (*) field is still empty — so it's
+                     physically impossible to submit an incomplete form. --}}
                 <button type="button" wire:click="requestSaveEvent"
-                        wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent"
+                        wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent,photo"
+                        @if(! $this->isFormValid) disabled @endif
                         class="w-full px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
                                {{ $isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]' }}">
-                    <span wire:loading wire:target="requestSaveEvent,saveEvent">
+                    <span wire:loading wire:target="requestSaveEvent,saveEvent,photo">
                         <i class="fas fa-spinner animate-spin text-sm"></i>
                     </span>
-                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
+                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent,photo">
                         @if($isResubmitting)
                             <i class="fas fa-rotate-right text-sm"></i>
                         @elseif($isEditing)
@@ -3145,13 +3192,21 @@ select.tw-select-arrow {
                             <i class="fas fa-paper-plane text-sm"></i>
                         @endif
                     </span>
-                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
+                    <span wire:loading wire:target="photo">
+                        Uploading photo…
+                    </span>
+                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent,photo">
                         @if($isResubmitting) Save &amp; Resubmit
                         @elseif($isEditing) Save Changes
                         @else Submit Event
                         @endif
                     </span>
                 </button>
+                @if(! $this->isFormValid)
+                    <p class="text-xs text-center font-medium" style="color:#b45309;">
+                        <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable submit.
+                    </p>
+                @endif
                 <button type="button" wire:click="closeFormModal"
                         wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent,closeFormModal"
                         class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">

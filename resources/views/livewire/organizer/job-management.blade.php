@@ -147,6 +147,47 @@ new class extends Component {
         return strip_tags(trim($value));
     }
 
+    /**
+     * Strips a leading emoji (plus any space right after it) from each
+     * non-empty line of a multi-line field. Used for Qualifications and
+     * How to Apply so the alumni-facing bullet list never shows a
+     * duplicate leading icon — emoji later in the line are left alone.
+     */
+    private function stripLeadingEmojiPerLine(string $value): string
+    {
+        $emojiPattern = '/^[\x{1F1E6}-\x{1F1FF}\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{2190}-\x{21FF}\x{2B00}-\x{2BFF}\x{FE0F}\x{200D}]+\s*/u';
+
+        $lines = preg_split('/\r\n|\r|\n/', $value);
+        $lines = array_map(function ($line) use ($emojiPattern) {
+            $trimmed = ltrim($line);
+            $leadingWhitespace = substr($line, 0, strlen($line) - strlen($trimmed));
+            $cleaned = preg_replace($emojiPattern, '', $trimmed);
+            return $leadingWhitespace . $cleaned;
+        }, $lines);
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Wraps every occurrence of the current search term in $value with a
+     * light-blue <mark> highlight (case-insensitive). $value is HTML-escaped
+     * first, so this is safe to output with {!! !!} in the view.
+     */
+    private function highlightSearch(string $value): string
+    {
+        $escaped = e($value);
+        $term    = trim($this->search);
+        if ($term === '') {
+            return $escaped;
+        }
+        $escapedTerm = preg_quote(e($term), '/');
+        return preg_replace(
+            '/(' . $escapedTerm . ')/iu',
+            '<mark class="jm-search-hl">$1</mark>',
+            $escaped
+        ) ?? $escaped;
+    }
+
     private function logAudit(
         string  $action,
         string  $subjectLabel,
@@ -227,16 +268,59 @@ new class extends Component {
         }
     }
 
+    /**
+     * Stores a newly-uploaded job image and returns its path.
+     *
+     * IMPORTANT: if $imageFile isn't a valid, still-existing temporary
+     * upload (e.g. the async $wire.upload() hadn't finished/failed before
+     * Save was clicked, or Livewire re-hydrated it as something else),
+     * this returns $existingPath UNCHANGED instead of null. Previously it
+     * returned null on any failure, which the caller then saved straight
+     * into job_image — silently wiping out the current photo and falling
+     * back to the default image even though the organizer never asked to
+     * remove it.
+     */
+    /**
+     * @throws \RuntimeException if a new image was supplied but never
+     *         actually landed on the server. Callers MUST catch this and
+     *         surface it as a validation error — silently falling back to
+     *         $existingPath here made "Save Changes" report success while
+     *         quietly discarding the organizer's new photo (the job just
+     *         kept whatever image it already had / the default).
+     */
     private function storeJobImage($imageFile, string $existingPath = ''): ?string
     {
-        if ($imageFile && $imageFile instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
-            if ($existingPath && Storage::disk('public')->exists($existingPath)) {
-                Storage::disk('public')->delete($existingPath);
+        if ($imageFile instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
+            if (! $imageFile->exists()) {
+                // The client told us the upload finished (handleFile()'s
+                // $wire.upload success callback fired, unlocking Save),
+                // but the temp file isn't actually on disk server-side —
+                // e.g. it expired/was GC'd between upload and Save, or a
+                // Livewire re-render mid-upload left editJobImage pointing
+                // at a stale temp path. Treat this as a real failure
+                // instead of silently keeping the old photo.
+                throw new \RuntimeException('editJobImage temp file missing at save time');
             }
-            $path = $imageFile->store('job', 'public');
-            return $path ?: null;
+
+            try {
+                $path = $imageFile->store('job', 'public');
+                if (! $path) {
+                    throw new \RuntimeException('editJobImage store() returned empty path');
+                }
+
+                if ($existingPath && Storage::disk('public')->exists($existingPath)) {
+                    Storage::disk('public')->delete($existingPath);
+                }
+
+                return $path;
+            } catch (\RuntimeException $e) {
+                throw $e;
+            } catch (\Throwable $e) {
+                throw new \RuntimeException('editJobImage store failed: ' . $e->getMessage(), previous: $e);
+            }
         }
-        return null;
+
+        return $existingPath ?: null;
     }
 
     public static function jobImageUrl(?string $path): string
@@ -408,7 +492,7 @@ new class extends Component {
             $q->where('employment_type', $this->filterType);
         }
 
-        $q->orderBy('created_at', 'desc');
+        $q->orderBy('updated_at', 'desc');
 
         $paginated = $q->paginate(20);
 
@@ -595,7 +679,21 @@ public function closePostModal(): void
             return;
         }
 
-        $imagePath = $this->storeJobImage($this->postJobImage);
+        if ($this->postJobImage) {
+            try {
+                $imagePath = $this->storeJobImage($this->postJobImage);
+            } catch (\RuntimeException) {
+                // Same failure mode as the edit-job flow: the upload
+                // widget said it finished, but the temp file isn't
+                // actually on disk at save time. Stop here instead of
+                // creating the job with no photo and no explanation.
+                $this->postErrors['postJobImage'] = 'Photo upload didn\'t finish saving. Please re-upload the photo and click Post again.';
+                $this->dispatch('scroll-to-first-error');
+                return;
+            }
+        } else {
+            $imagePath = null;
+        }
 
         $job = JobPosting::create([
             'organizer_id'             => $org?->id,
@@ -608,13 +706,14 @@ public function closePostModal(): void
             'salary'                   => $this->sanitize($this->postSalary) ?: null,
             'deadline'                 => $this->postDeadline,
             'description'              => $this->sanitize($this->postDescription),
-            'qualifications'           => $this->sanitize($this->postQualifications),
-            'application_instructions' => $this->sanitize($this->postApplicationInstructions),
+            'qualifications'           => $this->stripLeadingEmojiPerLine($this->sanitize($this->postQualifications)),
+            'application_instructions' => $this->stripLeadingEmojiPerLine($this->sanitize($this->postApplicationInstructions)),
             'target_college'           => implode(',', $this->postTargetColleges) ?: null,
             'job_image'                => $imagePath,
             'status'                   => 'ACTIVE',
             'updated_by'               => auth()->user()->name,
             'updated_by_role'          => 'organizer',
+            'last_action'              => 'created',
         ]);
 
         $this->logAudit(
@@ -875,7 +974,21 @@ public function openEditModal(int $id): void
             }
             $newImagePath = null;
         } elseif ($this->editJobImage) {
-            $newImagePath = $this->storeJobImage($this->editJobImage, $job->job_image ?? '');
+            try {
+                $newImagePath = $this->storeJobImage($this->editJobImage, $job->job_image ?? '');
+            } catch (\RuntimeException) {
+                // Bail out BEFORE $job->update() runs — previously this
+                // failure mode was swallowed inside storeJobImage() itself,
+                // so the rest of saveEditJob() carried on, the job saved
+                // with its old/default photo, and the organizer still got
+                // a "Job posting updated successfully" toast. Now the
+                // whole save stops and the organizer is told the photo
+                // specifically needs to be re-uploaded, rather than
+                // discovering it on next open (as in this report).
+                $this->editErrors['editJobImage'] = 'Photo upload didn\'t finish saving. Please re-upload the photo and click Save Changes again.';
+                $this->dispatch('scroll-to-first-error');
+                return;
+            }
         }
 
         $before = [
@@ -903,12 +1016,12 @@ public function openEditModal(int $id): void
             'salary'                   => $this->sanitize($this->editSalary) ?: null,
             'deadline'                 => $this->editDeadline,
             'description'              => $this->sanitize($this->editDescription),
-            'qualifications'           => $this->sanitize($this->editQualifications),
-            'application_instructions' => $this->sanitize($this->editApplicationInstructions),
-            'target_college'           => implode(',', $this->editTargetColleges) ?: null,
+            'qualifications'           => $this->stripLeadingEmojiPerLine($this->sanitize($this->editQualifications)),
+            'application_instructions' => $this->stripLeadingEmojiPerLine($this->sanitize($this->editApplicationInstructions)),
             'job_image'                => $newImagePath,
             'updated_by'               => auth()->user()->name,
             'updated_by_role'          => 'organizer',
+            'last_action'              => 'updated',
         ]);
 
         $this->logAudit(
@@ -929,8 +1042,8 @@ public function openEditModal(int $id): void
                 'salary'                   => $this->sanitize($this->editSalary) ?: 'Not disclosed',
                 'deadline'                 => $this->editDeadline,
                 'target_college'           => implode(',', $this->editTargetColleges) ?: null,
-                'qualifications'           => $this->sanitize($this->editQualifications),
-                'application_instructions' => $this->sanitize($this->editApplicationInstructions),
+                'qualifications'           => $this->stripLeadingEmojiPerLine($this->sanitize($this->editQualifications)),
+                'application_instructions' => $this->stripLeadingEmojiPerLine($this->sanitize($this->editApplicationInstructions)),
                 'has_image'                => $newImagePath ? 'yes' : 'no (default)',
             ],
             severity: 'info'
@@ -1008,6 +1121,7 @@ public function openEditModal(int $id): void
                 'status'          => $newStatus,
                 'updated_by'      => auth()->user()->name,
                 'updated_by_role' => 'organizer',
+                'last_action'     => $newStatus === 'ACTIVE' ? 'activated' : 'deactivated',
             ]);
 
             $this->logAudit(
@@ -1430,20 +1544,29 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 }
 .modal-top-btn:active { transform: scale(.93); }
 
-.modal-top-btn .mtip {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
+.activate-disabled-wrap { position: relative; display: inline-flex; }
+
+/* ── #eo-modal-tip: shared fixed tooltip for modal-top-btn / activate-disabled-wrap ──
+   Same pattern as #eo-hover-tip — a single element OUTSIDE the modal's
+   stacking context, positioned by JS on mousemove. A CSS-positioned
+   tooltip nested inside the button (position:absolute) stays trapped
+   inside the modal's/stacking parent's stacking context no matter how
+   high its z-index is, so it can still render behind a sibling
+   stacking context (e.g. the sidebar). Moving it out to a fixed,
+   top-level element sidesteps that entirely — matches how the
+   "View Details" row tooltip already avoids this exact problem. */
+#eo-modal-tip {
+    position: fixed;
     background: #111827;
     color: #fff;
     font-size: 10px; font-weight: 700;
     text-transform: uppercase; letter-spacing: .05em;
     padding: 4px 10px; border-radius: 6px;
     white-space: nowrap; pointer-events: none;
-    opacity: 0; transition: opacity .15s; z-index: 9999;
+    opacity: 0; transition: opacity .15s;
+    z-index: 2147483647;
 }
-.modal-top-btn .mtip::before {
+#eo-modal-tip::before {
     content: '';
     position: absolute;
     bottom: 100%; left: 50%;
@@ -1451,36 +1574,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     border: 4px solid transparent;
     border-bottom-color: #111827;
 }
-.modal-top-btn:hover .mtip { opacity: 1; }
-
-.activate-disabled-wrap { position: relative; display: inline-flex; }
-.activate-disabled-wrap .adtip {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 50%;
-    transform: translateX(-50%);
-    background: #111827;
-    color: #fff;
-    font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: .04em;
-    padding: 4px 10px; border-radius: 6px;
-    white-space: nowrap; pointer-events: none;
-    opacity: 0; transition: opacity .15s; z-index: 9999;
-}
-.activate-disabled-wrap .adtip::before {
-    content: '';
-    position: absolute;
-    bottom: 100%; left: 50%;
-    transform: translateX(-50%);
-    border: 4px solid transparent;
-    border-bottom-color: #111827;
-}
-.activate-disabled-wrap:hover .adtip { opacity: 1; }
 
 @media (max-width: 768px), (hover: none), (pointer: coarse) {
     #eo-hover-tip { display: none !important; }
-    .modal-top-btn .mtip { display: none !important; }
-    .activate-disabled-wrap .adtip { display: none !important; }
+    #eo-modal-tip { display: none !important; }
     [class*="group-hover:opacity-100"] { display: none !important; }
 }
 
@@ -1503,14 +1600,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 .img-preview-thumb {
     width: 100%;
     height: 120px;
-    object-fit: cover;
+    object-fit: contain;
+    background: #f3f0f6;
     border-radius: 10px;
     display: block;
 }
 .img-preview-thumb-sm {
     width: 100%;
     height: 100px;
-    object-fit: cover;
+    object-fit: contain;
+    background: #f3f0f6;
     border-radius: 10px;
     display: block;
 }
@@ -1657,6 +1756,28 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     overflow-x: visible !important;
 }
 
+/* ══ FIX 5: job table text not selectable/highlightable (click-drag over
+   rows was leaving stray blue text-selection highlights in the list).
+   Scoped only to #jm-table-scroll so the View Details modal — which is
+   outside this container — stays selectable/copyable as intended. ══ */
+#jm-table-scroll table {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* ══ FIX 6: light-blue highlight on the search term matched inside the
+   Job Title / Company table cells. ══ */
+.jm-search-hl {
+    background: #dbeafe;   /* light blue */
+    color: #1e3a8a;        /* darker blue text for contrast */
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: inherit;
+}
+
 /* ══ FIX 3: default photo fully visible (no dimming) in Post modal ══ */
 .img-upload-zone img.job-default-photo-img {
     opacity: 1 !important;
@@ -1726,6 +1847,59 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 }
 </style>
 
+{{-- ── Reactive flag: photo-upload-in-progress (Post Job modal) ──
+     Same purpose as eoEditPhoto below, but for the Post Job modal's photo
+     widget/button, which are a separate pair of Alpine scopes. --}}
+<script>
+(function () {
+    function registerEoPostPhoto() {
+        if (!Alpine.store('eoPostPhoto')) {
+            Alpine.store('eoPostPhoto', { uploading: false });
+        }
+    }
+    // Alpine may have already fired 'alpine:init' (e.g. this script re-runs
+    // after a Livewire morph/navigate) — in that case Alpine is already on
+    // window and the store can be registered immediately. Otherwise wait
+    // for the event like normal. Registering only on 'alpine:init' was
+    // what caused "$store.eoPostPhoto is undefined" whenever this markup
+    // rendered after Alpine's one-time init had already run.
+    if (window.Alpine) {
+        registerEoPostPhoto();
+    } else {
+        document.addEventListener('alpine:init', registerEoPostPhoto);
+    }
+})();
+</script>
+
+{{-- ── Reactive flag: photo-upload-in-progress ──
+     Used by the "Job Photo" upload widget (wire:ignore'd, its own Alpine
+     scope) to tell the Save Changes button (a DIFFERENT Alpine scope,
+     outside that wire:ignore block) that an upload is still in flight.
+     A plain `window.__eoEditPhotoUploading = true/false` was tried first,
+     but Alpine's x-show/:disabled only re-evaluate when a *reactive*
+     value changes — a bare window property isn't tracked, so the button
+     could get stuck showing its last-rendered state (e.g. stayed
+     disabled with no "Uploading…" label after the upload had already
+     finished). Alpine.store() IS reactive, so every reader re-renders
+     correctly when the store value changes. --}}
+<script>
+(function () {
+    function registerEoEditPhoto() {
+        if (!Alpine.store('eoEditPhoto')) {
+            Alpine.store('eoEditPhoto', { uploading: false });
+        }
+    }
+    // Same fix as eoPostPhoto above — don't rely solely on 'alpine:init',
+    // which only ever fires once and can have already fired by the time
+    // this script tag is (re)executed (e.g. after a Livewire morph).
+    if (window.Alpine) {
+        registerEoEditPhoto();
+    } else {
+        document.addEventListener('alpine:init', registerEoEditPhoto);
+    }
+})();
+</script>
+
 {{-- Hover tooltip --}}
 <div id="eo-hover-tip"
      wire:ignore
@@ -1734,6 +1908,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     <i class="fas fa-eye mr-1.5"></i>View Details
     <span class="absolute top-full left-3.5 border-[5px] border-transparent border-t-[#1a1a1a]"></span>
 </div>
+
+{{-- Modal top-right icon-button tooltip (Activate/Deactivate/Share/Close etc.) --}}
+<div id="eo-modal-tip" wire:ignore></div>
 
 {{-- ── FLASH TOAST ── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
@@ -1768,12 +1945,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
          onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;">
         <div class="flex items-center gap-4">
             <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                 style="background:linear-gradient(135deg,#9a5fb3,#7a3f91);">
                 <i class="fas fa-briefcase text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Job Management</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#7A3F91] font-normal">
+                <h1 class="text-2xl font-bold text-[#333333] leading-tight">Job Management</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
                     Post and manage job listings for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
                         <i class="fas fa-building-columns text-[9px]"></i>
@@ -1820,7 +1997,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
                 <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
-                       placeholder="Search title or company…"
+                       placeholder="Search…"
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] placeholder-[#a78bbd] font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
@@ -1837,20 +2014,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                 @endforeach
             </select>
-
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
 
             @if($filterStatus)
             @php
@@ -1874,7 +2037,27 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <button wire:click="$set('filterType', '')" type="button" class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer"><i class="fas fa-xmark text-[10px]"></i></button>
             </span>
             @endif
+
+            {{-- Reset — pushed to the far right (ml-auto), and disabled
+                 whenever no filter is active (search empty, status unset,
+                 type unset) so it can't be clicked with nothing to reset. --}}
+            @php $jmHasActiveFilter = ($search !== '') || ($filterStatus !== '') || ($filterType !== ''); @endphp
+            <button wire:click="resetFilters"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60 cursor-wait"
+                    wire:target="resetFilters"
+                    @if(!$jmHasActiveFilter) disabled @endif
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
+                <span wire:loading.remove wire:target="resetFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                </span>
+                <span wire:loading wire:target="resetFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
+                <span class="hidden sm:inline">Reset</span>
+            </button>
         </div>
+
 
         {{-- ── TABLE WRAPPER ── --}}
         <div class="relative flex-1 min-h-0 bg-white">
@@ -1920,7 +2103,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <td class="px-4 py-3.5">
                                 <div class="max-w-[240px]">
                                     <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333] flex items-center gap-1.5 flex-wrap">
-                                        {{ $job->job_title }}
+                                        {!! $this->highlightSearch($job->job_title) !!}
                                         @if($isAlumniDirector)
                                             <span class="jm-director-badge"><i class="fas fa-shield-halved text-[8px]"></i>Alumni Director</span>
                                         @endif
@@ -1936,7 +2119,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             </td>
 
                             <td class="px-4 py-3.5 hidden lg:table-cell">
-                                <p class="text-sm text-[#555555] truncate max-w-[160px]">{{ $job->company_name }}</p>
+                                <p class="text-sm text-[#555555] truncate max-w-[160px]">{!! $this->highlightSearch($job->company_name) !!}</p>
                             </td>
 
                             <td class="px-4 py-3.5 text-center">
@@ -1955,19 +2138,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <div class="flex items-center justify-end gap-1.5" @click.stop>
 
                                     {{-- Share --}}
-                                    <div class="relative inline-flex group" data-eo-share>
+                                    <div class="relative inline-flex" data-eo-share>
                                         <button type="button"
                                                 @if($canShare) wire:click.stop="openShareModal({{ $job->id }})" @endif
                                                 wire:loading.attr="disabled" wire:target="openShareModal({{ $job->id }})"
                                                 @disabled(!$canShare)
+                                                data-mtip="Share"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition bg-blue-50 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-blue-50 disabled:hover:border-blue-200 {{ $canShare ? 'cursor-pointer' : '' }}">
                                             <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $job->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $job->id }})"></i>
                                         </button>
-                                        <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                            Share
-                                            <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                        </div>
                                     </div>
 
                                     @php
@@ -1975,19 +2155,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                     @endphp
 
                                     {{-- Activate / Deactivate --}}
-                                    <div class="relative inline-flex group" data-eo-share>
+                                    <div class="relative inline-flex" data-eo-share>
                                         <button type="button"
                                                 @if($canToggle) wire:click.stop="confirmToggleStatus({{ $job->id }})" @endif
                                                 wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $job->id }})"
                                                 @disabled(!$canToggle)
+                                                data-mtip="{{ $isActive ? 'Deactivate' : 'Activate' }}"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition {{ $isActive ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400 disabled:hover:bg-amber-50 disabled:hover:border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400 disabled:hover:bg-emerald-50 disabled:hover:border-emerald-200' }} disabled:opacity-40 disabled:cursor-not-allowed {{ $canToggle ? 'cursor-pointer' : '' }}">
                                             <i class="fas {{ $isActive ? 'fa-circle-pause' : 'fa-circle-play' }}" wire:loading.remove wire:target="confirmToggleStatus({{ $job->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleStatus({{ $job->id }})"></i>
                                         </button>
-                                        <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                            {{ $isActive ? 'Deactivate' : 'Activate' }}
-                                            <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
-                                        </div>
                                     </div>
 
                                 </div>
@@ -2097,10 +2274,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 {{-- ══ ACTIVATE / DEACTIVATE CONFIRM ══ --}}
 @if($showToggleModal)
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+     x-data="{ closing: false, cancelling: false }"
+     x-show="!closing"
      wire:keydown.escape.window="cancelToggleStatus">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b {{ $toggleAction === 'activate' ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50' }}">
-            <h2 class="text-base font-semibold {{ $toggleAction === 'activate' ? 'text-emerald-800' : 'text-amber-800' }} flex items-center gap-2.5">
+            <h2 class="text-lg font-semibold {{ $toggleAction === 'activate' ? 'text-emerald-800' : 'text-amber-800' }} flex items-center gap-2.5">
                 <div class="w-8 h-8 {{ $toggleAction === 'activate' ? 'bg-emerald-100' : 'bg-amber-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
                     <i class="fas {{ $toggleAction === 'activate' ? 'fa-circle-play text-emerald-600' : 'fa-circle-pause text-amber-600' }} text-sm"></i>
                 </div>
@@ -2108,42 +2287,43 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">You are about to <strong>{{ $toggleAction }}</strong>:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+            <p class="text-base text-[#555555] mb-1">You are about to <strong>{{ $toggleAction }}</strong>:</p>
+            <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $toggleJobTitle }}
             </p>
             @if($toggleAction === 'activate')
             <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-emerald-900">Alumni will be able to see and apply to this job posting once activated.</span>
+                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                <span class="text-sm text-emerald-900">Alumni will be able to see and apply to this job posting once activated.</span>
             </div>
             @else
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. All fields become editable while inactive.</span>
+                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                <span class="text-sm text-amber-900">Alumni won't see this job posting until you re-activate it. All fields become editable while inactive.</span>
             </div>
             @endif
             <div class="flex gap-2">
-                <button wire:click="cancelToggleStatus"
-                        wire:loading.attr="disabled" wire:target="executeToggleStatus,cancelToggleStatus"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
-                    <span wire:loading.remove wire:target="cancelToggleStatus">
-                        <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                <button type="button"
+                        :disabled="cancelling"
+                        @click="cancelling = true; $wire.cancelToggleStatus(); setTimeout(() => { closing = true }, 400)"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-70 disabled:cursor-wait">
+                    <span x-show="!cancelling" x-cloak>
+                        <i class="fas fa-xmark mr-1 text-sm"></i>Cancel
                     </span>
-                    <span wire:loading wire:target="cancelToggleStatus">
-                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Cancel
+                    <span x-show="cancelling" x-cloak>
+                        <i class="fas fa-spinner fa-spin mr-1 text-sm"></i>Cancelling…
                     </span>
                 </button>
                 <button wire:click="executeToggleStatus"
                         wire:loading.attr="disabled" wire:target="executeToggleStatus"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer disabled:opacity-70 disabled:cursor-wait
+                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white transition cursor-pointer disabled:opacity-70 disabled:cursor-wait
                                {{ $toggleAction === 'activate' ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600' }}">
                     <span wire:loading.remove wire:target="executeToggleStatus">
-                        <i class="fas {{ $toggleAction === 'activate' ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-xs"></i>
+                        <i class="fas {{ $toggleAction === 'activate' ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-sm"></i>
                         Yes, {{ $toggleAction === 'activate' ? 'Activate' : 'Deactivate' }}
                     </span>
                     <span wire:loading wire:target="executeToggleStatus">
-                        <i class="fas fa-spinner fa-spin mr-1 text-xs"></i>
+                        <i class="fas fa-spinner fa-spin mr-1 text-sm"></i>
                         {{ $toggleAction === 'activate' ? 'Activating…' : 'Deactivating…' }}
                     </span>
                 </button>
@@ -2166,23 +2346,22 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
             <div>
                 <h2 class="text-white font-semibold text-lg leading-tight">Post a New Job</h2>
-                <p class="text-white/60 text-xs mt-0.5">Fill in details — job goes live immediately</p>
+                <p class="text-white/60 text-sm mt-0.5">Fill in details — job goes live immediately</p>
             </div>
         </div>
         <div class="flex items-center gap-1.5">
             <button wire:click="closePostModal" type="button"
                     wire:loading.attr="disabled" wire:target="closePostModal"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
-                    aria-label="Close">
+                    aria-label="Close" data-mtip="Close">
                 <span wire:loading.remove wire:target="closePostModal">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
                     </svg>
                 </span>
                 <span wire:loading wire:target="closePostModal">
-                    <i class="fas fa-spinner fa-spin text-white text-xs"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm"></i>
                 </span>
-                <span class="mtip">Close</span>
             </button>
         </div>
     </div>
@@ -2195,24 +2374,59 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Job Photo — shown first so the default photo is visible immediately at the top --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
-                        <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
+                        <i class="fas fa-image text-[11px] text-[#555555]"></i> Job Photo
+                        <span class="font-normal normal-case tracking-normal text-sm ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-3.5">
                         <div wire:ignore
                              x-data="{
                                  preview: null,
+                                 uploading: false,
+                                 uploadError: false,
                                  defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
                                  handleFile(e) {
                                      const f = e.target.files[0];
                                      if (!f) return;
+                                     this.uploadError = false;
                                      const r = new FileReader();
                                      r.onload = ev => { this.preview = ev.target.result; };
                                      r.readAsDataURL(f);
+
+                                     this.uploading = true;
+                                     // Reactive flag (see Alpine.store('eoPostPhoto') registered
+                                     // near the top of this file) so the Post Job button, which
+                                     // lives in a separate Alpine scope outside this wire:ignore
+                                     // block, correctly re-renders while this is true.
+                                     Alpine.store('eoPostPhoto').uploading = true;
+                                     // Safety net: if neither $wire.upload callback ever fires
+                                     // (e.g. connection drops mid-upload), don't leave Post Job
+                                     // permanently disabled — release the lock after 30s.
+                                     clearTimeout(this._eoUploadTimeout);
+                                     this._eoUploadTimeout = setTimeout(() => {
+                                         this.uploading = false;
+                                         this.uploadError = true;
+                                         Alpine.store('eoPostPhoto').uploading = false;
+                                     }, 30000);
+                                     $wire.upload('postJobImage', f,
+                                         () => {
+                                             clearTimeout(this._eoUploadTimeout);
+                                             this.uploading = false;
+                                             Alpine.store('eoPostPhoto').uploading = false;
+                                         },
+                                         () => {
+                                             clearTimeout(this._eoUploadTimeout);
+                                             this.uploading = false;
+                                             this.uploadError = true;
+                                             Alpine.store('eoPostPhoto').uploading = false;
+                                         }
+                                     );
                                  },
                                  clear() {
                                      this.preview = null;
+                                     this.uploading = false;
+                                     this.uploadError = false;
+                                     Alpine.store('eoPostPhoto').uploading = false;
                                      this.$refs.fileInput.value = '';
                                      $wire.set('postJobImage', null);
                                  }
@@ -2223,9 +2437,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         <img :src="preview" class="img-preview-thumb" alt="Preview">
                                         <button type="button" @click="clear()"
                                                 class="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition cursor-pointer">
-                                            <i class="fas fa-xmark text-[10px]"></i>
+                                            <i class="fas fa-xmark text-sm"></i>
                                         </button>
-                                        <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">PREVIEW</span>
+                                        <span class="absolute bottom-1.5 left-1.5 text-sm font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">PREVIEW</span>
                                     </div>
                                 </template>
                                 <template x-if="!preview">
@@ -2235,22 +2449,25 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         <label class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 cursor-pointer w-full bg-black/0 hover:bg-black/35 transition group/uploadlbl">
                                             <span class="opacity-0 group-hover/uploadlbl:opacity-100 transition flex flex-col items-center gap-1.5 bg-white/90 rounded-xl px-4 py-3">
                                                 <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
-                                                <p class="font-semibold text-xs text-[#333333]">Click to upload a photo</p>
-                                                <p class="text-[10px] text-[#555555]">JPG, PNG, WebP — max 2MB</p>
+                                                <p class="font-semibold text-sm text-[#333333]">Click to upload a photo</p>
+                                                <p class="text-sm text-[#555555]">JPG, PNG, WebP — max 2MB</p>
                                             </span>
                                             <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                                   wire:model="postJobImage" @change="handleFile($event)">
+                                                   @change="handleFile($event)">
                                         </label>
-                                        <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-gray-600 text-white px-1.5 py-0.5 rounded-full">DEFAULT</span>
+                                        <span class="absolute bottom-1.5 left-1.5 text-sm font-bold bg-gray-600 text-white px-1.5 py-0.5 rounded-full">DEFAULT</span>
                                     </div>
                                 </template>
                             </div>
-                            <p class="text-[10px] mt-1.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
-                            <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2 justify-center">
-                                <i class="fas fa-spinner fa-spin text-xs"></i> Uploading…
+                            <p class="text-sm mt-1.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
+                            <div x-show="uploading" x-cloak class="mt-1.5 text-sm text-[#7a3f91] flex items-center gap-2 justify-center">
+                                <i class="fas fa-spinner fa-spin text-sm"></i> Uploading…
+                            </div>
+                            <div x-show="uploadError" x-cloak class="mt-1.5 text-sm text-red-600 flex items-center gap-2 justify-center">
+                                <i class="fas fa-circle-exclamation text-sm"></i> Upload failed. Try again.
                             </div>
                             @if(isset($postErrors['postJobImage']))
-                                <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobImage'] }}</p>
+                                <p class="text-red-600 flex items-center gap-1 mt-1 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postJobImage'] }}</p>
                             @endif
                         </div>
                     </div>
@@ -2258,8 +2475,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Employer Category --}}
                 <div class="bg-white border-[1.5px] {{ isset($postErrors['postOrgCategory']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-building text-[9px] text-[#555555]"></i> Employer <span class="text-red-400 font-semibold ml-0.5">*</span>
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
+                        <i class="fas fa-building text-[11px] text-[#555555]"></i> Employer <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 space-y-2">
                         <div class="grid grid-cols-1 gap-1.5">
@@ -2269,20 +2486,20 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                            {{ $postOrgCategory===$val ? 'border-[#7a3f91] text-white shadow-md' : 'border-gray-200 text-[#333333] hover:border-[#7a3f91] hover:bg-purple-50' }}"
                                     style="{{ $postOrgCategory===$val ? 'background:linear-gradient(135deg,#7a3f91,#6a3580);' : '' }}">
                                 <i class="fas {{ $ico }} text-base flex-shrink-0"></i>
-                                <div><span class="block text-sm">{{ $label }}</span><span class="block font-normal opacity-70 text-xs">{{ $sub }}</span></div>
+                                <div><span class="block text-sm">{{ $label }}</span><span class="block font-normal opacity-70 text-sm">{{ $sub }}</span></div>
                             </button>
                             @endforeach
                         </div>
-                        @if(isset($postErrors['postOrgCategory']))<p class="text-red-600 flex items-center gap-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postOrgCategory'] }}</p>@endif
+                        @if(isset($postErrors['postOrgCategory']))<p class="text-red-600 flex items-center gap-1 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postOrgCategory'] }}</p>@endif
 
                         @if($postOrgCategory === 'philcst' && $philcstName)
                         <div class="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl px-2.5 py-2">
-                            <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-white shadow-sm" style="background:linear-gradient(135deg,#7a3f91,#6a3580);"><i class="fas fa-school text-xs"></i></div>
+                            <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-white shadow-sm" style="background:linear-gradient(135deg,#7a3f91,#6a3580);"><i class="fas fa-school text-sm"></i></div>
                             <div class="flex-1 min-w-0">
                                 <div class="font-semibold text-[#4c1d95] truncate text-sm">{{ $philcstName }}</div>
-                                @if($philcstLocation)<div class="text-[#7c3aed] truncate mt-0.5 text-xs"><i class="fas fa-location-dot mr-1"></i>{{ $philcstLocation }}</div>@endif
+                                @if($philcstLocation)<div class="text-[#7c3aed] truncate mt-0.5 text-sm"><i class="fas fa-location-dot mr-1"></i>{{ $philcstLocation }}</div>@endif
                             </div>
-                            <span class="inline-flex items-center gap-1 font-semibold text-purple-700 bg-white border border-purple-200 px-1.5 py-0.5 rounded-full text-[0.6rem] flex-shrink-0"><i class="fas fa-lock text-[8px]"></i> Auto</span>
+                            <span class="inline-flex items-center gap-1 font-semibold text-purple-700 bg-white border border-purple-200 px-1.5 py-0.5 rounded-full text-[0.75rem] flex-shrink-0"><i class="fas fa-lock text-[10px]"></i> Auto</span>
                         </div>
                         @endif
 
@@ -2290,22 +2507,22 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v,false)},syncT(v){$wire.set('postPartnerType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
-                                    <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Acme Corp" maxlength="150"
+                                    <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
+                                    <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Real Madrid" maxlength="150"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postPartnerName']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
+                                    @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
-                                    <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Private, NGO" maxlength="100"
+                                    <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
+                                    <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Information Technology" maxlength="100"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postPartnerType']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
+                                    @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Location <span class="text-red-500">*</span></label>
+                                    <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Location <span class="text-red-500">*</span></label>
                                     <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postLocation']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postLocation'] }}</p>@endif
+                                    @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postLocation'] }}</p>@endif
                                 </div>
                             </div>
                         </div>
@@ -2315,29 +2532,29 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v,false)},syncT(v){$wire.set('postCustomType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
-                                    <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
+                                    <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
+                                    <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Real Madrid" maxlength="150"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postCustomName']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomName'] }}</p>@endif
+                                    @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
-                                    <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
+                                    <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
+                                    <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Information Technology" maxlength="100"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postCustomType']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomType'] }}</p>@endif
+                                    @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postCustomType'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold uppercase tracking-wider text-[#333333] mb-1">Location <span class="text-red-500">*</span></label>
+                                    <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Location <span class="text-red-500">*</span></label>
                                     <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postLocation']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postLocation'] }}</p>@endif
+                                    @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postLocation'] }}</p>@endif
                                 </div>
                             </div>
                         </div>
                         @endif
 
                         @if(!$postOrgCategory)
-                        <div class="text-center py-3 text-[#777777]"><p class="text-xs">Select an option above to continue.</p></div>
+                        <div class="text-center py-3 text-[#777777]"><p class="text-sm">Select an option above to continue.</p></div>
                         @endif
                     </div>
                 </div>
@@ -2350,19 +2567,19 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Job Information
                     </div>
                     <div class="p-3.5 space-y-3">
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title <span class="text-red-500">*</span></label>
+                            <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title <span class="text-red-500">*</span></label>
                             <input wire:model.defer="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
                                    class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                            @if(isset($postErrors['postJobTitle']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
+                            @if(isset($postErrors['postJobTitle']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type <span class="text-red-500">*</span></label>
+                                <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type <span class="text-red-500">*</span></label>
                                 <select wire:model.defer="postEmpType"
                                         class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($postErrors['postEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     <option value="">Select Type</option>
@@ -2370,10 +2587,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                                     @endforeach
                                 </select>
-                                @if(isset($postErrors['postEmpType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postEmpType'] }}</p>@endif
+                                @if(isset($postErrors['postEmpType']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postEmpType'] }}</p>@endif
                             </div>
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level <span class="text-red-500">*</span></label>
+                                <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level <span class="text-red-500">*</span></label>
                                 <select wire:model.defer="postExpLevel"
                                         class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($postErrors['postExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     <option value="">Select Level</option>
@@ -2381,21 +2598,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         <option value="{{ $lvl }}">{{ $lvl }}</option>
                                     @endforeach
                                 </select>
-                                @if(isset($postErrors['postExpLevel']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postExpLevel'] }}</p>@endif
+                                @if(isset($postErrors['postExpLevel']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postExpLevel'] }}</p>@endif
                             </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Salary <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                                 </label>
                                 <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000 per month" maxlength="100"
                                        oninput="window.__eoFormatSalaryInput(this)"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                @if(isset($postErrors['postSalary']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postSalary'] }}</p>@endif
+                                @if(isset($postErrors['postSalary']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postSalary'] }}</p>@endif
                             </div>
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Deadline <span class="text-red-500">*</span>
                                 </label>
                                 <input wire:model.defer="postDeadline" type="date"
@@ -2404,48 +2621,45 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                        onchange="window.__eoGuardDeadlineInput(this)"
                                        onclick="window.__eoOpenDatePicker(this)"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                @if(isset($postErrors['postDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postDeadline'] }}</p>@endif
+                                @if(isset($postErrors['postDeadline']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0" style="flex-basis:0;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Description <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
-                    <div class="p-3.5 flex flex-col flex-1">
+                    <div class="p-3.5 flex flex-col flex-1 min-h-0">
                         <textarea wire:model.defer="postDescription"
                                   placeholder="Describe the role, responsibilities, and what the candidate will be doing…" maxlength="5000"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  style="min-height:120px;"></textarea>
-                        @if(isset($postErrors['postDescription']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postDescription'] }}</p>@endif
+                                  class="w-full flex-1 min-h-0 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"></textarea>
+                        @if(isset($postErrors['postDescription']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postDescription'] }}</p>@endif
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0" style="flex-basis:0;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Qualifications <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
-                    <div class="p-3.5 flex flex-col flex-1">
+                    <div class="p-3.5 flex flex-col flex-1 min-h-0">
                         <textarea wire:model.defer="postQualifications"
                                   placeholder="e.g. Bachelor's degree in a relevant field, at least 1 year experience…" maxlength="3000"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  style="min-height:100px;"></textarea>
-                        @if(isset($postErrors['postQualifications']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postQualifications'] }}</p>@endif
+                                  class="w-full flex-1 min-h-0 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"></textarea>
+                        @if(isset($postErrors['postQualifications']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postQualifications'] }}</p>@endif
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0" style="flex-basis:0;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         How to Apply <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
-                    <div class="p-3.5 flex flex-col flex-1">
+                    <div class="p-3.5 flex flex-col flex-1 min-h-0">
                         <textarea wire:model.defer="postApplicationInstructions"
                                   placeholder="e.g. Send your resume to hr@company.com with subject: Application – [Position]" maxlength="3000"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  style="min-height:100px;"></textarea>
-                        @if(isset($postErrors['postApplicationInstructions']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postApplicationInstructions'] }}</p>@endif
+                                  class="w-full flex-1 min-h-0 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"></textarea>
+                        @if(isset($postErrors['postApplicationInstructions']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postApplicationInstructions'] }}</p>@endif
                     </div>
                 </div>
 
@@ -2458,15 +2672,15 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Target College --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-building-columns text-[9px] text-[#555555]"></i> Target College
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
+                        <i class="fas fa-building-columns text-[11px] text-[#555555]"></i> Target College
                     </div>
                     <div class="p-3.5">
                         <div class="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-2.5 py-2">
                             <i class="fas fa-lock text-blue-500 flex-shrink-0 text-sm"></i>
                             <div class="flex-1 min-w-0">
                                 <div class="font-semibold text-blue-900 truncate text-sm">{{ $this->organizerCollege ?? 'Your College' }}</div>
-                                <div class="text-blue-700 mt-0.5 text-xs">Auto-selected · your alumni only</div>
+                                <div class="text-blue-700 mt-0.5 text-sm">Auto-selected · your alumni only</div>
                             </div>
                         </div>
                     </div>
@@ -2474,21 +2688,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Submission Tips --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Submission Tips
                     </div>
                     <div class="p-3.5">
                         <ul class="space-y-2">
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Set a future deadline — past deadlines auto-deactivate.</span></li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Include salary — listings with salary attract more applicants.</span></li>
-                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[9px]"></i><span>Job goes live immediately — no approval required.</span></li>
+                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[11px]"></i><span>Set a future deadline — past deadlines auto-deactivate.</span></li>
+                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[11px]"></i><span>Include salary — listings with salary attract more applicants.</span></li>
+                            <li class="flex items-start gap-1.5 text-[11px] text-[#333333]"><i class="fas fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-[11px]"></i><span>Job goes live immediately — no approval required.</span></li>
                         </ul>
                     </div>
                 </div>
 
                 {{-- Visibility --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Visibility
                     </div>
                     <div class="p-3.5">
@@ -2496,39 +2710,46 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <i class="fas fa-users text-purple-500 flex-shrink-0 text-sm"></i>
                             <div class="flex-1 min-w-0">
                                 <div class="font-semibold text-purple-800 truncate text-sm">{{ $this->organizerCollege ?? 'Your College' }}</div>
-                                <div class="text-purple-600 mt-0.5 text-xs">Only alumni from this college can see this job</div>
+                                <div class="text-purple-600 mt-0.5 text-sm">Only alumni from this college can see this job</div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
                     <p class="font-semibold text-emerald-800 flex items-center gap-1.5 text-sm"><i class="fas fa-circle-check text-emerald-500 text-sm"></i> Ready to post</p>
-                    <p class="text-emerald-700 mt-1 text-xs">Job goes live immediately after submitting. No approval required.</p>
+                    <p class="text-emerald-700 mt-1 text-sm">Job goes live immediately after submitting. No approval required.</p>
                 </div>
             </div>
 
-            <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
+            <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2"
+                 x-data="{ get photoUploading() { return $store.eoPostPhoto ? $store.eoPostPhoto.uploading : false; } }">
+                {{-- Button label stays "Post Job" always — it only disables
+                     (never relabels) while a photo upload is still in flight, so
+                     clicking Post before postJobImage is populated server-side is
+                     blocked without the button text jumping around. Tracked via
+                     Alpine.store('eoPostPhoto') (reactive — mirrors eoEditPhoto in
+                     the Edit modal below). --}}
                 <button type="button" wire:click="savePost"
                         wire:loading.attr="disabled" wire:target="savePost"
                         class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
                     <span wire:loading.remove wire:target="savePost" class="flex items-center justify-center gap-2">
-                        <i class="fas fa-paper-plane text-xs"></i>
+                        <i class="fas fa-paper-plane text-sm"></i>
                         Post Job
                     </span>
                     <span wire:loading wire:target="savePost" class="flex items-center justify-center gap-2">
-                        <i class="fas fa-spinner fa-spin text-xs"></i>
-                        Posting…
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
+                        Post Job
                     </span>
                 </button>
                 <button type="button" wire:click="closePostModal"
                         wire:loading.attr="disabled" wire:target="savePost,closePostModal"
-                        class="w-full px-5 py-2 rounded-xl text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
+                        class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
                     <span wire:loading.remove wire:target="closePostModal" class="flex items-center justify-center gap-1.5">
-                        <i class="fas fa-xmark text-[10px]"></i>
+                        <i class="fas fa-xmark text-sm"></i>
                         Cancel
                     </span>
                     <span wire:loading wire:target="closePostModal" class="flex items-center justify-center gap-1.5">
-                        <i class="fas fa-spinner fa-spin text-[10px]"></i>
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
                         Cancel
                     </span>
                 </button>
@@ -2576,10 +2797,18 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     // read-only, so the header shows an eye icon for those instead.
     $editHeaderIsReadOnly = $editJobIsActive || $editIsAlumniDirectorJob;
 @endphp
+{{-- wire:key includes the job status: the moment Activate/Deactivate flips
+     $editModeAllowed server-side, Livewire treats this as a *new* element
+     (key changed) instead of morphing the old one in place. That forces a
+     full re-mount, which re-runs x-data with the fresh value — this is what
+     actually fixes "need to close/refresh before I can edit again", since
+     the previous x-effect with a Blade-baked literal had no reactive
+     dependency for Alpine to react to and so never re-ran after the first
+     paint. --}}
 <div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
-     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }"
-     x-effect="editMode = {{ $editModeAllowed ? 'true' : 'false' }}">
+     wire:key="edit-modal-{{ $editingJobId }}-{{ $editJobIsActive ? 'active' : 'inactive' }}-{{ $editIsAlumniDirectorJob ? 'dir' : 'org' }}"
+     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }">
 
     <div class="flex items-center justify-between px-4 sm:px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg jm-modal-header-row">
         <div class="flex items-center gap-3 min-w-0">
@@ -2612,50 +2841,49 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @endphp
                 @if(!$editJobIsActive)
                     @if($editJobDeadlinePassed)
-                        <div class="activate-disabled-wrap">
+                        <div class="activate-disabled-wrap" data-mtip="Update deadline to activate">
                             <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed opacity-40 border border-white/35">
                                 <i class="fas fa-circle-play text-white text-sm"></i>
                             </span>
-                            <span class="adtip">Update deadline to activate</span>
                         </div>
                     @else
                         <button wire:click="confirmToggleStatus({{ $editingJobId }})" type="button"
                                 wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $editingJobId }})"
-                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
+                                data-mtip="Activate">
                             <span wire:loading.remove wire:target="confirmToggleStatus({{ $editingJobId }})">
                                 <i class="fas fa-circle-play text-white text-sm"></i>
                             </span>
                             <span wire:loading wire:target="confirmToggleStatus({{ $editingJobId }})">
                                 <i class="fas fa-spinner fa-spin text-white text-sm"></i>
                             </span>
-                            <span class="mtip">Activate</span>
                         </button>
                     @endif
                 @else
                     <button wire:click="confirmToggleStatus({{ $editingJobId }})" type="button"
                             wire:loading.attr="disabled" wire:target="confirmToggleStatus({{ $editingJobId }})"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
+                            data-mtip="Deactivate">
                         <span wire:loading.remove wire:target="confirmToggleStatus({{ $editingJobId }})">
                             <i class="fas fa-circle-pause text-white text-sm"></i>
                         </span>
                         <span wire:loading wire:target="confirmToggleStatus({{ $editingJobId }})">
                             <i class="fas fa-spinner fa-spin text-white text-sm"></i>
                         </span>
-                        <span class="mtip">Deactivate</span>
                     </button>
                 @endif
                 @php $editJobCanShare = !$editJobDeadlinePassed && $editJobIsActive; @endphp
                 @if($editJobCanShare)
                     <button wire:click="openShareModal({{ $editingJobId }})" type="button"
                             wire:loading.attr="disabled" wire:target="openShareModal({{ $editingJobId }})"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
+                            data-mtip="Share">
                         <span wire:loading.remove wire:target="openShareModal({{ $editingJobId }})">
                             <i class="fas fa-share-nodes text-white text-sm"></i>
                         </span>
                         <span wire:loading wire:target="openShareModal({{ $editingJobId }})">
                             <i class="fas fa-spinner fa-spin text-white text-sm"></i>
                         </span>
-                        <span class="mtip">Share</span>
                     </button>
                 @endif
             @elseif($editingJob && $editIsAlumniDirectorJob)
@@ -2666,20 +2894,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @if($editJobCanShare)
                     <button wire:click="openShareModal({{ $editingJobId }})" type="button"
                             wire:loading.attr="disabled" wire:target="openShareModal({{ $editingJobId }})"
-                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                            class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
+                            data-mtip="Share">
                         <span wire:loading.remove wire:target="openShareModal({{ $editingJobId }})">
                             <i class="fas fa-share-nodes text-white text-sm"></i>
                         </span>
                         <span wire:loading wire:target="openShareModal({{ $editingJobId }})">
                             <i class="fas fa-spinner fa-spin text-white text-sm"></i>
                         </span>
-                        <span class="mtip">Share</span>
                     </button>
                 @endif
             @endif
             <button wire:click="closeEditModal" type="button"
                     wire:loading.attr="disabled" wire:target="closeEditModal"
-                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95">
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
+                    data-mtip="Close">
                 <span wire:loading.remove wire:target="closeEditModal">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                         <path d="M2 2L12 12M12 2L2 12" stroke="#ffffff" stroke-width="2.25" stroke-linecap="round"/>
@@ -2688,39 +2917,47 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <span wire:loading wire:target="closeEditModal">
                     <i class="fas fa-spinner fa-spin text-white text-xs"></i>
                 </span>
-                <span class="mtip">Close</span>
             </button>
         </div>
     </div>
 
     @if($editingJob && $editIsAlumniDirectorJob)
-    <div class="bg-purple-50 border-b border-purple-200 px-4 sm:px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-shield-halved text-purple-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-purple-800 font-semibold">
-            <span class="jm-director-badge mr-1.5">
+    <div class="bg-purple-50/80 border-b border-purple-200 px-4 sm:px-6 py-2 flex-shrink-0 flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-shield-halved text-purple-600 text-[10px]"></i>
+        </span>
+        <p class="text-xs text-purple-900 leading-snug">
+            <span class="jm-director-badge mr-1.5 align-middle">
                 <i class="fas fa-shield-halved text-[8px]"></i> Alumni Director
             </span>
-            View only — editing is not available for this job posting.
+            <span class="font-semibold">View only</span> — editing is not available for this job posting.
         </p>
     </div>
     @elseif($editingJob && $editingJob->status === 'INACTIVE')
-    <div class="bg-blue-50 border-b border-blue-200 px-4 sm:px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-pen text-blue-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-blue-800">
-            <strong>This job is currently Inactive — all fields below are editable.</strong>
+    <div class="bg-blue-50/80 border-b border-blue-200 px-4 sm:px-6 py-2 flex-shrink-0 flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-pen text-blue-600 text-[10px]"></i>
+        </span>
+        <p class="text-xs text-blue-900 leading-snug">
+            <span class="font-semibold">Inactive — all fields below are editable.</span>
             @if($editJobDeadlinePassed)
                 The deadline has passed — update it, save, then use <strong>Activate</strong>.
             @else
-                Review your changes carefully before clicking <strong>Save Changes</strong>, then use <strong>Activate</strong> (top-right) to go live.
+                Review your changes, click <strong>Save Changes</strong>, then use <strong>Activate</strong> (top-right) to go live.
             @endif
         </p>
     </div>
     @endif
 
     @if(!$editIsAlumniDirectorJob && $editJobIsActive)
-    <div class="bg-purple-50 border-b border-purple-200 px-4 sm:px-6 py-1.5 flex-shrink-0 flex items-center gap-3">
-        <i class="fas fa-eye text-purple-500 flex-shrink-0 text-xs"></i>
-        <p class="text-xs text-purple-800"><strong>View Mode:</strong> This job is currently Active. Deactivate it (top-right) first to make changes.</p>
+    <div class="bg-emerald-50/80 border-b border-emerald-200 px-4 sm:px-6 py-2 flex-shrink-0 flex items-center gap-2.5">
+        <span class="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-eye text-emerald-600 text-[10px]"></i>
+        </span>
+        <p class="text-xs text-emerald-900 leading-snug">
+            <span class="font-semibold">View Mode</span> — this job is currently Active.
+            <strong>Deactivate</strong> it (top-right) first to make changes.
+        </p>
     </div>
     @endif
 
@@ -2729,20 +2966,20 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
         {{-- LEFT: Company Details + Job Info --}}
         <div class="jm-modal-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
-            <div class="p-2.5 space-y-2.5">
+            <div class="p-3 space-y-3">
 
                 @if($editingJob)
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
+                        <i class="fas fa-image text-[11px] text-[#555555]"></i> Job Photo
                         <span x-show="editMode" x-cloak class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-3">
                         <div x-show="!editMode">
                             @php $editViewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null); @endphp
-                            <div class="rounded-xl overflow-hidden" style="height:110px;">
+                            <div class="rounded-xl overflow-hidden" style="height:110px; background:#f3f0f6;">
                                 <img src="{{ $editViewImgUrl }}" alt="{{ $editingJob->job_title }}"
-                                     class="w-full h-full object-cover"
+                                     class="w-full h-full object-contain"
                                      onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
                             </div>
                             <p class="text-[10px] mt-1 text-center font-medium" style="color:#111111;">
@@ -2757,23 +2994,73 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                  existing: @js($editCurrentImage ? Storage::url($editCurrentImage) : ''),
                                  defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
                                  removed: false,
+                                 uploading: false,
+                                 uploadError: false,
                                  handleFile(e) {
                                      const f = e.target.files[0];
                                      if (!f) return;
                                      this.removed = false;
+                                     this.uploadError = false;
+                                     $wire.set('editRemoveImage', false);
                                      const r = new FileReader();
                                      r.onload = ev => { this.preview = ev.target.result; };
                                      r.readAsDataURL(f);
+
+                                     this.uploading = true;
+                                     // Reactive flag (see Alpine.store('eoEditPhoto') registered
+                                     // near the top of this file) so the Save Changes button,
+                                     // which lives in a separate Alpine scope outside this
+                                     // wire:ignore block, correctly re-renders while this is true.
+                                     Alpine.store('eoEditPhoto').uploading = true;
+                                     // Safety net: if neither $wire.upload callback ever fires
+                                     // (e.g. connection drops mid-upload), don't leave Save
+                                     // permanently disabled — release the lock after 30s.
+                                     clearTimeout(this._eoUploadTimeout);
+                                     this._eoUploadTimeout = setTimeout(() => {
+                                         this.uploading = false;
+                                         this.uploadError = true;
+                                         Alpine.store('eoEditPhoto').uploading = false;
+                                     }, 30000);
+                                     // FIX: both $wire.upload() callbacks used to touch
+                                     // this.$refs.fileInput directly (via clearNew()), and one
+                                     // of the two file inputs that call handleFile() was
+                                     // missing the x-ref attribute entirely. When that input was
+                                     // the one used, any code path touching $refs.fileInput threw,
+                                     // which could abort a callback mid-run and leave uploading
+                                     // (and the shared Alpine.store lock disabling Save Changes)
+                                     // stuck at true forever — the Uploading-photo button that
+                                     // never clears. Wrapping the callbacks so a thrown error
+                                     // still always releases the lock, on top of fixing the
+                                     // missing ref at its source below.
+                                     $wire.upload('editJobImage', f,
+                                         () => {
+                                             clearTimeout(this._eoUploadTimeout);
+                                             this.uploading = false;
+                                             Alpine.store('eoEditPhoto').uploading = false;
+                                         },
+                                         () => {
+                                             clearTimeout(this._eoUploadTimeout);
+                                             this.uploading = false;
+                                             this.uploadError = true;
+                                             Alpine.store('eoEditPhoto').uploading = false;
+                                         }
+                                     );
                                  },
                                  clearNew() {
                                      this.preview = null;
-                                     this.$refs.fileInput.value = '';
+                                     this.uploading = false;
+                                     this.uploadError = false;
+                                     Alpine.store('eoEditPhoto').uploading = false;
+                                     if (this.$refs.fileInput) this.$refs.fileInput.value = '';
                                      $wire.set('editJobImage', null);
                                  },
                                  removeExisting() {
                                      this.existing = '';
                                      this.preview  = null;
                                      this.removed  = true;
+                                     this.uploading = false;
+                                     this.uploadError = false;
+                                     Alpine.store('eoEditPhoto').uploading = false;
                                      $wire.set('editRemoveImage', true);
                                      if (this.$refs.fileInput) this.$refs.fileInput.value = '';
                                      $wire.set('editJobImage', null);
@@ -2815,7 +3102,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                                 <p class="text-[10px] text-[#555555]">JPG, PNG, WebP · max 2MB</p>
                                             </span>
                                             <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                                   wire:model="editJobImage" @change="handleFile($event)">
+                                                   @change="handleFile($event)">
                                         </label>
                                         <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-gray-600 text-white px-1.5 py-0.5 rounded-full">DEFAULT</span>
                                     </div>
@@ -2826,8 +3113,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         </p>
                                     </template>
                                     <p class="text-[10px] mt-1.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
-                                    <div wire:loading wire:target="editJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2 justify-center">
+                                    <div x-show="uploading" x-cloak class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2 justify-center">
                                         <i class="fas fa-spinner fa-spin text-xs"></i> Uploading…
+                                    </div>
+                                    <div x-show="uploadError" x-cloak class="mt-1.5 text-xs text-red-600 flex items-center gap-2 justify-center">
+                                        <i class="fas fa-circle-exclamation text-xs"></i> Upload failed. Try again.
                                     </div>
                                 </div>
                             </template>
@@ -2836,8 +3126,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="flex items-center gap-1.5 mt-1.5 cursor-pointer text-[10px] text-[#7a3f91] font-semibold hover:underline">
                                     <i class="fas fa-arrow-up-from-bracket text-[9px]"></i>
                                     Replace photo
-                                    <input type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                           wire:model="editJobImage" @change="handleFile($event)">
+                                    <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
+                                           @change="handleFile($event)">
                                 </label>
                             </template>
 
@@ -2851,14 +3141,14 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @endif
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Company Details
                     </div>
                     <div class="p-2.5 space-y-2">
                         @php $editIsPhilcst = str_contains(strtoupper($editCompanyType ?? ''), 'PHILCST'); @endphp
 
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                            <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                 Industry
                                 <span x-show="editMode" x-cloak class="text-red-500">*</span>
                                 @if($editIsPhilcst)
@@ -2881,7 +3171,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             </div>
                         </div>
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Company Name <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Company Name <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm">{{ $editCompany ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
                                 <input wire:model.defer="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif
@@ -2890,7 +3180,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             </div>
                         </div>
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Location <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Location <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm">{{ $editLocation ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
                                 <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif
@@ -2901,63 +3191,74 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+            </div>
+        </div>
+
+        {{-- MIDDLE: Job Info + Textareas --}}
+        <div class="jm-modal-col flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+            <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-visible flex-shrink-0">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Job Information
                     </div>
-                    <div class="p-2.5 space-y-2">
+                    <div class="p-3.5 space-y-3">
                         <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm font-semibold">{{ $editJobTitle ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
                                 <input wire:model.defer="editJobTitle" type="text" maxlength="200"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                @if(isset($editErrors['editJobTitle']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
+                                @if(isset($editErrors['editJobTitle']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
                             </div>
                         </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display text-sm">{{ $editEmpType ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <select wire:model.defer="editEmpType"
-                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    <option value="">Select Type</option>
-                                    @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
-                                        <option value="{{ $opt->label }}" @selected($editEmpType === $opt->label)>{{ $opt->label }}</option>
-                                    @endforeach
-                                </select>
-                                @if(isset($editErrors['editEmpType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editEmpType'] }}</p>@endif
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display text-sm">{{ $editExpLevel ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <select wire:model.defer="editExpLevel"
-                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    <option value="">Select Level</option>
-                                    @foreach($this->orderedExpLevels as $lvl)
-                                        <option value="{{ $lvl }}" @selected($editExpLevel === $lvl)>{{ $lvl }}</option>
-                                    @endforeach
-                                </select>
-                                @if(isset($editErrors['editExpLevel']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editExpLevel'] }}</p>@endif
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
-                                    Salary <span class="font-normal normal-case tracking-normal text-[#777777] text-[10px]">optional</span>
+                                <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                                <div x-show="!editMode" class="view-field-display text-sm">{{ $editEmpType ?: '—' }}</div>
+                                <div x-show="editMode" x-cloak>
+                                    <select wire:model.defer="editEmpType"
+                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                        <option value="">Select Type</option>
+                                        @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
+                                            <option value="{{ $opt->label }}" @selected($editEmpType === $opt->label)>{{ $opt->label }}</option>
+                                        @endforeach
+                                    </select>
+                                    @if(isset($editErrors['editEmpType']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editEmpType'] }}</p>@endif
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                                <div x-show="!editMode" class="view-field-display text-sm">{{ $editExpLevel ?: '—' }}</div>
+                                <div x-show="editMode" x-cloak>
+                                    <select wire:model.defer="editExpLevel"
+                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                        <option value="">Select Level</option>
+                                        @foreach($this->orderedExpLevels as $lvl)
+                                            <option value="{{ $lvl }}" @selected($editExpLevel === $lvl)>{{ $lvl }}</option>
+                                        @endforeach
+                                    </select>
+                                    @if(isset($editErrors['editExpLevel']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editExpLevel'] }}</p>@endif
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                    Salary <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                                 </label>
                                 <div x-show="!editMode" class="view-field-display text-sm">{{ $editSalary ?: 'Not disclosed' }}</div>
                                 <div x-show="editMode" x-cloak>
                                     <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25,000 per month"
                                            oninput="window.__eoFormatSalaryInput(this)"
-                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($editErrors['editSalary']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editSalary'] }}</p>@endif
+                                           class="w-full px-3 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                    @if(isset($editErrors['editSalary']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editSalary'] }}</p>@endif
                                 </div>
                             </div>
                             <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Deadline <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                                    Deadline <span x-show="editMode" x-cloak class="text-red-500">*</span>
+                                </label>
                                 <div x-show="!editMode" class="view-field-display text-sm">
                                     @if($editDeadline)
                                         {{ \Carbon\Carbon::parse($editDeadline)->setTimezone('Asia/Manila')->format('M d, Y') }}
@@ -2970,69 +3271,56 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                            oninput="window.__eoGuardDeadlineInput(this)"
                                            onchange="window.__eoGuardDeadlineInput(this)"
                                            onclick="window.__eoOpenDatePicker(this)"
-                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDeadline'] }}</p>@endif
+                                           class="w-full px-3 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                    @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editDeadline'] }}</p>@endif
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-            </div>
-        </div>
-
-        {{-- MIDDLE: Textareas --}}
-        <div class="jm-modal-col flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
-            <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
-
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0" style="flex-basis:0;">
+                    <div class="px-3 py-1.5 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.75rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Description <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
-                    <div class="p-3.5 flex flex-col flex-1">
+                    <div class="p-2.5 flex flex-col flex-1 min-h-0">
                         <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
-                             style="min-height:160px;">{{ $editDescription ?: 'No description provided.' }}</div>
+                             class="view-content-box flex-1 min-h-0 px-2.5 py-1.5 rounded-xl text-xs text-[#333333] leading-snug whitespace-pre-wrap overflow-y-auto scroll-c">{{ $editDescription ?: 'No description provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editDescription"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  placeholder="Describe the role, responsibilities…" maxlength="5000"
-                                  style="min-height:160px;"></textarea>
-                        @if(isset($editErrors['editDescription']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDescription'] }}</p>@endif
+                                  class="w-full flex-1 min-h-0 px-2.5 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                  placeholder="Describe the role, responsibilities…" maxlength="5000"></textarea>
+                        @if(isset($editErrors['editDescription']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDescription'] }}</p>@endif
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0" style="flex-basis:0;">
+                    <div class="px-3 py-1.5 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.75rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         Qualifications <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
-                    <div class="p-3.5 flex flex-col flex-1">
+                    <div class="p-2.5 flex flex-col flex-1 min-h-0">
                         <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
-                             style="min-height:120px;">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
+                             class="view-content-box flex-1 min-h-0 px-2.5 py-1.5 rounded-xl text-xs text-[#333333] leading-snug whitespace-pre-wrap overflow-y-auto scroll-c">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editQualifications"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  placeholder="e.g. Bachelor's degree in relevant field…" maxlength="3000"
-                                  style="min-height:120px;"></textarea>
-                        @if(isset($editErrors['editQualifications']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editQualifications'] }}</p>@endif
+                                  class="w-full flex-1 min-h-0 px-2.5 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                  placeholder="e.g. Bachelor's degree in relevant field…" maxlength="3000"></textarea>
+                        @if(isset($editErrors['editQualifications']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editQualifications'] }}</p>@endif
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0" style="flex-basis:0;">
+                    <div class="px-3 py-1.5 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.75rem] font-semibold uppercase tracking-widest flex-shrink-0">
                         How to Apply <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
-                    <div class="p-3.5 flex flex-col flex-1">
+                    <div class="p-2.5 flex flex-col flex-1 min-h-0">
                         <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto scroll-c"
-                             style="min-height:120px;">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
+                             class="view-content-box flex-1 min-h-0 px-2.5 py-1.5 rounded-xl text-xs text-[#333333] leading-snug whitespace-pre-wrap overflow-y-auto scroll-c">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
                                   wire:model.defer="editApplicationInstructions"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  placeholder="e.g. Send your resume to hr@company.com…" maxlength="3000"
-                                  style="min-height:120px;"></textarea>
-                        @if(isset($editErrors['editApplicationInstructions']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editApplicationInstructions'] }}</p>@endif
+                                  class="w-full flex-1 min-h-0 px-2.5 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                  placeholder="e.g. Send your resume to hr@company.com…" maxlength="3000"></textarea>
+                        @if(isset($editErrors['editApplicationInstructions']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editApplicationInstructions'] }}</p>@endif
                     </div>
                 </div>
 
@@ -3045,7 +3333,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Target College --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Target College
                     </div>
                     <div class="p-2.5">
@@ -3086,7 +3374,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 @if($editingJob)
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Job History
                     </div>
                     <div class="p-3.5 space-y-2">
@@ -3095,9 +3383,18 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <p class="text-sm text-[#333333]">{{ \Carbon\Carbon::parse($editingJob->created_at)->setTimezone('Asia/Manila')->format('M d, Y g:i A') }}</p>
                         </div>
                         @if($editingJob->updated_by)
+                        @php
+                            $actionLabel = match($editingJob->last_action ?? null) {
+                                'activated'   => 'Activated',
+                                'deactivated' => 'Deactivated',
+                                'updated'     => 'Edited',
+                                'created'     => 'Created',
+                                default       => 'Updated',
+                            };
+                        @endphp
                         <div>
-                            <p class="text-[10px] font-semibold uppercase tracking-wider text-[#555555]">Last Updated By</p>
-                            <p class="text-sm text-[#333333]">{{ $editingJob->updated_by }}</p>
+                            <p class="text-[10px] font-semibold uppercase tracking-wider text-[#555555]">Last Updated</p>
+                            <p class="text-sm text-[#333333]">{{ $actionLabel }} {{ \Carbon\Carbon::parse($editingJob->updated_at)->setTimezone('Asia/Manila')->format('g:i A') }}</p>
                         </div>
                         @endif
                         <div>
@@ -3109,7 +3406,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @endif
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Tips
                     </div>
                     <div class="p-3.5">
@@ -3125,7 +3422,15 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
             <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
                 @if($editingJob && !$editJobIsActive && !$editIsAlumniDirectorJob)
-                <div x-show="editMode" x-cloak>
+                <div x-show="editMode" x-cloak
+                     x-data="{ get photoUploading() { return $store.eoEditPhoto ? $store.eoEditPhoto.uploading : false; } }">
+                    {{-- Button label stays "Save Changes" always — it only disables
+                         (never relabels) while a photo upload is still in flight, so
+                         clicking Save before editJobImage is populated server-side is
+                         blocked without the button text jumping around. Tracked via
+                         Alpine.store('eoEditPhoto') (reactive — unlike a plain window
+                         global, every reader here re-renders correctly when the store
+                         value flips). --}}
                     <button type="button" wire:click="saveEditJob"
                             wire:loading.attr="disabled" wire:target="saveEditJob"
                             class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
@@ -3135,7 +3440,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         </span>
                         <span wire:loading wire:target="saveEditJob" class="flex items-center justify-center gap-2">
                             <i class="fas fa-spinner fa-spin text-xs"></i>
-                            Saving…
+                            Save Changes
                         </span>
                     </button>
                 </div>
@@ -3453,13 +3758,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <div class="px-3 py-2.5 border-t border-gray-100 bg-white">
                                 <button type="button" wire:click="shareToAlumniChats"
                                         wire:loading.attr="disabled" wire:target="shareToAlumniChats"
-                                        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-white text-xs font-semibold cursor-pointer transition-all duration-150 active:scale-[.97] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
+                                        class="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-white text-sm font-semibold cursor-pointer transition-all duration-150 active:scale-[.97] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
                                         style="background:#7a3f91;" onmouseover="this.style.background='#6a3280'" onmouseout="this.style.background='#7a3f91'">
                                     <span wire:loading.remove wire:target="shareToAlumniChats">
-                                        <i class="fas fa-paper-plane text-[11px]"></i> Share ({{ count($shareTargetRoomIds) }})
+                                        <i class="fas fa-paper-plane text-xs"></i> Share ({{ count($shareTargetRoomIds) }})
                                     </span>
                                     <span wire:loading wire:target="shareToAlumniChats">
-                                        <i class="fas fa-spinner fa-spin text-[11px]"></i> Sharing…
+                                        <i class="fas fa-spinner fa-spin text-xs"></i> Sharing…
                                     </span>
                                 </button>
                             </div>
@@ -3467,7 +3772,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                 </div>
 
-                <p class="text-[10px] text-center" style="color:#333333;">Sharing is available until the deadline passes.</p>
+                <p class="text-xs text-center" style="color:#333333;">Sharing is available until the deadline passes.</p>
             </div>
         </div>
 
@@ -3700,7 +4005,101 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     }
 
     bindRows();
+    // NOTE: 'livewire:updated' is a Livewire v2 event and never fires in
+    // v3 — that's why the "View Details" tooltip stopped appearing after
+    // search/filter/pagination (rows get morphed into new DOM nodes and
+    // never get re-bound). 'livewire:morph.updated' fires once per
+    // morphed element in v3; 'livewire:navigated' covers full-page
+    // Livewire navigations. Using Livewire.hook as the primary, reliable
+    // rebind point, with the DOM events as a safety net.
     document.addEventListener('livewire:updated', bindRows);
+    document.addEventListener('livewire:navigated', bindRows);
+    document.addEventListener('livewire:morph.updated', bindRows);
+    if (window.Livewire && typeof window.Livewire.hook === 'function') {
+        window.Livewire.hook('morph.updated', bindRows);
+        window.Livewire.hook('commit', function ({ succeed }) {
+            succeed(function () { bindRows(); });
+        });
+    } else {
+        document.addEventListener('livewire:init', function () {
+            if (window.Livewire && typeof window.Livewire.hook === 'function') {
+                window.Livewire.hook('morph.updated', bindRows);
+                window.Livewire.hook('commit', function ({ succeed }) {
+                    succeed(function () { bindRows(); });
+                });
+            }
+        });
+    }
+})();
+</script>
+
+<script>
+(function () {
+    // ── Modal top-right button tooltips (Activate/Deactivate/Share/Close) ──
+    // Mirrors the #eo-hover-tip approach above: a single `fixed` element
+    // living outside every modal, positioned via mousemove. Previously
+    // these tooltips were `.mtip`/`.adtip` spans positioned absolute
+    // *inside* the button itself — that keeps them trapped in the modal's
+    // stacking context, so even a huge z-index can still lose to a
+    // sibling stacking context (e.g. the sidebar) sitting in front of the
+    // whole modal. Rendering it as a top-level fixed element sidesteps
+    // that, same as the row tooltip already does.
+    function getModalTip() { return document.getElementById('eo-modal-tip'); }
+
+    function isHoverCapable() {
+        return window.matchMedia('(hover: hover) and (pointer: fine)').matches
+            && window.innerWidth > 768;
+    }
+
+    function bindModalTips() {
+        document.querySelectorAll('[data-mtip]').forEach(function (el) {
+            if (el._eoModalTipBound) return;
+            el._eoModalTipBound = true;
+
+            el.addEventListener('mousemove', function (e) {
+                var tip = getModalTip();
+                if (!tip || !isHoverCapable()) return;
+                var label = el.getAttribute('data-mtip');
+                if (!label) return;
+                tip.textContent = label;
+                var rect = el.getBoundingClientRect();
+                tip.style.left = (rect.left + rect.width / 2) + 'px';
+                tip.style.top  = (rect.bottom + 6) + 'px';
+                tip.style.transform = 'translateX(-50%)';
+                tip.style.opacity = '1';
+            });
+
+            el.addEventListener('mouseleave', function () {
+                var tip = getModalTip();
+                if (tip) tip.style.opacity = '0';
+            });
+
+            el.addEventListener('click', function () {
+                var tip = getModalTip();
+                if (tip) tip.style.opacity = '0';
+            });
+        });
+    }
+
+    bindModalTips();
+    document.addEventListener('livewire:updated', bindModalTips);
+    document.addEventListener('livewire:navigated', bindModalTips);
+    document.addEventListener('livewire:morph.updated', bindModalTips);
+    if (window.Livewire && typeof window.Livewire.hook === 'function') {
+        window.Livewire.hook('morph.updated', bindModalTips);
+        window.Livewire.hook('commit', function ({ succeed }) {
+            succeed(function () { bindModalTips(); });
+        });
+    } else {
+        document.addEventListener('livewire:init', function () {
+            if (window.Livewire && typeof window.Livewire.hook === 'function') {
+                window.Livewire.hook('morph.updated', bindModalTips);
+                window.Livewire.hook('commit', function ({ succeed }) {
+                    succeed(function () { bindModalTips(); });
+                });
+            }
+        });
+    }
 })();
 </script>
 
@@ -3749,6 +4148,17 @@ document.addEventListener('livewire:init', function () {
                 el.scrollTop = 0;
             });
         });
+
+        // Also reset the "photo upload in progress" flags whenever a modal
+        // opens (Post New Job / Edit Job both dispatch close-sidebar on
+        // open) — guards against a stale `true` ever carrying over from a
+        // previous session and leaving Post Job / Save Changes stuck disabled.
+        if (window.Alpine && Alpine.store('eoEditPhoto')) {
+            Alpine.store('eoEditPhoto').uploading = false;
+        }
+        if (window.Alpine && Alpine.store('eoPostPhoto')) {
+            Alpine.store('eoPostPhoto').uploading = false;
+        }
     });
 });
 </script>

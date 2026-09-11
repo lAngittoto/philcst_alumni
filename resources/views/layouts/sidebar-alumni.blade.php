@@ -1664,13 +1664,13 @@
                     [
                         'route'   => 'job.opportunities',
                         'icon'    => 'briefcase',
-                        'label'   => 'Job Board',
+                        'label'   => 'Job Opportunities',
                         'pattern' => 'job/opportunities*',
                     ],
                     [
                         'route'   => 'upcoming.events',
                         'icon'    => 'calendar',
-                        'label'   => 'Events',
+                        'label'   => 'Alumni Events',
                         'pattern' => 'upcoming/events*',
                     ],
                     [

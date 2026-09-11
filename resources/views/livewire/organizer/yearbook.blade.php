@@ -283,6 +283,26 @@ new class extends Component {
 
         return trim($name);
     }
+
+    /**
+     * Wraps every occurrence of the current search term in $value with a
+     * light-blue <mark> highlight (case-insensitive). $value is HTML-escaped
+     * first, so this is safe to output with {!! !!} in the view.
+     */
+    private function highlightSearch(string $value): string
+    {
+        $escaped = e($value);
+        $term    = trim($this->search);
+        if ($term === '') {
+            return $escaped;
+        }
+        $escapedTerm = preg_quote(e($term), '/');
+        return preg_replace(
+            '/(' . $escapedTerm . ')/iu',
+            '<mark class="yb-search-hl">$1</mark>',
+            $escaped
+        ) ?? $escaped;
+    }
 };
 ?>
 
@@ -299,6 +319,10 @@ new class extends Component {
         setAvailHeight();
         window.addEventListener('resize', () => setAvailHeight());
         window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
+        // Re-measure after every Livewire update too — not just on
+        // actual window resize — since this fixes the bug where the
+        // pagination bar was missing before any resize ever happened.
+        Livewire.hook('morph.updated', () => setAvailHeight());
      ">
 
 <style>
@@ -329,6 +353,9 @@ new class extends Component {
     padding: 4px 14px; border-radius: 9999px;
     font-size: 12px; font-weight: 700; letter-spacing: .02em;
     background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
+    white-space: normal;
+    line-height: 1.3;
+    max-width: 100%;
 }
 .yb-batch-badge {
     display: inline-flex; align-items: center; gap: 4px;
@@ -361,6 +388,15 @@ new class extends Component {
     font-size: 11px; font-weight: 700; letter-spacing: .04em;
     background: rgba(122,63,145,.10); color: #7A3F91;
     border: 1px solid rgba(122,63,145,.22); white-space: nowrap;
+}
+
+/* ── Light-blue highlight on the search term matched in alumni names ── */
+.yb-search-hl {
+    background: #dbeafe;   /* light blue */
+    color: #1e3a8a;        /* darker blue text for contrast */
+    border-radius: 3px;
+    padding: 0 2px;
+    font-weight: inherit;
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
@@ -475,18 +511,26 @@ new class extends Component {
    to the 100dvh calc if JS hasn't run yet.
 ──────────────────────────────────────────────────────── */
 .yb-root-height {
+    /* Fallback before Alpine measures real space (first paint). */
     height: calc(100vh - 180px);
     max-height: calc(100vh - 180px);
     overflow: hidden;
+    /* Once x-init's setAvailHeight() runs, this always wins on ANY
+       screen size (not just mobile) — fixes the pagination bar
+       getting pushed off-screen when the real topbar height differs
+       from the static 180px guess, before any resize/reflow happens. */
+    height: var(--yb-avail-h, calc(100vh - 180px));
+    max-height: var(--yb-avail-h, calc(100vh - 180px));
 }
 
 /* ── Mobile responsiveness ──────────────────────────────── */
 @media (max-width: 640px) {
-    .yb-filter-bar { gap: 8px; }
-          background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
-      padding: 0.6rem 0.875rem; flex-shrink: 0;
-   position: relative; z-index: 50; overflow: visible;
-    position: relative; z-index: 5; overflow: visible;
+    .yb-filter-bar {
+        gap: 8px;
+        background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
+        padding: 0.6rem 0.875rem; flex-shrink: 0;
+        position: relative; z-index: 5; overflow: visible;
+    }
 }
 
 /*
@@ -533,7 +577,7 @@ new class extends Component {
                 </div>
                 <div>
                     <h1 class="yb-mobile-title text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                    <p class="yb-mobile-subtitle text-xs leading-relaxed mt-0.5 font-semibold" style="color:#7a3f91;">Complete Alumni Directory</p>
+                    <p class="yb-mobile-subtitle text-sm leading-relaxed mt-0.5 font-semibold" style="color:#7a3f91;">Complete Alumni Directory</p>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -565,7 +609,7 @@ new class extends Component {
                 <input type="text"
                        x-model="q"
                        @input.debounce.350ms="$wire.set('search', q)"
-                       placeholder="Search name or student ID…"
+                       placeholder="Search..."
                        class="yb-search-input"
                        autocomplete="off" spellcheck="false">
             </div>
@@ -684,11 +728,11 @@ new class extends Component {
                     @foreach($this->currentPageGroups as $group)
                     <div wire:key="group-{{ $group['courseCode'] }}">
                         {{-- Section header — per COURSE/PROGRAM (unchanged) --}}
-                        <div class="flex items-center gap-2 pt-2 pb-2 px-1">
+                        <div class="flex items-center flex-wrap gap-2 pt-2 pb-2 px-1">
                             <span class="yb-section-badge {{ $group['isMyCollege'] ? 'yb-section-badge-mine' : '' }}">
                                 {{ $group['courseName'] }}
                             </span>
-                            <div class="flex-1 h-px" style="background:#D8B4FE;"></div>
+                            <div class="flex-1 min-w-[24px] h-px" style="background:#D8B4FE;"></div>
                             <span class="text-xs font-semibold shrink-0" style="color:#c0a0d8;">
                                 {{ $group['members']->count() }} shown
                             </span>
@@ -719,7 +763,7 @@ new class extends Component {
                                 <div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
                                     <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
                                        style="color:#111111;">
-                                        {{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}
+                                        {!! $this->highlightSearch($this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null)) !!}
                                     </p>
                                     <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
                                        style="color:#111111; letter-spacing:0.02em;">
@@ -828,3 +872,32 @@ new class extends Component {
     </div>{{-- /yb-table-block --}}
 
 </div>{{-- /root --}}
+
+<script>
+(function () {
+    // ── Reset results scroll to top on filter/search/pagination changes ──
+    // Without this, changing search/batch/course/resetFilters/pagination
+    // leaves #yb-organizer-scroll at whatever scroll position the user was
+    // previously at. Since the new (filtered) result set is shorter/differs,
+    // the user lands mid-list looking at a leftover course-group section
+    // instead of the top of the new results — reading as "the filter didn't
+    // clear" even though the data underneath is correct.
+    var watchedActions = ['search', 'batch', 'course', 'resetFilters', 'previousPage', 'nextPage', 'gotoPage'];
+
+    function resetScroll() {
+        var el = document.getElementById('yb-organizer-scroll');
+        if (el) el.scrollTop = 0;
+    }
+
+    document.addEventListener('livewire:init', function () {
+        if (window.Livewire && typeof window.Livewire.hook === 'function') {
+            window.Livewire.hook('commit', function ({ component, commit, succeed }) {
+                var isRelevant = (commit.updates && watchedActions.some(k => k in commit.updates))
+                    || (commit.calls && commit.calls.some(c => watchedActions.includes(c.method)));
+                if (!isRelevant) return;
+                succeed(function () { resetScroll(); });
+            });
+        }
+    });
+})();
+</script>

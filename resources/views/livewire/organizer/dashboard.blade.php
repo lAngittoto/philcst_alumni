@@ -46,6 +46,10 @@ new class extends Component {
     // ── Course breakdown ──
     public array $courseStats = [];
 
+    // ── Email self-service edit ──
+    public bool $editingEmail = false;
+    public string $emailInput = '';
+
     public function mount(): void
     {
         $user = Auth::user();
@@ -86,6 +90,52 @@ new class extends Component {
     public function organizerId(): ?int
     {
         return Auth::user()?->organizer?->id;
+    }
+
+    /**
+     * ── Self-service email update (organizer/coordinator) ──
+     * Lets the logged-in organizer/coordinator update their own contact
+     * email shown on this dashboard card. Updates BOTH the `organizer`
+     * row (used to display org email/name elsewhere) and the linked
+     * `users` row (used for login/auth), so the two stay in sync.
+     */
+    public function startEditingEmail(): void
+    {
+        $this->emailInput   = $this->organizerEmail;
+        $this->editingEmail = true;
+    }
+
+    public function cancelEditingEmail(): void
+    {
+        $this->editingEmail = false;
+        $this->emailInput   = '';
+    }
+
+    public function saveEmail(): void
+    {
+        $user   = Auth::user();
+        $orgId  = $this->organizerId;
+
+        $this->validate([
+            'emailInput' => [
+                'required', 'email', 'max:255',
+                'unique:users,email,' . $user->id,
+            ],
+        ], [
+            'emailInput.required' => 'Email is required.',
+            'emailInput.email'    => 'Enter a valid email address.',
+            'emailInput.unique'   => 'That email is already in use by another account.',
+        ]);
+
+        $newEmail = trim($this->emailInput);
+
+        DB::table('organizer')->where('id', $orgId)->update(['email' => $newEmail]);
+        $user->forceFill(['email' => $newEmail])->save();
+
+        unset($this->organizerEmail); // clear cached #[Computed] value
+
+        $this->editingEmail = false;
+        $this->dispatch('email-updated');
     }
 
     /**
@@ -495,9 +545,58 @@ new class extends Component {
                     <span class="org-info-value">{{ $this->organizerName }}</span>
                 </div>
 
-                <div class="org-info-row" style="align-items:flex-start;">
+                <div class="org-info-row" style="align-items:flex-start;" x-data="{ toast: false }" @email-updated.window="toast = true; setTimeout(() => toast = false, 2500)">
                     <span class="org-info-label" style="margin-top:2px;">Email</span>
-                    <span class="org-info-value-sm">{{ $this->organizerEmail ?: '—' }}</span>
+
+                    @if(! $editingEmail)
+                        <div class="flex flex-col items-end gap-1.5">
+                            <span class="org-info-value-sm relative">
+                                {{ $this->organizerEmail ?: '—' }}
+                                <span x-cloak x-show="toast" x-transition
+                                      class="absolute -top-6 right-0 whitespace-nowrap text-[0.65rem] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                    <i class="fas fa-check mr-0.5"></i>Updated
+                                </span>
+                            </span>
+                            <button type="button"
+                                    wire:click="startEditingEmail"
+                                    wire:loading.attr="disabled" wire:target="startEditingEmail"
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.68rem] font-bold transition"
+                                    style="background:#F3E8FF; color:#7A3F91; border:1px solid #E8E0F0;">
+                                <span wire:loading.remove wire:target="startEditingEmail"><i class="fas fa-pen text-[9px]"></i></span>
+                                <span wire:loading wire:target="startEditingEmail"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                                Update
+                            </button>
+                        </div>
+                    @else
+                        <div class="flex flex-col items-end gap-1.5 w-full" style="max-width:220px;">
+                            <input type="email"
+                                   wire:model="emailInput"
+                                   wire:keydown.enter="saveEmail"
+                                   autofocus
+                                   placeholder="you@example.com"
+                                   class="w-full text-right text-[0.8rem] font-semibold rounded-md px-2 py-1 outline-none"
+                                   style="border:1.5px solid #E8E0F0; color:#111111;">
+                            @error('emailInput')
+                                <span class="text-[0.65rem] font-semibold text-red-600">{{ $message }}</span>
+                            @enderror
+                            <div class="flex items-center gap-1.5">
+                                <button type="button" wire:click="cancelEditingEmail"
+                                        wire:loading.attr="disabled" wire:target="saveEmail"
+                                        class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.68rem] font-bold"
+                                        style="background:#F5F5F5; color:#555555; border:1px solid #E8E0F0;">
+                                    <i class="fas fa-xmark text-[9px]"></i> Cancel
+                                </button>
+                                <button type="button" wire:click="saveEmail"
+                                        wire:loading.attr="disabled" wire:target="saveEmail"
+                                        class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.68rem] font-bold text-white"
+                                        style="background:#7A3F91;">
+                                    <span wire:loading.remove wire:target="saveEmail"><i class="fas fa-check text-[9px]"></i></span>
+                                    <span wire:loading wire:target="saveEmail"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    @endif
                 </div>
 
                 <div class="org-info-row">
@@ -554,16 +653,6 @@ new class extends Component {
                 </div>
                 <p class="org-stat-num text-[#111111] font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($totalAlumni) }}</p>
                 <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Total Alumni</p>
-                @if($pendingAlumni > 0)
-                    <p class="text-[#7A3F91] font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
-                        <i class="fas fa-circle text-[8px]"></i> {{ $verifiedAlumni }} Verified
-                        <span class="text-[#333333] font-normal">· {{ $pendingAlumni }} Pending</span>
-                    </p>
-                @else
-                    <p class="text-[#7A3F91] font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
-                        <i class="fas fa-circle text-[8px]"></i> {{ $verifiedAlumni }} Verified
-                    </p>
-                @endif
             </button>
 
             {{-- Total Events --}}

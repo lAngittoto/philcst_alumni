@@ -916,7 +916,6 @@ select.filter-input {
                 <option value="Contract">Contract</option>
                 <option value="Internship">Internship</option>
                 <option value="Freelance">Freelance</option>
-                <option value="__job_history" style="background:#7a3f91; color:#ffffff;">Job History</option>
             </select>
 
             <select wire:model.live="filterLevel"
