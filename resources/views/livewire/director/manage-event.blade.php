@@ -22,6 +22,23 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
+    /** Wraps each case-insensitive match of $search inside $text with the
+     *  same light-blue <mark> used on Alumni Records / Coordinator Management —
+     *  keeps the "here's what matched" visual cue consistent across pages. */
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="mgevt-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
     public string $search        = '';
     public string $filterStatus  = '';
     public string $filterSort    = 'recent';
@@ -1032,6 +1049,14 @@ new class extends Component {
      style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
 
 <style>
+/* ── Search highlight — same light blue mark used on Alumni Records / Coordinator Management ── */
+mark.mgevt-hl {
+    background: #BFDBFE;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    font-weight: 700;
+}
 @keyframes modalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
     to   { opacity:1; transform:none; }
@@ -1198,7 +1223,7 @@ select.tw-select-arrow {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
                 <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
-                       placeholder="Search title or venue…"
+                       placeholder="Search..."
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] placeholder-[#a78bbd] font-normal
                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
@@ -1258,12 +1283,15 @@ select.tw-select-arrow {
             </span>
             @endif
 
+            @php $mgEventHasActiveFilters = $search || $filterStatus || $filterCollege; @endphp
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    {{ !$mgEventHasActiveFilters ? 'disabled' : '' }}
+                    title="{{ $mgEventHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
-                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
                 </span>
@@ -1324,7 +1352,7 @@ select.tw-select-arrow {
                             data-dir-row>
 
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{!! $this->highlight($event->title, $search) !!}</p>
                                 <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $eventDate->diffForHumans() }}</p>
                             </td>
 
@@ -1449,7 +1477,7 @@ select.tw-select-arrow {
                     <div class="dir-mrow" wire:key="dir-event-mrow-{{ $event->id }}" wire:click="viewEvent({{ $event->id }})" data-dir-row>
 
                         <div class="flex-1 min-w-0">
-                            <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{{ $event->title }}</p>
+                            <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{!! $this->highlight($event->title, $search) !!}</p>
                             <p class="text-xs mt-0.5 text-[#666666]">{{ $eventDate->diffForHumans() }}</p>
 
                             <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">

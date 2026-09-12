@@ -273,7 +273,7 @@ new class extends Component {
             $this->validate([
                 'coordFirstName'     => ['required', 'string', 'max:100'],
                 'coordLastName'      => ['required', 'string', 'max:100'],
-                'coordMiddleInitial' => ['nullable', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
+                'coordMiddleInitial' => ['required', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
                 'coordSuffix'        => ['nullable', 'string', 'max:10'],
                 'coordTeacherId'     => ['required', 'string', 'regex:/^\d{8}$/', 'unique:organizer,id_number'],
                 'coordEmail'         => ['required', 'email', 'max:255', 'unique:organizer,email', 'unique:users,email'],
@@ -284,6 +284,7 @@ new class extends Component {
                 'coordTeacherId.regex'        => 'Teacher ID must be exactly 8 digits (e.g. 20240001).',
                 'coordEmail.unique'           => 'This email address is already taken.',
                 'coordCollegeSelect.required' => 'Please select a college.',
+                'coordMiddleInitial.required' => 'Middle name is required.',
                 'coordPhoto.max'              => 'Profile photo must not exceed 5 MB.',
             ]);
 
@@ -902,8 +903,8 @@ new class extends Component {
                 <i class="fas fa-users-gear text-white text-lg"></i>
             </div>
             <div style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                <h1 class="text-xl font-semibold tracking-tight text-gray-900">Manage Coordinator</h1>
-                <p class="text-sm leading-relaxed mt-0.5 text-gray-700">
+                <h1 class="text-2xl font-semibold tracking-tight text-[#111111]">Manage Coordinator</h1>
+                <p class="text-sm leading-relaxed mt-0.5 text-[#7A3F91] font-normal">
                     Manage coordinator records and
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">college assignments</span>
                 </p>
@@ -957,7 +958,7 @@ new class extends Component {
                  x-data="{ q: '', init() { this.q = $wire.coordSearch ?? ''; $wire.$watch('coordSearch', val => { if (val !== this.q) this.q = val; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 pointer-events-none"></i>
                 <input type="text" x-model="q" @input.debounce.200ms="$wire.set('coordSearch', q)"
-                       placeholder="Search name, ID, email..."
+                       placeholder="Search..."
                        class="coord-filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition"
                        autocomplete="off" spellcheck="false">
             </div>
@@ -979,11 +980,14 @@ new class extends Component {
                 <option value="INACTIVE">Inactive</option>
             </select>
 
+            @php $coordHasActiveFilters = $coordSearch || $coordCollege || $coordStatus; @endphp
             <button wire:click="resetCoordFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetCoordFilters"
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none">
+                    {{ !$coordHasActiveFilters ? 'disabled' : '' }}
+                    title="{{ $coordHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                 <i class="fas fa-rotate-left text-xs" wire:loading.remove wire:target="resetCoordFilters"></i>
                 <span wire:loading wire:target="resetCoordFilters">
                     <i class="fas fa-spinner animate-spin text-xs"></i>
@@ -1323,7 +1327,19 @@ new class extends Component {
                 </div>
                 @endif
 
-                <form wire:submit="registerCoordinator" class="space-y-5">
+                <form wire:submit="registerCoordinator" class="space-y-5"
+                      x-data="{
+                          fN: @entangle('coordFirstName'),
+                          lN: @entangle('coordLastName'),
+                          mN: @entangle('coordMiddleInitial'),
+                          tId: @entangle('coordTeacherId'),
+                          em: @entangle('coordEmail'),
+                          col: @entangle('coordCollegeSelect'),
+                          get canSubmit() {
+                              return this.fN.trim() !== '' && this.lN.trim() !== '' && this.mN.trim() !== ''
+                                  && this.tId.trim() !== '' && this.em.trim() !== '' && this.col.trim() !== '';
+                          }
+                      }">
 
                     <div id="reg-section-personal" class="bg-white rounded-2xl border border-gray-200 shadow-sm scroll-mt-4">
                         <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50 rounded-t-2xl">
@@ -1363,7 +1379,7 @@ new class extends Component {
                                         @error('coordLastName')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
-                                        <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Middle Name</label>
+                                        <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Middle Name <span class="text-red-500">*</span></label>
                                         <input wire:model.defer="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
                                                class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordMiddleInitial') border-red-400 @enderror">
                                         @error('coordMiddleInitial')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
@@ -1472,7 +1488,7 @@ new class extends Component {
                                      class="space-y-4">
                                     <div class="flex flex-col gap-4">
                                         <div class="flex-1">
-                                            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Select College</label>
+                                            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Select College <span class="text-red-500">*</span></label>
                                             <select wire:model.live="coordCollegeSelect"
                                                     class="w-full px-3.5 py-3 pr-8 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition appearance-none bg-no-repeat cursor-pointer @error('coordCollegeSelect') border-red-400 @enderror"
                                                     style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
@@ -1514,12 +1530,6 @@ new class extends Component {
                     </div>
 
                     <div class="flex flex-wrap gap-3 pb-2">
-                        <button type="button" wire:click="closeModal"
-                                wire:loading.attr="disabled" wire:target="closeModal"
-                                class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
-                            <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="closeModal"></i>
-                            Cancel
-                        </button>
                         <button type="button" wire:click="resetCoordFormPublic"
                                 wire:loading.attr="disabled" wire:target="resetCoordFormPublic"
                                 class="flex-1 sm:flex-none sm:w-36 px-6 py-3.5 rounded-xl text-sm font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
@@ -1527,7 +1537,8 @@ new class extends Component {
                             Reset
                         </button>
                         <button type="submit" wire:loading.attr="disabled" wire:target="registerCoordinator"
-                                class="flex-1 px-6 py-3.5 rounded-xl text-sm font-semibold bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50">
+                                :disabled="!canSubmit"
+                                class="flex-1 px-6 py-3.5 rounded-xl text-sm font-semibold bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-[#7a3f91]">
                             <span wire:loading wire:target="registerCoordinator" class="inline-flex items-center gap-2">
                                 <i class="fas fa-spinner animate-spin"></i>
                                 Registering...
@@ -2020,62 +2031,6 @@ new class extends Component {
             </div>
             @endif
 
-            @if($orgAddingToCollege)
-            <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden">
-                <div class="px-6 py-3.5 border-b border-[#e2d3ef] bg-[#f5eef9] flex items-center justify-between">
-                    <h3 class="text-xs font-semibold text-[#7a3f91] uppercase tracking-wider flex items-center gap-2">
-                        <i class="fas fa-{{ isset($orgCoursesList[$orgAddingToCollege]) ? 'pencil' : 'plus' }}"></i>
-                        {{ isset($orgCoursesList[$orgAddingToCollege]) ? 'Edit Departments' : 'Assign Departments' }}
-                        — <span class="normal-case text-gray-800 font-normal">{{ $orgAddingToCollege }}</span>
-                    </h3>
-                    <span class="px-3 py-1.5 bg-[#7a3f91] text-white rounded-full text-xs font-semibold">{{ count($orgSelectedCourseCodes) }} selected</span>
-                </div>
-                <div class="p-6">
-                    @if($this->allCoursesForAssign->count() > 0)
-                    <p class="text-sm text-gray-600 mb-3">Select all courses belonging to this college:</p>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 mb-5">
-                        @foreach($this->allCoursesForAssign as $c)
-                        @php
-                            $isSelected   = in_array($c->code, $orgSelectedCourseCodes);
-                            $otherCollege = ($c->college && $c->college !== $orgAddingToCollege) ? $c->college : null;
-                            $isTaken      = $otherCollege !== null;
-                        @endphp
-                        <label class="flex items-center gap-3 p-3 border rounded-xl cursor-pointer transition bg-white
-                            {{ $isTaken ? 'opacity-50 cursor-not-allowed border-gray-100' : ($isSelected ? 'border-[#7a3f91]/40 bg-[#faf5ff] shadow-sm' : 'border-gray-200 hover:border-gray-300') }}">
-                            <input type="checkbox" wire:model="orgSelectedCourseCodes" value="{{ $c->code }}"
-                                   class="w-4 h-4 shrink-0 rounded" style="accent-color:#7a3f91;" {{ $isTaken ? 'disabled' : '' }}>
-                            <div class="flex-1 min-w-0">
-                                <p class="font-semibold text-gray-900 text-sm font-mono leading-tight">{{ $c->code }}</p>
-                                <p class="text-gray-500 text-xs truncate">{{ $c->name }}</p>
-                                @if($isTaken)<p class="text-xs text-amber-700 mt-0.5"><i class="fas fa-lock mr-1"></i>{{ $otherCollege }}</p>@endif
-                            </div>
-                            @if($isSelected && !$isTaken)<i class="fas fa-circle-check shrink-0 text-[#7a3f91]"></i>@endif
-                        </label>
-                        @endforeach
-                    </div>
-                    @else
-                    <div class="text-center py-8">
-                        <i class="fas fa-book text-3xl text-gray-200 block mb-2"></i>
-                        <p class="text-gray-500 text-sm">No courses available.</p>
-                    </div>
-                    @endif
-                    <div class="flex gap-3">
-                        <button wire:click="cancelAddingCourses"
-                                wire:loading.attr="disabled" wire:target="cancelAddingCourses"
-                                class="flex-1 sm:flex-none sm:w-36 bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
-                            <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="cancelAddingCourses"></i>
-                            Cancel
-                        </button>
-                        <button wire:click="saveCollegeCourses" wire:loading.attr="disabled" wire:target="saveCollegeCourses"
-                                class="flex-1 bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-50">
-                            <span wire:loading wire:target="saveCollegeCourses"><i class="fas fa-spinner animate-spin"></i> Saving...</span>
-                            <span wire:loading.remove wire:target="saveCollegeCourses">Save Departments</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-            @endif
-
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
                 @if(!$orgAddingToCollege)
@@ -2084,14 +2039,15 @@ new class extends Component {
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
                             <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Add New College</h3>
                         </div>
-                        <div class="p-5 space-y-3">
-                            <input wire:model.defer="orgNewCollegeName" type="text"
+                        <div class="p-5 space-y-3" x-data="{ newCollegeVal: @entangle('orgNewCollegeName') }">
+                            <input wire:model.defer="orgNewCollegeName" x-model="newCollegeVal" type="text"
                                    placeholder="e.g. College of Computer Studies"
                                    class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
-                                   @keydown.enter.prevent="$wire.addCollege()">
+                                   @keydown.enter.prevent="if (newCollegeVal.trim() !== '') $wire.addCollege()">
                             <button wire:click="addCollege"
                                     wire:loading.attr="disabled" wire:target="addCollege"
-                                    class="w-full bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none">
+                                    :disabled="newCollegeVal.trim() === ''"
+                                    class="w-full bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-[#7a3f91]">
                                 <i class="fas fa-plus text-sm" wire:loading.remove wire:target="addCollege"></i>
                                 <i class="fas fa-spinner animate-spin text-sm" wire:loading wire:target="addCollege"></i>
                                 Add College
@@ -2100,9 +2056,63 @@ new class extends Component {
                         </div>
                     </div>
                 </div>
+                @else
+                <div id="mc-section-assign" class="lg:col-span-5 scroll-mt-4">
+                    <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden lg:sticky lg:top-5 flex flex-col" style="max-height: calc(100vh - 220px);">
+                        <div class="px-5 py-3.5 border-b border-[#e2d3ef] bg-[#f5eef9] flex-shrink-0">
+                            <h3 class="text-xs font-semibold text-[#7a3f91] uppercase tracking-wider flex items-center gap-2">
+                                <i class="fas fa-{{ isset($orgCoursesList[$orgAddingToCollege]) ? 'pencil' : 'plus' }}"></i>
+                                {{ isset($orgCoursesList[$orgAddingToCollege]) ? 'Edit Departments' : 'Assign Departments' }}
+                            </h3>
+                            <p class="text-xs text-gray-600 mt-0.5 normal-case">{{ $orgAddingToCollege }}</p>
+                            <span class="inline-block mt-2 px-3 py-1 bg-[#7a3f91] text-white rounded-full text-xs font-semibold">{{ count($orgSelectedCourseCodes) }} selected</span>
+                        </div>
+                        <div class="p-5 flex-1 overflow-y-auto min-h-0">
+                            @if($this->allCoursesForAssign->count() > 0)
+                            <p class="text-sm text-gray-600 mb-3">Select all courses belonging to this college:</p>
+                            <div class="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
+                                @foreach($this->allCoursesForAssign as $c)
+                                @php
+                                    $isSelected   = in_array($c->code, $orgSelectedCourseCodes);
+                                    $otherCollege = ($c->college && $c->college !== $orgAddingToCollege) ? $c->college : null;
+                                    $isTaken      = $otherCollege !== null;
+                                @endphp
+                                <label class="flex items-center gap-3 px-3 py-2 cursor-pointer transition bg-white
+                                    {{ $isTaken ? 'opacity-50 cursor-not-allowed' : ($isSelected ? 'bg-[#faf5ff]' : 'hover:bg-gray-50') }}">
+                                    <input type="checkbox" wire:model="orgSelectedCourseCodes" value="{{ $c->code }}"
+                                           class="w-4 h-4 shrink-0 rounded" style="accent-color:#7a3f91;" {{ $isTaken ? 'disabled' : '' }}>
+                                    <span class="font-semibold text-gray-900 text-sm font-mono shrink-0 w-20">{{ $c->code }}</span>
+                                    <span class="text-gray-500 text-xs truncate flex-1">{{ $c->name }}</span>
+                                    @if($isTaken)<span class="text-xs text-amber-700 shrink-0 whitespace-nowrap"><i class="fas fa-lock mr-1"></i>{{ $otherCollege }}</span>@endif
+                                    @if($isSelected && !$isTaken)<i class="fas fa-circle-check shrink-0 text-[#7a3f91]"></i>@endif
+                                </label>
+                                @endforeach
+                            </div>
+                            @else
+                            <div class="text-center py-8">
+                                <i class="fas fa-book text-3xl text-gray-200 block mb-2"></i>
+                                <p class="text-gray-500 text-sm">No courses available.</p>
+                            </div>
+                            @endif
+                        </div>
+                        <div class="p-5 pt-3 border-t border-gray-100 flex gap-3 flex-shrink-0">
+                            <button wire:click="cancelAddingCourses"
+                                    wire:loading.attr="disabled" wire:target="cancelAddingCourses"
+                                    class="flex-1 sm:flex-none sm:w-32 bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
+                                <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="cancelAddingCourses"></i>
+                                Cancel
+                            </button>
+                            <button wire:click="saveCollegeCourses" wire:loading.attr="disabled" wire:target="saveCollegeCourses"
+                                    class="flex-1 bg-[#7a3f91] hover:bg-[#5e2f72] text-white px-4 py-3 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-2 disabled:opacity-50">
+                                <span wire:loading wire:target="saveCollegeCourses"><i class="fas fa-spinner animate-spin"></i> Saving...</span>
+                                <span wire:loading.remove wire:target="saveCollegeCourses">Save Departments</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 @endif
 
-                <div id="mc-section-list" class="{{ !$orgAddingToCollege ? 'lg:col-span-7' : 'lg:col-span-12' }} scroll-mt-4">
+                <div id="mc-section-list" class="lg:col-span-7 scroll-mt-4">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="min-height: 700px; max-height: calc(100vh - 220px);">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-shrink-0">
                             <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Colleges &amp; Departments</h3>

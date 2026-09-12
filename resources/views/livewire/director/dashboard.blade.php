@@ -39,6 +39,9 @@ new class extends Component {
     public string $directorEmail = '';
     public string $directorPhoto = '';
 
+    public bool $editingEmail = false;
+    public bool $savingEmail  = false;
+
     public function mount(): void
     {
         abort_unless(auth()->check() && auth()->user()->role === 'director', 403);
@@ -69,6 +72,41 @@ new class extends Component {
         if (str_starts_with($p, 'alumni-photos/') || str_starts_with($p, 'organizers/') || str_starts_with($p, 'directors/') || str_starts_with($p, 'registrars/'))
             return Storage::disk('public')->exists($p) ? asset('storage/'.$p) : asset('storage/alumni-photos/default.png');
         return asset('storage/alumni-photos/default.png');
+    }
+
+    public function startEditEmail(): void
+    {
+        $this->editingEmail = true;
+    }
+
+    public function cancelEditEmail(): void
+    {
+        $dir = DB::table('director')->where('user_id', auth()->id())->first();
+        $this->directorEmail = ($dir && !empty($dir->email)) ? $dir->email : (auth()->user()->email ?? '—');
+        $this->editingEmail = false;
+        $this->resetErrorBag('directorEmail');
+    }
+
+    public function saveEmail(): void
+    {
+        $this->savingEmail = true;
+
+        $this->validate([
+            'directorEmail' => [
+                'required',
+                'email',
+                'max:255',
+                \Illuminate\Validation\Rule::unique('users', 'email')->ignore(auth()->id()),
+            ],
+        ]);
+
+        DB::table('director')->where('user_id', auth()->id())
+            ->update(['email' => $this->directorEmail]);
+
+        auth()->user()->update(['email' => $this->directorEmail]);
+
+        $this->savingEmail  = false;
+        $this->editingEmail = false;
     }
 
     private function loadStats(): void
@@ -275,6 +313,53 @@ new class extends Component {
     .dir-mini-card .dir-mini-tip { display: none !important; }
 }
 
+/* ── Dashboard card click spinner ───────────────────────────
+   Purple "..." dot loader — same loading interface used on the
+   Alumni Dashboard, applied here for consistency. Card content
+   blurs + dims underneath instead of being fully covered, so it
+   still reads as "this card is busy" not an empty gap. Uses plain
+   CSS dots instead of an icon font glyph so the color is never at
+   the mercy of icon-font fallback rendering. */
+.dir-card-clickable { position: relative; }
+.dir-card-clickable.is-loading > *:not(.dir-card-spinner) {
+    filter: blur(4px);
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
+}
+.dir-card-spinner {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    z-index: 40;
+}
+.dir-card-spinner span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #7A3F91;
+    animation: dirDotPulse 1.1s ease-in-out infinite;
+}
+.dir-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+.dir-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+.dir-card-spinner--sm span {
+    width: 5px;
+    height: 5px;
+}
+@keyframes dirDotPulse {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+.dir-card-clickable.is-loading .dir-card-spinner {
+    display: flex;
+}
+.dir-card-clickable.is-loading {
+    pointer-events: none;
+}
+
 /* ── Main grid ── */
 .dir-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: start; }
 @media (max-width: 1023px) {
@@ -309,6 +394,24 @@ new class extends Component {
 
 .dir-chips-section { padding: 0.65rem 1rem; }
 .dir-chips-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #333333; margin-bottom: 0.4rem; }
+
+/* ── Update Email save button dot loader — same purple "..." loading
+   interface used across the dashboard cards, applied here too. ── */
+.dir-email-save-btn { min-width: 62px; }
+.dir-email-save-spinner { z-index: 5; }
+.dir-email-save-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #ffffff;
+    animation: dirEmailSaveDotPulse 1.1s ease-in-out infinite;
+}
+.dir-email-save-dot:nth-child(2) { animation-delay: 0.15s; }
+.dir-email-save-dot:nth-child(3) { animation-delay: 0.3s; }
+@keyframes dirEmailSaveDotPulse {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
 
 .dir-chip {
     font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 999px;
@@ -417,9 +520,77 @@ new class extends Component {
                     <span class="dir-info-value">{{ $directorName ?: 'Director' }}</span>
                 </div>
 
-                <div class="dir-info-row">
-                    <span class="dir-info-label">Email</span>
-                    <span class="dir-info-value" style="max-width:220px;" title="{{ $directorEmail }}">{{ $directorEmail }}</span>
+                <div class="dir-info-row" wire:key="dir-email-row">
+                    @if(!$editingEmail)
+                        <span class="dir-info-label">Email</span>
+                        <span class="flex items-center gap-2 min-w-0">
+                            <span class="dir-info-value" style="max-width:220px;" title="{{ $directorEmail }}">{{ $directorEmail }}</span>
+                            <button type="button"
+                                    wire:click="startEditEmail"
+                                    class="dir-email-edit-btn inline-flex items-center gap-1 px-2 py-1 rounded-md
+                                           border border-[#E8E0F0] bg-[#F9F7FC] text-[#7A3F91] font-semibold
+                                           hover:bg-[#F0E8F7] hover:border-[#7A3F91]/40 transition-all duration-150
+                                           active:scale-[.97] cursor-pointer shrink-0"
+                                    style="font-size:10.5px;">
+                                <i class="fas fa-pen" style="font-size:8.5px;"></i>
+                                Update
+                            </button>
+                        </span>
+                    @else
+                        <div class="w-full">
+                            <input type="email"
+                                   wire:model="directorEmail"
+                                   wire:keydown.enter="saveEmail"
+                                   {{ $savingEmail ? 'disabled' : '' }}
+                                   autofocus
+                                   class="w-full px-2.5 py-1.5 rounded-lg border font-bold text-[#111111]
+                                          focus:outline-none focus:ring-2 transition-all duration-150
+                                          {{ $errors->has('directorEmail') ? 'border-red-400 focus:ring-red-200' : 'border-[#7A3F91]/50 focus:ring-[#7A3F91]/20' }}"
+                                   style="font-size:12.5px;">
+
+                            @error('directorEmail')
+                                <p class="text-red-600 font-semibold mt-1" style="font-size:10.5px;">{{ $message }}</p>
+                            @enderror
+
+                            <div class="flex items-center justify-end gap-1.5 mt-1.5">
+                                <button type="button"
+                                        wire:click="cancelEditEmail"
+                                        {{ $savingEmail ? 'disabled' : '' }}
+                                        class="inline-flex items-center gap-1 px-2 py-1 rounded-md
+                                               border border-[#E8E0F0] bg-white text-[#333333] font-semibold
+                                               hover:bg-[#F5F5F5] transition-all duration-150
+                                               active:scale-[.97] cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                                        style="font-size:10.5px;">
+                                    <i class="fas fa-xmark" style="font-size:8.5px;"></i>
+                                    Cancel
+                                </button>
+
+                                <button type="button"
+                                        wire:click="saveEmail"
+                                        wire:loading.attr="disabled"
+                                        wire:target="saveEmail"
+                                        class="dir-email-save-btn relative inline-flex items-center gap-1 px-2 py-1 rounded-md
+                                               text-white font-semibold bg-[#7A3F91]
+                                               hover:opacity-90 transition-all duration-150
+                                               active:scale-[.97] cursor-pointer disabled:opacity-70 disabled:pointer-events-none"
+                                        style="font-size:10.5px;">
+
+                                    {{-- Purple "..." dot loader — shown while wire:click="saveEmail" is in flight --}}
+                                    <span wire:loading wire:target="saveEmail"
+                                          class="dir-email-save-spinner absolute inset-0 flex items-center justify-center gap-1 rounded-md bg-[#7A3F91]">
+                                        <span class="dir-email-save-dot"></span>
+                                        <span class="dir-email-save-dot"></span>
+                                        <span class="dir-email-save-dot"></span>
+                                    </span>
+
+                                    <span wire:loading.remove wire:target="saveEmail" class="inline-flex items-center gap-1">
+                                        <i class="fas fa-check" style="font-size:8.5px;"></i>
+                                        Save
+                                    </span>
+                                </button>
+                            </div>
+                        </div>
+                    @endif
                 </div>
 
                 <div class="dir-info-row">
@@ -472,9 +643,10 @@ new class extends Component {
 
             {{-- Active Coordinators — clean URL, filter pre-set via session --}}
             <button type="button" wire:click="goToActiveCoordinators"
-               class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="dir-stat-card dir-card-clickable dir-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
+                <div class="dir-card-spinner"><span></span><span></span><span></span></div>
                 <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Active Coordinators</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow"
@@ -496,9 +668,10 @@ new class extends Component {
 
             {{-- Total Events — clean URL: /director/event/management (no status segment) --}}
             <button type="button" wire:click="goToAllEvents"
-               class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="dir-stat-card dir-card-clickable dir-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
+                <div class="dir-card-spinner"><span></span><span></span><span></span></div>
                 <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Events</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-emerald-600">
@@ -520,9 +693,10 @@ new class extends Component {
 
             {{-- Pending Events — clean URL: /director/event/management (session-based filter) --}}
             <button type="button" wire:click="goToPendingEvents"
-               class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+               class="dir-stat-card dir-card-clickable dir-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                       hover:shadow-md hover:border-amber-300 transition-all duration-200
                       active:scale-[.985] cursor-pointer block text-left w-full">
+                <div class="dir-card-spinner"><span></span><span></span><span></span></div>
                 <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View Pending Events</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-amber-500">
@@ -544,9 +718,10 @@ new class extends Component {
 
             {{-- Job Postings — clean URL, filter pre-set via session (same pattern as Active Coordinators) --}}
             <button type="button" wire:click="goToAllJobs"
-                    class="dir-stat-card bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
+                    class="dir-stat-card dir-card-clickable dir-card-nav-btn bg-white rounded-xl border border-[#E8E0F0] shadow-sm p-5
                            hover:shadow-md hover:border-blue-300 transition-all duration-200
                            active:scale-[.985] cursor-pointer block text-left w-full">
+                <div class="dir-card-spinner"><span></span><span></span><span></span></div>
                 <span class="dir-card-tip"><i class="fas fa-eye mr-1.5"></i>View All Job Postings</span>
                 <div class="flex items-start justify-between mb-3 sm:mb-4">
                     <div class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shadow bg-blue-600">
@@ -587,17 +762,14 @@ new class extends Component {
                         </div>
                         <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Events Overview</p>
                     </div>
-                    <button type="button" wire:click="goToAllEvents"
-                       class="text-[.68rem] font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
-                        Manage <i class="fas fa-arrow-right text-[10px]"></i>
-                    </button>
                 </div>
 
                 <div class="p-3 flex-1">
                     <div class="grid grid-cols-2 gap-2">
                         @foreach($evtCards as $card)
                         <button type="button" wire:click="{{ $card['method'] }}"
-                           class="dir-mini-card dir-mini-tile rounded-xl border {{ $card['bg'] }} block w-full text-left">
+                           class="dir-mini-card dir-mini-tile dir-card-clickable dir-card-nav-btn rounded-xl border {{ $card['bg'] }} block w-full text-left">
+                            <div class="dir-card-spinner dir-card-spinner--sm"><span></span><span></span><span></span></div>
                             <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>{{ $card['ctip'] }}</span>
                             <div class="flex items-center gap-1.5 mb-1">
                                 <i class="fas {{ $card['icon'] }} text-[10px] {{ $card['color'] }}"></i>
@@ -620,21 +792,19 @@ new class extends Component {
                         </div>
                         <p class="text-xs font-semibold text-[#333333] uppercase tracking-wide">Job Postings</p>
                     </div>
-                    <a href="{{ route('director.job/management') }}" wire:navigate
-                       class="text-[.68rem] font-semibold text-[#7A3F91] hover:underline flex items-center gap-1">
-                        Manage <i class="fas fa-arrow-right text-[10px]"></i>
-                    </a>
                 </div>
 
                 <div class="p-3 grid grid-cols-2 gap-2 content-start flex-1">
                     <button type="button" wire:click="goToActiveJobs"
-                            class="dir-mini-card dir-mini-tile rounded-xl border bg-emerald-50 border-emerald-200 block w-full text-left">
+                            class="dir-mini-card dir-mini-tile dir-card-clickable dir-card-nav-btn rounded-xl border bg-emerald-50 border-emerald-200 block w-full text-left">
+                        <div class="dir-card-spinner dir-card-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>View Active Jobs</span>
                         <p class="dir-mini-num font-extrabold leading-none text-emerald-700">{{ number_format($activeJobs) }}</p>
                         <p class="dir-mini-label font-bold text-[#333333] uppercase tracking-wide">Active</p>
                     </button>
                     <button type="button" wire:click="goToInactiveJobs"
-                            class="dir-mini-card dir-mini-tile rounded-xl border bg-gray-50 border-gray-200 block w-full text-left">
+                            class="dir-mini-card dir-mini-tile dir-card-clickable dir-card-nav-btn rounded-xl border bg-gray-50 border-gray-200 block w-full text-left">
+                        <div class="dir-card-spinner dir-card-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="dir-mini-tip"><i class="fas fa-eye mr-1"></i>View Inactive Jobs</span>
                         <p class="dir-mini-num font-extrabold leading-none text-[#333333]">{{ number_format($inactiveJobs) }}</p>
                         <p class="dir-mini-label font-bold text-[#333333] uppercase tracking-wide">Inactive</p>
@@ -754,6 +924,63 @@ new class extends Component {
     </div>
 </div>
 @endif
+
+<script>
+(function () {
+    'use strict';
+
+    // ─── CARD CLICK SPINNER (nav cards — wire:click buttons that redirect
+    //     with navigate:true) ─────────────────────────────────────────────
+    // Shows a spinner inside the clicked stat/mini card the instant it's
+    // tapped, and keeps it spinning until the NEW page has actually finished
+    // loading (livewire:navigated) — not just until the Livewire request
+    // that kicked off the redirect finishes. wire:loading.class was tried
+    // first but it clears as soon as the component's action call returns,
+    // which happens well before the wire:navigate page swap completes, so
+    // the spinner was flashing off immediately instead of staying on
+    // through the whole transition. Plain click listeners + livewire:navigated
+    // don't have that gap. Same pattern as the Alumni Dashboard, ported here
+    // with dir- prefixed classes for consistency.
+    function initDirCardSpinners() {
+        document.querySelectorAll('button.dir-card-nav-btn').forEach(function (card) {
+            if (card.__dirSpinnerBound) return;
+            card.__dirSpinnerBound = true;
+            card.addEventListener('click', function () {
+                clearOtherDirCardSpinners(card);
+                card.classList.add('is-loading');
+            });
+        });
+    }
+
+    function clearOtherDirCardSpinners(except) {
+        document.querySelectorAll('.dir-card-clickable.is-loading').forEach(function (el) {
+            if (el !== except) el.classList.remove('is-loading');
+        });
+    }
+
+    function clearAllDirCardSpinners() {
+        document.querySelectorAll('.dir-card-clickable.is-loading').forEach(function (el) {
+            el.classList.remove('is-loading');
+        });
+    }
+
+    // Safety net: if navigation fails or the page is restored from bfcache,
+    // don't leave a card stuck spinning forever.
+    window.addEventListener('pageshow', clearAllDirCardSpinners);
+
+    // Bind card spinners right away so clicks right after page load feel
+    // responsive.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDirCardSpinners);
+    } else {
+        initDirCardSpinners();
+    }
+    document.addEventListener('livewire:navigated', function () {
+        clearAllDirCardSpinners();
+        initDirCardSpinners();
+    });
+})();
+</script>
 
 
 </div>{{-- end root --}}

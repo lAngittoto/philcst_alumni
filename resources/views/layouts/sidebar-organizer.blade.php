@@ -19,6 +19,31 @@
         }
 
         [x-cloak] { display: none !important; }
+
+        /* ── Disable text selection/copy across the whole app ─────────
+           Requested: no highlighting/copying of any text anywhere in
+           this interface (labels, nav items, cards, tables, etc).
+           Inputs, textareas, and contenteditable fields are explicitly
+           exempted so users can still select/copy/paste their own
+           typed content (e.g. search boxes, form fields). ── */
+        body {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+        }
+        input,
+        textarea,
+        [contenteditable="true"],
+        [contenteditable=""] {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+            -webkit-touch-callout: default;
+        }
+
         .no-scrollbar {
             -ms-overflow-style: none;
             scrollbar-width: none;
@@ -116,11 +141,13 @@
             100% { transform: scale(2.8); opacity: 0; }
         }
 
-        /* ── In-place notif loading overlay (used while deleting) ────
-           Same visual language as the rest of the app: fa-spinner
-           fa-spin, brand purple. The item's own content blurs out
-           underneath instead of being fully covered, so it still
-           reads as "this item is busy" rather than an empty gap. ── */
+        /* ── In-place notif loading overlay (used while opening/deleting) ──
+           Blurs and dims the item's own content while it's busy, with a
+           centered spinner on top — makes clear the row is loading
+           without leaving stale text sharply readable underneath.
+           A safety-net timeout (see openNotif()/_goToTarget() in the JS
+           below) guarantees this never gets stuck indefinitely even if
+           a navigation event is missed. ── */
         .notif-item.is-loading > *:not(.notif-item-loading-overlay) {
             filter: blur(4px);
             opacity: 0.5;
@@ -358,14 +385,11 @@
             color: #7A3F91 !important;
         }
 
-        /* ── Strip icon color while navigating ──────────────────────
-           While a link is mid-navigation (spinner showing), the chip
-           drops its clr-* accent color and goes neutral gray — the
-           spinner is the only signal that matters in that moment. ── */
-        .coord-nav-link.is-navigating .coord-nav-icon {
-            background: #F0F0F0 !important;
-            color: #9CA3AF !important;
-        }
+        /* ── Icon keeps its accent color while navigating ───────────
+           Previously this stripped the clr-* color to neutral gray
+           while the spinner showed. Per request, the icon chip now
+           keeps its normal color at all times — only the spinner
+           overlay indicates the loading state. ── */
 
         /* ── Nav link click spinner ──────────────────────────────
            Expanded sidebar: sits at the end of the row (where the
@@ -736,6 +760,31 @@
         });
     });
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SWALLOW LIVEWIRE'S DUPLICATE PROMISE REJECTION
+    //  Livewire 3 rejects its internal request promise with a
+    //  { status, body, json, errors } error object on EVERY failed request,
+    //  even after our `fail()` hook above has already handled it (419s) or
+    //  a page navigation/reload is about to happen anyway (network errors,
+    //  aborted requests, 500s, etc). `preventDefault()` only stops Livewire
+    //  from swapping in the raw failure HTML — it does NOT stop this
+    //  rejection from propagating, so it always surfaces as
+    //  "Uncaught (in promise)" in the console even though the UI is
+    //  behaving correctly (soft modal shown, or reload in progress).
+    //  We recognize this specific error shape and silence only that one,
+    //  so genuine unrelated promise rejections still surface normally.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        if (
+            reason && typeof reason === 'object' &&
+            'status' in reason && 'body' in reason &&
+            'json' in reason && 'errors' in reason
+        ) {
+            event.preventDefault();
+        }
+    });
+
     // Fallback for older Livewire versions / plain fetch-based failures
     // that don't go through the hook above (defensive double-cover).
     window.addEventListener('livewire:navigate:failed', function () {
@@ -896,14 +945,18 @@
                 var result = [];
                 var eventGroups = {}; // event_id -> merged notif row
                 var jobGroups   = {}; // job_id -> merged notif row (chain title)
-                var chatGroups  = {}; // 'room::YYYY-MM-DD' -> merged chat notif row (×N per day)
+                var chatGroups  = {}; // 'YYYY-MM-DD' -> merged chat notif row (×N per day, all rooms)
 
                 // Human-readable step label per underlying action, used to
                 // build the "Step -> Step" chain title for job notifs.
+                // ALL job postings — whether from the organizer or the
+                // Alumni Director — are labeled "Job Posted" (never
+                // "Submitted Job"). This is a fixed convention: do not
+                // rename this back to "Submitted Job" again.
                 var jobStepLabel = {
-                    'created':         'You Posted a Job',
+                    'created':         'Job Posted',
                     'director_posted': 'Job Posted',
-                    'updated':         'Updated',
+                    'updated':         'Edited',
                     'activated':       'Active',
                     'deactivated':     'Inactive',
                     'deleted':         'Deleted',
@@ -912,10 +965,16 @@
 
                 // Human-readable step label per underlying action, used to
                 // build the "Step -> Step" chain title for event notifs.
+                // 'created' and 'updated' both resolve to the same
+                // "Submitted Event" label — from the organizer's point of
+                // view, editing a pending/rejected event is just another
+                // submission for review, so the chain always reads
+                // "Submitted Event → Pending/Approved/Rejected" rather
+                // than the vague "Updated → Pending".
                 var eventStepLabel = {
-                    'created':     'Submitted',
-                    'resubmitted': 'Resubmitted',
-                    'updated':     'Updated',
+                    'created':     'Submitted Event',
+                    'resubmitted': 'Submitted Event',
+                    'updated':     'Submitted Event',
                     'deleted':     'Deleted',
                     'approved':    'Approved',
                     'rejected':    'Rejected',
@@ -1110,7 +1169,7 @@
                         // after collapses down to just the CURRENT status
                         // (Active / Inactive / Deleted / Restored) so the
                         // row never grows into a long replayed history.
-                        var jFirstStep = jgroup._chainSteps[0] || 'You Posted a Job';
+                        var jFirstStep = jgroup._chainSteps[0] || 'Job Posted';
                         var jLastStep  = jgroup._chainSteps[jgroup._chainSteps.length - 1];
                         jgroup.title = (jLastStep === jFirstStep)
                             ? jFirstStep
@@ -1119,10 +1178,11 @@
                         return;
                     }
 
-                    // ── Chat/message notifs: grouped PER ROOM PER DAY so a
-                    //    burst of messages in the same room on the same day
-                    //    collapses into a single "×N" row instead of a long
-                    //    unbroken wall of separate "New Message" entries. ──
+                    // ── Chat/message notifs: grouped PER DAY (across ALL
+                    //    rooms) so every message that lands on the same
+                    //    calendar day collapses into a single row —
+                    //    "New Message ×N" / "You received N message(s)."
+                    //    instead of a separate row per room per day. ──
                     var isChatNotif = (
                         rawDedup.startsWith('message-received::') ||
                         n.icon === 'comments'
@@ -1134,40 +1194,50 @@
                             String(dayBucket.getMonth() + 1).padStart(2, '0') + '-' +
                             String(dayBucket.getDate()).padStart(2, '0');
 
-                        // Room name is embedded in the saved message text
-                        // (" sent a message in {room}"/" in {room} · ...").
-                        // Fall back to the whole message if it can't be
-                        // parsed so grouping still works, just less finely.
-                        var roomMatch = /sent a message in ([^:."]+)/i.exec(n.message || '');
-                        var roomKey = roomMatch ? roomMatch[1].trim() : (n.message || 'chat');
+                        // A single row can already represent MULTIPLE actual
+                        // messages — coord-message-received bundles same-
+                        // minute bursts server-side into one row whose text
+                        // reads "X and others sent N new messages in Room."
+                        // Pull that N back out (default 1 for the plain
+                        // single-message row text) so the day total reflects
+                        // real messages received, not just row count.
+                        var rowCountMatch = /sent (\d+) new messages?/i.exec(n.message || '');
+                        var rowCount = rowCountMatch ? parseInt(rowCountMatch[1], 10) : 1;
+                        if (!rowCount || rowCount < 1) rowCount = 1;
 
-                        var chatKey = roomKey + '::' + dayKey;
+                        var chatKey = dayKey;
                         var cgroup = chatGroups[chatKey];
 
                         if (!cgroup) {
                             cgroup = Object.assign({}, n, {
-                                count:      1,
+                                count:      rowCount,
                                 _ids:       [],
                                 created_at: n.created_at,
                             });
                             chatGroups[chatKey] = cgroup;
                             result.push(cgroup);
                         } else {
-                            cgroup.count += 1;
+                            cgroup.count += rowCount;
                         }
 
                         cgroup._ids.push(n.id);
 
                         // Latest message in the group drives the visible
-                        // title/message/read-state/timestamp, with a ×N
-                        // suffix once more than one message has landed.
+                        // icon/link/read-state/timestamp. Title always shows
+                        // the running ×N count for the day, and the body
+                        // switches to a plain "You received N message(s)."
+                        // summary once more than one message has landed —
+                        // the single-message case still shows the original
+                        // per-message text.
                         cgroup.icon        = n.icon;
-                        cgroup.message     = n.message;
                         cgroup.link_route  = n.link_route;
                         cgroup.link_label  = n.link_label;
                         cgroup.read        = n.read;
                         cgroup.created_at  = n.created_at;
                         cgroup.title       = 'New Message' + (cgroup.count > 1 ? ' ×' + cgroup.count : '');
+                        cgroup.message     = cgroup.count > 1
+                            ? ('You received ' + cgroup.count + ' messages.')
+                            : n.message;
 
                         return;
                     }
@@ -1237,7 +1307,14 @@
                 this.open = false;
             },
 
-            async markRead(item) {
+            // `deferResort`: when true, skips the immediate re-sort below.
+            // Used by openNotif() so a notif being navigated to/opened
+            // doesn't visually jump into the "Already Read" section while
+            // its spinner is still showing — it stays put until the
+            // destination page actually lands (or the load finishes),
+            // at which point the normal `livewire:navigated` handler /
+            // next poll naturally re-sorts everything anyway.
+            async markRead(item, deferResort) {
                 if (window.__coordLoggingOut) return;
                 if (item.read) return;
                 item.read = true;
@@ -1256,6 +1333,7 @@
                         if (r.status === 419) { window.__coordShowSessionExpired(); return; }
                     } catch (e) { /* ignore */ }
                 }
+                if (deferResort) return;
                 // Re-sort immediately so the item jumps to the top of the
                 // read section right away, instead of waiting on the next
                 // 3s poll to visually reorder.
@@ -1282,16 +1360,61 @@
                 if (window.__coordLoggingOut) return;
                 this.navigating = true;
                 this.loadingId  = item.id;
+                var self = this;
+                clearTimeout(window.__coordNotifNavTimeout);
+
+                // Close the panel immediately on click rather than waiting
+                // for `livewire:navigated` (150ms+ later). Previously the
+                // panel stayed open in the background during the page
+                // transition and only snapped closed once navigation
+                // finished — visible as a glitchy "panel flashes back up"
+                // right as the destination page landed.
+                this.open = false;
+
+                // Safety net: if `livewire:navigated` never fires (missed
+                // event, same-page dispatch that doesn't trigger it, or an
+                // interrupted navigation), this guarantees the spinner
+                // overlay on the notif item never gets stuck indefinitely
+                // — and also runs the deferred re-sort below so the item
+                // doesn't stay frozen out of place forever in that case.
+                window.__coordNotifNavTimeout = setTimeout(function () {
+                    self.navigating = false;
+                    self.loadingId  = null;
+                    self._resortItems();
+                }, 5000);
                 var clearedByNav = false;
                 try {
-                    await this.markRead(item);
+                    // deferResort = true: keep this item in its current
+                    // spot (don't jump it into "Already Read" yet) while
+                    // the spinner is showing — it re-sorts once the
+                    // destination page actually lands, or on timeout.
+                    await this.markRead(item, true);
                     clearedByNav = this._goToTarget(item);
                 } finally {
                     if (!clearedByNav) {
                         this.navigating = false;
                         this.loadingId  = null;
+                        clearTimeout(window.__coordNotifNavTimeout);
+                        this._resortItems();
                     }
                 }
+            },
+
+            // Shared read/unread + read-order sort, factored out of
+            // markRead() so openNotif() can defer it until the spinner
+            // is done (see above) instead of resorting the instant the
+            // item is marked read.
+            _resortItems() {
+                var store = this;
+                this.items = this.items.slice().sort(function (a, b) {
+                    if (!!a.read !== !!b.read) return a.read ? 1 : -1;
+                    if (a.read) {
+                        var aOrder = store._readOrder[a._groupKey] || 0;
+                        var bOrder = store._readOrder[b._groupKey] || 0;
+                        if (aOrder !== bOrder) return bOrder - aOrder;
+                    }
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
             },
 
             // Routes to wherever this notif points. Returns true when it
@@ -1325,6 +1448,7 @@
                         self.navigating = false;
                         self.loadingId  = null;
                         self.open       = false;
+                        self._resortItems();
                     }, 400);
                     return true;
                 } else if (isSameLocation && item.link_route === 'organizer.job/management' && item.job_id && window.Livewire) {
@@ -1336,6 +1460,7 @@
                         self.navigating = false;
                         self.loadingId  = null;
                         self.open       = false;
+                        self._resortItems();
                     }, 400);
                     return true;
                 } else if (isSameLocation) {
@@ -1525,6 +1650,7 @@
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
             if (window.__coordLoggingOut) return;
+            clearTimeout(window.__coordNotifNavTimeout);
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
             var s = Alpine.store('coordNotifs');
             if (s) {
@@ -1885,7 +2011,7 @@
     @click="$store.coordNotifs && $store.coordNotifs.open && $store.coordNotifs.close()"
     @close-sidebar.window="sidebarWasOpenBeforeModal = open; sidebarHiddenByModal = true; open = false;"
     @open-sidebar.window="sidebarHiddenByModal = false; open = sidebarWasOpenBeforeModal;"
-    @@livewire:navigated.window="navClickedRoute = null; open = false;">
+    @@livewire:navigated.window="navClickedRoute = null; if (window.innerWidth < 1024) { open = false; }">
 
 <div class="coord-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
@@ -1903,6 +2029,7 @@
 
     <aside
         id="coord-sidebar-aside"
+        wire:key="coord-sidebar-aside-static"
         :class="{
             'translate-x-0': open,
             '-translate-x-full': !open,
@@ -2287,7 +2414,9 @@
                     x-transition:leave-end="opacity-0 translate-x-full"
                     style="overflow: hidden;">
                     <div class="coord-notif-divider"
-                         x-show="notif.read && notifIdx > 0 && !$store.coordNotifs.items[notifIdx - 1].read"
+                         x-show="notif.read && notifIdx > 0 && !$store.coordNotifs.items[notifIdx - 1].read
+                                 && !($store.coordNotifs.navigating && $store.coordNotifs.loadingId === notif.id)
+                                 && $store.coordNotifs.deletingId !== notif.id"
                          x-cloak>
                         <span class="coord-notif-divider-label">Already Read</span>
                     </div>
@@ -2304,6 +2433,14 @@
                     ondragstart="return false;"
                     @click.stop="$store.coordNotifs.openNotif(notif);">
 
+                    {{-- Icon — colored per notif type --}}
+                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
+                         :style="'background:' + window.__coordIconBg(notif.icon) + ';'">
+                        <i class="fas"
+                           :class="'fa-' + (notif.icon || 'bell')"
+                           :style="'font-size:15px;color:' + window.__coordIconColor(notif.icon) + ';'"></i>
+                    </div>
+
                     <template x-if="$store.coordNotifs.navigating && $store.coordNotifs.loadingId === notif.id">
                         <div class="notif-item-loading-overlay">
                             <i class="fas fa-spinner fa-spin notif-item-spinner"></i>
@@ -2315,14 +2452,6 @@
                             <i class="fas fa-spinner fa-spin notif-item-spinner" style="color:#DC2626;"></i>
                         </div>
                     </template>
-
-                    {{-- Icon — colored per notif type --}}
-                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"
-                         :style="'background:' + window.__coordIconBg(notif.icon) + ';'">
-                        <i class="fas"
-                           :class="'fa-' + (notif.icon || 'bell')"
-                           :style="'font-size:15px;color:' + window.__coordIconColor(notif.icon) + ';'"></i>
-                    </div>
 
                     {{-- Content --}}
                     <div class="flex-1 min-w-0">

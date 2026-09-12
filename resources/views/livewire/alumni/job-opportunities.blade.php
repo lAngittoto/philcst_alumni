@@ -252,8 +252,14 @@ new class extends Component {
 
     public static function jobImageUrl(?string $path): string
     {
-        if ($path && Storage::disk('public')->exists($path)) {
-            return Storage::url($path);
+        // FIX: match the pattern that works on this server —
+        // asset('storage/' . $path) — same as OrganizerEvent's working
+        // photo_url accessor and the now-fixed job-management component.
+        // Storage::disk('public')->exists()/Storage::url() were both
+        // resolving incorrectly here even with a correct DB path,
+        // silently forcing the default photo for every job.
+        if ($path) {
+            return asset('storage/' . $path);
         }
         return asset('storage/job/default-photo-job.jpg');
     }
@@ -999,7 +1005,17 @@ select.filter-input {
                         <img src="{{ $cardImageUrl }}" alt="{{ $job->job_title }}"
                              loading="lazy"
                              class="w-full h-full object-contain"
-                             onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
+                             data-real-src="{{ $cardImageUrl }}"
+                             onerror="
+                                 var img=this;
+                                 if(!img.dataset.retried){
+                                     img.dataset.retried='1';
+                                     setTimeout(function(){ img.src = img.dataset.realSrc + (img.dataset.realSrc.indexOf('?')>-1?'&':'?') + 'retry=' + Date.now(); }, 400);
+                                 } else {
+                                     img.onerror=null;
+                                     img.src='{{ asset('storage/job/default-photo-job.jpg') }}';
+                                 }
+                             ">
                         @if($isExpired)
                             <span class="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-gray-700/90 text-white">
                                 <i class="fas fa-ban text-[9px]"></i> Expired

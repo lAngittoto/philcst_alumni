@@ -21,6 +21,24 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
+    /** Wraps each case-insensitive match of $search inside $text with the
+     *  same light-blue <mark> used on Alumni Records / Coordinator Management /
+     *  Manage Events — keeps the "here's what matched" visual cue consistent
+     *  across pages. */
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="mgjob-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
     public string $search         = '';
     public string $filterStatus   = '';
     public string $filterType     = '';
@@ -1653,6 +1671,15 @@ new class extends Component {
 <style>
 [x-cloak] { display: none !important; }
 
+/* ── Search highlight — same light blue mark used on Alumni Records / Coordinator Management / Manage Events ── */
+mark.mgjob-hl {
+    background: #BFDBFE;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    font-weight: 700;
+}
+
 /* ══ Fixed-height card, mirrors job-management's flex-fill card ══ */
 .job-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
@@ -1974,7 +2001,7 @@ select.tw-select-arrow {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
                 <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
-                       placeholder="Search title or company…"
+                       placeholder="Search..."
                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 pl-9 rounded-lg w-full transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] placeholder-[#a78bbd]"
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
@@ -2041,11 +2068,14 @@ select.tw-select-arrow {
             </span>
             @endif
 
+            @php $mgJobHasActiveFilters = $search || $filterStatus || $filterType || $filterCollege; @endphp
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                    {{ !$mgJobHasActiveFilters ? 'disabled' : '' }}
+                    title="{{ $mgJobHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
                 </span>
@@ -2125,7 +2155,7 @@ select.tw-select-arrow {
                             data-eo-row>
 
                             <td class="px-4 py-3.5 max-w-[200px]">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isOrgDel ? 'line-through text-red-400' : 'text-[#333333]' }}">{{ $job->job_title }}</p>
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isOrgDel ? 'line-through text-red-400' : 'text-[#333333]' }}">{!! $isOrgDel ? e($job->job_title) : $this->highlight($job->job_title, $search) !!}</p>
                                 <p class="text-xs mt-0.5 {{ $isOrgDel ? 'text-red-400' : 'text-[#777777]' }}">
                                     @if($isOrgDel) Deleted {{ $job->updated_at->diffForHumans() }}
                                     @else {{ $job->created_at->diffForHumans() }}
@@ -2239,7 +2269,7 @@ select.tw-select-arrow {
                     <div class="job-mrow" wire:key="job-mrow-{{ $job->id }}" wire:click="viewJob({{ $job->id }})">
                         <div class="flex-1 min-w-0">
                             <p class="font-semibold text-sm truncate {{ $isOrgDel ? 'line-through text-red-400' : 'text-gray-900' }}">
-                                {{ $job->job_title }}
+                                {!! $isOrgDel ? e($job->job_title) : $this->highlight($job->job_title, $search) !!}
                             </p>
                             <div class="flex items-center gap-1.5 mt-1 flex-wrap">
                                 <span class="text-xs text-gray-600 truncate">

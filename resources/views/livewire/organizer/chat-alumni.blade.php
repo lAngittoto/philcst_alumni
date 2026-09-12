@@ -117,7 +117,8 @@ new class extends Component {
         'wanker', 'twat', 'prick',
         // Tagalog
         'putangina', 'putang ina', 'putanginamo', 'putanginamu', 'puta',
-        'tangina', 'tanginamo', 'tang ina',
+        'potangina', 'potang ina', 'potanginamo', 'potanginamu',
+        'tangina', 'tanginamo', 'tang ina', 'tangna', 'tangnamo',
         'gago', 'gaga', 'gagu',
         'ulol', 'ulul',
         'bobo', 'boba',
@@ -174,8 +175,15 @@ new class extends Component {
                 array_keys($letters)
             ));
 
+            // Leading boundary (\b) still requires the match to START at a
+            // word edge, so "abobo" is never flagged for containing "bobo".
+            // There is intentionally NO trailing \b — a plain \b fails to
+            // match when a suffix is glued directly onto the root with no
+            // separator (e.g. "boboka", "gagoka"), letting that common
+            // evasion slip through uncensored. Dropping it still censors
+            // "bobo", "bobo ka", and "boboka" alike.
             $text = preg_replace_callback(
-                '/\b' . $pattern . '\b/iu',
+                '/\b' . $pattern . '/iu',
                 fn($m) => str_repeat('*', mb_strlen($m[0])),
                 $text
             ) ?? $text;
@@ -3749,7 +3757,7 @@ new class extends Component {
                         <p class="text-xs font-semibold text-blue-700 flex items-center gap-1.5">
                             <i class="fa-solid fa-pen text-[10px]"></i>Editing message
                         </p>
-                        <button wire:click="cancelEdit" class="text-xs font-semibold text-[#666666] hover:text-[#333333] transition cursor-pointer">Cancel</button>
+                        <button wire:click="cancelEdit" class="text-xs font-semibold text-orange-600 hover:text-orange-700 transition cursor-pointer">Cancel</button>
                     </div>
                     @endif
                     <div class="flex items-end gap-2" x-data="{ sending: false }">
@@ -3776,7 +3784,7 @@ new class extends Component {
                                 @focus-input.window="$el.focus()"
                                 @editing-started.window="$nextTick(() => { $el.style.height='auto'; $el.style.height=Math.min($el.scrollHeight,120)+'px'; $el.focus(); $el.select(); })"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
-                                class="w-full resize-none rounded-xl border-2 border-[#ddd3e8] bg-[#fafafa] px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none focus:ring-0 transition placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed"
+                                class="w-full resize-none rounded-xl border-2 {{ $editingId ? 'border-blue-400' : 'border-[#6b2490]' }} bg-[#fafafa] px-4 py-2.5 text-base leading-relaxed text-[#333333] focus:outline-none focus:ring-0 transition placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
                         @if($editingId)

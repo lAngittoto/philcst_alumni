@@ -413,8 +413,16 @@ new class extends Component {
 
     public static function jobImageUrl(?string $path): string
     {
-        if ($path && Storage::disk('public')->exists($path)) {
-            return Storage::url($path);
+        // FIX: match the exact pattern OrganizerEvent::getPhotoUrlAttribute()
+        // already uses successfully — asset('storage/' . $path), not
+        // Storage::url($path). On this server the two can resolve
+        // differently (Storage::url() goes through the 'public' disk's
+        // own 'url' config key in filesystems.php, which can end up
+        // pointing somewhere else than plain asset() does), which is why
+        // event photos worked while job photos kept falling back to the
+        // default even with the exact same file/DB path shape.
+        if ($path) {
+            return asset('storage/' . $path);
         }
         return asset('storage/job/default-photo-job.jpg');
     }
@@ -2668,21 +2676,18 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                          this.uploading = false;
                                          this.uploadError = true;
                                          Alpine.store('eoPostPhoto').uploading = false;
-                                         $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload timed out. Please try again.' });
                                      }, 30000);
                                      $wire.upload('postJobImage', f,
                                          () => {
                                              clearTimeout(this._eoUploadTimeout);
                                              this.uploading = false;
                                              Alpine.store('eoPostPhoto').uploading = false;
-                                             $wire.dispatch('flash-message', { type: 'success', message: 'Photo uploaded successfully.' });
                                          },
                                          () => {
                                              clearTimeout(this._eoUploadTimeout);
                                              this.uploading = false;
                                              this.uploadError = true;
                                              Alpine.store('eoPostPhoto').uploading = false;
-                                             $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload failed. Please try again.' });
                                          }
                                      );
                                  },
@@ -3289,7 +3294,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                              wire:key="edit-photo-picker-{{ $editingJobId }}-{{ $editCurrentImage }}"
                              x-data="{
                                  preview: null,
-                                 existing: @js($editCurrentImage ? Storage::url($editCurrentImage) . '?v=' . now()->timestamp : ''),
+                                 existing: @js($editCurrentImage ? asset('storage/' . $editCurrentImage) . '?v=' . now()->timestamp : ''),
                                  defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
                                  removed: false,
                                  uploading: false,
@@ -3318,7 +3323,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                          this.uploading = false;
                                          this.uploadError = true;
                                          Alpine.store('eoEditPhoto').uploading = false;
-                                         $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload timed out. Please try again.' });
                                      }, 30000);
                                      // FIX: both $wire.upload() callbacks used to touch
                                      // this.$refs.fileInput directly (via clearNew()), and one
@@ -3336,7 +3340,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                              clearTimeout(this._eoUploadTimeout);
                                              this.uploading = false;
                                              Alpine.store('eoEditPhoto').uploading = false;
-                                             $wire.dispatch('flash-message', { type: 'success', message: 'Photo uploaded successfully.' });
                                              // Confirms the upload actually finished AND that
                                              // Livewire's own success callback fired — if
                                              // Save Changes still stays disabled/no changes
@@ -3351,7 +3354,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                              this.uploading = false;
                                              this.uploadError = true;
                                              Alpine.store('eoEditPhoto').uploading = false;
-                                             $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload failed. Please try again.' });
                                              console.debug('[job-photo] editJobImage upload FAILED');
                                          }
                                      );
