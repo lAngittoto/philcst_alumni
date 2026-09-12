@@ -197,6 +197,31 @@
             user-select: none;
         }
 
+        /* ── Disable text selection/copy across the ENTIRE sidebar ──
+             Covers every label, link, badge, and section inside .alm-sidebar
+             (logo, nav items, section labels, collapse/expand button,
+             notification bell trigger, profile mini-card, etc). This is on
+             top of the #alumni-notif-panel rule above, which already covers
+             the notification dropdown panel itself (a separate floating
+             element that lives outside .alm-sidebar in the DOM). */
+        .alm-sidebar,
+        .alm-sidebar * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+        /* Text inputs/textareas inside the sidebar (if any, e.g. a search
+           box) still need to be selectable/typeable — only block selection
+           of static labels/links, not form fields. */
+        .alm-sidebar input,
+        .alm-sidebar textarea {
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            -ms-user-select: text;
+            user-select: text;
+        }
+
         .notif-close-wrap {
             position: relative;
             display: inline-flex;
@@ -1755,6 +1780,23 @@
             </form>
         </div>
     </aside>
+
+    <script>
+        // ── Block copy/right-click/drag on the sidebar itself ──
+        // CSS (user-select: none above) already prevents highlighting text,
+        // but a user can still right-click → "Copy" on some browsers, or
+        // drag-select across elements CSS doesn't fully cover. This backs
+        // that up at the DOM event level, scoped only to #alumni-sidebar-aside
+        // so the rest of the page (main content, modals, notif panel handled
+        // separately) is completely unaffected.
+        (function () {
+            var sidebar = document.getElementById('alumni-sidebar-aside');
+            if (!sidebar) return;
+            ['contextmenu', 'copy', 'cut', 'dragstart', 'selectstart'].forEach(function (evt) {
+                sidebar.addEventListener(evt, function (e) { e.preventDefault(); });
+            });
+        })();
+    </script>
 
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">

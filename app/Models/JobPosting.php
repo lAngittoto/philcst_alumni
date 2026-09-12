@@ -32,6 +32,7 @@ class JobPosting extends Model
         'deleted_by_role',
         'qualifications',
         'application_instructions',
+        'job_image',
     ];
 
     protected $casts = [

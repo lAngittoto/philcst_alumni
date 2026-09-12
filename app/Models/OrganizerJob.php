@@ -28,6 +28,14 @@ class OrganizerJob extends Model
         // ✅ FIX: these were missing — Eloquent was silently discarding them
         'updated_by',
         'updated_by_role',
+        // ✅ FIX: job_image was missing too — this is why an uploaded
+        // photo never actually saved. The Blade component's
+        // storeJobImage()/$job->update([...]) correctly stores the file
+        // on disk and passes 'job_image' => $path, but Eloquent's mass
+        // assignment silently drops any key not listed here — so the
+        // path was thrown away and the job kept its old/default photo
+        // no matter what was uploaded.
+        'job_image',
     ];
 
     protected $casts = [

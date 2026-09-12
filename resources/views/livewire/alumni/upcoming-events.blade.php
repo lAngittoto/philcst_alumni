@@ -257,7 +257,11 @@ new class extends Component {
             $organizerQ->where(fn($sub) => $sub->where('title', 'like', "%{$s}%")->orWhere('venue', 'like', "%{$s}%"));
         }
 
-        $merged = $adminQ->get()->concat($organizerQ->get())->sortByDesc('created_at')->values();
+        // Most-recently updated event leads within its group (upcoming vs
+        // completed), same as job postings — activating/approving/editing
+        // an event brings it back to the top even if it was created a
+        // while ago, instead of staying pinned by its original post date.
+        $merged = $adminQ->get()->concat($organizerQ->get())->sortByDesc('updated_at')->values();
 
         if ($this->filterStatus === '') {
             $merged = $merged->sortBy(fn($event) => $this->isEventCompleted($event) ? 1 : 0)->values();

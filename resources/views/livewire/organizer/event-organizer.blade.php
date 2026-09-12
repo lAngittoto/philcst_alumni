@@ -64,9 +64,32 @@ new class extends Component {
 
     public array  $selectedCourses = [];
 
+    /** Snapshot of every editable field's value the moment an existing
+     *  PENDING event is opened for editing (see populateEditForm()) — used
+     *  by isFormValid/hasFormChanges below to keep "Save Changes" disabled
+     *  until something actually differs from what was originally loaded.
+     *  Editing a letter and then undoing it back to the original value
+     *  must land back on "no changes" / disabled, not stay enabled just
+     *  because a keystroke happened at some point. Null while creating a
+     *  brand-new event (isEditing === false) or resubmitting — the
+     *  no-changes gate only applies to editing a PENDING event. */
+    public ?array $originalFormSnapshot = null;
+
     public $photo                    = null;
     public ?string $existingPhotoUrl = null;
     public bool   $removePhoto       = false;
+
+    /** Livewire hook that fires as part of the SAME request that finishes
+     *  setting $photo (unlike the raw JS upload event, which completes
+     *  slightly before that request's response — and its HTML — actually
+     *  lands). Doing nothing here is fine; its only job is to give
+     *  wire:loading a target that stays "loading" for the full round trip,
+     *  so the overlay in the Blade view doesn't disappear a beat early and
+     *  flash the old/default photo before the new one swaps in. */
+    public function updatedPhoto(): void
+    {
+        //
+    }
 
     public array  $formErrors = [];
 
@@ -334,6 +357,14 @@ new class extends Component {
             return false;
         }
 
+        // Editing a PENDING event (plain edit, not resubmit/create): stay
+        // disabled until something actually differs from what was loaded.
+        // Typing a letter then deleting it back to the original value
+        // must land here again, not stay stuck enabled.
+        if (! $this->hasFormChanges) {
+            return false;
+        }
+
         return true;
     }
 
@@ -546,6 +577,64 @@ public function openCreateModal(): void
         $this->selectedCourses = !empty($coursesPart) && $coursesPart !== 'All Courses'
             ? array_map('trim', explode(',', $coursesPart))
             : [];
+
+        // Snapshot taken only for the plain "edit a PENDING event" flow —
+        // resubmitting a REJECTED event or creating new always allows
+        // Save/Submit once required fields are filled, no "changed?" gate.
+        $this->originalFormSnapshot = $this->isResubmitting ? null : $this->buildFormSnapshot();
+    }
+
+    /** Current values of every field the organizer can actually edit,
+     *  in the same shape as originalFormSnapshot, so the two can be
+     *  compared directly by hasFormChanges(). Keep this list in sync with
+     *  whatever populateEditForm() loads. */
+    private function buildFormSnapshot(): array
+    {
+        return [
+            'title'          => $this->title,
+            'description'    => $this->description,
+            'event_date'     => $this->event_date,
+            'start_time'     => $this->start_time,
+            'end_time'       => $this->end_time,
+            'venue'          => $this->venue,
+            'venue_address'  => $this->venue_address,
+            'contact_phone'  => $this->contact_phone,
+            'notes'          => $this->notes,
+            'batchYearFrom'  => $this->batchYearFrom,
+            'batchYearTo'    => $this->batchYearTo,
+            'allAlumniChosen'=> $this->allAlumniChosen,
+            'selectedCourses'=> $this->selectedCourses,
+            'removePhoto'    => $this->removePhoto,
+            'hasNewPhoto'    => $this->photo !== null,
+        ];
+    }
+
+    /**
+     * ── "Nothing actually changed yet" gate for the plain edit flow ──
+     * True when there IS an original snapshot (i.e. we're editing a
+     * PENDING event, not creating/resubmitting) AND the current form
+     * values are identical to it — so Save Changes should stay disabled.
+     * Comparing selectedCourses order-insensitively so re-picking the same
+     * courses in a different click order doesn't falsely count as a change.
+     */
+    #[Computed]
+    public function hasFormChanges(): bool
+    {
+        if ($this->originalFormSnapshot === null) {
+            return true; // not the plain-edit flow — never gate on this
+        }
+
+        $current = $this->buildFormSnapshot();
+        $orig    = $this->originalFormSnapshot;
+
+        $currentCourses = $current['selectedCourses'];
+        $origCourses    = $orig['selectedCourses'];
+        sort($currentCourses);
+        sort($origCourses);
+        $current['selectedCourses'] = $currentCourses;
+        $orig['selectedCourses']    = $origCourses;
+
+        return $current !== $orig;
     }
 
 public function openEditModal(int $id): void
@@ -1527,6 +1616,7 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->editingEventId = null;
         $this->isEditing      = false;
         $this->isResubmitting = false;
+        $this->originalFormSnapshot = null;
         $this->resubmitEventTitle   = '';
         $this->resubmitEventRemarks = '';
         $this->showSubmitConfirmModal = false;
@@ -2294,34 +2384,34 @@ select.tw-select-arrow {
      wire:keydown.escape.window="cancelDelete">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b border-red-100 bg-red-50">
-            <h2 class="text-base font-semibold text-red-800 flex items-center gap-2.5">
+            <h2 class="text-lg font-semibold text-red-800 flex items-center gap-2.5">
                 <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-trash-can text-red-500 text-sm"></i>
+                    <i class="fas fa-trash-can text-red-500 text-base"></i>
                 </div>
                 Delete Event
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">Are you sure you want to delete:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+            <p class="text-base text-[#555555] mb-1">Are you sure you want to delete:</p>
+            <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $pendingDeleteTitle }}
             </p>
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-800">This action cannot be undone. The event will be permanently marked as deleted.</span>
+                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                <span class="text-sm text-amber-800">This action cannot be undone. The event will be permanently marked as deleted.</span>
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelDelete"
                         wire:loading.attr="disabled" wire:target="deleteEvent"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
-                    <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+                    <i class="fas fa-xmark mr-1 text-sm"></i>Cancel
                 </button>
                 <button wire:click="deleteEvent"
                         wire:loading.attr="disabled"
                         wire:target="deleteEvent"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
-                    <span wire:loading wire:target="deleteEvent"><i class="fas fa-spinner fa-spin mr-1 text-xs"></i>Deleting…</span>
-                    <span wire:loading.remove wire:target="deleteEvent"><i class="fas fa-trash-can mr-1 text-xs"></i>Yes, Delete</span>
+                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
+                    <span wire:loading wire:target="deleteEvent"><i class="fas fa-spinner fa-spin mr-1 text-sm"></i>Deleting…</span>
+                    <span wire:loading.remove wire:target="deleteEvent"><i class="fas fa-trash-can mr-1 text-sm"></i>Yes, Delete</span>
                 </button>
             </div>
         </div>
@@ -2528,22 +2618,46 @@ select.tw-select-arrow {
                         <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— Preview</span>
                     </div>
                     <div class="p-2.5 bg-white">
-                        <div x-data="{isDragging:false}"
+                        <div x-data="{
+                                isDragging:false,
+                                localPreviewUrl: null,
+                                onFileChosen(e) {
+                                    // ── Instant local preview via FileReader ──
+                                    // Renders the picked image IMMEDIATELY from the
+                                    // browser's own copy of the file, without waiting
+                                    // for Livewire's upload roundtrip. Livewire still
+                                    // uploads photo in the background via wire:model
+                                    // (unchanged) for the actual save — this only
+                                    // affects what's shown on screen while that happens,
+                                    // so there's no more delay/flash before the new
+                                    // photo appears.
+                                    const file = e.target.files && e.target.files[0];
+                                    if (!file) { this.localPreviewUrl = null; return; }
+                                    const reader = new FileReader();
+                                    reader.onload = (ev) => { this.localPreviewUrl = ev.target.result; };
+                                    reader.readAsDataURL(file);
+                                }
+                             }"
                              @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false"
                              class="relative border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
                              :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':'{{ ($photo||($existingPhotoUrl&&!$removePhoto))?'border-[#7a3f91] border-solid bg-white':'border-dashed border-gray-300 hover:border-[#7a3f91] hover:bg-white' }}'">
-                            {{-- Uploading overlay — sits directly on top of the preview
-                                 box the moment a file is picked, instead of only a small
-                                 text line below it, so the "something is happening" feel
-                                 is immediate and impossible to miss. --}}
-                            <div wire:loading wire:target="photo"
-                                 class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-xl"
-                                 style="background:rgba(255,255,255,.9);backdrop-filter:blur(1px);">
-                                <div class="eo-upload-spinner"></div>
-                                <p class="text-sm font-semibold text-[#7a3f91]">Uploading…</p>
-                            </div>
                             <label class="cursor-pointer block p-2.5">
-                                <input type="file" wire:model="photo" accept="image/*" class="hidden">
+                                <input type="file" wire:model="photo" accept="image/*" class="hidden" @change="onFileChosen($event)">
+                                {{-- Local (Alpine) preview shows the instant the file is
+                                     picked — takes priority over every server-rendered
+                                     branch below while present, so the chosen image is
+                                     always what's on screen, with zero delay and no flash
+                                     of the old/default photo in between. --}}
+                                <template x-if="localPreviewUrl">
+                                    <div class="flex flex-col items-center gap-1">
+                                        <div class="w-full rounded-lg overflow-hidden border border-purple-200 bg-white flex items-center justify-center" style="height:150px;">
+                                            <img :src="localPreviewUrl" class="w-full h-full object-contain">
+                                        </div>
+                                        <p class="text-sm font-semibold text-[#7a3f91]"><i class="fas fa-check-circle mr-1 text-xs"></i>New photo selected — click to change</p>
+                                    </div>
+                                </template>
+                                <template x-if="!localPreviewUrl">
+                                <div>
                                 @if($photo)
                                     {{-- User just selected a new photo — always visible immediately via temporaryUrl() --}}
                                     <div class="flex flex-col items-center gap-1">
@@ -2588,6 +2702,8 @@ select.tw-select-arrow {
                                         <p class="text-xs text-center font-medium" style="color:#111111;">JPG, PNG, WEBP — max 5 MB. Click photo to update.</p>
                                     </div>
                                 @endif
+                                </div>
+                                </template>
                             </label>
                         </div>
                         @if($existingPhotoUrl&&!$removePhoto&&!$photo)
@@ -2914,7 +3030,7 @@ select.tw-select-arrow {
                             <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                 Event Title <span class="text-red-500">*</span>
                             </label>
-                            <input wire:model.defer="title" type="text"
+                            <input wire:model.live.debounce.100ms="title" type="text"
                                    placeholder="e.g. PHILCST Alumni Homecoming 2026" maxlength="200"
                                    class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['title']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                             @if(isset($formErrors['title']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['title'] }}</p>@endif
@@ -2924,7 +3040,7 @@ select.tw-select-arrow {
                             <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1 flex-shrink-0">
                                 Description <span class="text-red-500">*</span>
                             </label>
-                            <textarea wire:model.defer="description"
+                            <textarea wire:model.live.debounce.100ms="description"
                                       placeholder="Describe the event, agenda, highlights…" maxlength="5000"
                                       class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
                                       style="min-height: 80px;"></textarea>
@@ -3052,7 +3168,7 @@ select.tw-select-arrow {
                                 <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Venue / Location <span class="text-red-500">*</span>
                                 </label>
-                                <input wire:model.defer="venue" type="text"
+                                <input wire:model.live.debounce.100ms="venue" type="text"
                                        placeholder="e.g. PHILCST Main Gym" maxlength="200"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($formErrors['venue']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue'] }}</p>@endif
@@ -3061,7 +3177,7 @@ select.tw-select-arrow {
                                 <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Full Address <span class="text-red-500">*</span>
                                 </label>
-                                <input wire:model.defer="venue_address" type="text"
+                                <input wire:model.live.debounce.100ms="venue_address" type="text"
                                        placeholder="e.g. Old Nalsian Road, Calasiao, Pangasinan" maxlength="200"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue_address']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($formErrors['venue_address']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue_address'] }}</p>@endif
@@ -3077,7 +3193,7 @@ select.tw-select-arrow {
                         <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-2.5 bg-white">
-                        <textarea wire:model.defer="notes"
+                        <textarea wire:model.live.debounce.100ms="notes"
                                   placeholder="Dress code, special instructions, what to bring, parking info…" maxlength="3000"
                                   class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
                                   style="height: 200px;"></textarea>
@@ -3124,7 +3240,7 @@ select.tw-select-arrow {
                             <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                 Phone <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                             </label>
-                            <input wire:model.defer="contact_phone" type="text"
+                            <input wire:model.live.debounce.100ms="contact_phone" type="text"
                                    placeholder="09XXXXXXXXX" maxlength="11"
                                    inputmode="numeric"
                                    onfocus="if(!this.value) this.value='09';"
@@ -3174,16 +3290,46 @@ select.tw-select-arrow {
                 {{-- Disabled while: (1) a photo is actively uploading,
                      (2) the submit/save request itself is in-flight, or
                      (3) any required (*) field is still empty — so it's
-                     physically impossible to submit an incomplete form. --}}
+                     physically impossible to submit an incomplete form.
+
+                     BUG FIX: previously this used wire:loading.attr="disabled"
+                     wire:target="...,photo". wire:loading.attr toggles the
+                     `disabled` attribute directly on the DOM node the moment
+                     the "photo" upload finishes, WITHOUT re-checking
+                     isFormValid — so once a photo upload completed it would
+                     rip the disabled attribute straight off, re-enabling the
+                     button even if required (*) fields were still empty.
+                     Fix: don't let wire:loading.attr touch "photo" for the
+                     disabled state. Instead we bind `disabled` via Alpine's
+                     :disabled, driven by a local isUploadingPhoto flag toggled
+                     by native livewire-upload-start/finish/cancel events,
+                     OR'd with the server-computed isFormValid — so every time
+                     loading ends, the *combined* condition is what's applied,
+                     never a blind "remove disabled". --}}
                 <button type="button" wire:click="requestSaveEvent"
-                        wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent,photo"
-                        @if(! $this->isFormValid) disabled @endif
+                        wire:target="requestSaveEvent,saveEvent"
+                        wire:loading.attr="disabled" wire:loading.target="requestSaveEvent,saveEvent"
+                        x-data="{ uploadingPhoto: false }"
+                        x-init="
+                            $el.addEventListener('livewire-upload-start', () => uploadingPhoto = true);
+                            $el.addEventListener('livewire-upload-finish', () => uploadingPhoto = false);
+                            $el.addEventListener('livewire-upload-error', () => uploadingPhoto = false);
+                            $el.addEventListener('livewire-upload-cancel', () => uploadingPhoto = false);
+                        "
+                        :disabled="uploadingPhoto || {{ $this->isFormValid ? 'false' : 'true' }}"
                         class="w-full px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
                                {{ $isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]' }}">
-                    <span wire:loading wire:target="requestSaveEvent,saveEvent,photo">
+                    {{-- Loading spinner/icon only reacts to the actual save
+                         request (requestSaveEvent/saveEvent) — NOT to
+                         "photo". While a photo is uploading, the button
+                         still gets disabled (see wire:target above), but
+                         its label stays the normal "Submit Event" / "Save
+                         Changes" text with no spinner or "Uploading
+                         photo…" state. --}}
+                    <span wire:loading wire:target="requestSaveEvent,saveEvent">
                         <i class="fas fa-spinner animate-spin text-sm"></i>
                     </span>
-                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent,photo">
+                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
                         @if($isResubmitting)
                             <i class="fas fa-rotate-right text-sm"></i>
                         @elseif($isEditing)
@@ -3192,10 +3338,7 @@ select.tw-select-arrow {
                             <i class="fas fa-paper-plane text-sm"></i>
                         @endif
                     </span>
-                    <span wire:loading wire:target="photo">
-                        Uploading photo…
-                    </span>
-                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent,photo">
+                    <span wire:loading.remove wire:target="requestSaveEvent,saveEvent">
                         @if($isResubmitting) Save &amp; Resubmit
                         @elseif($isEditing) Save Changes
                         @else Submit Event
@@ -3204,7 +3347,11 @@ select.tw-select-arrow {
                 </button>
                 @if(! $this->isFormValid)
                     <p class="text-xs text-center font-medium" style="color:#b45309;">
-                        <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable submit.
+                        @if($this->originalFormSnapshot !== null && ! $this->hasFormChanges)
+                            <i class="fas fa-circle-info mr-1"></i>No changes yet — edit a field to enable Save Changes.
+                        @else
+                            <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable submit.
+                        @endif
                     </p>
                 @endif
                 <button type="button" wire:click="closeFormModal"
@@ -3812,7 +3959,7 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
-                <p class="text-[10px] text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
+                <p class="text-xs text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
             </div>
         </div>
 

@@ -178,6 +178,14 @@ new class extends Component {
         $this->redirect(route('job.opportunities'), navigate: true);
     }
 
+    // ── Sends the alumni to their My Profile page (Alumni Information),
+    //    same destination as the profile-completion banner/links above —
+    //    just without forcing the Update Employment editor open. ──
+    public function goToProfile(): void
+    {
+        $this->redirect(route('alumni.information'), navigate: true);
+    }
+
     // ── Sends the alumni straight into the Update Employment editor on the
     //    Alumni Information page instead of just landing on the page. ──
     public function goToUpdateEmployment(): void
@@ -505,7 +513,11 @@ new class extends Component {
 
         {{-- ══ LEFT: Profile Card ═══ --}}
         <div class="dash-profile-col">
-            <div class="dash-profile-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
+            <button type="button" wire:click="goToProfile"
+               class="dash-stat-card dash-card-clickable dash-card-nav-btn dash-profile-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white
+                      hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
+                <div class="dash-card-spinner"><span></span><span></span><span></span></div>
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View My Profile</span>
 
                 {{-- Photo banner --}}
                 <div class="relative w-full overflow-hidden shrink-0 h-[300px] sm:h-[220px] bg-[#EDE0F5]">
@@ -570,7 +582,7 @@ new class extends Component {
                     <div class="flex-1"></div>
 
                 </div>
-            </div>
+            </button>
         </div>
 
         {{-- ══ RIGHT: Stat Cards — 2×2 grid (1-col on phone) ══════════════════════ --}}

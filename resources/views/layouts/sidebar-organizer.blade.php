@@ -269,24 +269,36 @@
             min-width: 18rem;
             background: #FFFFFF;
             border-right: 1px solid #E8E0F0;
-            transition: width 0.2s ease, min-width 0.2s ease;
+            transition: width 0.2s ease, min-width 0.2s ease, opacity 0.22s ease, transform 0.22s ease;
+            opacity: 1;
+            transform: translateX(0);
         }
 
         @media (min-width: 1024px) {
+            /* Previously this switched to position:fixed, which yanks the
+               sidebar OUT of the coord-app-shell flex row entirely. Since
+               <main> is flex-1, it would then instantly snap to fill the
+               freed space — a jarring layout jump every time a modal
+               (e.g. View Details) opened/closed. Instead we now collapse
+               the sidebar's own width/min-width to 0 while fading it out,
+               so it stays a flex item and <main> resizes smoothly via the
+               same width transition already declared on .coord-sidebar,
+               instead of jumping instantly. */
             .coord-sidebar.coord-sidebar-modal-hidden {
-                position: fixed !important;
+                width: 0 !important;
+                min-width: 0 !important;
                 opacity: 0;
-                transform: translateX(-16px);
                 pointer-events: none;
-                transition: opacity 0.22s ease, transform 0.22s ease;
+                border-right-width: 0;
             }
         }
         @media (max-width: 1023px) {
+            #coord-sidebar-aside {
+                transition: transform 0.3s ease, opacity 0.22s ease;
+            }
             #coord-sidebar-aside.coord-sidebar-modal-hidden {
                 opacity: 0;
-                transform: translateX(-100%);
                 pointer-events: none;
-                transition: opacity 0.22s ease, transform 0.22s ease;
             }
         }
 
@@ -1862,6 +1874,7 @@
         open: false,
         sidebarCollapsed: localStorage.getItem('coord_sidebar_collapsed') === '1',
         sidebarHiddenByModal: false,
+        sidebarWasOpenBeforeModal: false,
         loggingOut: false,
         navClickedRoute: null,
         toggleSidebar() {
@@ -1870,8 +1883,8 @@
     }"
     x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('coord_sidebar_collapsed', val ? '1' : '0'); })"
     @click="$store.coordNotifs && $store.coordNotifs.open && $store.coordNotifs.close()"
-    @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
-    @open-sidebar.window="sidebarHiddenByModal = false;"
+    @close-sidebar.window="sidebarWasOpenBeforeModal = open; sidebarHiddenByModal = true; open = false;"
+    @open-sidebar.window="sidebarHiddenByModal = false; open = sidebarWasOpenBeforeModal;"
     @@livewire:navigated.window="navClickedRoute = null; open = false;">
 
 <div class="coord-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">

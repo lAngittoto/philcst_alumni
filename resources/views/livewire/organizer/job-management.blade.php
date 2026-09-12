@@ -24,8 +24,17 @@ new class extends Component {
     public string $search       = '';
     public string $filterStatus = '';
     public string $filterType   = '';
+    public string $filterSource = '';
 
     public bool   $showPostModal                    = false;
+    // ── Bumped every time the Post modal opens, so the wire:ignore'd photo
+    //    picker below gets a fresh wire:key each open — without this, the
+    //    same Alpine node (and its `preview` state) survives across opens,
+    //    which could show a leftover/stale preview or the default photo
+    //    even right after a NEW photo was successfully uploaded and saved
+    //    on a previous open, since wire:ignore blocks Livewire from ever
+    //    resetting that node's local Alpine state on its own. ───────────
+    public int    $postModalOpenToken               = 0;
     public string $postJobTitle                     = '';
     public string $postOrgCategory                  = '';
     public string $postPartnerName                  = '';
@@ -71,6 +80,17 @@ new class extends Component {
     public array  $editErrors                       = [];
     public string $editCurrentImage                 = '';
 
+    /** Snapshot of every editable field's value the moment an existing job
+     *  is opened in the Edit modal (see openEditModal()) — used by
+     *  hasEditFormChanges()/isEditFormValid() below to keep "Save Changes"
+     *  disabled until something actually differs from what was loaded.
+     *  Editing a letter and then undoing it back to the original value
+     *  must land back on "no changes" / disabled, not stay enabled just
+     *  because a keystroke happened at some point. Null until an edit
+     *  modal is actually opened. */
+    public ?array $originalEditFormSnapshot = null;
+
+
     public bool   $showToggleModal = false;
     public ?int   $toggleJobId     = null;
     public string $toggleJobTitle  = '';
@@ -114,6 +134,30 @@ new class extends Component {
         ];
     }
 
+    /**
+     * Livewire hook — fires the instant $wire.upload('editJobImage', ...)
+     * actually finishes and Livewire sets $editJobImage server-side. Doing
+     * nothing here is fine; its purpose is purely diagnostic/defensive:
+     * if this NEVER fires after a photo is picked, the upload itself never
+     * reached the server (a client-side/JS problem), as opposed to the
+     * property being cleared afterward by something else (a server-side
+     * problem) — the two look identical from the Save Changes button
+     * alone ("no changes yet" / photo doesn't save), but this hook makes
+     * them distinguishable, and guarantees editJobImage is recognized by
+     * Livewire (and therefore by hasEditFormChanges()) the moment it's
+     * actually set, with no dependency on any other computed running first.
+     */
+    public function updatedEditJobImage(): void
+    {
+        $this->editRemoveImage = false;
+    }
+
+    /** Same as updatedEditJobImage() above, for the Post Job modal. */
+    public function updatedPostJobImage(): void
+    {
+        $this->postRemoveImage = false;
+    }
+
     private function guardAuth(): void
     {
         if (! auth()->check()) {
@@ -145,6 +189,41 @@ new class extends Component {
     private function sanitize(string $value): string
     {
         return strip_tags(trim($value));
+    }
+
+    /**
+     * Clears the alumni dashboard's cached "active jobs" count
+     * (dash_jobs_{college}, set in dashboard_blade.php, 120s TTL) for every
+     * college a job change could affect — otherwise a newly posted,
+     * activated, deactivated, edited, or deleted job posting doesn't show
+     * up on the alumni dashboard until the old cache naturally expires up
+     * to 2 minutes later, instead of updating live.
+     *
+     * $targetCollegeCsv is the job's target_college value (comma-separated
+     * college names, or null/empty for "all colleges"). When null/empty,
+     * the job is visible dashboard-wide, so every college's cache entry
+     * needs clearing, not just one.
+     */
+    private function clearDashboardJobCache(?string $targetCollegeCsv): void
+    {
+        $colleges = trim((string) $targetCollegeCsv) !== ''
+            ? array_filter(array_map('trim', explode(',', $targetCollegeCsv)))
+            : [];
+
+        if (empty($colleges)) {
+            // No specific target (or job removed from all targets) — this
+            // job is/was visible to every college's dashboard, so every
+            // college's cached count could now be wrong.
+            $colleges = \App\Models\Course::whereNotNull('college')
+                ->where('college', '!=', '')
+                ->distinct()
+                ->pluck('college')
+                ->toArray();
+        }
+
+        foreach ($colleges as $college) {
+            Cache::forget("dash_jobs_{$college}");
+        }
     }
 
     /**
@@ -290,7 +369,16 @@ new class extends Component {
      */
     private function storeJobImage($imageFile, string $existingPath = ''): ?string
     {
-        if ($imageFile instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
+        // Check against the common parent class (Illuminate\Http\UploadedFile)
+        // instead of one specific Livewire namespace. Livewire v2's
+        // Livewire\TemporaryUploadedFile and v3's
+        // Livewire\Features\SupportFileUploads\TemporaryUploadedFile both
+        // extend Illuminate\Http\UploadedFile, but a strict instanceof
+        // against only the v3 path silently failed on anything else,
+        // treating every real upload as "no file provided" — which is
+        // exactly why an uploaded photo always fell back to the default
+        // no matter what, on both Post and Edit.
+        if ($imageFile instanceof \Illuminate\Http\UploadedFile) {
             if (! $imageFile->exists()) {
                 // The client told us the upload finished (handleFile()'s
                 // $wire.upload success callback fired, unlocking Save),
@@ -434,8 +522,14 @@ new class extends Component {
                   ->orWhere(function ($sub) use ($orgCollege) {
                       $sub->whereNull('organizer_id')
                           ->where(function ($inner) use ($orgCollege) {
+                              // target_college can be a comma-separated list
+                              // (job targets several colleges at once), so an
+                              // exact-equality match misses any job where
+                              // this college isn't the ONLY one selected.
+                              // FIND_IN_SET matches it wherever it sits in
+                              // the list.
                               $inner->whereNull('target_college')
-                                    ->orWhere('target_college', $orgCollege);
+                                    ->orWhereRaw('FIND_IN_SET(?, target_college)', [$orgCollege]);
                           });
                   });
             })
@@ -463,8 +557,12 @@ new class extends Component {
                 ->orWhere(function ($sub) use ($orgCollege) {
                     $sub->whereNull('organizer_id')
                         ->where(function ($inner) use ($orgCollege) {
+                            // Same FIND_IN_SET fix as above — target_college
+                            // may hold several comma-separated colleges, not
+                            // just this one, so exact equality would hide
+                            // jobs this college was actually targeted for.
                             $inner->whereNull('target_college')
-                                  ->orWhere('target_college', $orgCollege);
+                                  ->orWhereRaw('FIND_IN_SET(?, target_college)', [$orgCollege]);
                         });
                 });
         });
@@ -490,6 +588,16 @@ new class extends Component {
 
         if ($this->filterType !== '') {
             $q->where('employment_type', $this->filterType);
+        }
+
+        // Post-source filter — "mine" = this coordinator's own posts
+        // (organizer_id = their org id), "director" = Alumni Director
+        // posts (always NULL organizer_id, since only organizer accounts
+        // get one).
+        if ($this->filterSource === 'mine') {
+            $q->where('organizer_id', $org->id);
+        } elseif ($this->filterSource === 'director') {
+            $q->whereNull('organizer_id');
         }
 
         $q->orderBy('updated_at', 'desc');
@@ -544,6 +652,127 @@ new class extends Component {
         );
     }
 
+    /**
+     * ── Client-side "can submit" gate — Post Job modal ──
+     * Mirrors the required-field checks from savePost() so the Post Job
+     * button can be disabled the instant something required is still
+     * empty — no need to click Post first to find out. Does NOT duplicate
+     * the deeper server-side checks (duplicate title, no-verified-alumni,
+     * image mime/size, etc.) — those still run in savePost() when clicked.
+     */
+    #[Computed]
+    public function isPostFormValid(): bool
+    {
+        if (trim($this->postJobTitle) === '') return false;
+
+        if ($this->postOrgCategory === '') return false;
+        if ($this->postOrgCategory === 'partner') {
+            if (trim($this->postPartnerName) === '') return false;
+            if (trim($this->postPartnerType) === '') return false;
+            if (trim($this->postLocation) === '')    return false;
+        } elseif ($this->postOrgCategory === 'custom') {
+            if (trim($this->postCustomName) === '') return false;
+            if (trim($this->postCustomType) === '') return false;
+            if (trim($this->postLocation) === '')   return false;
+        }
+        // 'philcst' category uses $philcstName/$philcstLocation, always
+        // present once selected — nothing further required from the user.
+
+        if (trim($this->postEmpType) === '')  return false;
+        if (trim($this->postExpLevel) === '') return false;
+
+        if (trim($this->postSalary) !== '' && !preg_match('/\d/', $this->postSalary)) {
+            return false;
+        }
+
+        if (trim($this->postDeadline) === '') return false;
+
+        if (trim($this->postDescription) === '')             return false;
+        if (trim($this->postQualifications) === '')          return false;
+        if (trim($this->postApplicationInstructions) === '') return false;
+
+        if (empty($this->postTargetColleges)) return false;
+
+        return true;
+    }
+
+    /** Current values of every field the organizer can edit on an existing
+     *  job, in a stable shape so it can be compared directly against
+     *  originalEditFormSnapshot by hasEditFormChanges(). Keep in sync with
+     *  whatever openEditModal() loads. */
+    private function buildEditFormSnapshot(): array
+    {
+        $targetColleges = $this->editTargetColleges;
+        sort($targetColleges);
+
+        return [
+            'editJobTitle'                => $this->editJobTitle,
+            'editCompany'                 => $this->editCompany,
+            'editCompanyType'             => $this->editCompanyType,
+            'editLocation'                => $this->editLocation,
+            'editEmpType'                 => $this->editEmpType,
+            'editExpLevel'                => $this->editExpLevel,
+            'editSalary'                  => $this->editSalary,
+            'editDeadline'                => $this->editDeadline,
+            'editDescription'             => $this->editDescription,
+            'editQualifications'          => $this->editQualifications,
+            'editApplicationInstructions' => $this->editApplicationInstructions,
+            'editTargetColleges'          => $targetColleges,
+            'editRemoveImage'             => $this->editRemoveImage,
+            'hasNewImage'                 => $this->editJobImage !== null,
+        ];
+    }
+
+    /**
+     * ── "Nothing actually changed yet" gate — Edit Job modal ──
+     * True when there IS an original snapshot (i.e. an edit modal is open)
+     * AND the current form values are identical to it — so Save Changes
+     * should stay disabled. Comparing editTargetColleges order-insensitively
+     * so re-picking the same colleges in a different order isn't a "change".
+     */
+    #[Computed]
+    public function hasEditFormChanges(): bool
+    {
+        if ($this->originalEditFormSnapshot === null) {
+            return true; // no edit modal open yet — never gate on this
+        }
+        return $this->buildEditFormSnapshot() !== $this->originalEditFormSnapshot;
+    }
+
+    /**
+     * ── Client-side "can save" gate — Edit Job modal ──
+     * Mirrors the required-field checks from saveEditJob(), PLUS stays
+     * disabled while nothing has actually changed from what was loaded
+     * (hasEditFormChanges). Typing a letter then deleting it back to the
+     * original value must land back on disabled, not stay stuck enabled.
+     */
+    #[Computed]
+    public function isEditFormValid(): bool
+    {
+        if (trim($this->editJobTitle) === '')    return false;
+        if (trim($this->editCompany) === '')     return false;
+        if (trim($this->editCompanyType) === '') return false;
+        if (trim($this->editLocation) === '')    return false;
+        if (trim($this->editEmpType) === '')     return false;
+        if (trim($this->editExpLevel) === '')    return false;
+
+        if (trim($this->editSalary) !== '' && !preg_match('/\d/', $this->editSalary)) {
+            return false;
+        }
+
+        if (trim($this->editDeadline) === '') return false;
+
+        if (trim($this->editDescription) === '')             return false;
+        if (trim($this->editQualifications) === '')          return false;
+        if (trim($this->editApplicationInstructions) === '') return false;
+
+        if (empty($this->editTargetColleges)) return false;
+
+        if (! $this->hasEditFormChanges) return false;
+
+        return true;
+    }
+
     // ── Live-refreshed copy of the job currently open in the Edit modal.
     //    Used so that after Activate/Deactivate (which happens while the
     //    modal stays open) the "editMode" state and header controls update
@@ -557,7 +786,7 @@ new class extends Component {
 
     public function resetFilters(): void
     {
-        $this->search = $this->filterStatus = $this->filterType = '';
+        $this->search = $this->filterStatus = $this->filterType = $this->filterSource = '';
         $this->resetPage();
     }
 
@@ -567,6 +796,7 @@ public function openPostModal(): void
     $this->resetPostFields();
     $this->postTargetColleges = !empty($this->organizerCollege) ? [$this->organizerCollege] : [];
     $this->showPostModal      = true;
+    $this->postModalOpenToken++;
     $this->dispatch('close-sidebar');
 }
 
@@ -716,6 +946,8 @@ public function closePostModal(): void
             'last_action'              => 'created',
         ]);
 
+        $this->clearDashboardJobCache($job->target_college);
+
         $this->logAudit(
             action:       'created',
             subjectLabel: $job->job_title,
@@ -810,6 +1042,7 @@ public function viewJob(int $id): void
         $this->editRemoveImage  = false;
         $this->editErrors       = [];
         $this->showEditModal    = true;
+        $this->originalEditFormSnapshot = $this->buildEditFormSnapshot();
         $this->dispatch('close-sidebar');
         return;
     }
@@ -836,6 +1069,7 @@ public function viewJob(int $id): void
     $this->editRemoveImage  = false;
     $this->editErrors       = [];
     $this->showEditModal    = true;
+    $this->originalEditFormSnapshot = $this->buildEditFormSnapshot();
     $this->dispatch('close-sidebar');
 }
    public function closeViewModal(): void
@@ -871,6 +1105,7 @@ public function openEditModal(int $id): void
     $this->editErrors       = [];
     $this->showViewModal    = false;
     $this->showEditModal    = true;
+    $this->originalEditFormSnapshot = $this->buildEditFormSnapshot();
     $this->dispatch('close-sidebar');
 }
 
@@ -1024,6 +1259,8 @@ public function openEditModal(int $id): void
             'last_action'              => 'updated',
         ]);
 
+        $this->clearDashboardJobCache($job->target_college);
+
         $this->logAudit(
             action:       'updated',
             subjectLabel: $this->sanitize($this->editJobTitle),
@@ -1076,6 +1313,7 @@ public function openEditModal(int $id): void
         $this->editCurrentImage = '';
         $this->editJobImage     = null;
         $this->editRemoveImage  = false;
+        $this->originalEditFormSnapshot = null;
     }
 
     public function confirmToggleStatus(int $id): void
@@ -1123,6 +1361,8 @@ public function openEditModal(int $id): void
                 'updated_by_role' => 'organizer',
                 'last_action'     => $newStatus === 'ACTIVE' ? 'activated' : 'deactivated',
             ]);
+
+            $this->clearDashboardJobCache($job->target_college);
 
             $this->logAudit(
                 action:       $newStatus === 'ACTIVE' ? 'activated' : 'deactivated',
@@ -1202,6 +1442,8 @@ public function openEditModal(int $id): void
             'updated_by'      => auth()->user()->name,
             'updated_by_role' => 'organizer',
         ]);
+
+        $this->clearDashboardJobCache($job->target_college);
 
         $this->logAudit(
             action:       'deleted',
@@ -1913,7 +2155,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 <div id="eo-modal-tip" wire:ignore></div>
 
 {{-- ── FLASH TOAST ── --}}
-<div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
+<div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,7000);}}"
      @flash-message.window="display($event.detail.type,$event.detail.message)"
      x-show="show" x-cloak
      x-transition:enter="transition ease-out duration-300"
@@ -1949,7 +2191,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <i class="fas fa-briefcase text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-2xl font-bold text-[#333333] leading-tight">Job Management</h1>
+                <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Job Management</h1>
                 <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
                     Post and manage job listings for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
@@ -1988,7 +2230,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
-             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType">
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterSource">
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                 Filters
             </div>
@@ -2014,6 +2256,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                 @endforeach
             </select>
+            <select wire:model.live="filterSource"
+                    class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                <option value="">All Job Posts</option>
+                <option value="mine">My Job Posts</option>
+                <option value="director">Alumni Director</option>
+            </select>
 
             @if($filterStatus)
             @php
@@ -2038,10 +2286,22 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </span>
             @endif
 
+            @if($filterSource === 'mine')
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-teal-50 border-teal-300 text-teal-800">
+                <i class="fas fa-filter text-[9px]"></i>My Job Posts
+                <button wire:click="$set('filterSource', '')" type="button" class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer"><i class="fas fa-xmark text-[10px]"></i></button>
+            </span>
+            @elseif($filterSource === 'director')
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
+                <i class="fas fa-filter text-[9px]"></i>Alumni Director
+                <button wire:click="$set('filterSource', '')" type="button" class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer"><i class="fas fa-xmark text-[10px]"></i></button>
+            </span>
+            @endif
+
             {{-- Reset — pushed to the far right (ml-auto), and disabled
                  whenever no filter is active (search empty, status unset,
                  type unset) so it can't be clicked with nothing to reset. --}}
-            @php $jmHasActiveFilter = ($search !== '') || ($filterStatus !== '') || ($filterType !== ''); @endphp
+            @php $jmHasActiveFilter = ($search !== '') || ($filterStatus !== '') || ($filterType !== '') || ($filterSource !== ''); @endphp
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
@@ -2066,13 +2326,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                  same pattern as the alumni-facing yearbook, instead of only
                  the thin progress bar in the filter strip. --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterType,filterSource,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             <div id="jm-table-scroll"
                  class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterSource,resetFilters,previousPage,nextPage,gotoPage">
 
             @if($this->jobPostings->count() > 0)
 
@@ -2182,17 +2442,17 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 </div>
                 <div>
                     <p class="font-semibold text-base text-[#333333]">
-                        @if($search || $filterStatus || $filterType) No jobs match your filters
+                        @if($search || $filterStatus || $filterType || $filterSource) No jobs match your filters
                         @else No job postings yet
                         @endif
                     </p>
                     <p class="text-sm mt-1 text-[#555555]">
-                        @if($search || $filterStatus || $filterType) Try clearing your filters to see all postings.
+                        @if($search || $filterStatus || $filterType || $filterSource) Try clearing your filters to see all postings.
                         @else Click the <strong>+</strong> button to post your first job listing.
                         @endif
                     </p>
                 </div>
-                @if($search || $filterStatus || $filterType)
+                @if($search || $filterStatus || $filterType || $filterSource)
                     <button wire:click="resetFilters"
                             class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                         <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
@@ -2221,7 +2481,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
                 of <strong class="text-white font-bold">{{ $total }}</strong>
                 job{{ $total !== 1 ? 's' : '' }}
-                @if($filterStatus || $search || $filterType)<span class="text-white/50 text-xs ml-1">(filtered)</span>@endif
+                @if($filterStatus || $search || $filterType || $filterSource)<span class="text-white/50 text-xs ml-1">(filtered)</span>@endif
             </p>
 
             <div class="flex items-center gap-1 flex-wrap py-2">
@@ -2380,6 +2640,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                     <div class="p-3.5">
                         <div wire:ignore
+                             wire:key="post-photo-picker-{{ $postModalOpenToken }}"
                              x-data="{
                                  preview: null,
                                  uploading: false,
@@ -2407,18 +2668,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                          this.uploading = false;
                                          this.uploadError = true;
                                          Alpine.store('eoPostPhoto').uploading = false;
+                                         $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload timed out. Please try again.' });
                                      }, 30000);
                                      $wire.upload('postJobImage', f,
                                          () => {
                                              clearTimeout(this._eoUploadTimeout);
                                              this.uploading = false;
                                              Alpine.store('eoPostPhoto').uploading = false;
+                                             $wire.dispatch('flash-message', { type: 'success', message: 'Photo uploaded successfully.' });
                                          },
                                          () => {
                                              clearTimeout(this._eoUploadTimeout);
                                              this.uploading = false;
                                              this.uploadError = true;
                                              Alpine.store('eoPostPhoto').uploading = false;
+                                             $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload failed. Please try again.' });
                                          }
                                      );
                                  },
@@ -2504,23 +2768,23 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
 
                         @if($postOrgCategory === 'partner')
-                        <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v,false)},syncT(v){$wire.set('postPartnerType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
+                        <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v)},syncT(v){$wire.set('postPartnerType',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
-                                    <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Real Madrid" maxlength="150"
+                                    <input x-model="pName" @input.debounce.100ms="syncN(pName)" type="text" placeholder="e.g. Real Madrid" maxlength="150"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postPartnerName']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
-                                    <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Information Technology" maxlength="100"
+                                    <input x-model="pType" @input.debounce.100ms="syncT(pType)" type="text" placeholder="e.g. Information Technology" maxlength="100"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postPartnerType']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Location <span class="text-red-500">*</span></label>
-                                    <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120"
+                                    <input x-model="loc" @input.debounce.100ms="syncL(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postLocation']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postLocation'] }}</p>@endif
                                 </div>
@@ -2529,23 +2793,23 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
 
                         @if($postOrgCategory === 'custom')
-                        <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v,false)},syncT(v){$wire.set('postCustomType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
+                        <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v)},syncT(v){$wire.set('postCustomType',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Company Name <span class="text-red-500">*</span></label>
-                                    <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Real Madrid" maxlength="150"
+                                    <input x-model="cName" @input.debounce.100ms="syncN(cName)" type="text" placeholder="e.g. Real Madrid" maxlength="150"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postCustomName']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Industry <span class="text-red-500">*</span></label>
-                                    <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Information Technology" maxlength="100"
+                                    <input x-model="cType" @input.debounce.100ms="syncT(cType)" type="text" placeholder="e.g. Information Technology" maxlength="100"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postCustomType']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postCustomType'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Location <span class="text-red-500">*</span></label>
-                                    <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
+                                    <input x-model="loc" @input.debounce.100ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postLocation']) ? 'border-red-300 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-sm"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postLocation'] }}</p>@endif
                                 </div>
@@ -2573,14 +2837,14 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     <div class="p-3.5 space-y-3">
                         <div>
                             <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title <span class="text-red-500">*</span></label>
-                            <input wire:model.defer="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
+                            <input wire:model.live.debounce.100ms="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
                                    class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                             @if(isset($postErrors['postJobTitle']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div>
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type <span class="text-red-500">*</span></label>
-                                <select wire:model.defer="postEmpType"
+                                <select wire:model.live="postEmpType"
                                         class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($postErrors['postEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     <option value="">Select Type</option>
                                     @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
@@ -2591,7 +2855,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             </div>
                             <div>
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level <span class="text-red-500">*</span></label>
-                                <select wire:model.defer="postExpLevel"
+                                <select wire:model.live="postExpLevel"
                                         class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($postErrors['postExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     <option value="">Select Level</option>
                                     @foreach($this->orderedExpLevels as $lvl)
@@ -2606,7 +2870,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Salary <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                                 </label>
-                                <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000 per month" maxlength="100"
+                                <input wire:model.live.debounce.100ms="postSalary" type="text" placeholder="e.g. ₱25,000 per month" maxlength="100"
                                        oninput="window.__eoFormatSalaryInput(this)"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($postErrors['postSalary']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postSalary'] }}</p>@endif
@@ -2615,7 +2879,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Deadline <span class="text-red-500">*</span>
                                 </label>
-                                <input wire:model.defer="postDeadline" type="date"
+                                <input wire:model.live="postDeadline" type="date"
                                        min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
                                        oninput="window.__eoGuardDeadlineInput(this)"
                                        onchange="window.__eoGuardDeadlineInput(this)"
@@ -2632,7 +2896,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         Description <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 flex flex-col flex-1 min-h-0">
-                        <textarea wire:model.defer="postDescription"
+                        <textarea wire:model.live.debounce.100ms="postDescription"
                                   placeholder="Describe the role, responsibilities, and what the candidate will be doing…" maxlength="5000"
                                   class="w-full flex-1 min-h-0 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"></textarea>
                         @if(isset($postErrors['postDescription']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postDescription'] }}</p>@endif
@@ -2644,7 +2908,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         Qualifications <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 flex flex-col flex-1 min-h-0">
-                        <textarea wire:model.defer="postQualifications"
+                        <textarea wire:model.live.debounce.100ms="postQualifications"
                                   placeholder="e.g. Bachelor's degree in a relevant field, at least 1 year experience…" maxlength="3000"
                                   class="w-full flex-1 min-h-0 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"></textarea>
                         @if(isset($postErrors['postQualifications']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postQualifications'] }}</p>@endif
@@ -2656,7 +2920,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         How to Apply <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 flex flex-col flex-1 min-h-0">
-                        <textarea wire:model.defer="postApplicationInstructions"
+                        <textarea wire:model.live.debounce.100ms="postApplicationInstructions"
                                   placeholder="e.g. Send your resume to hr@company.com with subject: Application – [Position]" maxlength="3000"
                                   class="w-full flex-1 min-h-0 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"></textarea>
                         @if(isset($postErrors['postApplicationInstructions']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postApplicationInstructions'] }}</p>@endif
@@ -2728,10 +2992,19 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                      clicking Post before postJobImage is populated server-side is
                      blocked without the button text jumping around. Tracked via
                      Alpine.store('eoPostPhoto') (reactive — mirrors eoEditPhoto in
-                     the Edit modal below). --}}
+                     the Edit modal below).
+
+                     BUG FIX: photoUploading was defined here but never actually
+                     wired to :disabled — the button only disabled while
+                     wire:loading targeted "savePost" itself, so a photo still
+                     mid-upload never blocked the click. Also now disabled
+                     whenever a required (*) field is still empty
+                     (isPostFormValid), same pattern as Event Management's
+                     Submit Event button. --}}
                 <button type="button" wire:click="savePost"
                         wire:loading.attr="disabled" wire:target="savePost"
-                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
+                        :disabled="photoUploading || {{ $this->isPostFormValid ? 'false' : 'true' }}"
+                        class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait disabled:pointer-events-none">
                     <span wire:loading.remove wire:target="savePost" class="flex items-center justify-center gap-2">
                         <i class="fas fa-paper-plane text-sm"></i>
                         Post Job
@@ -2741,6 +3014,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         Post Job
                     </span>
                 </button>
+                @if(! $this->isPostFormValid)
+                    <p class="text-xs text-center font-medium" style="color:#b45309;">
+                        <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable posting.
+                    </p>
+                @endif
                 <button type="button" wire:click="closePostModal"
                         wire:loading.attr="disabled" wire:target="savePost,closePostModal"
                         class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
@@ -2976,7 +3254,14 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                     <div class="p-3">
                         <div x-show="!editMode">
-                            @php $editViewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null); @endphp
+                            {{-- Cache-bust with updated_at so the browser always fetches the
+                                 latest file after a photo replace — without this, browsers can
+                                 keep showing a previously-cached image at the same-looking URL
+                                 right after Save, making a successful replace look like nothing
+                                 changed. --}}
+                            @php $editViewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null);
+                                 $editViewImgUrl .= (str_contains($editViewImgUrl, '?') ? '&' : '?') . 'v=' . $editingJob->updated_at?->timestamp;
+                            @endphp
                             <div class="rounded-xl overflow-hidden" style="height:110px; background:#f3f0f6;">
                                 <img src="{{ $editViewImgUrl }}" alt="{{ $editingJob->job_title }}"
                                      class="w-full h-full object-contain"
@@ -2988,10 +3273,23 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         </div>
 
                         <div x-show="editMode" x-cloak>
+                        {{-- wire:key busts this wire:ignore'd node whenever editingJobId
+                             OR editCurrentImage changes — e.g. right after Save Changes
+                             persists a brand-new photo and the modal is reopened for the
+                             same or a different job. Without a key tied to the actual
+                             image path, Livewire can reuse this exact DOM node across
+                             opens, and since wire:ignore blocks it from ever being
+                             morphed/updated, the Alpine x-data below keeps whatever
+                             "existing" URL it captured the very FIRST time it mounted —
+                             showing an old/previous photo (not even the freshly-saved
+                             one) even though the new file is correctly on disk and in
+                             the DB. Changing the key forces a real destroy+recreate, so
+                             "existing" is always re-evaluated fresh from $editCurrentImage. --}}
                         <div wire:ignore
+                             wire:key="edit-photo-picker-{{ $editingJobId }}-{{ $editCurrentImage }}"
                              x-data="{
                                  preview: null,
-                                 existing: @js($editCurrentImage ? Storage::url($editCurrentImage) : ''),
+                                 existing: @js($editCurrentImage ? Storage::url($editCurrentImage) . '?v=' . now()->timestamp : ''),
                                  defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
                                  removed: false,
                                  uploading: false,
@@ -3020,6 +3318,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                          this.uploading = false;
                                          this.uploadError = true;
                                          Alpine.store('eoEditPhoto').uploading = false;
+                                         $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload timed out. Please try again.' });
                                      }, 30000);
                                      // FIX: both $wire.upload() callbacks used to touch
                                      // this.$refs.fileInput directly (via clearNew()), and one
@@ -3037,12 +3336,23 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                              clearTimeout(this._eoUploadTimeout);
                                              this.uploading = false;
                                              Alpine.store('eoEditPhoto').uploading = false;
+                                             $wire.dispatch('flash-message', { type: 'success', message: 'Photo uploaded successfully.' });
+                                             // Confirms the upload actually finished AND that
+                                             // Livewire's own success callback fired — if
+                                             // Save Changes still stays disabled/no changes
+                                             // after this logs, the break is server-side
+                                             // (check updatedEditJobImage() in the PHP class);
+                                             // if this NEVER logs after picking a file, the
+                                             // break is client-side (upload never completed).
+                                             console.debug('[job-photo] editJobImage upload finished');
                                          },
                                          () => {
                                              clearTimeout(this._eoUploadTimeout);
                                              this.uploading = false;
                                              this.uploadError = true;
                                              Alpine.store('eoEditPhoto').uploading = false;
+                                             $wire.dispatch('flash-message', { type: 'error', message: 'Photo upload failed. Please try again.' });
+                                             console.debug('[job-photo] editJobImage upload FAILED');
                                          }
                                      );
                                  },
@@ -3051,7 +3361,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                      this.uploading = false;
                                      this.uploadError = false;
                                      Alpine.store('eoEditPhoto').uploading = false;
-                                     if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+                                     // FIX: was $refs.fileInput, ambiguous now that each
+                                     // input has its own unique ref (see markup below) —
+                                     // clear whichever one(s) actually exist.
+                                     if (this.$refs.fileInputDefault) this.$refs.fileInputDefault.value = '';
+                                     if (this.$refs.fileInputReplace) this.$refs.fileInputReplace.value = '';
                                      $wire.set('editJobImage', null);
                                  },
                                  removeExisting() {
@@ -3062,7 +3376,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                      this.uploadError = false;
                                      Alpine.store('eoEditPhoto').uploading = false;
                                      $wire.set('editRemoveImage', true);
-                                     if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+                                     if (this.$refs.fileInputDefault) this.$refs.fileInputDefault.value = '';
+                                     if (this.$refs.fileInputReplace) this.$refs.fileInputReplace.value = '';
                                      $wire.set('editJobImage', null);
                                  }
                              }">
@@ -3101,7 +3416,19 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                                 <p class="font-semibold text-xs text-[#333333]">Upload photo</p>
                                                 <p class="text-[10px] text-[#555555]">JPG, PNG, WebP · max 2MB</p>
                                             </span>
-                                            <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
+                                            {{-- FIX: this input previously shared x-ref="fileInput"
+                                                 with the "Replace photo" input below (line ~3279).
+                                                 Both templates can be TRUE at the same time is not
+                                                 actually possible here (they're mutually exclusive
+                                                 x-if branches), but Alpine's $refs is populated from
+                                                 EVERY x-ref in the component regardless of which
+                                                 x-if branch is currently mounted, and a stale/duplicate
+                                                 ref from a just-destroyed template node has previously
+                                                 caused $refs.fileInput to resolve to the wrong (or a
+                                                 detached) element, silently breaking clearNew()/
+                                                 removeExisting() mid-callback. Unique refs per input
+                                                 removes the ambiguity entirely. --}}
+                                            <input x-ref="fileInputDefault" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
                                                    @change="handleFile($event)">
                                         </label>
                                         <span class="absolute bottom-1.5 left-1.5 text-[10px] font-bold bg-gray-600 text-white px-1.5 py-0.5 rounded-full">DEFAULT</span>
@@ -3123,10 +3450,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             </template>
 
                             <template x-if="!preview && existing && !removed">
-                                <label class="flex items-center gap-1.5 mt-1.5 cursor-pointer text-[10px] text-[#7a3f91] font-semibold hover:underline">
-                                    <i class="fas fa-arrow-up-from-bracket text-[9px]"></i>
+                                <label class="flex items-center gap-1.5 mt-1.5 cursor-pointer text-sm text-[#7a3f91] font-semibold hover:underline">
+                                    <i class="fas fa-arrow-up-from-bracket text-xs"></i>
                                     Replace photo
-                                    <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
+                                    <input x-ref="fileInputReplace" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
                                            @change="handleFile($event)">
                                 </label>
                             </template>
@@ -3174,7 +3501,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Company Name <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm">{{ $editCompany ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
-                                <input wire:model.defer="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif
+                                <input wire:model.live.debounce.100ms="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
                                 @if(isset($editErrors['editCompany']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
                             </div>
@@ -3183,7 +3510,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Location <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm">{{ $editLocation ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
-                                <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif
+                                <input wire:model.live.debounce.100ms="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
                                 @if(isset($editErrors['editLocation']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
                             </div>
@@ -3207,7 +3534,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                             <div x-show="!editMode" class="view-field-display text-sm font-semibold">{{ $editJobTitle ?: '—' }}</div>
                             <div x-show="editMode" x-cloak>
-                                <input wire:model.defer="editJobTitle" type="text" maxlength="200"
+                                <input wire:model.live.debounce.100ms="editJobTitle" type="text" maxlength="200"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($editErrors['editJobTitle']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
                             </div>
@@ -3217,7 +3544,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                                 <div x-show="!editMode" class="view-field-display text-sm">{{ $editEmpType ?: '—' }}</div>
                                 <div x-show="editMode" x-cloak>
-                                    <select wire:model.defer="editEmpType"
+                                    <select wire:model.live="editEmpType"
                                             class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                         <option value="">Select Type</option>
                                         @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
@@ -3231,7 +3558,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
                                 <div x-show="!editMode" class="view-field-display text-sm">{{ $editExpLevel ?: '—' }}</div>
                                 <div x-show="editMode" x-cloak>
-                                    <select wire:model.defer="editExpLevel"
+                                    <select wire:model.live="editExpLevel"
                                             class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                         <option value="">Select Level</option>
                                         @foreach($this->orderedExpLevels as $lvl)
@@ -3249,7 +3576,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 </label>
                                 <div x-show="!editMode" class="view-field-display text-sm">{{ $editSalary ?: 'Not disclosed' }}</div>
                                 <div x-show="editMode" x-cloak>
-                                    <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25,000 per month"
+                                    <input wire:model.live.debounce.100ms="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25,000 per month"
                                            oninput="window.__eoFormatSalaryInput(this)"
                                            class="w-full px-3 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($editErrors['editSalary']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $editErrors['editSalary'] }}</p>@endif
@@ -3266,7 +3593,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                     @endif
                                 </div>
                                 <div x-show="editMode" x-cloak>
-                                    <input wire:model.defer="editDeadline" type="date"
+                                    <input wire:model.live="editDeadline" type="date"
                                            min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
                                            oninput="window.__eoGuardDeadlineInput(this)"
                                            onchange="window.__eoGuardDeadlineInput(this)"
@@ -3287,7 +3614,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div x-show="!editMode"
                              class="view-content-box flex-1 min-h-0 px-2.5 py-1.5 rounded-xl text-xs text-[#333333] leading-snug whitespace-pre-wrap overflow-y-auto scroll-c">{{ $editDescription ?: 'No description provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
-                                  wire:model.defer="editDescription"
+                                  wire:model.live.debounce.100ms="editDescription"
                                   class="w-full flex-1 min-h-0 px-2.5 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
                                   placeholder="Describe the role, responsibilities…" maxlength="5000"></textarea>
                         @if(isset($editErrors['editDescription']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDescription'] }}</p>@endif
@@ -3302,7 +3629,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div x-show="!editMode"
                              class="view-content-box flex-1 min-h-0 px-2.5 py-1.5 rounded-xl text-xs text-[#333333] leading-snug whitespace-pre-wrap overflow-y-auto scroll-c">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
                         <textarea x-show="editMode" x-cloak
-                                  wire:model.defer="editQualifications"
+                                  wire:model.live.debounce.100ms="editQualifications"
                                   class="w-full flex-1 min-h-0 px-2.5 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
                                   placeholder="e.g. Bachelor's degree in relevant field…" maxlength="3000"></textarea>
                         @if(isset($editErrors['editQualifications']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editQualifications'] }}</p>@endif
@@ -3317,7 +3644,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div x-show="!editMode"
                              class="view-content-box flex-1 min-h-0 px-2.5 py-1.5 rounded-xl text-xs text-[#333333] leading-snug whitespace-pre-wrap overflow-y-auto scroll-c">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
                         <textarea x-show="editMode" x-cloak
-                                  wire:model.defer="editApplicationInstructions"
+                                  wire:model.live.debounce.100ms="editApplicationInstructions"
                                   class="w-full flex-1 min-h-0 px-2.5 py-1.5 border-[1.5px] rounded-xl text-xs bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
                                   placeholder="e.g. Send your resume to hr@company.com…" maxlength="3000"></textarea>
                         @if(isset($editErrors['editApplicationInstructions']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs flex-shrink-0"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editApplicationInstructions'] }}</p>@endif
@@ -3394,7 +3721,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endphp
                         <div>
                             <p class="text-[10px] font-semibold uppercase tracking-wider text-[#555555]">Last Updated</p>
-                            <p class="text-sm text-[#333333]">{{ $actionLabel }} {{ \Carbon\Carbon::parse($editingJob->updated_at)->setTimezone('Asia/Manila')->format('g:i A') }}</p>
+                            <p class="text-sm text-[#333333]">{{ $actionLabel }} {{ \Carbon\Carbon::parse($editingJob->updated_at)->setTimezone('Asia/Manila')->format('m/d/Y g:i A') }}</p>
                         </div>
                         @endif
                         <div>
@@ -3430,10 +3757,19 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                          blocked without the button text jumping around. Tracked via
                          Alpine.store('eoEditPhoto') (reactive — unlike a plain window
                          global, every reader here re-renders correctly when the store
-                         value flips). --}}
+                         value flips).
+
+                         BUG FIX: photoUploading was defined here but never actually
+                         wired to :disabled. Also now disabled whenever a required
+                         (*) field is empty OR nothing has actually changed yet from
+                         what was loaded (isEditFormValid / hasEditFormChanges) — same
+                         "no changes yet" pattern as Event Management's Save Changes
+                         button: edit a letter then undo it back to the original value
+                         and this goes back to disabled. --}}
                     <button type="button" wire:click="saveEditJob"
                             wire:loading.attr="disabled" wire:target="saveEditJob"
-                            class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait">
+                            :disabled="photoUploading || {{ $this->isEditFormValid ? 'false' : 'true' }}"
+                            class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait disabled:pointer-events-none">
                         <span wire:loading.remove wire:target="saveEditJob" class="flex items-center justify-center gap-2">
                             <i class="fas fa-floppy-disk text-xs"></i>
                             Save Changes
@@ -3441,6 +3777,32 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <span wire:loading wire:target="saveEditJob" class="flex items-center justify-center gap-2">
                             <i class="fas fa-spinner fa-spin text-xs"></i>
                             Save Changes
+                        </span>
+                    </button>
+                    @if(! $this->isEditFormValid)
+                        <p class="text-xs text-center font-medium mt-2" style="color:#b45309;">
+                            @if($this->originalEditFormSnapshot !== null && ! $this->hasEditFormChanges)
+                                <i class="fas fa-circle-info mr-1"></i>No changes yet — edit a field to enable Save Changes.
+                            @else
+                                <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable saving.
+                            @endif
+                        </p>
+                    @endif
+                    {{-- Cancel button — same pattern as Post Job modal's Cancel:
+                         disabled + wire:loading state while either saveEditJob or
+                         closeEditModal is in flight, so it can't be clicked mid-save
+                         and doesn't relabel, just disables. Hover state included to
+                         match Post Job's Cancel (was previously missing here). --}}
+                    <button type="button" wire:click="closeEditModal"
+                            wire:loading.attr="disabled" wire:target="saveEditJob,closeEditModal"
+                            class="w-full mt-2 px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
+                        <span wire:loading.remove wire:target="closeEditModal" class="flex items-center justify-center gap-1.5">
+                            <i class="fas fa-xmark text-sm"></i>
+                            Cancel
+                        </span>
+                        <span wire:loading wire:target="closeEditModal" class="flex items-center justify-center gap-1.5">
+                            <i class="fas fa-spinner fa-spin text-sm"></i>
+                            Cancel
                         </span>
                     </button>
                 </div>

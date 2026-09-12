@@ -11,11 +11,11 @@
        lookup/metric-matching overhead per text node like "Arial,
        Helvetica" would need. */
     body {
-        font-family: sans-serif;
+        font-family: "Times New Roman", Times, serif;
         color: #111111;
         margin: 0;
         padding: 0;
-        font-size: 11px;
+        font-size: 12px;
     }
 
     .rp-header {
@@ -217,21 +217,19 @@
     <table class="rp-table">
         <thead>
             <tr>
-                <th style="width:18%;">Name</th>
-                <th style="width:12%;">Student ID</th>
+                <th style="width:26%;">Name</th>
                 <th style="width:10%;">Program Code</th>
                 <th style="width:7%;">Batch</th>
                 <th style="width:14%;">Employment Status</th>
-                <th style="width:17%;">Company</th>
+                <th style="width:18%;">Company</th>
                 <th style="width:15%;">Job Title</th>
-                <th style="width:7%;">Location</th>
+                <th style="width:10%;">Location</th>
             </tr>
         </thead>
         <tbody>
             @foreach($chunk as $item)
             <tr>
                 <td>{{ strtoupper($formatName($item)) }}</td>
-                <td>{{ $item->student_id }}</td>
                 <td>{{ $item->course_code }}</td>
                 <td>{{ $item->batch }}</td>
                 <td>

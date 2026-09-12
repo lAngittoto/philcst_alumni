@@ -176,7 +176,7 @@ new class extends Component {
                 'id', 'organizer_id', 'job_title', 'company_name', 'company_type',
                 'location', 'employment_type', 'experience_level',
                 'target_college', 'salary', 'deadline', 'status', 'job_image',
-                'description', 'qualifications', 'application_instructions', 'created_at',
+                'description', 'qualifications', 'application_instructions', 'created_at', 'updated_at',
             ])
             ->where('status', 'ACTIVE')
             ->where(function ($q) use ($college) {
@@ -207,8 +207,11 @@ new class extends Component {
         }
         if ($this->filterLevel !== '') $q->where('experience_level', $this->filterLevel);
 
-        // Latest-posted job always leads, regardless of deadline.
-        $q->orderBy('created_at', 'desc');
+        // Most-recently activated/updated job always leads, regardless of
+        // when it was originally created and regardless of deadline — so
+        // reactivating or editing an older posting brings it back to the
+        // top, matching what the organizer just did.
+        $q->orderBy('updated_at', 'desc');
 
         return $q->paginate(20);
     }

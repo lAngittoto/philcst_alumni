@@ -5,18 +5,21 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use Livewire\WithPagination;
+use Livewire\WithoutUrlPagination;
 use Illuminate\Support\Facades\DB;
 
 new class extends Component {
 
-    use WithPagination;
+    use WithPagination, WithoutUrlPagination;
 
     protected string $paginationTheme = 'tailwind';
 
     // Keeps ?page= (and every other tracked prop) OUT of the URL — a
     // plain page refresh/link should always be the clean
     // /coordinator/alumni/employment, never
-    // /coordinator/alumni/employment?page=1. Mirrors Alumni Records'
+    // /coordinator/alumni/employment?page=1. WithoutUrlPagination
+    // handles "page" specifically; this queryString() override covers
+    // every other prop (search, filters, etc). Mirrors Alumni Records'
     // queryString() override.
     protected function queryString(): array { return []; }
 
@@ -61,6 +64,14 @@ new class extends Component {
 
     public bool  $showModal = false;
     public array $modalData = [];
+
+    // Signature of the currently-applied filters (search/status/programs/
+    // batch range). computeStats() only needs to re-run when this changes
+    // — plain pagination (next/prev/gotoPage) doesn't touch any filter,
+    // so re-running 9 COUNT queries on every single page click was the
+    // main reason pagination felt slow. Comparing this signature in
+    // with() lets pagination clicks skip computeStats() entirely.
+    public string $statsSignature = '';
 
     // ── tracks the last seen emp update timestamp so we only notify once ──
     public string $lastSeenEmpAt = '';
@@ -167,26 +178,25 @@ new class extends Component {
 
     /** Human-readable summary of whatever filters are currently active,
      *  shown inside the Generate Reports dropdown ("Report will
-     *  include…"). Unlike before, every filter GROUP is always listed —
-     *  Batches / Programs / Statuses each show their own part even when
-     *  untouched (as "All Batches" / "All Programs" / "All Statuses"),
-     *  so the three sit evenly together instead of only the active ones
-     *  appearing. Search stays conditional since it isn't a dropdown
-     *  filter with an "all" state. */
+     *  include…"). Only ACTIVE filters are listed now — an untouched
+     *  filter group (Batch / Programs / Statuses) is simply omitted
+     *  instead of showing as "All Batches" / "All Programs" / "All
+     *  Statuses". If nothing at all is active (including search), the
+     *  summary falls back to "No filters applied". */
     #[Computed]
     public function activeFilterSummary(): string
     {
         $parts = [];
 
-        $parts[] = ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '')
-            ? ($this->filterBatchFrom === $this->filterBatchTo
+        if ($this->filterBatchFrom !== '' && $this->filterBatchTo !== '') {
+            $parts[] = $this->filterBatchFrom === $this->filterBatchTo
                 ? 'Batch ' . $this->filterBatchFrom
-                : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo)
-            : 'All Batches';
+                : 'Batch ' . $this->filterBatchFrom . '–' . $this->filterBatchTo;
+        }
 
-        $parts[] = !empty($this->filterCourses)
-            ? implode(', ', $this->filterCourses)
-            : 'All Programs';
+        if (!empty($this->filterCourses)) {
+            $parts[] = implode(', ', $this->filterCourses);
+        }
 
         if (!empty($this->filterStatuses)) {
             $labels = [
@@ -196,15 +206,13 @@ new class extends Component {
                 'not_filled'    => 'Not Filled',
             ];
             $parts[] = implode(', ', array_map(fn($s) => $labels[$s] ?? $s, $this->filterStatuses));
-        } else {
-            $parts[] = 'All Statuses';
         }
 
         if ($this->search !== '') {
             $parts[] = 'Search: "' . $this->search . '"';
         }
 
-        return implode(' · ', $parts);
+        return $parts ? implode(' · ', $parts) : 'No filters applied';
     }
 
     /** Count of records matching the currently-applied filters — shown
@@ -363,10 +371,21 @@ new class extends Component {
 
     public function with(): array
     {
-        // Cards recompute on every render so they always reflect the
-        // currently-applied filters (search/status/program/batch range),
-        // not just the organizer-wide totals from mount().
-        $this->computeStats();
+        // Cards only need to recompute when a filter actually changed —
+        // NOT on plain pagination (next/prev/gotoPage), which was
+        // re-running all 9 COUNT queries on every page click for no
+        // reason and made pagination feel slow.
+        $currentSignature = json_encode([
+            $this->search,
+            $this->filterStatuses,
+            $this->filterCourses,
+            $this->filterBatchFrom,
+            $this->filterBatchTo,
+        ]);
+        if ($currentSignature !== $this->statsSignature) {
+            $this->statsSignature = $currentSignature;
+            $this->computeStats();
+        }
 
         $q = DB::table('alumni as a')
             ->leftJoin('employment_trackings as et', function ($j) {
@@ -667,7 +686,7 @@ new class extends Component {
                 'et.employment_status','et.company_name','et.job_title',
                 'et.employment_type','et.work_location','et.date_hired',
                 'et.career_path','et.education_status','et.course_relevance',
-                'et.unemployment_status','et.updated_at as emp_updated_at',
+                'et.unemployment_status','et.unemployment_reason','et.updated_at as emp_updated_at',
             ])->first();
 
         if (!$row) return;
@@ -698,16 +717,32 @@ new class extends Component {
 
 }; ?>
 
-<div class="flex flex-col">
+<div class="ae-root flex flex-col">
 
 <div id="ae-hover-tip"
      wire:ignore
-     class="fixed bg-neutral-900 text-white text-[11px] font-semibold tracking-wide px-3 py-1.5 rounded-lg whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-lg -translate-x-0"
+     class="fixed bg-neutral-900 text-white text-[11px] font-semibold tracking-wide px-2 py-1 rounded-lg whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-lg -translate-x-0"
      style="transform:translate(12px,-110%)">
-    <i class="fas fa-eye mr-1.5"></i>View Details
+    <i class="fas fa-eye mr-1"></i>View Details
 </div>
 
 <style>
+    /* ── Kill the browser's default blue tap/click highlight on table
+         rows (data-ae-row). Without this, tapping/clicking a row flashes
+         a translucent blue overlay before the Livewire request resolves
+         — most visible on Chrome/mobile WebKit. ────────────────────── */
+    [data-ae-row] {
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        outline: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+    [data-ae-row]:focus,
+    [data-ae-row]:focus-visible {
+        outline: none;
+    }
+
     /* ── Search highlight — mirrors Alumni Records' mark.ar-hl ────── */
     mark.ae-hl {
         background: #BFDBFE;
@@ -863,17 +898,19 @@ new class extends Component {
                 <i class="fas fa-chart-line text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Employment Tracking</h1>
-                <p class="text-xs leading-relaxed mt-0.5 flex flex-wrap items-center gap-1.5 text-[#7A3F91] font-normal">
-                    Track employment status of your assigned alumni.
+                <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                    Track employment status of your assigned alumni
                     @if($organizerDepartment)
-                        <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                            <i class="fas fa-building-columns text-[9px]"></i>{{ $organizerDepartment }}
+                        <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                            <i class="fas fa-building-columns text-[9px]"></i>
+                            {{ $organizerDepartment }}
                         </span>
                     @endif
                     @if($organizerBatch)
-                        <span class="inline-flex items-center gap-1 font-semibold px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                            <i class="fas fa-calendar text-[9px]"></i>Batch {{ $organizerBatch }}
+                        <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                            <i class="fas fa-calendar text-[9px]"></i>
+                            Batch {{ $organizerBatch }}
                         </span>
                     @endif
                 </p>
@@ -1238,7 +1275,7 @@ new class extends Component {
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
                     <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)"
                            :class="q !== '' ? 'border-[#7a3f91] bg-white text-[#333333] font-semibold' : 'bg-white text-[#333333] font-medium'"
-                           placeholder="Search name, ID, email or job…"
+                           placeholder="Search ..."
                            style="-webkit-user-select:text;-moz-user-select:text;-ms-user-select:text;user-select:text;"
                            onselectstart="event.stopPropagation(); return true;"
                            class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
@@ -1562,9 +1599,8 @@ new class extends Component {
                                  is clicked. Text sized up (text-sm) from
                                  the original text-xs for readability. --}}
                             <div x-show="rangeMode" class="p-2.5" style="width:240px;">
-                                <div class="flex items-center gap-2 mb-1.5">
-                                    <span class="flex-1 text-xs font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeFrom ? ('From: ' + rangeFrom) : 'From'"></span>
-                                    <span class="flex-1 text-xs font-bold uppercase tracking-wide text-[#7a3f91]" x-text="rangeTo ? ('To: ' + rangeTo) : 'To'"></span>
+                                <div class="flex items-center justify-center mb-1.5">
+                                    <span class="text-xs font-bold uppercase tracking-wide text-[#7a3f91]" x-text="(rangeFrom || '—') + ' → ' + (rangeTo || '—')"></span>
                                 </div>
                                 <div class="flex items-start gap-2">
                                     <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:160px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
@@ -1599,13 +1635,21 @@ new class extends Component {
                     </div>
                 @endif
 
-                {{-- Reset --}}
+                {{-- Reset — pushed to the far right of the bar (ml-auto),
+                     and automatically disabled whenever no filter/search
+                     is currently active, so there's nothing to reset. --}}
+                @php
+                    $aeHasActiveFilters = $search !== '' || !empty($filterStatuses) || $filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses);
+                @endphp
                 <button wire:click="clearFilters"
                         wire:loading.attr="disabled"
                         wire:loading.class="opacity-60 cursor-wait"
                         wire:target="clearFilters"
-                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                               bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer text-[#333333]">
+                        @disabled(!$aeHasActiveFilters)
+                        class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                               bg-white border border-[#E8E0F0] transition active:scale-95
+                               disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed
+                               cursor-pointer text-[#333333]">
                     <i class="fas fa-rotate-left text-sm"></i>
                     <span class="hidden sm:inline">Reset</span>
                 </button>
@@ -1651,7 +1695,7 @@ new class extends Component {
                 </button>
             </div>
 
-            <div class="relative flex flex-col flex-1 min-h-0">
+            <div class="relative flex flex-col flex-1 min-h-0" id="ae-rows-wrapper">
 
                 {{-- Centered loading spinner — big icon over the table itself,
                      same pattern as Job Management / Event Organizer. --}}
@@ -1721,6 +1765,8 @@ new class extends Component {
                             <tr class="bg-white cursor-pointer transition-colors duration-150 hover:bg-[#f5f0fa]"
                                 wire:click="viewDetail({{ $row->id }})"
                                 wire:key="ae-row-{{ $row->id }}"
+                                wire:loading.class="opacity-60"
+                                wire:target="viewDetail({{ $row->id }})"
                                 data-ae-row>
 
                                 <td class="px-4 py-3.5">
@@ -1835,6 +1881,8 @@ new class extends Component {
                         <div class="cursor-pointer select-none bg-white border-b border-[#F5F5F5] px-3.5 py-3 flex items-center gap-2.5 transition-colors duration-100 active:bg-[#f5f0fa]"
                              wire:click="viewDetail({{ $row->id }})"
                              wire:key="ae-mrow-{{ $row->id }}"
+                             wire:loading.class="opacity-60"
+                             wire:target="viewDetail({{ $row->id }})"
                              data-ae-row>
 
                             <img src="{{ $photoUrl }}"
@@ -2002,11 +2050,6 @@ new class extends Component {
         'project_based' => 'Project-Based',
         'internship'    => 'Internship',
     ];
-    $eduMap = [
-        'none'               => 'None',
-        'pursuing_masteral'  => 'Pursuing Masteral',
-        'pursuing_doctorate' => 'Pursuing Doctorate',
-    ];
     $careerLabels = [
         'ofw'                   => ['fa-plane-departure', 'OFW'],
         'freelancer'            => ['fa-laptop-code',     'Freelancer'],
@@ -2030,61 +2073,50 @@ new class extends Component {
             : asset('storage/alumni-photos/default.png')
         );
 @endphp
-{{-- x-data + wire:click.self on the backdrop lets Alpine manage this element
-     properly (fixes the escape-key/$wire scope) and lets clicking the dark
-     backdrop close the modal too. @click.stop on the inner card stops that
-     backdrop handler from firing when you click inside the card itself, so
-     it never intercepts clicks meant for the X button. --}}
-<div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4"
-     x-data="{ open: false, closing(){ this.open = false; setTimeout(() => $wire.closeModal(), 180); } }"
+{{-- Full-screen page (not a modal/dialog): no backdrop, no centering,
+     fills the entire viewport like the Edit Event page. Just an X button
+     top-right to go back. x-data still manages the open/closing
+     transition so closeModal() fires after the fade-out finishes. --}}
+<div class="fixed inset-0 bg-white z-50 flex flex-col"
+     x-data="{ open: false, isClosing: false, closing(){ if (this.isClosing) return; this.isClosing = true; this.open = false; window.dispatchEvent(new CustomEvent('open-sidebar')); setTimeout(() => $wire.closeModal(), 180); } }"
      x-init="requestAnimationFrame(() => open = true)"
      x-show="open"
      x-transition:enter="transition ease-out duration-200"
-     x-transition:enter-start="opacity-0"
-     x-transition:enter-end="opacity-100"
+     x-transition:enter-start="opacity-0 scale-[0.99]"
+     x-transition:enter-end="opacity-100 scale-100"
      x-transition:leave="transition ease-in duration-150"
      x-transition:leave-start="opacity-100"
      x-transition:leave-end="opacity-0"
-     wire:click.self="closing"
      @keydown.escape.window="closing()">
-    {{-- On mobile (below sm) this is a full-screen sheet, not a floating
-         modal: no rounded corners, no border, fills the entire viewport.
-         From sm and up it goes back to being a centered, rounded modal
-         card capped at max-w-lg / 90vh. --}}
-    <div class="bg-white rounded-none sm:rounded-2xl w-full h-full sm:h-auto sm:max-w-lg max-h-[100dvh] sm:max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border-0 sm:border sm:border-[#E8E0F0]"
-         @click.stop
-         x-show="open"
-         x-transition:enter="transition ease-out duration-200"
-         x-transition:enter-start="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2"
-         x-transition:enter-end="opacity-100 sm:scale-100 translate-y-0"
-         x-transition:leave="transition ease-in duration-150"
-         x-transition:leave-start="opacity-100 sm:scale-100 translate-y-0"
-         x-transition:leave-end="opacity-0 sm:scale-95 translate-y-4 sm:translate-y-2">
 
         <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0 bg-[#7A3F91]">
-            <div class="flex items-center gap-3">
-                <img src="{{ $modalPhotoUrl }}"
-                     alt="{{ $modalData['full_name'] ?? '' }}"
-                     class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
-                <div>
-                    <p class="font-semibold text-white text-sm leading-snug uppercase">
-                        {{ $modalData['full_name'] ?? '—' }}
-                        @if($modalData['suffix'] ?? null) {{ $modalData['suffix'] }}@endif
-                    </p>
-                </div>
-            </div>
+            <p class="font-semibold text-white text-base leading-snug uppercase">
+                {{ $modalData['full_name'] ?? '—' }}
+                @if($modalData['suffix'] ?? null) {{ $modalData['suffix'] }}@endif
+            </p>
             <button type="button"
                     @click="closing()"
-                    class="relative group/close w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white cursor-pointer">
-                <i class="fa-solid fa-xmark text-base"></i>
-                <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-[10px] font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close:opacity-100 transition-opacity duration-150">Close</span>
+                    :disabled="isClosing"
+                    class="relative group/close w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white cursor-pointer disabled:cursor-wait">
+                <i class="fa-solid fa-spinner fa-spin text-lg" x-show="isClosing" x-cloak></i>
+                <i class="fa-solid fa-xmark text-lg" x-show="!isClosing"></i>
+                <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-xs font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close:opacity-100 transition-opacity duration-150">Close</span>
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-5 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-8 space-y-5 max-w-3xl w-full mx-auto [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
+
+            <div class="flex flex-col items-center text-center gap-3 pb-2">
+                <img src="{{ $modalPhotoUrl }}"
+                     alt="{{ $md['full_name'] ?? '' }}"
+                     class="w-24 h-24 rounded-2xl object-cover shadow-md ring-2 ring-[#E8E0F0]">
+                <p class="text-xl font-bold text-[#333333] uppercase leading-snug">
+                    {{ $md['full_name'] ?? '—' }}@if($md['suffix'] ?? null) {{ $md['suffix'] }}@endif
+                </p>
+            </div>
 
             <div>
-                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
+                <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
                 <div class="grid grid-cols-3 gap-2 mb-2">
                     @foreach([
                         'Program' => $md['course_code']    ?? '—',
@@ -2092,25 +2124,25 @@ new class extends Component {
                         'Contact' => $md['contact_number'] ?? '—',
                     ] as $label => $value)
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $label }}</p>
-                            <p class="text-sm font-semibold text-[#333333]">{{ $value ?: '—' }}</p>
+                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $label }}</p>
+                            <p class="text-base font-semibold text-[#333333]">{{ $value ?: '—' }}</p>
                         </div>
                     @endforeach
                 </div>
                 <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                    <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Email Address</p>
-                    <p class="text-sm font-semibold text-[#333333] break-all">{{ $md['email'] ?? '—' }}</p>
+                    <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Email Address</p>
+                    <p class="text-base font-semibold text-[#333333] break-all">{{ $md['email'] ?? '—' }}</p>
                 </div>
             </div>
 
             <div class="border-t border-[#E8E0F0] pt-4">
-                <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-3">Employment Information</p>
+                <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-3">Employment Information</p>
                 <div class="flex items-center gap-2 mb-4 flex-wrap">
-                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold {{ $statusCls }}">
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-semibold {{ $statusCls }}">
                         {{ $statusLbl }}
                     </span>
                     @if($md['emp_updated_at'] ?? null)
-                        <span class="text-xs text-[#999999]">
+                        <span class="text-sm text-[#999999]">
                             <i class="fa-regular fa-clock mr-1"></i>
                             Updated {{ \Carbon\Carbon::parse($md['emp_updated_at'])->diffForHumans() }}
                         </span>
@@ -2124,30 +2156,28 @@ new class extends Component {
                             ['Job Title',  $md['job_title']     ?? '—'],
                             ['Type',       $empTypeMap[$md['employment_type'] ?? ''] ?? '—'],
                             ['Location',   ucfirst($md['work_location'] ?? '—')],
-                            ['Date Hired', $md['date_hired'] ? \Carbon\Carbon::parse($md['date_hired'])->format('M d, Y') : '—'],
-                            ['Education',  $eduMap[$md['education_status'] ?? ''] ?? '—'],
                         ] as [$lbl, $val])
                             <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                                <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $lbl }}</p>
-                                <p class="text-sm font-semibold text-[#333333]">{{ $val }}</p>
+                                <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $lbl }}</p>
+                                <p class="text-base font-semibold text-[#333333]">{{ $val }}</p>
                             </div>
                         @endforeach
                         <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] sm:col-span-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-1.5">Job Related to Program?</p>
+                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-1.5">Job Related to Program?</p>
                             @if($relModal)
-                                <p class="text-sm font-semibold text-[#333333]">{{ $relModal[0] }}</p>
+                                <p class="text-base font-semibold text-[#333333]">{{ $relModal[0] }}</p>
                             @else
-                                <p class="text-sm text-[#999999]">— Not specified</p>
+                                <p class="text-base text-[#999999]">— Not specified</p>
                             @endif
                         </div>
                     </div>
                     @if(!empty($md['career_path_arr']))
                         <div class="mt-4">
-                            <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest mb-2">Career Path</p>
+                            <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-2">Career Path</p>
                             <div class="flex flex-wrap gap-2">
                                 @foreach($md['career_path_arr'] as $cp)
                                     @if(isset($careerLabels[$cp]))
-                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold bg-gray-50 text-[#333333] border border-[#E8E0F0]">
+                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-semibold bg-gray-50 text-[#333333] border border-[#E8E0F0]">
                                             {{ $careerLabels[$cp][1] }}
                                         </span>
                                     @endif
@@ -2158,27 +2188,27 @@ new class extends Component {
                 @elseif(($md['employment_status'] ?? '') === 'unemployed')
                     <div class="space-y-3">
                         <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Unemployment Status</p>
-                            <p class="text-sm font-semibold text-[#333333]">
+                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Unemployment Status</p>
+                            <p class="text-base font-semibold text-[#333333]">
                                 {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
                             </p>
                         </div>
+                        @if(($md['unemployment_status'] ?? '') === 'not_looking' && !empty($md['unemployment_reason']))
                         <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
-                            <p class="text-xs font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Education Status</p>
-                            <p class="text-sm font-semibold text-[#333333]">{{ $eduMap[$md['education_status'] ?? ''] ?? '—' }}</p>
+                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Reason</p>
+                            <p class="text-base font-semibold text-[#333333]">{{ $md['unemployment_reason'] }}</p>
                         </div>
+                        @endif
                     </div>
                 @else
                     <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-8 text-center">
-                        <p class="text-sm font-semibold text-[#999999]">No employment record yet.</p>
-                        <p class="text-xs text-[#CCCCCC] mt-1">This alumni has not filled in their employment information.</p>
+                        <p class="text-base font-semibold text-[#999999]">No employment record yet.</p>
+                        <p class="text-sm text-[#CCCCCC] mt-1">This alumni has not filled in their employment information.</p>
                     </div>
                 @endif
             </div>
 
         </div>
-        <div class="flex-shrink-0 h-0"></div>
-    </div>
 </div>
 @endif
 
@@ -2390,6 +2420,25 @@ new class extends Component {
     }
     bindRows();
     document.addEventListener('livewire:updated', bindRows);
+    document.addEventListener('livewire:navigated', bindRows);
+
+    // MutationObserver is the reliable catch-all: filtering + pagination
+    // (or any combination of the two) morphs/replaces the rows, and
+    // depending on Livewire's exact update path the 'livewire:updated'
+    // DOM event doesn't always fire for every one of those morphs — which
+    // is why "View Details" could stop appearing after filtering into
+    // page 2. Watching the wrapper directly means new rows always get
+    // (re)bound regardless of which Livewire event actually fired.
+    (function observeRowsWrapper() {
+        var wrapper = document.getElementById('ae-rows-wrapper');
+        if (!wrapper) {
+            // Wrapper not in the DOM yet (e.g. very first paint) — retry shortly.
+            setTimeout(observeRowsWrapper, 300);
+            return;
+        }
+        var observer = new MutationObserver(function () { bindRows(); });
+        observer.observe(wrapper, { childList: true, subtree: true });
+    })();
 
     // ── Employment update polling — every 15 seconds ───────────────────────
     // Calls the Livewire method checkEmploymentUpdates() on THIS component.
