@@ -755,6 +755,29 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  SILENCE "Uncaught (in promise) {status:null, body:null, ...}" SPAM
+    //  This comes from Livewire's own polling internals (coordinateNetwork
+    //  Interactions -> cancel -> rejectPromise), NOT from the dirNotifs
+    //  Alpine store. It fires whenever Livewire cancels an in-flight
+    //  wire:poll request on director.director-notif-poller because a
+    //  newer poll tick (or a navigation/component teardown) superseded
+    //  it — normal, expected behavior for polling components, but the
+    //  cancellation promise is rejected with no .catch() anywhere in
+    //  Livewire's own code, so it surfaces as an uncaught rejection.
+    //  We only swallow *this exact* shape (all four fields null, which
+    //  is unique to a Livewire-canceled request) so genuine errors with
+    //  real status/body/errors still show up normally.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('unhandledrejection', function (event) {
+        var r = event.reason;
+        if (r && typeof r === 'object'
+            && r.status === null && r.body === null
+            && r.json === null && r.errors === null) {
+            event.preventDefault();
+        }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  BELL REFRESH ON APPROVE / REJECT / COMPLETE
     //  manage-event.blade.php (and similar pages) dispatch a browser event
     //  called 'dir-notif-refresh' right after updateDirectorReviewNotif()
@@ -836,27 +859,54 @@
     // Builds the "Event Submitted → <status>" title for an event
     // submission/resubmission notif — mirrors the job posting's
     // "You Posted a Job → Active/Inactive" chain title convention.
-    // The backend (manage-event component) overwrites the row's title
-    // in place to "...→ Approved" / "...→ Rejected" / "...→ Completed"
-    // once the director acts on it; until then the row still carries the
-    // plain "Event Submitted" / "Event Resubmitted" wording, so we append
-    // "→ Pending" here purely for display so the status is always
-    // visible, without needing to touch the submission code.
     //
-    // Also recognizes the older "New Event for Review" / "Event
-    // Resubmitted for Review" wording from rows written before this
-    // rename, so legacy rows still display correctly instead of falling
-    // through with no "→ Pending" suffix appended.
-    window.__dirEventReviewTitle = function (rawTitle, isSubmit) {
+    // The backend now also sends `live_status` alongside every event
+    // notif row — the event's ACTUAL current status read fresh from the
+    // events table (not from whatever the notif row's own title text
+    // says). That field always wins here: no matter how stale, wrong,
+    // or out-of-sync the stored title text is, the bell can never show
+    // a status that disagrees with the real event, because the display
+    // is rebuilt from live_status every time instead of trusting the
+    // stored title's own "→ Pending"/"→ Approved" suffix.
+    window.__dirEventReviewTitle = function (rawTitle, isSubmit, liveStatus) {
         var base = rawTitle || (isSubmit ? 'Event Submitted' : 'Event Resubmitted');
-        var plainTitles = [
-            'Event Submitted', 'Event Resubmitted',
-            'New Event for Review', 'Event Resubmitted for Review',
-        ];
-        if (plainTitles.indexOf(base) !== -1) {
-            base += ' \u2192 Pending';
+
+        var legacyMap = {
+            'New Event for Review':            'Event Submitted',
+            'Event Resubmitted for Review':    'Event Resubmitted',
+        };
+
+        // Strip whatever suffix is already there (if any) so we never
+        // double up into "Event Submitted → Approved → Pending".
+        var stripped = base.replace(/\s*\u2192\s*(Pending|Approved|Rejected|Completed)\s*$/u, '');
+        if (legacyMap.hasOwnProperty(stripped)) {
+            stripped = legacyMap[stripped];
         }
-        return base;
+        if (stripped === '') {
+            stripped = isSubmit ? 'Event Submitted' : 'Event Resubmitted';
+        }
+
+        var statusLabelMap = {
+            'PENDING':   'Pending',
+            'APPROVED':  'Approved',
+            'REJECTED':  'Rejected',
+            'COMPLETED': 'Completed',
+        };
+
+        // live_status from the backend always wins when present — this
+        // is what makes the bell immune to stale/out-of-sync title text
+        // in the database.
+        if (liveStatus && statusLabelMap[liveStatus]) {
+            return stripped + ' \u2192 ' + statusLabelMap[liveStatus];
+        }
+
+        // No live_status available (e.g. row has no event_id at all,
+        // or the fetch didn't resolve one) — fall back to whatever
+        // status suffix the stored title already carried, defaulting
+        // to Pending for a bare "Event Submitted"/"Event Resubmitted".
+        var existingSuffix = base.match(/\u2192\s*(Pending|Approved|Rejected|Completed)\s*$/u);
+        var fallbackLabel  = existingSuffix ? existingSuffix[1] : 'Pending';
+        return stripped + ' \u2192 ' + fallbackLabel;
     };
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -867,14 +917,28 @@
             open:        false,
             items:       [],
             _pollTimer:  null,
+            _initializing: false,
+            _fetchInFlight: false,
             deleteToast: { show: false, message: '' },
             navigating:  false,
             loadingId:   null,
 
             async init() {
                 if (window.__dirLoggingOut) return;
-                await this._fetch();
-                this._startPolling();
+                // Guard against the multiple boot paths (alpine:initialized,
+                // window load, the bottom IIFE, livewire:navigated) all racing
+                // to init() on the same page load — without this, each one
+                // kicks off its own _fetch() + _startPolling(), stacking
+                // overlapping /director/notifications requests and duplicate
+                // poll timers, which is what was flooding the network tab.
+                if (this._initializing) return;
+                this._initializing = true;
+                try {
+                    await this._fetch();
+                    this._startPolling();
+                } finally {
+                    this._initializing = false;
+                }
             },
 
             _startPolling() {
@@ -894,6 +958,8 @@
             async _fetch() {
                 if (window.__dirLoggingOut) return;
                 if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
+                if (this._fetchInFlight) return; // collapse overlapping calls from the multiple boot paths
+                this._fetchInFlight = true;
                 try {
                     var res = await window.fetch('/director/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -907,6 +973,9 @@
                         this.items = this._groupByDay(raw);
                     }
                 } catch (e) { /* silently fail */ }
+                finally {
+                    this._fetchInFlight = false;
+                }
             },
 
             // Human-readable step label per underlying job action, used to
@@ -1056,7 +1125,7 @@
 
                             if (isCoordSelfEvent || isEventSubmit || isEventResubmit) {
                                 g.title   = (isEventSubmit || isEventResubmit)
-                                    ? window.__dirEventReviewTitle(n.title, isEventSubmit)
+                                    ? window.__dirEventReviewTitle(n.title, isEventSubmit, n.live_status)
                                     : (n.title || g.title);
                                 g.message = n.message || g.message;
                                 g.icon    = n.icon    || g.icon;
@@ -1087,9 +1156,9 @@
                                 count: rowCount,
                                 _ids:  Array.isArray(n._ids) ? n._ids.slice() : [n.id],
                                 title: isEventSubmit
-                                    ? window.__dirEventReviewTitle(n.title, true)
+                                    ? window.__dirEventReviewTitle(n.title, true, n.live_status)
                                     : isEventResubmit
-                                    ? window.__dirEventReviewTitle(n.title, false)
+                                    ? window.__dirEventReviewTitle(n.title, false, n.live_status)
                                     : isCoordSelfEvent
                                     ? (n.title || 'Coordinator Update')
                                     : isMsgEvent
@@ -1237,6 +1306,79 @@
                     });
                     if (r.status === 419) { window.__dirShowSessionExpired(); }
                 } catch (e) { /* ignore */ }
+            },
+
+            // ── Click handler for a notif row ──────────────────────────
+            // markRead() fires a PATCH to /director/notifications/{id}/read.
+            // It used to be called WITHOUT awaiting it, immediately followed
+            // by a hard `window.location.href` navigation (needed for
+            // deep-link notifs like event review rows so the destination
+            // page's mount() re-runs and pops the View/Manage modal). The
+            // page unload from that hard navigation could — and did, per
+            // user report — abort the in-flight PATCH before it reached the
+            // server, so the notif never actually got marked read there:
+            // it would flip back to unread (still counted in the bell) on
+            // the very next poll/refetch, even though it visually looked
+            // read for the instant before the page navigated away.
+            //
+            // Awaiting markRead() here guarantees the PATCH round-trip
+            // completes before we ever call window.location.href / hard-
+            // navigate, at the cost of the navigation starting a beat
+            // later — imperceptible, and the spinner overlay (navigating/
+            // loadingId, set right below, before the await) already
+            // covers that gap.
+            async handleNotifClick(notif) {
+                if (this.navigating) return;
+
+                // Set the loading state FIRST, before awaiting markRead().
+                // markRead() flips notif.read = true synchronously, which
+                // immediately re-sorts the computed `sorted` list (read
+                // items drop below an "Already Read" divider) — but the
+                // await inside markRead() (the PATCH round-trip) takes a
+                // moment to resolve. If navigating/loadingId aren't set
+                // until AFTER that await, there's a visible gap where the
+                // row has already jumped down under "Already Read" with no
+                // spinner covering it yet, then the spinner pops in a beat
+                // later — a jarring double-motion. Setting these up front
+                // means the spinner overlay is already covering the row
+                // (blurring/hiding its content, including the divider) at
+                // the exact moment it starts reordering, so the whole thing
+                // reads as one clean transition instead of two.
+                if (notif.link_route) {
+                    this.navigating = true;
+                    this.loadingId  = notif.id;
+                }
+
+                await this.markRead(notif);
+
+                if (notif.link_route) {
+                    let url = window.__dirRouteMap[notif.link_route] || '/director/dashboard';
+                    if (notif.link_route === 'director.event/management' && notif.event_id) {
+                        url += (url.indexOf('?') === -1 ? '?' : '&') + 'event=' + encodeURIComponent(notif.event_id);
+                    } else if (notif.link_route === 'director.job/management' && notif.job_id) {
+                        url += (url.indexOf('?') === -1 ? '?' : '&') + 'job=' + encodeURIComponent(notif.job_id);
+                    } else if (notif.link_route === 'director.coordinator/management') {
+                        var coordDedup = notif.dedup_key || '';
+                        var coordMatch = coordDedup.indexOf('coordinator-self::') === 0
+                            ? coordDedup.split('::')[1]
+                            : null;
+                        if (coordMatch) {
+                            url += (url.indexOf('?') === -1 ? '?' : '&') + 'coordinator=' + encodeURIComponent(coordMatch);
+                        }
+                    }
+
+                    let hasDeepLinkParam = /[?&](event|job)=/.test(url);
+                    let isSameLocation   = window.location.pathname === url.split('?')[0];
+                    if (isSameLocation || hasDeepLinkParam) {
+                        window.location.href = url;
+                    } else if (window.Livewire && typeof window.Livewire.navigate === 'function') {
+                        window.Livewire.navigate(url);
+                    } else {
+                        window.location.href = url;
+                    }
+                } else {
+                    this.close();
+                }
             },
 
             async markReadByRoute(routeName) {
@@ -2014,61 +2156,7 @@
                     ]"
                     oncontextmenu="return false;"
                     ondragstart="return false;"
-                    @click.stop="
-                        if ($store.dirNotifs.navigating) return;
-                        $store.dirNotifs.markRead(notif);
-                        if (notif.link_route) {
-                            $store.dirNotifs.navigating = true;
-                            $store.dirNotifs.loadingId  = notif.id;
-                            let url = window.__dirRouteMap[notif.link_route] || '/director/dashboard';
-                            if (notif.link_route === 'director.event/management' && notif.event_id) {
-                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'event=' + encodeURIComponent(notif.event_id);
-                            } else if (notif.link_route === 'director.job/management' && notif.job_id) {
-                                url += (url.indexOf('?') === -1 ? '?' : '&') + 'job=' + encodeURIComponent(notif.job_id);
-                            } else if (notif.link_route === 'director.coordinator/management') {
-                                var coordDedup = notif.dedup_key || '';
-                                var coordMatch = coordDedup.indexOf('coordinator-self::') === 0
-                                    ? coordDedup.split('::')[1]
-                                    : null;
-                                if (coordMatch) {
-                                    url += (url.indexOf('?') === -1 ? '?' : '&') + 'coordinator=' + encodeURIComponent(coordMatch);
-                                }
-                            }
-                            // Panel stays open with the spinner overlay showing
-                            // on this row — it only closes once the destination
-                            // page has actually landed (see livewire:navigated
-                            // listener below), instead of closing instantly and
-                            // making the click look like it did nothing.
-                            //
-                            // If already on the target page, SPA-navigate won't
-                            // re-fire livewire:navigated the same way, so force
-                            // a hard reload there (page unload clears the
-                            // spinner naturally) — same fix as the registrar
-                            // sidebar's notif click.
-                            //
-                            // Deep-links carrying ?event= or ?job= are meant to
-                            // pop the View/Manage modal open on arrival, via that
-                            // target page's own mount(). Livewire.navigate() is a
-                            // SPA morph, not a real page load — the destination
-                            // component's mount() doesn't reliably re-run the
-                            // same way a fresh request does, so the modal could
-                            // sit there NOT opening (or opening late) until the
-                            // user manually refreshes. Force a hard navigation
-                            // for these so mount() always runs top-to-bottom on
-                            // a clean request and the modal opens immediately.
-                            let hasDeepLinkParam = /[?&](event|job)=/.test(url);
-                            let isSameLocation   = window.location.pathname === url.split('?')[0];
-                            if (isSameLocation || hasDeepLinkParam) {
-                                window.location.href = url;
-                            } else if (window.Livewire && typeof window.Livewire.navigate === 'function') {
-                                window.Livewire.navigate(url);
-                            } else {
-                                window.location.href = url;
-                            }
-                        } else {
-                            $store.dirNotifs.close();
-                        }
-                    ">
+                    @click.stop="$store.dirNotifs.handleNotifClick(notif)">
 
                     <template x-if="$store.dirNotifs.navigating && $store.dirNotifs.loadingId === notif.id">
                         <div class="dir-notif-item-loading-overlay">

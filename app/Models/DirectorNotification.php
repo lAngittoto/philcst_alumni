@@ -14,6 +14,7 @@ class DirectorNotification extends Model
 
     protected $fillable = [
         'director_id',
+        'event_id',
         'icon',
         'title',
         'message',

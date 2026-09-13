@@ -283,5 +283,30 @@ new class extends Component {
 };
 ?>
 
-{{-- Invisible — pure background poller, no UI --}}
-<div wire:poll.3000ms="poll" class="hidden" aria-hidden="true"></div>
+{{--
+    Invisible — pure background poller, no UI.
+
+    wire:poll.keep-alive.10000ms instead of a bare wire:poll.3000ms:
+      - 3s was too aggressive for a tick that runs a handful of DB
+        queries (chat_messages scan + cache read/write + dedup
+        exists-check + insert/update on director_notifications).
+        Whenever poll() took close to (or longer than) 3s to round
+        trip, Livewire's poll timer fired the NEXT tick while the
+        previous request was still in flight and canceled it —
+        that cancellation is exactly what was rejecting the promise
+        uncaught with {status:null, body:null, json:null, errors:null}
+        in the console (coordinateNetworkInteractions -> cancel ->
+        rejectPromise).
+      - .keep-alive makes Livewire wait for the current request to
+        finish before scheduling the next tick from ITS completion,
+        instead of firing on a fixed wall-clock interval regardless
+        of whether the last request has resolved yet — so a slow
+        tick can never get cancelled by the next one anymore.
+      - 10s cadence: this is a background chat-notification poll,
+        not something that needs 3s freshness. The bell already
+        gets an immediate refresh via the 'dir-notif-refresh' event
+        dispatched at the end of poll() and via the JS $wire call in
+        mount(), so lowering the interval doesn't add real-world lag
+        to when a new message notif appears.
+--}}
+<div wire:poll.keep-alive.10000ms="poll" class="hidden" aria-hidden="true"></div>

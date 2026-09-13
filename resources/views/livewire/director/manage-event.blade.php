@@ -166,19 +166,19 @@ new class extends Component {
         }
 
         // ─────────────────────────────────────────────────────────────────
-        // One-time self-heal: notifs already sitting in the bell as
-        // "New Event for Review" / "Event Resubmitted for Review" from
-        // BEFORE updateDirectorReviewNotif() existed never got their
-        // title flipped to "→ Approved" / "→ Rejected" when they were
-        // acted on — so the bell still shows "→ Pending" for events that
-        // are actually long since decided. Sync those stale rows to the
-        // event's real current status here, once per director per
-        // request-cache window (same pattern as the block above).
+        // Self-heal: notifs already sitting in the bell as "New Event for
+        // Review" / "Event Resubmitted for Review" / stuck on "→ Pending"
+        // never got their title flipped to "→ Approved" / "→ Rejected" /
+        // "→ Completed" when they were acted on — so the bell shows the
+        // wrong status for events that are actually long since decided.
+        // Sync those stale rows to the event's real current status here,
+        // on every mount — cheap (a handful of indexed queries scoped to
+        // this director) and guarantees the bell is never stale for more
+        // than one page visit, instead of sitting wrong for up to 60
+        // seconds behind a request-cache window.
         // ─────────────────────────────────────────────────────────────────
-        $syncCacheKey = 'director_review_notifs_synced_' . $this->directorId;
-        if ($this->directorId && ! Cache::has($syncCacheKey)) {
+        if ($this->directorId) {
             $this->syncStaleReviewNotifTitles();
-            Cache::put($syncCacheKey, true, 60);
         }
     }
 
@@ -187,20 +187,21 @@ new class extends Component {
         try {
             // ── Backfill pass FIRST: some submission rows were created
             //    without event_id ever populated (older/other code path
-            //    that only wrote title+message), which made every match
-            //    below silently skip them — the bell then sits on
-            //    "Event Submitted" forever no matter what the
-            //    director does, since nothing can find the row to update
-            //    it. Recover the event by matching the title embedded in
-            //    the row's own message (format: "\"{title}\" ... your
-            //    approval." or similar, written when the row was first
-            //    created) against AdminEvent, then stamp event_id back
-            //    onto the row so every check after this one works
+            //    that only wrote title+message), OR with a WRONG
+            //    event_id (organizer-side insert bug / stale id from a
+            //    since-deleted-and-recreated event) — either way the
+            //    match below silently skips them and the bell sits
+            //    stuck on "Event Submitted → Pending" forever no matter
+            //    what the director does, even after approving/rejecting
+            //    the event. Recover the event by matching the title
+            //    embedded in the row's own message (format: "\"{title}\"
+            //    ... your approval." or similar, written when the row
+            //    was first created) against AdminEvent, then correct
+            //    event_id on the row so every check after this one works
             //    normally via the fast, unambiguous event_id match. ──
             $orphanRows = DB::table('director_notifications')
                 ->where('director_id', $this->directorId)
                 ->where('link_route', 'director.event/management')
-                ->whereNull('event_id')
                 ->where(function ($q) {
                     $q->where('title', 'like', '%Event Submitted%')
                       ->orWhere('title', 'like', '%Event Resubmitted%')
@@ -212,7 +213,7 @@ new class extends Component {
             foreach ($orphanRows as $row) {
                 if (!preg_match('/"([^"]+)"/u', (string) $row->message, $m)) continue;
                 $matchedEvent = AdminEvent::withTrashed()->where('title', $m[1])->orderByDesc('id')->first();
-                if ($matchedEvent) {
+                if ($matchedEvent && (int) $matchedEvent->id !== (int) $row->event_id) {
                     DB::table('director_notifications')->where('id', $row->id)->update(['event_id' => $matchedEvent->id]);
                 }
             }
@@ -226,7 +227,6 @@ new class extends Component {
             // "→ Approved" instead of following the event to Completed.
             $staleRows = DB::table('director_notifications')
                 ->where('director_id', $this->directorId)
-                ->where('link_route', 'director.event/management')
                 ->whereNotNull('event_id')
                 ->where(function ($q) {
                     $q->whereIn('title', ['Event Submitted', 'Event Resubmitted', 'New Event for Review', 'Event Resubmitted for Review'])
@@ -268,11 +268,17 @@ new class extends Component {
                 DB::table('director_notifications')->where('id', $row->id)->update([
                     'title'      => $prefix . ' → ' . $label,
                     'icon'       => $status === 'APPROVED' ? 'calendar-check' : ($status === 'REJECTED' ? 'calendar' : ($status === 'COMPLETED' ? 'circle-check' : 'calendar-days')),
+                    'link_route' => 'director.event/management',
                     'updated_at' => now(),
                 ]);
             }
-        } catch (\Throwable) {
-            // Non-critical — bell just keeps showing the un-synced title until next mount
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('syncStaleReviewNotifTitles failed', [
+                'directorId' => $this->directorId,
+                'message'    => $e->getMessage(),
+                'file'       => $e->getFile(),
+                'line'       => $e->getLine(),
+            ]);
         }
     }
 
@@ -351,25 +357,26 @@ new class extends Component {
         if (!$eventId) return;
 
         try {
+            // ── Primary match: event_id + link_route both correct. ──
             $rows = DB::table('director_notifications')
                 ->where('link_route', 'director.event/management')
                 ->where('event_id', $eventId)
                 ->get();
 
             // ── Fallback: the submission row may have been created
-            //    without event_id ever populated (e.g. an older/other
-            //    code path that only writes title+message), which makes
-            //    the exact match above return nothing and leaves the
-            //    bell stuck reading "Submitted" forever no matter what
-            //    the director does here. When that happens, fall back to
-            //    matching on the event's title inside an otherwise
-            //    still-pending review row, and backfill event_id onto it
-            //    so every update after this one hits the fast path. ──
+            //    without event_id ever populated, with the WRONG
+            //    event_id, or even with a slightly different link_route
+            //    — any of those makes the primary match above return
+            //    nothing and leaves the bell stuck reading
+            //    "Submitted"/"Pending" forever no matter what the
+            //    director does here. When that happens, fall back to
+            //    matching PURELY on the event's own title inside the
+            //    row's message — no link_route or event_id requirement
+            //    at all — then correct BOTH columns on the row so every
+            //    update after this one hits the fast path. ──
             if ($rows->isEmpty()) {
                 $rows = DB::table('director_notifications')
-                    ->where('link_route', 'director.event/management')
-                    ->whereNull('event_id')
-                    ->where(function ($q) use ($eventTitle) {
+                    ->where(function ($q) {
                         $q->where('title', 'like', '%Event Submitted%')
                           ->orWhere('title', 'like', '%Event Resubmitted%')
                           ->orWhere('title', 'like', '%New Event for Review%')
@@ -382,7 +389,10 @@ new class extends Component {
                     ->get();
 
                 foreach ($rows as $row) {
-                    DB::table('director_notifications')->where('id', $row->id)->update(['event_id' => $eventId]);
+                    DB::table('director_notifications')->where('id', $row->id)->update([
+                        'event_id'   => $eventId,
+                        'link_route' => 'director.event/management',
+                    ]);
                 }
             }
 
@@ -469,8 +479,18 @@ new class extends Component {
             }
 
             $this->dispatch('dir-notif-refresh');
-        } catch (\Throwable) {
-            // Non-critical — don't break the approve/reject/complete action if this fails
+        } catch (\Throwable $e) {
+            // Was previously silently swallowed — logging it now so a
+            // failure here (wrong column name, DB error, etc.) actually
+            // surfaces in storage/logs/laravel.log instead of leaving
+            // the bell stuck on "→ Pending" with zero trace of why.
+            \Illuminate\Support\Facades\Log::error('updateDirectorReviewNotif failed', [
+                'eventId'   => $eventId,
+                'status'    => $status,
+                'message'   => $e->getMessage(),
+                'file'      => $e->getFile(),
+                'line'      => $e->getLine(),
+            ]);
         }
     }
 

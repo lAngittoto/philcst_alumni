@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AdminEvent;
 use App\Models\Director;
 use App\Models\DirectorNotification;
 use Illuminate\Http\JsonResponse;
@@ -50,8 +51,40 @@ class DirectorNotificationController extends Controller
             ->get([
                 'id', 'icon', 'title', 'message',
                 'link_route', 'link_label', 'dedup_key',
-                'count', 'read', 'created_at',
+                'event_id', 'count', 'read', 'created_at',
             ]);
+
+        // ── Attach live_status per row ───────────────────────────────────
+        // The sidebar bell (__dirEventReviewTitle in sidebar-director_blade.php)
+        // rebuilds the "Event Submitted → <status>" title from THIS field,
+        // not from whatever the stored `title` column says — that's what
+        // makes the bell immune to stale/out-of-sync title text. But this
+        // endpoint was never actually sending it, so every event review
+        // notif fell through to the JS fallback, which defaults to
+        // "Pending" whenever the stored title has no "→ <status>" suffix
+        // yet. Result: an event could be APPROVED/COMPLETED in the events
+        // table while its bell notif still displayed "→ Pending" forever.
+        //
+        // Pull the real current status for every distinct event_id on this
+        // page in ONE query (mirrors the same AdminEvent::withTrashed()
+        // ->whereIn(...)->pluck('status','id') pattern already used by
+        // syncStaleReviewNotifTitles() in manage-event_blade.php), then
+        // stamp it onto each row as `live_status` before returning.
+        $eventIds = $notifications->pluck('event_id')->filter()->unique()->values();
+
+        if ($eventIds->isNotEmpty()) {
+            $liveStatuses = AdminEvent::withTrashed()
+                ->whereIn('id', $eventIds)
+                ->pluck('status', 'id');
+
+            $notifications->each(function ($n) use ($liveStatuses) {
+                $n->live_status = $n->event_id ? ($liveStatuses[$n->event_id] ?? null) : null;
+            });
+        } else {
+            $notifications->each(function ($n) {
+                $n->live_status = null;
+            });
+        }
 
         return response()->json($notifications);
     }
