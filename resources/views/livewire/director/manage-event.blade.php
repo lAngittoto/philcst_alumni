@@ -22,6 +22,11 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
+    // Keeps the URL clean (no ?page=2 etc.) — same fix already used on
+    // Manage Coordinator. Without this, Livewire's WithPagination default
+    // pushes the current page number into the query string.
+    protected function queryString(): array { return []; }
+
     /** Wraps each case-insensitive match of $search inside $text with the
      *  same light-blue <mark> used on Alumni Records / Coordinator Management —
      *  keeps the "here's what matched" visual cue consistent across pages. */
@@ -382,33 +387,17 @@ new class extends Component {
                 ]);
         }
 
-        // ── Case 2: real-world prep-time rule — a proposed event needs at
-        //    least 1 day's lead time to actually get ready for (venue,
-        //    materials, alumni notice, etc). If it's still PENDING with
-        //    less than 24 hours left before it starts, approving it now
-        //    would leave the organizer no real time to prepare, so it
-        //    auto-rejects instead of quietly slipping past the deadline
-        //    unapproved. This runs BEFORE it actually passes (Case 1
-        //    above already covers "already happened"), so the cutoff here
-        //    is strictly "still upcoming, but under 24h away". ──────────
-        $prepCutoff = $now->copy()->addDay();
-
-        $tooLateToPrep = AdminEvent::withoutTrashed()
-            ->where('status', 'PENDING')
-            ->where('event_date', '>', $now)
-            ->where('event_date', '<=', $prepCutoff)
-            ->get(['id', 'title', 'organizer_id']);
-
-        if ($tooLateToPrep->isNotEmpty()) {
-            AdminEvent::withoutTrashed()
-                ->where('status', 'PENDING')
-                ->where('event_date', '>', $now)
-                ->where('event_date', '<=', $prepCutoff)
-                ->update([
-                    'status'         => 'REJECTED',
-                    'review_remarks' => 'Auto-rejected: less than 24 hours remained before the event with no approval yet. Events need at least 1 day of lead time to prepare (venue, materials, alumni notice, etc.) — please resubmit with a later date.',
-                ]);
-        }
+        // NOTE: the old "Case 2" rule auto-rejected any PENDING event once
+        // less than 24 hours remained before its start, on the theory that
+        // approving it that late wouldn't leave enough prep time. In
+        // practice that blocked legitimate last-minute events (something
+        // came up today for an event later today). The real-world rule is
+        // simpler: as long as the event hasn't started yet, it can still
+        // be submitted and reviewed — Case 1 above already auto-rejects
+        // anything whose date has actually passed without approval, and
+        // the organizer-side form (event-organizer) already blocks dates/
+        // times that are already in the past at submission time. No
+        // separate lead-time cutoff is applied here anymore.
     }
 
     private function autoCompleteExpiredEvents(): void
@@ -490,7 +479,7 @@ new class extends Component {
         if ($this->filterStatus !== '') $q->where('status', $this->filterStatus);
         if ($this->filterCollege !== '') $q->where('target_participants', 'like', "%{$this->filterCollege}%");
 
-        $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
+        $q->orderBy('updated_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
         return $q->paginate(20);
     }
 
@@ -760,12 +749,12 @@ new class extends Component {
         abort_unless(auth()->user()->role === 'director', 403);
         $event = app(AdminEventController::class)->getEvent($id);
 
-        $checkDate  = $event->event_date;
-        $prepCutoff = \Carbon\Carbon::now('UTC')->addDay();
-        if ($checkDate->lessThanOrEqualTo($prepCutoff)) {
+        $checkDate = $event->event_date;
+        $now       = \Carbon\Carbon::now('UTC');
+        if ($checkDate->lessThanOrEqualTo($now)) {
             $datePH = $event->event_date->setTimezone('Asia/Manila')->format('M d, Y g:i A');
             $this->dispatch('flash-message', type: 'error',
-                message: "Need to update date — event date ({$datePH}) is too close or has already passed. Please chat the coordinator to update the event date before approving.");
+                message: "Need to update date — event date ({$datePH}) has already passed. Please chat the coordinator to update the event date before approving.");
             return;
         }
 
@@ -780,12 +769,12 @@ new class extends Component {
         abort_unless(auth()->user()->role === 'director', 403);
         if ($this->approveEventId) {
             $event      = app(AdminEventController::class)->getEvent($this->approveEventId);
-            $checkDate  = $event->event_date;
-            $prepCutoff = \Carbon\Carbon::now('UTC')->addDay();
-            if ($checkDate->lessThanOrEqualTo($prepCutoff)) {
+            $checkDate = $event->event_date;
+            $now       = \Carbon\Carbon::now('UTC');
+            if ($checkDate->lessThanOrEqualTo($now)) {
                 $datePH = $event->event_date->setTimezone('Asia/Manila')->format('M d, Y g:i A');
                 $this->dispatch('flash-message', type: 'error',
-                    message: "Need to update date — event date ({$datePH}) is too close or has already passed.");
+                    message: "Need to update date — event date ({$datePH}) has already passed.");
                 $this->showApproveModal  = false;
                 $this->approveEventId    = null;
                 $this->approveEventTitle = '';
@@ -1111,6 +1100,15 @@ select.tw-select-arrow {
     -moz-appearance: none;
     appearance: none;
     cursor: pointer;
+    outline: none !important;
+    box-shadow: none !important;
+}
+select.tw-select-arrow:focus,
+select.tw-select-arrow:focus-visible {
+    outline: none !important;
+}
+select.tw-select-arrow::-moz-focus-inner {
+    border: 0 !important;
 }
 
 /* ══ Mobile stacked card row — mirrors the Manage Coordinators page ══ */
@@ -1344,7 +1342,7 @@ select.tw-select-arrow {
                             $isRejected  = $event->status === 'REJECTED';
                             $eventDate   = $event->event_date->setTimezone('Asia/Manila');
                             $rowCheckDate  = $event->event_date;
-                            $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
+                            $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC'));
                         @endphp
                         <tr class="bg-white cursor-pointer transition-colors duration-100 hover:bg-[#f5f0fa]"
                             wire:click="viewEvent({{ $event->id }})"
@@ -1472,7 +1470,7 @@ select.tw-select-arrow {
                         $isRejected  = $event->status === 'REJECTED';
                         $eventDate   = $event->event_date->setTimezone('Asia/Manila');
                         $rowCheckDate  = $event->event_date;
-                        $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
+                        $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC'));
                     @endphp
                     <div class="dir-mrow" wire:key="dir-event-mrow-{{ $event->id }}" wire:click="viewEvent({{ $event->id }})" data-dir-row>
 
@@ -1692,7 +1690,7 @@ select.tw-select-arrow {
      wire:keydown.escape.window="cancelApprove">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b border-emerald-100 bg-emerald-50">
-            <h2 class="text-base font-semibold text-emerald-800 flex items-center gap-2.5">
+            <h2 class="text-lg font-semibold text-emerald-800 flex items-center gap-2.5">
                 <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
                     <i class="fas fa-badge-check text-emerald-600 text-sm"></i>
                 </div>
@@ -1700,27 +1698,30 @@ select.tw-select-arrow {
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">You are about to approve:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+            <p class="text-base text-[#333333] mb-1">You are about to approve:</p>
+            <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $approveEventTitle }}
             </p>
             <div class="mb-4">
-                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
-                    Remarks <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
+                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                    Remarks <span class="font-normal normal-case tracking-normal text-[#555555]">— optional</span>
                 </label>
                 <textarea wire:model.defer="approveRemarks" rows="2"
-                          placeholder="e.g. Approved. Great event proposal!"
-                          class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"></textarea>
+                          class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-base bg-white text-[#333333] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"></textarea>
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelApprove"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
-                    <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                        wire:loading.attr="disabled"
+                        wire:target="cancelApprove"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60">
+                    <span wire:loading wire:target="cancelApprove"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
+                    <span wire:loading.remove wire:target="cancelApprove"><i class="fas fa-xmark mr-1 text-xs"></i></span>
+                    Cancel
                 </button>
                 <button wire:click="executeApprove"
                         wire:loading.attr="disabled"
                         wire:target="executeApprove"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition cursor-pointer disabled:opacity-60">
+                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition cursor-pointer disabled:opacity-60">
                     <span wire:loading wire:target="executeApprove"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
                     <span wire:loading.remove wire:target="executeApprove"><i class="fas fa-badge-check mr-1 text-xs"></i></span>
                     Yes, Approve
@@ -1746,30 +1747,33 @@ select.tw-select-arrow {
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">You are about to reject:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+            <p class="text-base text-[#333333] mb-1">You are about to reject:</p>
+            <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $rejectEventTitle }}
             </p>
             <div class="mb-4">
-                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
+                <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                     Reason for Rejection <span class="text-red-500">*</span>
                 </label>
                 <textarea wire:model.defer="rejectRemarks" rows="3"
-                          placeholder="e.g. Missing required details. Please revise and resubmit."
-                          class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"></textarea>
-                <p class="text-[10px] mt-1 text-[#777777]">
-                    <i class="fas fa-circle-info text-[9px] mr-1"></i>Required — coordinator will see this reason.
+                          class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-base bg-white text-[#333333] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"></textarea>
+                <p class="text-sm mt-1 text-[#555555]">
+                    <i class="fas fa-circle-info text-xs mr-1"></i>Required — coordinator will see this reason.
                 </p>
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelReject"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
-                    <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
+                        wire:loading.attr="disabled"
+                        wire:target="cancelReject"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60">
+                    <span wire:loading wire:target="cancelReject"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
+                    <span wire:loading.remove wire:target="cancelReject"><i class="fas fa-xmark mr-1 text-xs"></i></span>
+                    Cancel
                 </button>
                 <button wire:click="executeReject"
                         wire:loading.attr="disabled"
                         wire:target="executeReject"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60">
+                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60">
                     <span wire:loading wire:target="executeReject"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
                     <span wire:loading.remove wire:target="executeReject"><i class="fas fa-circle-xmark mr-1 text-xs"></i></span>
                     Yes, Reject
@@ -2192,7 +2196,7 @@ select.tw-select-arrow {
         : ($updatedByDisplay ?: 'Director');
 
     $approveCheckDate = $ev->event_date;
-    $eventDateExpired = $approveCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC')->addDay());
+    $eventDateExpired = $approveCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC'));
 @endphp
 
 <div class="fixed inset-0 z-[100] flex flex-col bg-gray-50 overflow-hidden fs-in"
@@ -2388,6 +2392,39 @@ select.tw-select-arrow {
 
                 </div>
 
+                <p class="text-sm text-center font-medium text-[#333333]">
+                    Posted {{ $createdPH->diffForHumans() }} · {{ $createdPH->format('M d, Y g:i A') }}
+                </p>
+
+            </div>
+        </div>
+
+        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden bg-gray-50">
+
+            <div class="flex-shrink-0 px-6 py-4 bg-white border-b border-gray-200">
+                <p class="text-[10px] font-bold uppercase tracking-widest mb-2 text-[#333333]">Responses</p>
+                @if($totalRsvp === 0)
+                    <p class="text-base font-medium text-[#333333]">No responses yet.</p>
+                @else
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <div class="flex flex-col items-center px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl min-w-[80px]">
+                            <span class="text-2xl font-bold text-emerald-700">{{ $ev->confirmed_count }}</span>
+                            <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Confirmed</span>
+                        </div>
+                        <div class="flex flex-col items-center px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl min-w-[80px]">
+                            <span class="text-2xl font-bold text-amber-700">{{ $ev->tentative_count }}</span>
+                            <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Maybe</span>
+                        </div>
+                        <div class="flex flex-col items-center px-4 py-2 bg-red-50 border border-red-200 rounded-xl min-w-[80px]">
+                            <span class="text-2xl font-bold text-red-700">{{ $ev->declined_count }}</span>
+                            <span class="text-xs font-semibold text-red-600 uppercase tracking-wide">Declined</span>
+                        </div>
+                    </div>
+                @endif
+            </div>
+
+            <div class="flex-1 min-h-0 lg:overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
+
                 <div class="p-4 rounded-xl border {{ $isCompleted ? 'bg-green-50 border-green-200' : ($isApproved ? 'bg-emerald-50 border-emerald-200' : ($isPending ? 'bg-amber-50 border-amber-200' : 'bg-orange-50 border-orange-200')) }}">
                     @if($isCompleted)
                         <p class="text-base font-bold text-[#333333]">Completed</p>
@@ -2421,39 +2458,6 @@ select.tw-select-arrow {
                     <span class="ml-1">· {{ $ev->updated_at->setTimezone('Asia/Manila')->format('M d, Y g:i A') }}</span>
                 </div>
                 @endif
-
-                <p class="text-sm text-center font-medium text-[#333333]">
-                    Posted {{ $createdPH->diffForHumans() }} · {{ $createdPH->format('M d, Y g:i A') }}
-                </p>
-
-            </div>
-        </div>
-
-        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden bg-gray-50">
-
-            <div class="flex-shrink-0 px-6 py-4 bg-white border-b border-gray-200">
-                <p class="text-[10px] font-bold uppercase tracking-widest mb-2 text-[#333333]">Responses</p>
-                @if($totalRsvp === 0)
-                    <p class="text-base font-medium text-[#333333]">No responses yet.</p>
-                @else
-                    <div class="flex items-center gap-3 flex-wrap">
-                        <div class="flex flex-col items-center px-4 py-2 bg-emerald-50 border border-emerald-200 rounded-xl min-w-[80px]">
-                            <span class="text-2xl font-bold text-emerald-700">{{ $ev->confirmed_count }}</span>
-                            <span class="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Confirmed</span>
-                        </div>
-                        <div class="flex flex-col items-center px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl min-w-[80px]">
-                            <span class="text-2xl font-bold text-amber-700">{{ $ev->tentative_count }}</span>
-                            <span class="text-xs font-semibold text-amber-600 uppercase tracking-wide">Maybe</span>
-                        </div>
-                        <div class="flex flex-col items-center px-4 py-2 bg-red-50 border border-red-200 rounded-xl min-w-[80px]">
-                            <span class="text-2xl font-bold text-red-700">{{ $ev->declined_count }}</span>
-                            <span class="text-xs font-semibold text-red-600 uppercase tracking-wide">Declined</span>
-                        </div>
-                    </div>
-                @endif
-            </div>
-
-            <div class="flex-1 min-h-0 lg:overflow-y-auto scroll-c px-6 py-5 flex flex-col gap-5">
 
                 @if($ev->description)
                 <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col lg:flex-1 lg:min-h-0">
@@ -2890,11 +2894,11 @@ select.tw-select-arrow {
                     </span>
                     <div class="flex-1 text-left min-w-0">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
+                        <p class="text-[10px]" style="color:#333333;">Copies the post text only, no photo</p>
                     </div>
                 </button>
 
-                <p class="text-[10px] text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
+                <p class="text-sm text-center font-medium" style="color:#333333;">Sharing highlights is available even after the event.</p>
             </div>
         </div>
 
@@ -2949,14 +2953,16 @@ select.tw-select-arrow {
 
 </div>
 
-{{-- ══ CLEAN-URL SCRIPT (strip ?event=46 from address bar on load) ══ --}}
+{{-- ══ CLEAN-URL SCRIPT (strip ?event=46 and ?page=N from address bar on load) ══ --}}
 <script>
     (function () {
         // Pure client-side: just rewrites the address bar in place so the
-        // URL shows /director/event/management instead of ?event=46 — no
-        // navigation, no reload, so it never touches the View Event modal
-        // that the server already opened on this page load via viewEvent().
-        if (window.location.search.indexOf('event=') !== -1) {
+        // URL shows /director/event/management instead of ?event=46 or
+        // ?page=2 — no navigation, no reload, so it never touches the View
+        // Event modal that the server already opened on this page load via
+        // viewEvent().
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('event') || params.has('page')) {
             var cleanUrl = window.location.origin + window.location.pathname;
             window.history.replaceState({}, '', cleanUrl);
         }

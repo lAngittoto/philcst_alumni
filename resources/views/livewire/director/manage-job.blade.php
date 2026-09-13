@@ -21,6 +21,12 @@ new class extends Component {
 
     protected string $paginationTheme = 'tailwind';
 
+    // Keeps the URL clean (no ?page=2 etc.) — same fix already used on
+    // Manage Events / Manage Coordinator. Without this, Livewire's
+    // WithPagination default pushes the current page number into the
+    // query string.
+    protected function queryString(): array { return []; }
+
     /** Wraps each case-insensitive match of $search inside $text with the
      *  same light-blue <mark> used on Alumni Records / Coordinator Management /
      *  Manage Events — keeps the "here's what matched" visual cue consistent
@@ -43,6 +49,7 @@ new class extends Component {
     public string $filterStatus   = '';
     public string $filterType     = '';
     public string $filterCollege  = '';
+    public string $filterPostedBy = '';
     public string $filterSort     = 'recent';
 
     public string $myDisplayName = '';
@@ -658,8 +665,16 @@ new class extends Component {
 
     public static function jobImageUrl(?string $path): string
     {
-        if ($path && Storage::disk('public')->exists($path)) {
-            return Storage::url($path);
+        // FIX: match the pattern that works on this server —
+        // asset('storage/' . $path) — same as OrganizerEvent's working
+        // photo_url accessor and the now-fixed job-management/
+        // job-opportunities components. Storage::disk('public')->exists()/
+        // Storage::url() were both resolving incorrectly here even with a
+        // correct DB path, silently forcing the default photo for every
+        // job — which is exactly why the Director's Manage Job page kept
+        // showing the default photo for jobs that had a real uploaded one.
+        if ($path) {
+            return asset('storage/' . $path);
         }
         return asset('storage/job/default-photo-job.jpg');
     }
@@ -726,6 +741,47 @@ new class extends Component {
             && empty(array_diff($allCollegeNames, $this->editTargetColleges));
     }
 
+    /**
+     * ── Client-side "can submit" gate — Post Job modal ──
+     * Mirrors the required-field checks from savePost() so the Post Job
+     * button can be disabled the instant something required is still
+     * empty — no need to click Post first to find out. Does NOT duplicate
+     * the deeper server-side checks (no-verified-alumni, image mime/size,
+     * etc.) — those still run in savePost() when clicked. Same pattern as
+     * Job Management's (organizer) isPostFormValid().
+     */
+    #[Computed]
+    public function isPostFormValid(): bool
+    {
+        if (trim($this->postJobTitle) === '') return false;
+
+        if ($this->postOrgCategory === '') return false;
+        if ($this->postOrgCategory === 'partner') {
+            if (trim($this->postPartnerName) === '') return false;
+            if (trim($this->postPartnerType) === '') return false;
+            if (trim($this->postLocation) === '')    return false;
+        } elseif ($this->postOrgCategory === 'custom') {
+            if (trim($this->postCustomName) === '') return false;
+            if (trim($this->postCustomType) === '') return false;
+            if (trim($this->postLocation) === '')   return false;
+        }
+        // 'philcst' category uses fixed name/location — nothing further
+        // required from the user once selected.
+
+        if (trim($this->postEmpType) === '')  return false;
+        if (trim($this->postExpLevel) === '') return false;
+
+        if (trim($this->postDeadline) === '') return false;
+
+        if (trim($this->postDescription) === '')             return false;
+        if (trim($this->postQualifications) === '')          return false;
+        if (trim($this->postApplicationInstructions) === '') return false;
+
+        if (empty($this->postTargetColleges)) return false;
+
+        return true;
+    }
+
     #[Computed]
     public function jobPostings()
     {
@@ -765,7 +821,17 @@ new class extends Component {
             });
         }
 
-        $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
+        if ($this->filterPostedBy === 'director') {
+            $q->whereNull('organizer_id');
+        } elseif ($this->filterPostedBy === 'coordinator') {
+            $q->whereNotNull('organizer_id');
+        }
+
+        // Sort by updated_at (not created_at) so ANY action on a job —
+        // director edit, activate/deactivate, coordinator edit/resubmit,
+        // status change, etc. — bumps it back to the top of "Recent",
+        // same as Manage Events already does.
+        $q->orderBy('updated_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
 
         $paginated = $q->paginate(20);
 
@@ -832,7 +898,7 @@ new class extends Component {
 
     public function resetFilters(): void
     {
-        $this->search = $this->filterStatus = $this->filterType = $this->filterCollege = '';
+        $this->search = $this->filterStatus = $this->filterType = $this->filterCollege = $this->filterPostedBy = '';
         $this->filterSort = 'recent';
         $this->resetPage();
     }
@@ -841,7 +907,6 @@ new class extends Component {
     {
         $this->authorizeRole();
         $this->resetPostFields();
-        $this->postDeadline  = now()->setTimezone('Asia/Manila')->addMonth()->format('Y-m-d');
         $this->showPostModal = true;
     }
 
@@ -1831,6 +1896,29 @@ select.tw-select-arrow {
    class is kept only for layout (icon centering). */
 .activate-disabled-wrap { display: inline-flex; }
 
+/* ── Date inputs: reserve room so the full date (incl. the 4-digit year)
+     is never clipped or overlapped by the native calendar-picker icon. ── */
+input[type="date"] {
+    position: relative;
+    padding-right: 2.5rem !important;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+    position: absolute;
+    right: 0.55rem;
+    top: 50%;
+    transform: translateY(-50%);
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0.75;
+}
+input[type="date"]::-webkit-datetime-edit {
+    padding-right: 2px;
+}
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+    padding-right: 2px;
+}
+
 .img-upload-zone {
     border: 2px dashed #d1d5db;
     border-radius: 12px;
@@ -1992,7 +2080,7 @@ select.tw-select-arrow {
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
-             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege,filterSort">
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort">
             <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                 Filters
             </div>
@@ -2027,6 +2115,13 @@ select.tw-select-arrow {
                 @foreach($this->collegesWithDepts as $college)
                     <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
                 @endforeach
+            </select>
+
+            <select wire:model.live="filterPostedBy"
+                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
+                <option value="">All Posted By</option>
+                <option value="director">You Posted</option>
+                <option value="coordinator">Posted by Coordinator</option>
             </select>
 
             @if($filterStatus)
@@ -2068,7 +2163,26 @@ select.tw-select-arrow {
             </span>
             @endif
 
-            @php $mgJobHasActiveFilters = $search || $filterStatus || $filterType || $filterCollege; @endphp
+            @if($filterPostedBy)
+            @php
+                $postedByPillMap = [
+                    'director'    => ['label' => 'You Posted',             'cls' => 'bg-indigo-50 border-indigo-300 text-indigo-800', 'icon' => 'fa-user-tie'],
+                    'coordinator' => ['label' => 'Posted by Coordinator',  'cls' => 'bg-teal-50 border-teal-300 text-teal-800',       'icon' => 'fa-user-group'],
+                ];
+                $pbPill = $postedByPillMap[$filterPostedBy] ?? null;
+            @endphp
+            @if($pbPill)
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $pbPill['cls'] }}">
+                <i class="fas {{ $pbPill['icon'] }} text-[9px]"></i>{{ $pbPill['label'] }}
+                <button wire:click="$set('filterPostedBy', '')" type="button"
+                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                    <i class="fas fa-xmark text-[10px]"></i>
+                </button>
+            </span>
+            @endif
+            @endif
+
+            @php $mgJobHasActiveFilters = $search || $filterStatus || $filterType || $filterCollege || $filterPostedBy; @endphp
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
@@ -2100,6 +2214,12 @@ select.tw-select-arrow {
                     <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
                 @endforeach
             </select>
+            <select wire:model.live="filterPostedBy"
+                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
+                <option value="">All Posted By</option>
+                <option value="director">You Posted</option>
+                <option value="coordinator">Posted by Coordinator</option>
+            </select>
         </div>
 
         {{-- ── TABLE WRAPPER — only this region scrolls; loading dim applies
@@ -2110,13 +2230,13 @@ select.tw-select-arrow {
                  same pattern as the alumni-facing yearbook, instead of only
                  the thin progress bar in the filter strip. --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             <div id="dm-table-scroll"
                  class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort,resetFilters,previousPage,nextPage,gotoPage">
 
             @if($this->jobPostings->count() > 0)
 
@@ -2495,10 +2615,13 @@ select.tw-select-arrow {
 @if($showConfirmModal)
 @php $confirmIsActivating = $confirmAction === 'ACTIVE'; @endphp
 <div class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-     wire:keydown.escape.window="cancelConfirm">
+     x-data="{ open: true }"
+     x-show="open"
+     x-init="$watch('open', v => { if (!v) $wire.cancelConfirm() })"
+     @keydown.escape.window="open = false">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
         <div class="px-6 py-4 border-b {{ $confirmIsActivating ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50' }}">
-            <h2 class="text-base font-semibold {{ $confirmIsActivating ? 'text-emerald-800' : 'text-amber-800' }} flex items-center gap-2.5">
+            <h2 class="text-lg font-semibold {{ $confirmIsActivating ? 'text-emerald-800' : 'text-amber-800' }} flex items-center gap-2.5">
                 <div class="w-8 h-8 {{ $confirmIsActivating ? 'bg-emerald-100' : 'bg-amber-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
                     <i class="fas {{ $confirmIsActivating ? 'fa-circle-play text-emerald-600' : 'fa-circle-pause text-amber-600' }} text-sm"></i>
                 </div>
@@ -2506,38 +2629,34 @@ select.tw-select-arrow {
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-sm text-[#555555] mb-1">You are about to <strong>{{ $confirmIsActivating ? 'activate' : 'deactivate' }}</strong>:</p>
-            <p class="font-semibold text-[#333333] text-sm mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
+            <p class="text-base text-[#555555] mb-1">You are about to <strong>{{ $confirmIsActivating ? 'activate' : 'deactivate' }}</strong>:</p>
+            <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $confirmJobTitle }}
             </p>
             @if($confirmIsActivating)
             <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-emerald-900">Alumni will be able to see and apply to this job posting once activated.</span>
+                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                <span class="text-sm text-emerald-900">Alumni will be able to see and apply to this job posting once activated.</span>
             </div>
             @else
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
-                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-xs"></i>
-                <span class="text-xs text-amber-900">Alumni won't see this job posting until you re-activate it. All fields become editable while inactive.</span>
+                <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                <span class="text-sm text-amber-900">Alumni won't see this job posting until you re-activate it. All fields become editable while inactive.</span>
             </div>
             @endif
             <div class="flex gap-2">
-                <button wire:click="cancelConfirm"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                        wire:target="cancelConfirm,executeToggle"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:pointer-events-none">
-                    <span wire:loading wire:target="cancelConfirm"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="cancelConfirm"><i class="fas fa-xmark mr-1 text-xs"></i></span>
+                <button type="button" @click="open = false"
+                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer">
+                    <i class="fas fa-xmark mr-1 text-sm"></i>
                     Cancel
                 </button>
                 <button wire:click="executeToggle"
                         wire:loading.attr="disabled"
                         wire:target="executeToggle"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer disabled:opacity-60
+                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white transition cursor-pointer disabled:opacity-60
                                {{ $confirmIsActivating ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600' }}">
-                    <span wire:loading wire:target="executeToggle"><i class="fas fa-spinner animate-spin mr-1 text-xs"></i></span>
-                    <span wire:loading.remove wire:target="executeToggle"><i class="fas {{ $confirmIsActivating ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-xs"></i></span>
+                    <span wire:loading wire:target="executeToggle"><i class="fas fa-spinner animate-spin mr-1 text-sm"></i></span>
+                    <span wire:loading.remove wire:target="executeToggle"><i class="fas {{ $confirmIsActivating ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-sm"></i></span>
                     Yes, {{ $confirmIsActivating ? 'Activate' : 'Deactivate' }}
                 </button>
             </div>
@@ -2546,6 +2665,37 @@ select.tw-select-arrow {
 </div>
 @endif
 
+
+{{-- ── Reactive flags: photo-upload-in-progress (Post Job / Edit Job) ──
+     Lets the wire:ignore'd photo widgets (their own Alpine scope) tell the
+     Post Job / Save Changes buttons (a different Alpine scope) that an
+     upload is still in flight, so the button can't be clicked before
+     postJobImage/editJobImage is actually populated server-side — this is
+     what was causing the default photo to get saved even after uploading
+     one. Alpine.store() is reactive so every reader re-renders correctly. --}}
+<script>
+(function () {
+    function registerEoPostPhoto() {
+        if (!Alpine.store('eoPostPhoto')) {
+            Alpine.store('eoPostPhoto', { uploading: false });
+        }
+    }
+    function registerEoEditPhoto() {
+        if (!Alpine.store('eoEditPhoto')) {
+            Alpine.store('eoEditPhoto', { uploading: false });
+        }
+    }
+    if (window.Alpine) {
+        registerEoPostPhoto();
+        registerEoEditPhoto();
+    } else {
+        document.addEventListener('alpine:init', function () {
+            registerEoPostPhoto();
+            registerEoEditPhoto();
+        });
+    }
+})();
+</script>
 
 {{-- ════════════════════════════════════════════════════════════════════════
      POST JOB — FULL SCREEN 3-COLUMN
@@ -2718,14 +2868,14 @@ select.tw-select-arrow {
                     <div class="p-3.5 space-y-3">
                         <div>
                             <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Job Title <span class="text-red-500">*</span></label>
-                            <input wire:model.defer="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
+                            <input wire:model.live.debounce.300ms="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
                                    class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                             @if(isset($postErrors['postJobTitle']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
                         </div>
                         <div class="grid grid-cols-2 gap-2">
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employment Type <span class="text-red-500">*</span></label>
-                                <select wire:model.defer="postEmpType"
+                                <select wire:model.live="postEmpType"
                                         class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
                                     <option value="">Select Type</option>
                                     @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
@@ -2736,7 +2886,7 @@ select.tw-select-arrow {
                             </div>
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Experience Level <span class="text-red-500">*</span></label>
-                                <select wire:model.defer="postExpLevel"
+                                <select wire:model.live="postExpLevel"
                                         class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
                                     <option value="">Select Level</option>
                                     @foreach($this->orderedExpLevels as $lvl)
@@ -2755,11 +2905,12 @@ select.tw-select-arrow {
                             </div>
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Deadline <span class="text-red-500">*</span></label>
-                                <input wire:model.defer="postDeadline" type="date"
+                                <input wire:model.live="postDeadline" type="date"
                                        min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
                                        oninput="window.__eoGuardDeadlineInput(this)"
                                        onchange="window.__eoGuardDeadlineInput(this)"
                                        onclick="window.__eoOpenDatePicker(this)"
+                                       onfocus="window.__eoOpenDatePicker(this)"
                                        class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
                                 @if(isset($postErrors['postDeadline']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                             </div>
@@ -2774,7 +2925,7 @@ select.tw-select-arrow {
                         <i class="{{ $ico }} text-[9px] text-[#555555]"></i> {{ $title }} <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
-                        <textarea wire:model.defer="{{ $field }}"
+                        <textarea wire:model.live.debounce.400ms="{{ $field }}"
                                   class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition resize-none"
                                   placeholder="{{ $placeholder }}" maxlength="{{ $maxlen }}"
                                   style="min-height:100px;"></textarea>
@@ -2795,23 +2946,52 @@ select.tw-select-arrow {
                     NEW: this is now the ONLY photo UI on the Post Job modal — the
                     separate "Job Photo" upload card that used to sit in the LEFT
                     column was removed (redundant once this panel became clickable).
-                    Click the image to open the file picker; wired straight to
-                    wire:model="postJobImage" so no more shared Alpine.store is
-                    needed — one x-data block owns the whole upload lifecycle.
+                    Click the image to open the file picker; uses $wire.upload()
+                    (not wire:model) + Alpine.store('eoPostPhoto') so the Post
+                    Job button can't be clicked until the upload actually
+                    finishes server-side.
                 --}}
                 <div wire:ignore
                      class="bg-white border-[1.5px] {{ isset($postErrors['postJobImage']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden"
                      x-data="{
                          preview: null,
+                         uploading: false,
+                         uploadError: false,
                          handleFile(e) {
                              const f = e.target.files[0];
                              if (!f) return;
+                             this.uploadError = false;
                              const r = new FileReader();
                              r.onload = ev => { this.preview = ev.target.result; };
                              r.readAsDataURL(f);
+
+                             this.uploading = true;
+                             Alpine.store('eoPostPhoto').uploading = true;
+                             clearTimeout(this._eoUploadTimeout);
+                             this._eoUploadTimeout = setTimeout(() => {
+                                 this.uploading = false;
+                                 this.uploadError = true;
+                                 Alpine.store('eoPostPhoto').uploading = false;
+                             }, 30000);
+                             $wire.upload('postJobImage', f,
+                                 () => {
+                                     clearTimeout(this._eoUploadTimeout);
+                                     this.uploading = false;
+                                     Alpine.store('eoPostPhoto').uploading = false;
+                                 },
+                                 () => {
+                                     clearTimeout(this._eoUploadTimeout);
+                                     this.uploading = false;
+                                     this.uploadError = true;
+                                     Alpine.store('eoPostPhoto').uploading = false;
+                                 }
+                             );
                          },
                          clear() {
                              this.preview = null;
+                             this.uploading = false;
+                             this.uploadError = false;
+                             Alpine.store('eoPostPhoto').uploading = false;
                              this.$refs.fileInput.value = '';
                              $wire.set('postJobImage', null);
                          }
@@ -2823,11 +3003,17 @@ select.tw-select-arrow {
                     <div class="p-3.5">
                         <label class="block rounded-xl overflow-hidden relative cursor-pointer group" style="height:100px;">
                             <template x-if="preview">
-                                <img :src="preview" alt="Job photo preview" class="w-full h-full object-cover">
+                                <div class="relative w-full h-full">
+                                    <img :src="preview" alt="Job photo preview" class="w-full h-full object-cover">
+                                    <span class="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-emerald-600 text-white px-1.5 py-0.5 rounded-full">PREVIEW</span>
+                                </div>
                             </template>
                             <template x-if="!preview">
-                                <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="Default job photo"
-                                     class="w-full h-full object-cover">
+                                <div class="relative w-full h-full">
+                                    <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="Default job photo"
+                                         class="w-full h-full object-cover">
+                                    <span class="absolute bottom-1.5 left-1.5 text-[9px] font-bold bg-gray-600 text-white px-1.5 py-0.5 rounded-full">DEFAULT</span>
+                                </div>
                             </template>
                             <div class="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-center justify-center">
                                 <span class="opacity-0 group-hover:opacity-100 transition text-white text-[10px] font-semibold flex items-center gap-1">
@@ -2835,7 +3021,7 @@ select.tw-select-arrow {
                                 </span>
                             </div>
                             <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                   wire:model="postJobImage" @change="handleFile($event)">
+                                   @change="handleFile($event)">
                         </label>
                         <div class="flex items-center justify-between mt-1.5">
                             <p class="text-[10px] text-[#777777]" x-text="preview ? 'Click photo to change' : 'Default photo if none uploaded — click to change'"></p>
@@ -2843,8 +3029,11 @@ select.tw-select-arrow {
                                     class="text-[10px] text-red-500 font-semibold hover:underline cursor-pointer">Remove</button>
                         </div>
                         <p class="text-[10px] text-[#777777] mt-0.5">JPG, PNG, WebP — max 2MB</p>
-                        <div wire:loading wire:target="postJobImage" class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
+                        <div x-show="uploading" x-cloak class="mt-1.5 text-xs text-[#7a3f91] flex items-center gap-2">
                             <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                        </div>
+                        <div x-show="uploadError" x-cloak class="mt-1.5 text-xs text-red-600 flex items-center gap-2">
+                            <i class="fas fa-circle-exclamation text-xs"></i> Upload failed. Try again.
                         </div>
                         @if(isset($postErrors['postJobImage']))
                             <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobImage'] }}</p>
@@ -2892,15 +3081,30 @@ select.tw-select-arrow {
                 </div>
             </div>
 
-            <div class="shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
+            <div class="shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2"
+                 x-data="{ get photoUploading() { return $store.eoPostPhoto ? $store.eoPostPhoto.uploading : false; } }">
+                {{-- BUG FIX: was only guarded by photoUploading — a completely
+                     empty form could still be submitted. Now also disabled
+                     whenever a required (*) field is still empty
+                     (isPostFormValid), same pattern as Job Management's
+                     (organizer) Post Job button. --}}
                 <button type="button" wire:click="savePost"
                         wire:loading.attr="disabled" wire:target="savePost"
+                        :disabled="photoUploading || {{ $this->isPostFormValid ? 'false' : 'true' }}"
                         class="w-full px-4 py-2.5 rounded-xl font-semibold text-white text-sm transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                     <span wire:loading wire:target="savePost"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                     <span wire:loading.remove wire:target="savePost"><i class="fas fa-paper-plane text-xs"></i></span>
                     <span wire:loading wire:target="savePost">Posting…</span>
                     <span wire:loading.remove wire:target="savePost">Post Job</span>
                 </button>
+                <p x-show="photoUploading" x-cloak class="text-xs text-center font-medium" style="color:#b45309;">
+                    <i class="fas fa-circle-info mr-1"></i>Please wait for the photo to finish uploading.
+                </p>
+                @if(! $this->isPostFormValid)
+                    <p class="text-xs text-center font-medium" style="color:#b45309;">
+                        <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable posting.
+                    </p>
+                @endif
                 <button type="button" wire:click="closePostModal"
                         wire:loading.attr="disabled"
                         wire:loading.class="opacity-60 cursor-wait"
@@ -3050,12 +3254,15 @@ select.tw-select-arrow {
                     <div class="p-3">
                         {{-- View mode: just show the current image --}}
                         <div x-show="!editMode">
-                            @php $editViewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null); @endphp
-                            <div class="rounded-xl overflow-hidden" style="height:110px;">
-                                <img src="{{ $editViewImgUrl }}" alt="Job photo" class="w-full h-full object-cover"
+                            @php $editViewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null);
+                                 $editViewImgUrl .= (str_contains($editViewImgUrl, '?') ? '&' : '?') . 'v=' . $editingJob->updated_at?->timestamp;
+                            @endphp
+                            <div class="rounded-xl overflow-hidden" style="height:110px; background:#f3f0f6;">
+                                <img src="{{ $editViewImgUrl }}" alt="{{ $editingJob->job_title }}"
+                                     class="w-full h-full object-contain"
                                      onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
                             </div>
-                            <p class="text-[10px] text-[#777777] mt-1.5 text-center">
+                            <p class="text-[10px] mt-1 text-center font-medium" style="color:#111111;">
                                 {{ $editingJob->job_image ? 'Custom photo uploaded' : 'Default photo' }}
                             </p>
                         </div>
@@ -3065,18 +3272,46 @@ select.tw-select-arrow {
                         <div wire:ignore
                              x-data="{
                                  preview: null,
-                                 existing: @js($editCurrentImage ? Storage::url($editCurrentImage) : ''),
+                                 existing: @js($editCurrentImage ? asset('storage/' . $editCurrentImage) : ''),
                                  removed: false,
+                                 uploading: false,
+                                 uploadError: false,
                                  handleFile(e) {
                                      const f = e.target.files[0];
                                      if (!f) return;
                                      this.removed = false;
+                                     this.uploadError = false;
                                      const r = new FileReader();
                                      r.onload = ev => { this.preview = ev.target.result; };
                                      r.readAsDataURL(f);
+
+                                     this.uploading = true;
+                                     Alpine.store('eoEditPhoto').uploading = true;
+                                     clearTimeout(this._eoUploadTimeout);
+                                     this._eoUploadTimeout = setTimeout(() => {
+                                         this.uploading = false;
+                                         this.uploadError = true;
+                                         Alpine.store('eoEditPhoto').uploading = false;
+                                     }, 30000);
+                                     $wire.upload('editJobImage', f,
+                                         () => {
+                                             clearTimeout(this._eoUploadTimeout);
+                                             this.uploading = false;
+                                             Alpine.store('eoEditPhoto').uploading = false;
+                                         },
+                                         () => {
+                                             clearTimeout(this._eoUploadTimeout);
+                                             this.uploading = false;
+                                             this.uploadError = true;
+                                             Alpine.store('eoEditPhoto').uploading = false;
+                                         }
+                                     );
                                  },
                                  clearNew() {
                                      this.preview = null;
+                                     this.uploading = false;
+                                     this.uploadError = false;
+                                     Alpine.store('eoEditPhoto').uploading = false;
                                      this.$refs.fileInput.value = '';
                                      $wire.set('editJobImage', null);
                                  },
@@ -3121,7 +3356,7 @@ select.tw-select-arrow {
                                             <p class="font-semibold text-xs text-[#555555]">Upload photo</p>
                                             <p class="text-[10px] text-[#777777]">JPG, PNG, WebP · max 2MB</p>
                                             <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                                   wire:model="editJobImage" @change="handleFile($event)">
+                                                   @change="handleFile($event)">
                                         </label>
                                     </div>
                                     <template x-if="removed">
@@ -3138,10 +3373,16 @@ select.tw-select-arrow {
                                     <i class="fas fa-arrow-up-from-bracket text-[9px]"></i>
                                     Replace photo
                                     <input type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
-                                           wire:model="editJobImage" @change="handleFile($event)">
+                                           @change="handleFile($event)">
                                 </label>
                             </template>
 
+                            <div x-show="uploading" x-cloak class="mt-1.5 text-[10px] text-[#7a3f91] flex items-center gap-2">
+                                <i class="fas fa-spinner animate-spin text-[10px]"></i> Uploading…
+                            </div>
+                            <div x-show="uploadError" x-cloak class="mt-1.5 text-[10px] text-red-600 flex items-center gap-2">
+                                <i class="fas fa-circle-exclamation text-[10px]"></i> Upload failed. Try again.
+                            </div>
                             @if(isset($editErrors['editJobImage']))
                                 <p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editJobImage'] }}</p>
                             @endif
@@ -3325,6 +3566,7 @@ select.tw-select-arrow {
                                            oninput="window.__eoGuardDeadlineInput(this)"
                                            onchange="window.__eoGuardDeadlineInput(this)"
                                            onclick="window.__eoOpenDatePicker(this)"
+                                           onfocus="window.__eoOpenDatePicker(this)"
                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDeadline'] }}</p>@endif
                                 </div>
@@ -3430,17 +3672,22 @@ select.tw-select-arrow {
 
             </div>
 
-            <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2">
+            <div class="flex-shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2"
+                 x-data="{ get photoUploading() { return $store.eoEditPhoto ? $store.eoEditPhoto.uploading : false; } }">
                 <div x-show="editMode" x-cloak>
                     <button type="button" wire:click="saveEditJob"
                             wire:loading.attr="disabled"
                             wire:target="saveEditJob"
+                            :disabled="photoUploading"
                             class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                         <span wire:loading wire:target="saveEditJob"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                         <span wire:loading.remove wire:target="saveEditJob"><i class="fas fa-floppy-disk text-xs"></i></span>
                         <span wire:loading wire:target="saveEditJob">Saving…</span>
                         <span wire:loading.remove wire:target="saveEditJob">Save Changes</span>
                     </button>
+                    <p x-show="photoUploading" x-cloak class="text-xs text-center font-medium mt-1.5" style="color:#b45309;">
+                        <i class="fas fa-circle-info mr-1"></i>Please wait for the photo to finish uploading.
+                    </p>
                 </div>
                 <div x-show="!editMode" class="pb-1">
                     <p class="text-center text-xs text-[#777777]">Deactivate this job (top-right) to make changes.</p>
@@ -3543,8 +3790,8 @@ select.tw-select-arrow {
                         <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
                     </div>
                     <div class="p-3">
-                        <div class="rounded-xl overflow-hidden" style="height:110px;">
-                            <img src="{{ $viewJobImgUrl }}" alt="{{ $job->job_title }}" class="w-full h-full object-cover"
+                        <div class="rounded-xl overflow-hidden" style="height:110px; background:#f3f0f6;">
+                            <img src="{{ $viewJobImgUrl }}" alt="{{ $job->job_title }}" class="w-full h-full object-contain"
                                  onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
                         </div>
                         <div class="flex flex-wrap gap-1.5 mt-2 justify-center">
@@ -3889,15 +4136,15 @@ select.tw-select-arrow {
 
         <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-c">
+            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 min-h-0">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
-                <div class="dir-share-photo-preview">
+                <div class="dir-share-photo-preview flex-shrink-0">
                     <img src="{{ $shareJobPhotoUrl }}" alt="{{ $shareJobTitle }}"
                          onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
                 </div>
 
-                <div class="rounded-xl border border-gray-200 flex-shrink-0">
+                <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto scroll-c" style="max-height:180px;">
                     <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $sjPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
@@ -3964,11 +4211,11 @@ select.tw-select-arrow {
                     </span>
                     <div class="flex-1 text-left min-w-0">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-[10px] truncate" style="color:#333333;">Copies the post text (photo not included)</p>
+                        <p class="text-[10px]" style="color:#333333;">Copies the post text only, no photo</p>
                     </div>
                 </button>
 
-                <p class="text-[10px] text-center" style="color:#333333;">Sharing is available while the job posting is active.</p>
+                <p class="text-sm text-center font-medium" style="color:#333333;">Sharing is available while the job posting is active.</p>
             </div>
         </div>
 
@@ -3984,6 +4231,22 @@ select.tw-select-arrow {
     </div>
 </div>
 @endif
+
+{{-- ══ CLEAN-URL SCRIPT (strip ?job=46 and ?page=N from address bar on load) ══ --}}
+<script>
+    (function () {
+        // Pure client-side: just rewrites the address bar in place so the
+        // URL shows /director/job/management instead of ?job=46 or
+        // ?page=2 — no navigation, no reload, so it never touches the View
+        // Job modal that the server already opened on this page load via
+        // viewJob().
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('job') || params.has('page')) {
+            var cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, '', cleanUrl);
+        }
+    })();
+</script>
 
 {{-- ══ SALARY AUTO-FORMAT + DEADLINE CLICK-TO-OPEN SCRIPTS ══ --}}
 <script>
@@ -4079,13 +4342,44 @@ select.tw-select-arrow {
         }
     };
 
+    // ── Safety net: reset the photo-uploading flags once the modal that
+    //    owns them actually closes, so a stuck flag never keeps the button
+    //    disabled the next time that modal is opened. ──
+    document.addEventListener('livewire:init', function () {
+        Livewire.hook('commit', ({ component, commit, succeed }) => {
+            var calls = (commit && commit.calls) || [];
+            var names = calls.map(function (c) { return c.method; });
+            succeed(() => {
+                if (names.indexOf('closePostModal') !== -1 && window.Alpine && Alpine.store('eoPostPhoto')) {
+                    Alpine.store('eoPostPhoto').uploading = false;
+                }
+                if (names.indexOf('closeEditModal') !== -1 && window.Alpine && Alpine.store('eoEditPhoto')) {
+                    Alpine.store('eoEditPhoto').uploading = false;
+                }
+            });
+        });
+    });
+
     // ── Click anywhere in the date field to open the picker ────────────
     // A native <input type="date"> only opens its calendar when you click
     // the small icon on the right — clicking the text/box area just moves
     // the text cursor. This makes the WHOLE input act like the icon, so
     // one click anywhere in the box pops the picker open immediately.
+    //
+    // FIX: also re-stamps "min" to TOMORROW (Asia/Manila) right before the
+    // picker opens. Without this, a field left open across midnight (or a
+    // wrong client clock) could keep a stale "min" that still lets TODAY
+    // render as clickable in the calendar grid — the earlier oninput/
+    // onchange guard only catches it AFTER a bad date is already picked,
+    // this stops the calendar from ever offering it in the first place.
     window.__eoOpenDatePicker = function (el) {
         if (!el) return;
+        var manilaNow    = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Manila' }));
+        var tomorrow     = new Date(manilaNow.getFullYear(), manilaNow.getMonth(), manilaNow.getDate() + 1);
+        var yyyy = tomorrow.getFullYear();
+        var mm   = String(tomorrow.getMonth() + 1).padStart(2, '0');
+        var dd   = String(tomorrow.getDate()).padStart(2, '0');
+        el.min = yyyy + '-' + mm + '-' + dd;
         if (typeof el.showPicker === 'function') {
             try { el.showPicker(); } catch (e) { /* ignore — e.g. not user-triggered enough for some browsers */ }
         }

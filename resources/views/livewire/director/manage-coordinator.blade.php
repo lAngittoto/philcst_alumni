@@ -52,6 +52,11 @@ new class extends Component {
     public bool   $editingProfileEmail  = false;
     public string $profileEmailInput    = '';
     public bool   $savingProfileEmail   = false;
+    public bool   $editingProfileCollege      = false;
+    public string $profileCollegeSelect       = '';
+    public string $profileCollegeOriginal     = '';
+    public array  $profileSelectedCourseCodes = [];
+    public bool   $savingProfileCollege       = false;
 
     // Photo upload (view profile) — mirrors alumni-records upload flow
     public $newCoordPhoto = null;
@@ -110,8 +115,8 @@ new class extends Component {
         }
         if ($this->coordCollege) $q->where('department', $this->coordCollege);
         if ($this->coordStatus)  $q->where('status', $this->coordStatus);
-        $q->orderByDesc('created_at');
-        return $q->paginate(10, ['*'], 'coordPage');
+        $q->orderByDesc('updated_at');
+        return $q->paginate(20, ['*'], 'coordPage');
     }
 
     #[Computed]
@@ -222,6 +227,10 @@ new class extends Component {
         $this->viewingProfileId     = null;
         $this->editingProfileEmail  = false;
         $this->profileEmailInput    = '';
+        $this->editingProfileCollege      = false;
+        $this->profileCollegeSelect       = '';
+        $this->profileCollegeOriginal     = '';
+        $this->profileSelectedCourseCodes = [];
         $this->coordinatorSuccess   = '';
         $this->newCoordPhoto        = null;
     }
@@ -541,6 +550,10 @@ new class extends Component {
             $this->viewingProfileId   = $id;
             $this->editingProfileEmail = false;
             $this->profileEmailInput   = '';
+            $this->editingProfileCollege      = false;
+            $this->profileCollegeSelect       = '';
+            $this->profileCollegeOriginal     = '';
+            $this->profileSelectedCourseCodes = [];
             $this->newCoordPhoto       = null;
             $this->activeModal        = 'viewProfile';
         } catch (\Exception) {
@@ -618,6 +631,101 @@ new class extends Component {
     }
 
     /**
+     * College Assignment edit (View Profile panel) — only meaningful while
+     * the coordinator is INACTIVE (an active one can't be reassigned without
+     * deactivating first, same rule enforced on activation elsewhere).
+     */
+    public function startEditingProfileCollege(): void
+    {
+        if (!$this->viewingProfileId) return;
+        $currentCode   = $this->viewingProfile['department'] ?? '';
+        $currentCollege = $this->getCollegeForCourse($currentCode);
+
+        $this->profileCollegeSelect       = $currentCollege;
+        $this->profileCollegeOriginal     = $currentCollege;
+        $this->profileSelectedCourseCodes = Course::where('college', $currentCollege)->pluck('code')->toArray();
+        $this->editingProfileCollege      = true;
+        $this->resetErrorBag(['profileCollegeSelect', 'profileSelectedCourseCodes']);
+    }
+
+    public function updatedProfileCollegeSelect(string $value): void
+    {
+        $this->profileSelectedCourseCodes = $value ? Course::where('college', $value)->pluck('code')->toArray() : [];
+    }
+
+    public function cancelEditingProfileCollege(): void
+    {
+        $this->editingProfileCollege      = false;
+        $this->profileCollegeSelect       = '';
+        $this->profileCollegeOriginal     = '';
+        $this->profileSelectedCourseCodes = [];
+        $this->resetErrorBag(['profileCollegeSelect', 'profileSelectedCourseCodes']);
+    }
+
+    public function updateProfileCollege(): void
+    {
+        if (!$this->viewingProfileId) return;
+        $this->savingProfileCollege = true;
+
+        try {
+            $coordinator = Organizer::findOrFail($this->viewingProfileId);
+
+            if ($coordinator->status === 'ACTIVE') {
+                throw new \Exception('Deactivate this coordinator before changing their college assignment.');
+            }
+
+            $college = trim($this->profileCollegeSelect);
+            if (!$college) throw new \Exception('Please select a college.');
+            if (empty($this->profileSelectedCourseCodes)) throw new \Exception('Select at least one program/course under this college.');
+
+            // Same duplicate-assignment guard used on registration/activation —
+            // block moving this coordinator onto a college another active
+            // coordinator already occupies.
+            // occupiedColleges() only tracks ACTIVE coordinators, and this
+            // coordinator is guaranteed INACTIVE above, so any hit here is
+            // always someone else.
+            $occupied = $this->occupiedColleges();
+            if (isset($occupied[$college])) {
+                throw new \Exception("College \"{$college}\" already has an active coordinator ({$occupied[$college]}). Choose a different college.");
+            }
+
+            $this->validate([
+                'profileCollegeSelect'       => ['required', 'string'],
+                'profileSelectedCourseCodes' => ['required', 'array', 'min:1'],
+            ], [
+                'profileCollegeSelect.required'       => 'Please select a college.',
+                'profileSelectedCourseCodes.required' => 'Select at least one program/course.',
+                'profileSelectedCourseCodes.min'       => 'Select at least one program/course.',
+            ]);
+
+            // department stores the full college name, matching how
+            // registration already stores it (see registerCoordinator()).
+            $coordinator->update(['department' => $college]);
+
+            $this->viewingProfile['department'] = $college;
+            $this->editingProfileCollege        = false;
+            $this->profileCollegeSelect         = '';
+            $this->profileCollegeOriginal       = '';
+            $this->profileSelectedCourseCodes   = [];
+
+            $this->flash('success', 'College assignment updated successfully.');
+
+            $this->dispatch('dir-coordinator-updated',
+                id: $coordinator->id,
+                name: $coordinator->getFullName(),
+                action: 'college_updated'
+            );
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            throw $e;
+        } catch (\Exception $e) {
+            $this->flash('error', $e->getMessage());
+        } finally {
+            $this->savingProfileCollege = false;
+        }
+    }
+
+    /**
      * Photo upload for the View Profile panel — mirrors the alumni-records
      * hover-to-upload flow (camera overlay on hover, upload/reset/cancel).
      */
@@ -689,25 +797,33 @@ new class extends Component {
     }
 
     /* ══ Coordinator table — same interaction language as Alumni Records ══ */
-    .coord-row {
+    .coord-row,
+    .coord-row * {
         cursor: pointer;
-        user-select: none;
-        -webkit-user-select: none;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
         transition: background .08s ease;
     }
     .coord-row:hover { background: #F7F4FA !important; }
 
-    .coord-mrow {
+    .coord-mrow,
+    .coord-mrow * {
         cursor: pointer;
-        user-select: none;
-        -webkit-user-select: none;
+        user-select: none !important;
+        -webkit-user-select: none !important;
+        -moz-user-select: none !important;
+        -ms-user-select: none !important;
         background: #fff;
         border-bottom: 1px solid #F0ECF5;
+        transition: background .08s ease;
+    }
+    .coord-mrow {
         padding: 12px 14px;
         display: flex;
         align-items: center;
         gap: 10px;
-        transition: background .08s ease;
     }
     .coord-mrow:active { background: #F0ECF5; }
 
@@ -744,6 +860,16 @@ new class extends Component {
     .coord-filter-input:focus {
         border-color: #9b8aab !important;
     }
+    .coord-filter-select {
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        appearance: none !important;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.6rem center !important;
+        background-size: 1.1em !important;
+    }
+    .coord-filter-select::-ms-expand { display: none; }
 
     /* ══ Manage Colleges modal — simple header, no sidebar ══ */
     .cfs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #f8f7fb; }
@@ -964,8 +1090,7 @@ new class extends Component {
             </div>
 
             <select wire:model.live="coordCollege"
-                    class="coord-filter-input py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition cursor-pointer appearance-none bg-no-repeat"
-                    style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
+                    class="coord-filter-input coord-filter-select py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition cursor-pointer">
                 <option value="">All Colleges</option>
                 @foreach($this->orgColleges as $col)
                     <option value="{{ $col }}">{{ $col }}</option>
@@ -973,8 +1098,7 @@ new class extends Component {
             </select>
 
             <select wire:model.live="coordStatus"
-                    class="coord-filter-input py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition cursor-pointer appearance-none bg-no-repeat"
-                    style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
+                    class="coord-filter-input coord-filter-select py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition cursor-pointer">
                 <option value="">All Status</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
@@ -1028,7 +1152,7 @@ new class extends Component {
                     <colgroup>
                         <col style="width:26%;"><col style="width:14%;"><col style="width:22%;"><col style="width:22%;"><col style="width:8%;"><col style="width:8%;">
                     </colgroup>
-                    <thead>
+                    <thead style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                         <tr class="bg-[#f5f0fa] border-b-2 border-[#e2d3ef] sticky top-0 z-10">
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Teacher ID</th>
@@ -1465,7 +1589,7 @@ new class extends Component {
                     <div id="reg-section-college" class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden scroll-mt-4">
                         <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50">
                             <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                College Assignment <span class="text-red-500">*</span>
+                                College Assignment
                             </h3>
                         </div>
                         <div class="p-6">
@@ -1474,7 +1598,7 @@ new class extends Component {
                                     <svg class="w-4 h-4 text-amber-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
                                     </svg>
-                                    <span class="text-gray-700">No colleges configured yet. Set up colleges via <strong>Manage Colleges</strong>.</span>
+                                    <span style="color:#333333;" class="text-base">No colleges configured yet. Set up colleges via <strong>Manage Colleges</strong>.</span>
                                 </div>
                             @else
                                 @php
@@ -1488,7 +1612,7 @@ new class extends Component {
                                      class="space-y-4">
                                     <div class="flex flex-col gap-4">
                                         <div class="flex-1">
-                                            <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Select College <span class="text-red-500">*</span></label>
+                                            <label style="color:#333333;" class="block text-sm font-semibold uppercase tracking-wide mb-1.5">Select College <span class="text-red-500">*</span></label>
                                             <select wire:model.live="coordCollegeSelect"
                                                     class="w-full px-3.5 py-3 pr-8 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition appearance-none bg-no-repeat cursor-pointer @error('coordCollegeSelect') border-red-400 @enderror"
                                                     style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
@@ -1506,20 +1630,20 @@ new class extends Component {
                                         </div>
                                         <div class="flex-1 min-w-0">
                                             <div x-show="depts.length > 0" x-cloak>
-                                                <p class="text-xs text-gray-500 font-semibold mb-2 uppercase tracking-wide">Departments under this college:</p>
+                                                <p style="color:#333333;" class="text-sm font-semibold mb-2 uppercase tracking-wide">Departments under this college:</p>
                                                 <div class="flex flex-wrap gap-1.5">
                                                     <template x-for="code in depts" :key="code">
-                                                        <span class="inline-block px-3 py-1.5 bg-gray-100 text-gray-700 border border-gray-300 rounded-full text-xs font-semibold font-mono" x-text="code"></span>
+                                                        <span style="color:#333333;" class="inline-block px-3 py-1.5 bg-gray-100 border border-gray-300 rounded-full text-sm font-semibold font-mono" x-text="code"></span>
                                                     </template>
                                                 </div>
                                             </div>
                                             <div x-show="!$wire.coordCollegeSelect" x-cloak>
-                                                <p class="text-xs text-gray-400 font-semibold mb-2 uppercase tracking-wide">&nbsp;</p>
+                                                <p style="color:#333333;" class="text-sm font-semibold mb-2 uppercase tracking-wide">&nbsp;</p>
                                                 <div class="flex items-center gap-2 p-3 bg-white border border-gray-300 rounded-xl">
-                                                    <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
+                                                    <svg class="w-4 h-4 shrink-0" style="color:#333333;" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                                                         <path stroke-linecap="round" stroke-linejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zm-7.518-.267A8.25 8.25 0 1120.25 10.5M8.288 14.212A5.25 5.25 0 1117.25 10.5"/>
                                                     </svg>
-                                                    <p class="text-xs text-gray-600">Select a college to preview its departments.</p>
+                                                    <p style="color:#333333;" class="text-sm">Select a college to preview its departments.</p>
                                                 </div>
                                             </div>
                                         </div>
@@ -1603,9 +1727,9 @@ new class extends Component {
     margin-bottom: 3px;
 }
 .vp-field-value {
-    font-size: 1.05rem;
+    font-size: 1.2rem;
     font-weight: 600;
-    color: #1a1a2e;
+    color: #333333;
 }
 .vp-dept-chip {
     display: inline-flex;
@@ -1946,25 +2070,92 @@ new class extends Component {
                         </div>
 
                         <div class="px-5 py-4">
-                            <p class="vp-field-label">College Assignment</p>
-                            @php
-                                // code => full course name, for the hover tooltip on each chip.
-                                $deptCodeNamesForProfile = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('name', 'code');
-                            @endphp
-                            <div class="flex items-center gap-2 flex-wrap mt-0.5">
-                                <p class="vp-field-value">{{ $collegeName }}</p>
-                                @foreach($deptCodeNamesForProfile as $deptCode => $deptCodeName)
-                                    <div class="relative group/dept">
-                                        <span class="inline-block px-2 py-0.5 bg-[#faf7fd] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-mono font-semibold cursor-default">{{ $deptCode }}</span>
-                                        <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/dept:opacity-100 transition-opacity duration-150 z-50">
-                                            <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
-                                                <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
-                                                {{ $deptCodeName ?: $deptCode }}
-                                            </div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <p class="vp-field-label" style="margin-bottom:0;">College Assignment</p>
+                                @if(!$editingProfileCollege && $profileStatus === 'INACTIVE')
+                                <div class="relative group/college-edit">
+                                    <button type="button" wire:click="startEditingProfileCollege"
+                                            wire:loading.attr="disabled" wire:target="startEditingProfileCollege"
+                                            class="inline-flex items-center justify-center w-7 h-7 rounded-md text-[#7a3f91] border border-[#d4aaeb] bg-[#faf5ff] hover:bg-[#ead5f5] hover:border-[#b47fd4] transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
+                                            aria-label="Edit">
+                                        <i class="fas fa-pen text-[10px]" wire:loading.remove wire:target="startEditingProfileCollege"></i>
+                                        <i class="fas fa-spinner animate-spin text-[10px]" wire:loading wire:target="startEditingProfileCollege"></i>
+                                    </button>
+                                    <div class="hidden md:block absolute top-full right-0 mt-1.5 pointer-events-none opacity-0 group-hover/college-edit:opacity-100 transition-opacity duration-150 z-50">
+                                        <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-md whitespace-nowrap relative">
+                                            <span class="absolute bottom-full right-2.5 border-4 border-transparent border-b-gray-900"></span>
+                                            Edit
                                         </div>
                                     </div>
-                                @endforeach
+                                </div>
+                                @endif
                             </div>
+
+                            @if($editingProfileCollege)
+                                @php
+                                    $profileCollegeDeptsMap = [];
+                                    $profileOccupiedColleges = $this->occupiedColleges();
+                                    foreach ($this->orgDepartmentsGrouped as $cN => $depts) {
+                                        $profileCollegeDeptsMap[$cN] = $depts->pluck('code')->toArray();
+                                    }
+                                @endphp
+                                <div x-data="{
+                                        map: {{ Js::from($profileCollegeDeptsMap) }},
+                                        get depts() { return $wire.profileCollegeSelect ? (this.map[$wire.profileCollegeSelect] ?? []) : []; }
+                                     }"
+                                     class="mt-2 space-y-3">
+                                    <div>
+                                        <select wire:model.live="profileCollegeSelect"
+                                                class="w-full px-3 py-2.5 pr-8 border border-[#d4aaeb] rounded-lg text-sm bg-white text-gray-900 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition appearance-none bg-no-repeat cursor-pointer @error('profileCollegeSelect') border-red-400 @enderror"
+                                                style="background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E&quot;);background-position:right 0.6rem center;background-size:1.1em;">
+                                            <option value="">Select College</option>
+                                            @foreach($this->orgDepartmentsGrouped->keys() as $cN)
+                                                @php $isOccupiedForProfile = isset($profileOccupiedColleges[$cN]) && $cN !== $profileCollegeSelect; @endphp
+                                                <option value="{{ $cN }}" {{ $isOccupiedForProfile ? 'disabled' : '' }}>
+                                                    {{ $cN }}{{ $isOccupiedForProfile ? ' — occupied' : '' }}
+                                                </option>
+                                            @endforeach
+                                        </select>
+                                        @error('profileCollegeSelect')<p class="text-xs text-red-500 mt-1.5">{{ $message }}</p>@enderror
+                                    </div>
+
+                                    <div x-show="depts.length > 0" x-cloak>
+                                        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Programs under this college</p>
+                                        <div class="flex flex-wrap gap-1.5">
+                                            <template x-for="code in depts" :key="code">
+                                                <span class="inline-block px-2.5 py-1 bg-[#faf7fd] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-mono font-semibold" x-text="code"></span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    @error('profileSelectedCourseCodes')<p class="text-xs text-red-500">{{ $message }}</p>@enderror
+
+                                    <div class="flex gap-2">
+                                        <button type="button" wire:click="cancelEditingProfileCollege"
+                                                wire:loading.attr="disabled" wire:target="cancelEditingProfileCollege,updateProfileCollege"
+                                                class="px-3 py-2.5 rounded-lg text-xs font-semibold border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none flex items-center gap-1.5">
+                                            <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="cancelEditingProfileCollege"></i>
+                                            <span wire:loading.remove wire:target="cancelEditingProfileCollege">Cancel</span>
+                                        </button>
+                                        <button type="button" wire:click="updateProfileCollege"
+                                                wire:loading.attr="disabled" wire:target="updateProfileCollege"
+                                                :disabled="$wire.profileCollegeSelect === {{ Js::from($profileCollegeOriginal) }} || !$wire.profileCollegeSelect"
+                                                class="px-3 py-2.5 rounded-lg text-xs font-semibold bg-[#7a3f91] text-white hover:bg-[#5e2f72] transition disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5">
+                                            <span wire:loading wire:target="updateProfileCollege"><i class="fas fa-spinner animate-spin"></i></span>
+                                            <span wire:loading.remove wire:target="updateProfileCollege">Save</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            @else
+                                @php
+                                    $deptCodesForProfile = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('code');
+                                @endphp
+                                <div class="flex items-center gap-2 flex-wrap mt-0.5">
+                                    <p class="vp-field-value">{{ $collegeName }}</p>
+                                    @foreach($deptCodesForProfile as $deptCode)
+                                        <span class="inline-block px-2 py-0.5 bg-[#faf7fd] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-mono font-semibold cursor-default">{{ $deptCode }}</span>
+                                    @endforeach
+                                </div>
+                            @endif
                         </div>
 
                     </div>
@@ -2115,7 +2306,7 @@ new class extends Component {
                 <div id="mc-section-list" class="lg:col-span-7 scroll-mt-4">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="min-height: 700px; max-height: calc(100vh - 220px);">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-shrink-0">
-                            <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Colleges &amp; Departments</h3>
+                            <h3 class="text-sm font-semibold text-[#333333] uppercase tracking-wider">Colleges and Programs</h3>
                             <span class="ml-auto text-xs font-semibold text-[#7a3f91] bg-[#f5eef9] px-2.5 py-1 rounded-full border border-[#d4aaeb]">{{ count($orgCoursesList) }}</span>
                         </div>
 
@@ -2176,24 +2367,24 @@ new class extends Component {
                                                 <i class="fas fa-building-columns text-xs text-white"></i>
                                             </div>
                                             <div class="flex-1 min-w-0">
-                                                <p class="font-semibold text-gray-800 text-sm leading-snug">{{ $college }}</p>
+                                                <p class="font-semibold text-[#333333] text-base leading-snug">{{ $college }}</p>
                                                 @if(count($departments) > 0)
                                                     <div class="flex flex-wrap gap-1 mt-1.5">
                                                         @foreach($departments as $dept)
                                                             <span class="inline-block px-2 py-1 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-md text-xs font-mono font-semibold">{{ $dept['code'] }}</span>
                                                         @endforeach
                                                     </div>
-                                                    <p class="text-xs text-gray-400 mt-1">{{ count($departments) }} department{{ count($departments) !== 1 ? 's' : '' }}</p>
+                                                    <p class="text-sm text-[#333333] mt-1">{{ count($departments) }} department{{ count($departments) !== 1 ? 's' : '' }}</p>
                                                 @else
-                                                    <span class="text-xs text-gray-400 mt-1 block">No departments</span>
+                                                    <span class="text-sm text-[#333333] mt-1 block">No departments</span>
                                                 @endif
                                                 @if($coordName)
                                                     <div class="flex items-center gap-1.5 mt-1.5">
                                                         <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
-                                                        <span class="text-xs text-gray-600">{{ $coordName }}</span>
+                                                        <span class="text-sm text-[#333333]">{{ $coordName }}</span>
                                                     </div>
                                                 @else
-                                                    <span class="text-xs text-gray-400 italic mt-1.5 block">Unassigned</span>
+                                                    <span class="text-sm text-[#333333] italic mt-1.5 block">Unassigned</span>
                                                 @endif
                                             </div>
                                         </div>
@@ -2424,6 +2615,21 @@ new class extends Component {
         coordPointerDownRowId = null;
     }, true);
 })();
+</script>
+
+{{-- ══ CLEAN-URL SCRIPT (strip ?page=N / ?coordPage=N from address bar on load) ══ --}}
+<script>
+    (function () {
+        // Pure client-side: just rewrites the address bar in place so the
+        // URL shows /director/coordinator/management instead of ?page=2
+        // or ?coordPage=2 — no navigation, no reload. Same fix already
+        // applied on Manage Event.
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('page') || params.has('coordPage')) {
+            var cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, '', cleanUrl);
+        }
+    })();
 </script>
 
 </div>{{-- end root --}}
