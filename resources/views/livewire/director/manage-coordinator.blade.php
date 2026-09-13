@@ -90,6 +90,15 @@ new class extends Component {
             $this->dispatch('showFlash', type: 'success', message: session()->pull('success'));
         if (session()->has('error'))
             $this->dispatch('showFlash', type: 'error', message: session()->pull('error'));
+
+        // Auto-open a coordinator's profile modal when arriving here from
+        // the bell notification (e.g. "Coordinator Deactivated") — same
+        // convention as Event/Job Management auto-opening their view
+        // details modal from a ?event= / ?job= query param.
+        $coordinatorId = (int) request()->query('coordinator', 0);
+        if ($coordinatorId > 0) {
+            $this->viewProfile($coordinatorId);
+        }
     }
 
     #[On('showFlash')]
@@ -333,7 +342,8 @@ new class extends Component {
             $this->dispatch('dir-coordinator-updated',
                 id: $coordinator->id,
                 name: $fullName,
-                action: 'created'
+                action: 'created',
+                college: $college
             );
 
             $this->resetCoordForm();
@@ -713,7 +723,8 @@ new class extends Component {
             $this->dispatch('dir-coordinator-updated',
                 id: $coordinator->id,
                 name: $coordinator->getFullName(),
-                action: 'college_updated'
+                action: 'college_updated',
+                college: $college
             );
 
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -2617,18 +2628,39 @@ new class extends Component {
 })();
 </script>
 
-{{-- ══ CLEAN-URL SCRIPT (strip ?page=N / ?coordPage=N from address bar on load) ══ --}}
+{{-- ══ CLEAN-URL SCRIPT (strip ?page=N / ?coordPage=N / ?coordinator=N from address bar) ══ --}}
 <script>
     (function () {
         // Pure client-side: just rewrites the address bar in place so the
-        // URL shows /director/coordinator/management instead of ?page=2
-        // or ?coordPage=2 — no navigation, no reload. Same fix already
-        // applied on Manage Event.
-        var params = new URLSearchParams(window.location.search);
-        if (params.has('page') || params.has('coordPage')) {
-            var cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, '', cleanUrl);
+        // URL shows /director/coordinator/management instead of ?page=2,
+        // ?coordPage=2, or ?coordinator=17 — no navigation, no reload, so
+        // it never touches the View Profile modal that the server already
+        // opened on this page load via viewProfile(). Same fix already
+        // applied on Manage Event for ?event=.
+        function stripCleanParams() {
+            var params = new URLSearchParams(window.location.search);
+            if (params.has('page') || params.has('coordPage') || params.has('coordinator')) {
+                var cleanUrl = window.location.origin + window.location.pathname;
+                window.history.replaceState({}, '', cleanUrl);
+            }
         }
+
+        // Run once on initial load (covers a fresh visit with a stray param).
+        stripCleanParams();
+
+        // Also re-run after every Livewire update — pagination clicks push
+        // "?page=N" into the URL via Livewire's own history.pushState call,
+        // which happens AFTER this script's initial run and doesn't trigger
+        // a full page load, so the one-shot check above never sees it. This
+        // hook fires after each commit (including page-link clicks), so the
+        // URL gets cleaned every time, not just on first paint.
+        document.addEventListener('livewire:init', function () {
+            Livewire.hook('commit', function ({ succeed }) {
+                succeed(function () {
+                    stripCleanParams();
+                });
+            });
+        });
     })();
 </script>
 

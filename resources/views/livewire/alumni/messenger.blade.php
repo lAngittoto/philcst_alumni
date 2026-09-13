@@ -2650,9 +2650,7 @@ new class extends \Livewire\Volt\Component {
                 </div>
 
                 @if($editingId)
-                <div x-data="{ sending: false }" @message-sending.window="sending = true" @message-sent.window="sending = false"
-                     x-show="! sending" x-transition.opacity.duration.120ms
-                     class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-blue-50 flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
+                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-blue-50 flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
                     <div class="w-1 h-10 rounded-full flex-shrink-0 bg-blue-400"></div>
                     <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-blue-700 truncate uppercase tracking-widest">
@@ -2665,9 +2663,7 @@ new class extends \Livewire\Volt\Component {
                     </button>
                 </div>
                 @elseif($replyTo)
-                <div x-data="{ sending: false }" @message-sending.window="sending = true" @message-sent.window="sending = false"
-                     x-show="! sending" x-transition.opacity.duration.120ms
-                     class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
+                <div class="flex items-center gap-3 px-4 py-2.5 border-t border-[#E8E0F0] bg-[#f3eef8] flex-shrink-0 animate-[msgrPop_.14s_ease-out]">
                     <div class="w-1 h-10 rounded-full flex-shrink-0 bg-[#7a3f91]"></div>
                     <div class="flex-1 min-w-0">
                         <p class="text-xs font-semibold text-[#7a3f91] truncate uppercase tracking-widest">Replying to {{ $replyTo['name'] }}</p>
@@ -2705,7 +2701,8 @@ new class extends \Livewire\Volt\Component {
                     </div>
                     @endif
 
-                    <div class="flex items-end gap-2" x-data="{ sending: false }">
+                    <div class="flex items-end gap-2" x-data="{ sending: false, hasText: {{ trim($body) !== '' ? 'true' : 'false' }} }"
+                         @chat-scroll-bottom-force.window="hasText = false">
                         <div class="flex-1 relative">
                             <textarea id="chat-input"
                                 wire:model.live.debounce.200ms="body"
@@ -2713,17 +2710,17 @@ new class extends \Livewire\Volt\Component {
                                 placeholder="{{ $editingId ? 'Edit your message…' : ($roomType==='college' ? 'Message '.$alumniCollege.'…' : 'Message '.($room['name']??'group').'…') }}"
                                 rows="1"
                                 :disabled="sending"
-                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); sending = true; window.dispatchEvent(new CustomEvent('message-sending')); const val=$el.value; $el.value=''; $el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; window.dispatchEvent(new CustomEvent('message-sent')); });}"
+                                @keydown.enter="if (!$event.shiftKey && !sending){$event.preventDefault(); if (!hasText) return; sending = true; const val=$el.value; $el.value=''; $el.style.height='auto'; hasText = false; $wire.sendMessage(val).then(() => { sending = false; });}"
                                 @keydown.escape="$wire.cancelEdit()"
                                 @focus-input.window="$el.focus()"
-                                x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
+                                x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';hasText=this.value.trim()!=='';});"
                                 class="w-full resize-none rounded-lg border-2 px-4 py-2.5 text-sm leading-relaxed text-[#333333] focus:outline-none transition-all duration-150 placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed
                                        {{ $editingId ? 'msgr-input-editing' : 'border-[#7a3f91] bg-white focus:ring-4 focus:ring-[#7a3f91]/25' }}"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
                         <button type="button"
-                                :disabled="sending"
-                                @click="if (!sending) { sending = true; window.dispatchEvent(new CustomEvent('message-sending')); const el=document.getElementById('chat-input'); const val=el.value; el.value=''; el.style.height='auto'; $wire.sendMessage(val).then(() => { sending = false; window.dispatchEvent(new CustomEvent('message-sent')); }); }"
+                                :disabled="sending || ! hasText"
+                                @click="if (!sending && hasText) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.value=''; el.style.height='auto'; hasText = false; $wire.sendMessage(val).then(() => { sending = false; }); }"
                                 wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition-all duration-150 hover:opacity-90 active:scale-90 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer
                                        {{ $editingId ? '' : 'bg-[#7a3f91]' }}"

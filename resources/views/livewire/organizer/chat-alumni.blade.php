@@ -3436,7 +3436,7 @@ new class extends Component {
                                     </div>
                                     @endif
 
-                                    @if($msg['reply_to'])
+                                    @if($msg['reply_to'] && ! ($msg['is_deleted'] ?? false))
                                     <div wire:click.stop="jumpToMessage({{ $msg['reply_to']['id'] }})"
                                          class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug cursor-pointer transition hover:brightness-95 active:scale-[0.98] {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-white border-[#ddd3e8] text-[#666666]' }}">
                                         <span class="font-semibold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
@@ -3610,6 +3610,7 @@ new class extends Component {
                                             @if($msg['is_mine'])
                                             <span class="w-px h-5 bg-[#E8E0F0] mx-0.5 flex-shrink-0"></span>
 
+                                            @if(! $msg['post_preview'])
                                             <div class="relative org-tooltip-wrap" x-data>
                                                 <button wire:click.stop="startEdit({{ $msg['id'] }})"
                                                         wire:loading.attr="disabled" wire:target="startEdit({{ $msg['id'] }})"
@@ -3619,6 +3620,7 @@ new class extends Component {
                                                 </button>
                                                 <span class="org-tooltip top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 rounded-lg">Edit</span>
                                             </div>
+                                            @endif
 
                                             <div class="relative org-tooltip-wrap" x-data>
                                                 <button wire:click.stop="askDeleteConfirmation({{ $msg['id'] }})"
@@ -3760,7 +3762,8 @@ new class extends Component {
                         <button wire:click="cancelEdit" class="text-xs font-semibold text-orange-600 hover:text-orange-700 transition cursor-pointer">Cancel</button>
                     </div>
                     @endif
-                    <div class="flex items-end gap-2" x-data="{ sending: false }">
+                    <div class="flex items-end gap-2" x-data="{ sending: false, hasText: {{ trim($body) !== '' ? 'true' : 'false' }} }"
+                         @chat-scroll-bottom-force.window="hasText = false">
                         <div class="flex-1 relative">
                             <textarea id="chat-input"
                                 wire:model.live.debounce.200ms="body"
@@ -3780,10 +3783,10 @@ new class extends Component {
                                 }"
                                 @input="checkMention($el)"
                                 @keydown.escape="if({{ $editingId ? 'true' : 'false' }}) { $wire.cancelEdit(); }"
-                                @keydown.enter="if (!$event.shiftKey && !sending){ $event.preventDefault(); sending = true; if ({{ $editingId ? 'true' : 'false' }}) { $wire.saveEdit().then(() => { sending = false; }); } else { const val=$el.value; $el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); } }"
+                                @keydown.enter="if (!$event.shiftKey && !sending){ $event.preventDefault(); if ({{ $editingId ? 'true' : 'false' }}) { sending = true; $wire.saveEdit().then(() => { sending = false; }); } else { if (!hasText) return; sending = true; const val=$el.value; $el.style.height='auto'; hasText = false; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); } }"
                                 @focus-input.window="$el.focus()"
                                 @editing-started.window="$nextTick(() => { $el.style.height='auto'; $el.style.height=Math.min($el.scrollHeight,120)+'px'; $el.focus(); $el.select(); })"
-                                x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';});"
+                                x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';hasText=this.value.trim()!=='';});"
                                 class="w-full resize-none rounded-xl border-2 {{ $editingId ? 'border-blue-400' : 'border-[#6b2490]' }} bg-[#fafafa] px-4 py-2.5 text-base leading-relaxed text-[#333333] focus:outline-none focus:ring-0 transition placeholder-[#999999] disabled:opacity-60 disabled:cursor-not-allowed"
                                 style="max-height:120px;overflow-y:auto;"></textarea>
                         </div>
@@ -3798,8 +3801,8 @@ new class extends Component {
                         </button>
                         @else
                         <button type="button"
-                                :disabled="sending"
-                                @click="if (!sending) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.style.height='auto'; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); }"
+                                :disabled="sending || ! hasText"
+                                @click="if (!sending && hasText) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.style.height='auto'; hasText = false; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); }"
                                 wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                                 style="background:#6b2490;">

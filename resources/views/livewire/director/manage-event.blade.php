@@ -185,11 +185,55 @@ new class extends Component {
     private function syncStaleReviewNotifTitles(): void
     {
         try {
+            // ── Backfill pass FIRST: some submission rows were created
+            //    without event_id ever populated (older/other code path
+            //    that only wrote title+message), which made every match
+            //    below silently skip them — the bell then sits on
+            //    "Event Submitted" forever no matter what the
+            //    director does, since nothing can find the row to update
+            //    it. Recover the event by matching the title embedded in
+            //    the row's own message (format: "\"{title}\" ... your
+            //    approval." or similar, written when the row was first
+            //    created) against AdminEvent, then stamp event_id back
+            //    onto the row so every check after this one works
+            //    normally via the fast, unambiguous event_id match. ──
+            $orphanRows = DB::table('director_notifications')
+                ->where('director_id', $this->directorId)
+                ->where('link_route', 'director.event/management')
+                ->whereNull('event_id')
+                ->where(function ($q) {
+                    $q->where('title', 'like', '%Event Submitted%')
+                      ->orWhere('title', 'like', '%Event Resubmitted%')
+                      ->orWhere('title', 'like', '%New Event for Review%')
+                      ->orWhere('title', 'like', '%Event Resubmitted for Review%');
+                })
+                ->get();
+
+            foreach ($orphanRows as $row) {
+                if (!preg_match('/"([^"]+)"/u', (string) $row->message, $m)) continue;
+                $matchedEvent = AdminEvent::withTrashed()->where('title', $m[1])->orderByDesc('id')->first();
+                if ($matchedEvent) {
+                    DB::table('director_notifications')->where('id', $row->id)->update(['event_id' => $matchedEvent->id]);
+                }
+            }
+
+            // Pull EVERY review notif row for this director that isn't
+            // already showing a terminal (Approved/Rejected/Completed)
+            // label — not just the brand-new title strings. A row
+            // already flipped to "→ Approved" still needs to be re-checked
+            // here, because the event may have since moved APPROVED ->
+            // COMPLETED — otherwise the bell gets stuck forever on
+            // "→ Approved" instead of following the event to Completed.
             $staleRows = DB::table('director_notifications')
                 ->where('director_id', $this->directorId)
                 ->where('link_route', 'director.event/management')
-                ->whereIn('title', ['New Event for Review', 'Event Resubmitted for Review'])
                 ->whereNotNull('event_id')
+                ->where(function ($q) {
+                    $q->whereIn('title', ['Event Submitted', 'Event Resubmitted', 'New Event for Review', 'Event Resubmitted for Review'])
+                      ->orWhere('title', 'like', '%→ Pending')
+                      ->orWhere('title', 'like', '%→ Approved')
+                      ->orWhere('title', 'like', '%→ Rejected');
+                })
                 ->get();
 
             if ($staleRows->isEmpty()) return;
@@ -199,13 +243,31 @@ new class extends Component {
 
             foreach ($staleRows as $row) {
                 $status = $statuses[$row->event_id] ?? null;
-                if (!in_array($status, ['APPROVED', 'REJECTED'], true)) continue; // genuinely still pending — leave as-is
+                if (!in_array($status, ['PENDING', 'APPROVED', 'REJECTED', 'COMPLETED'], true)) continue; // event not found — leave as-is
 
-                $label = $status === 'APPROVED' ? 'Approved' : 'Rejected';
+                $label = match ($status) {
+                    'PENDING'   => 'Pending',
+                    'APPROVED'  => 'Approved',
+                    'REJECTED'  => 'Rejected',
+                    'COMPLETED' => 'Completed',
+                };
+
+                // Row's title may already carry a "→ <label>" suffix from
+                // an earlier status (e.g. "...→ Approved") — strip that
+                // off before re-appending so it never doubles up into
+                // "...→ Approved → Completed".
+                $prefix = preg_replace('/\s*→\s*(Pending|Approved|Rejected|Completed)$/u', '', (string) $row->title);
+                if ($prefix === '' || in_array($prefix, ['New Event for Review', 'Event Resubmitted for Review'], true)) {
+                    $prefix = str_contains((string) $row->title, 'Resubmitted')
+                        ? 'Event Resubmitted'
+                        : 'Event Submitted';
+                }
+
+                if ($prefix . ' → ' . $label === $row->title) continue; // already correct, skip the write
 
                 DB::table('director_notifications')->where('id', $row->id)->update([
-                    'title'      => $row->title . ' → ' . $label,
-                    'icon'       => $status === 'APPROVED' ? 'calendar-check' : 'calendar',
+                    'title'      => $prefix . ' → ' . $label,
+                    'icon'       => $status === 'APPROVED' ? 'calendar-check' : ($status === 'REJECTED' ? 'calendar' : ($status === 'COMPLETED' ? 'circle-check' : 'calendar-days')),
                     'updated_at' => now(),
                 ]);
             }
@@ -276,37 +338,139 @@ new class extends Component {
     //    "New Event for Review" -> "New Event for Review → Approved" —
     //    instead of leaving it stuck reading "for Review" forever after
     //    the director has already acted on it.
+    //
+    //    Matched by event_id ONLY (not director_id) so this also works
+    //    from the un-scoped auto-complete / auto-reject sweeps below,
+    //    which run outside any single director's request and must be
+    //    able to flip the notif for whichever director(s) actually have
+    //    a submission row on file for that event — e.g. an event that
+    //    goes APPROVED -> COMPLETED while the director isn't even logged
+    //    in still needs its bell row corrected for next time they open it.
     private function updateDirectorReviewNotif(int $eventId, string $eventTitle, string $status): void
     {
-        $directorId = $this->directorId;
-        if (!$directorId || !$eventId) return;
+        if (!$eventId) return;
 
         try {
-            $existing = DB::table('director_notifications')
-                ->where('director_id', $directorId)
+            $rows = DB::table('director_notifications')
                 ->where('link_route', 'director.event/management')
                 ->where('event_id', $eventId)
-                ->first();
+                ->get();
 
-            if (!$existing) return; // no submission notif on file — nothing to update
+            // ── Fallback: the submission row may have been created
+            //    without event_id ever populated (e.g. an older/other
+            //    code path that only writes title+message), which makes
+            //    the exact match above return nothing and leaves the
+            //    bell stuck reading "Submitted" forever no matter what
+            //    the director does here. When that happens, fall back to
+            //    matching on the event's title inside an otherwise
+            //    still-pending review row, and backfill event_id onto it
+            //    so every update after this one hits the fast path. ──
+            if ($rows->isEmpty()) {
+                $rows = DB::table('director_notifications')
+                    ->where('link_route', 'director.event/management')
+                    ->whereNull('event_id')
+                    ->where(function ($q) use ($eventTitle) {
+                        $q->where('title', 'like', '%Event Submitted%')
+                          ->orWhere('title', 'like', '%Event Resubmitted%')
+                          ->orWhere('title', 'like', '%New Event for Review%')
+                          ->orWhere('title', 'like', '%Event Resubmitted for Review%');
+                    })
+                    ->where(function ($q) use ($eventTitle) {
+                        $q->where('message', 'like', '%"' . $eventTitle . '"%')
+                          ->orWhere('message', 'like', '%' . $eventTitle . '%');
+                    })
+                    ->get();
 
-            $prefix = str_contains((string) $existing->title, 'Resubmitted')
-                ? 'Event Resubmitted for Review'
-                : 'New Event for Review';
+                foreach ($rows as $row) {
+                    DB::table('director_notifications')->where('id', $row->id)->update(['event_id' => $eventId]);
+                }
+            }
 
-            DB::table('director_notifications')
-                ->where('id', $existing->id)
-                ->update([
-                    'title'      => $prefix . ' → ' . $status,
-                    'message'    => "\"{$eventTitle}\" has been {$status}.",
-                    'icon'       => $status === 'Approved' ? 'calendar-check' : 'calendar',
-                    'read'       => 0,
-                    'updated_at' => now(),
+            $icon = match ($status) {
+                'Approved'  => 'calendar-check',
+                'Rejected'  => 'calendar',
+                'Completed' => 'circle-check',
+                default     => 'calendar-days',
+            };
+
+            // ── FALLBACK: no submission row on file at all (exact
+            //    event_id match AND the title/message fuzzy match above
+            //    both came up empty) — this used to just silently return
+            //    here, which meant approving/rejecting/completing an
+            //    event with no matching submission row produced NO bell
+            //    notification whatsoever, even though the action itself
+            //    succeeded (event status changed, Event Overview table
+            //    updated correctly). The director would see the status
+            //    change in the table but never get notified about it.
+            //
+            //    Instead of silently no-op'ing, create a fresh review
+            //    notif row here for the director who is currently acting
+            //    on the event (this->directorId), already carrying the
+            //    correct terminal status — so the bell always reflects
+            //    what just happened regardless of whether an original
+            //    submission notif ever existed. ──
+            if ($rows->isEmpty()) {
+                if (!$this->directorId) return; // no director context to attach the row to — nothing safe to do
+
+                // ── dedup_key MUST start with 'event-submitted::' (not
+                //    'event-management::') — the sidebar bell's JS
+                //    grouping (_groupByDay in sidebar-director_blade.php)
+                //    only treats 'event-submitted::' / 'event-resubmitted::'
+                //    dedup keys as an "event review" row and preserves its
+                //    "Event Submitted → <status>" chain title as-is.
+                //    Anything starting with 'event-management::' instead
+                //    gets swept into the generic isCalEvent bucket, which
+                //    OVERWRITES the title/message with a generic "Event
+                //    Management Update" / "N event update(s) today." —
+                //    which is exactly why an approved event kept showing
+                //    "→ Pending" (or a wrong generic message) even after
+                //    this row was correctly written with an "Approved"
+                //    status server-side: the frontend was re-labeling it
+                //    on arrival because of the mismatched key prefix. ──
+                DB::table('director_notifications')->insert([
+                    'director_id' => $this->directorId,
+                    'event_id'    => $eventId,
+                    'icon'        => $icon,
+                    'title'       => 'Event Submitted → ' . $status,
+                    'message'     => "\"{$eventTitle}\" has been {$status}.",
+                    'link_route'  => 'director.event/management',
+                    'link_label'  => 'View Events',
+                    'dedup_key'   => 'event-submitted::' . $eventId,
+                    'count'       => 1,
+                    'read'        => 0,
+                    'created_at'  => now(),
+                    'updated_at'  => now(),
                 ]);
+
+                $this->dispatch('dir-notif-refresh');
+                return;
+            }
+
+            foreach ($rows as $existing) {
+                // Strip any existing "→ <label>" suffix first so re-running
+                // this (Approved -> Completed) never doubles up into
+                // "...→ Approved → Completed".
+                $prefix = preg_replace('/\s*→\s*(Pending|Approved|Rejected|Completed)$/u', '', (string) $existing->title);
+                if ($prefix === '' || in_array($prefix, ['New Event for Review', 'Event Resubmitted for Review'], true)) {
+                    $prefix = str_contains((string) $existing->title, 'Resubmitted')
+                        ? 'Event Resubmitted'
+                        : 'Event Submitted';
+                }
+
+                DB::table('director_notifications')
+                    ->where('id', $existing->id)
+                    ->update([
+                        'title'      => $prefix . ' → ' . $status,
+                        'message'    => "\"{$eventTitle}\" has been {$status}.",
+                        'icon'       => $icon,
+                        'read'       => 0,
+                        'updated_at' => now(),
+                    ]);
+            }
 
             $this->dispatch('dir-notif-refresh');
         } catch (\Throwable) {
-            // Non-critical — don't break the approve/reject action if this fails
+            // Non-critical — don't break the approve/reject/complete action if this fails
         }
     }
 
@@ -385,6 +549,14 @@ new class extends Component {
                     'status'         => 'REJECTED',
                     'review_remarks' => 'Auto-rejected: event date has already passed without approval.',
                 ]);
+
+            // ── Flip the director's own "New Event for Review" bell row
+            //    to "→ Rejected" for each auto-rejected event — otherwise
+            //    it sits stuck reading "→ Pending" forever since no
+            //    director ever clicked Reject to trigger the usual update. ──
+            foreach ($pastDue as $event) {
+                $this->updateDirectorReviewNotif((int) $event->id, $event->title, 'Rejected');
+            }
         }
 
         // NOTE: the old "Case 2" rule auto-rejected any PENDING event once
@@ -433,6 +605,12 @@ new class extends Component {
                 'Event Completed',
                 "\"{$event->title}\" has been completed."
             );
+
+            // ── Same treatment for the director's own bell: flip
+            //    "New Event for Review → Approved" to "→ Completed" now
+            //    that the event has run its course, instead of leaving
+            //    the bell stuck showing "→ Approved" forever. ──
+            $this->updateDirectorReviewNotif((int) $event->id, $event->title, 'Completed');
         }
     }
 
@@ -2953,7 +3131,7 @@ select.tw-select-arrow::-moz-focus-inner {
 
 </div>
 
-{{-- ══ CLEAN-URL SCRIPT (strip ?event=46 and ?page=N from address bar on load) ══ --}}
+{{-- ══ CLEAN-URL SCRIPT (strip ?event=46 and ?page=N from address bar) ══ --}}
 <script>
     (function () {
         // Pure client-side: just rewrites the address bar in place so the
@@ -2961,11 +3139,30 @@ select.tw-select-arrow::-moz-focus-inner {
         // ?page=2 — no navigation, no reload, so it never touches the View
         // Event modal that the server already opened on this page load via
         // viewEvent().
-        var params = new URLSearchParams(window.location.search);
-        if (params.has('event') || params.has('page')) {
-            var cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, '', cleanUrl);
+        function stripCleanParams() {
+            var params = new URLSearchParams(window.location.search);
+            if (params.has('event') || params.has('page')) {
+                var cleanUrl = window.location.origin + window.location.pathname;
+                window.history.replaceState({}, '', cleanUrl);
+            }
         }
+
+        // Run once on initial load (covers a fresh visit with ?event=46).
+        stripCleanParams();
+
+        // Also re-run after every Livewire update — pagination clicks push
+        // "?page=N" into the URL via Livewire's own history.pushState call,
+        // which happens AFTER this script's initial run and doesn't trigger
+        // a full page load, so the one-shot check above never sees it. This
+        // hook fires after each commit (including page-link clicks), so the
+        // URL gets cleaned every time, not just on first paint.
+        document.addEventListener('livewire:init', function () {
+            Livewire.hook('commit', function ({ succeed }) {
+                succeed(function () {
+                    stripCleanParams();
+                });
+            });
+        });
     })();
 </script>
 
@@ -2979,73 +3176,62 @@ select.tw-select-arrow::-moz-focus-inner {
             && window.innerWidth > 768;
     }
 
-    function bindRows() {
-        document.querySelectorAll('[data-dir-row]').forEach(function (row) {
-            if (row._dirTipBound) return;
-            row._dirTipBound = true;
+    // ── Delegated listeners instead of per-row/per-button binding ──
+    // Filtering/pagination makes Livewire morph swap in fresh row and
+    // action-button nodes (different wire:key per event id), so any
+    // "bind once per element" approach (the old bindRows()/bindActionTips(),
+    // rebound on 'livewire:updated') silently stops working the moment new
+    // rows swap in — and worse, 'livewire:updated' is a Livewire v2 event
+    // that never fires at all under Livewire v3/Volt, so it wasn't even
+    // rebinding on filter changes. This is what caused the "View Details"
+    // hover tooltip to disappear after applying any filter. A single
+    // delegated listener on `document` never needs rebinding, so it
+    // survives every Livewire morph automatically.
+    function findRow(el)    { return el.closest('[data-dir-row]'); }
+    function findAction(el) { return el.closest('[data-dir-action]'); }
+    function findTip(el)    { return el.closest('[data-tip]'); }
 
-            row.addEventListener('mousemove', function (e) {
-                if (!tip || !isHoverCapable()) return;
-                var actionWrap = e.target.closest('[data-dir-action]');
-                if (actionWrap) {
-                    tip.style.opacity = '0';
-                    return;
-                }
-                tip.style.left = e.clientX + 'px';
-                tip.style.top  = e.clientY + 'px';
-                tip.style.opacity = '1';
-            });
+    document.addEventListener('mousemove', function (e) {
+        if (!tip || !isHoverCapable()) return;
+        var row = findRow(e.target);
+        if (!row || findAction(e.target)) { tip.style.opacity = '0'; return; }
+        tip.style.left = e.clientX + 'px';
+        tip.style.top  = e.clientY + 'px';
+        tip.style.opacity = '1';
+    });
 
-            row.addEventListener('mouseleave', function () {
-                if (tip) tip.style.opacity = '0';
-            });
+    document.addEventListener('mouseout', function (e) {
+        if (!tip) return;
+        var row = findRow(e.target);
+        if (row && !row.contains(e.relatedTarget)) tip.style.opacity = '0';
+    });
 
-            row.addEventListener('click', function () {
-                if (tip) tip.style.opacity = '0';
-            });
-        });
-
-        document.querySelectorAll('[data-dir-action]').forEach(function (sw) {
-            if (sw._dirActionBound) return;
-            sw._dirActionBound = true;
-            sw.addEventListener('mouseenter', function () {
-                if (tip) tip.style.opacity = '0';
-            });
-        });
-    }
+    document.addEventListener('click', function (e) {
+        if (tip && findRow(e.target)) tip.style.opacity = '0';
+    });
 
     // Fixed-position tooltip for Share/Approve/Reject/Re-Approve buttons inside
     // the vertical scrollable table — escapes the scroll container's clipping
     // so the label is always fully readable, even near the top/bottom edges.
-    function bindActionTips() {
+    document.addEventListener('mouseover', function (e) {
         if (!actionTip) return;
-        document.querySelectorAll('[data-tip]').forEach(function (btn) {
-            if (btn._dirActionTipBound) return;
-            btn._dirActionTipBound = true;
+        var btn = findTip(e.target);
+        if (!btn) return;
+        var rect = btn.getBoundingClientRect();
+        actionTip.textContent  = btn.getAttribute('data-tip');
+        actionTip.style.left   = (rect.left + rect.width / 2) + 'px';
+        actionTip.style.top    = (rect.top - 8) + 'px';
+        actionTip.style.opacity = '1';
+    });
 
-            btn.addEventListener('mouseenter', function () {
-                var rect = btn.getBoundingClientRect();
-                actionTip.textContent  = btn.getAttribute('data-tip');
-                actionTip.style.left   = (rect.left + rect.width / 2) + 'px';
-                actionTip.style.top    = (rect.top - 8) + 'px';
-                actionTip.style.opacity = '1';
-            });
+    document.addEventListener('mouseout', function (e) {
+        if (!actionTip) return;
+        var btn = findTip(e.target);
+        if (btn && !btn.contains(e.relatedTarget)) actionTip.style.opacity = '0';
+    });
 
-            btn.addEventListener('mouseleave', function () {
-                actionTip.style.opacity = '0';
-            });
-
-            btn.addEventListener('click', function () {
-                actionTip.style.opacity = '0';
-            });
-        });
-    }
-
-    bindRows();
-    bindActionTips();
-    document.addEventListener('livewire:updated', function () {
-        bindRows();
-        bindActionTips();
+    document.addEventListener('click', function (e) {
+        if (actionTip && findTip(e.target)) actionTip.style.opacity = '0';
     });
 })();
 </script>

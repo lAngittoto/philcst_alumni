@@ -35,6 +35,12 @@ new class extends Component {
     public array $coordinators   = [];
     public array $pinnedMessages = [];
 
+    // ── Tracks the newest message id we've already scrolled for, so the
+    //    poll only auto-scrolls when a genuinely NEW message arrives —
+    //    not on every ~5-10s reload while the director is reading older
+    //    messages further up. ──────────────────────────────────────────
+    public ?int $lastSeenMessageId = null;
+
     // ── Online presence ───────────────────────────────────────────────────
     public int $onlineCount = 0;
     public int $totalCount  = 0;
@@ -310,6 +316,7 @@ new class extends Component {
         $this->refreshOnlineCount();
         $this->loadTypingIndicators();
 
+        $this->lastSeenMessageId = ! empty($this->messages) ? (int) end($this->messages)['id'] : null;
         $this->dispatch('chat-scroll-bottom');
     }
 
@@ -409,7 +416,16 @@ new class extends Component {
         if ($this->pollTick % 2 === 0 && ! $isComposing) {
             $this->checkAndDispatchNewMessageNotifications();
             $this->loadMessages();
-            $this->dispatch('chat-scroll-bottom');
+
+            // Only auto-scroll when a genuinely new message actually
+            // arrived — otherwise this yanks the director back down to
+            // the bottom every ~10s while they're scrolled up reading
+            // older messages, which felt like an unprompted bug.
+            $newestId = ! empty($this->messages) ? (int) end($this->messages)['id'] : null;
+            if ($newestId !== null && $newestId !== $this->lastSeenMessageId) {
+                $this->lastSeenMessageId = $newestId;
+                $this->dispatch('chat-scroll-bottom');
+            }
         }
 
         // Online/offline counts change the least often — every 4th tick
@@ -860,6 +876,7 @@ new class extends Component {
 
         $this->stopTyping();
         $this->loadMessages();
+        $this->lastSeenMessageId = ! empty($this->messages) ? (int) end($this->messages)['id'] : null;
         $this->dispatch('chat-scroll-bottom');
     }
 
@@ -970,7 +987,7 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     public function react(int $msgId, string $reaction): void
     {
-        if (! in_array($reaction, ['heart', 'purple', 'like', 'dislike'], true)) return;
+        if (! in_array($reaction, ['heart', 'purple', 'like', 'dislike', 'haha', 'sad'], true)) return;
 
         $msg = collect($this->messages)->firstWhere('id', $msgId);
         if (! $msg || $msg['deleted'] || ($msg['is_censored'] ?? false)) return;
@@ -1214,6 +1231,7 @@ new class extends Component {
                 'body'        => $self->resolvePreviewText($p->body),
                 'from'        => $s ? trim($s->first_name . ' ' . $s->last_name) : 'Unknown',
                 'sender_type' => $p->sender_type,
+                'preview'     => $self->resolvePostPreview($p->body),
                 'pinned_at'   => Carbon::parse($p->pinned_at)
                                     ->setTimezone('Asia/Manila')
                                     ->format('M d, Y h:i A'),
@@ -1323,6 +1341,7 @@ new class extends Component {
         width: 100%;
         overflow: hidden;
         background: linear-gradient(135deg,#9b59b6,#5c2d7a);
+        cursor: default;
     }
     .msgr-post-thumb img {
         width: 100%; height: 100%; object-fit: cover; display: block;
@@ -1378,18 +1397,6 @@ new class extends Component {
     }
     .msgr-post-overlay-strip p .accent { color: #7a3f91; }
 
-    .msgr-post-thumb-overlay {
-        position: absolute; inset: 0; z-index: 3;
-        display: flex; align-items: center; justify-content: center;
-        background: rgba(58,27,77,0); transition: background .18s ease;
-    }
-    .msgr-post-card:not(.is-unavailable):hover .msgr-post-thumb-overlay { background: rgba(58,27,77,.32); }
-    .msgr-post-view-btn {
-        opacity: 0; transform: translateY(4px);
-        transition: opacity .18s ease, transform .18s ease;
-    }
-    .msgr-post-card:not(.is-unavailable):hover .msgr-post-view-btn { opacity: 1; transform: translateY(0); }
-
     .msgr-post-caption { padding: 10px 12px 11px; background: transparent; }
     .msgr-post-caption .headline {
         font-size: 13px; font-weight: 500; line-height: 1.35; color: #ffffff;
@@ -1413,6 +1420,27 @@ new class extends Component {
     .msgr-post-source-row span {
         font-size: 11px; font-weight: 500; color: #EDE0F5;
     }
+
+    .msgr-post-view-footer-btn {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        margin: 0 12px 11px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: #ffffff;
+        color: #5c2d7a;
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+        box-shadow: 0 1px 3px rgba(0,0,0,.12);
+        transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+    }
+    .msgr-post-view-footer-btn i { font-size: 11px; }
+    .msgr-post-view-footer-btn:hover {
+        background: #f3eef8;
+        box-shadow: 0 2px 6px rgba(0,0,0,.18);
+        transform: translateY(-1px);
+    }
+    .msgr-post-view-footer-btn:active { transform: translateY(0); }
 </style>
 
 
@@ -1496,11 +1524,12 @@ new class extends Component {
             </div>
 
             {{-- Action buttons --}}
-            <div class="flex items-center gap-1.5 flex-shrink-0" x-data="{ pressed: null }">
+            <div class="flex items-center gap-1.5 flex-shrink-0" x-data="{ pressed: null, showTip: null }">
                 <button wire:click="togglePins"
                         wire:loading.attr="disabled"
                         wire:target="togglePins"
-                        @click="pressed = 'pins'"
+                        @click="pressed = 'pins'; showTip = 'pins'"
+                        @mouseleave="if (showTip === 'pins') showTip = null"
                         class="relative group flex items-center justify-center w-8 h-8 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
                         :style="(pressed === 'pins' || {{ $showPins ? 'true' : 'false' }})
                             ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
@@ -1510,14 +1539,16 @@ new class extends Component {
                     <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2
                                  whitespace-nowrap px-2 py-1 rounded-md text-[11px] font-medium
                                  bg-black text-white opacity-0 group-hover:opacity-100 transition-opacity
-                                 duration-150 z-50">
+                                 duration-150 z-50"
+                          :class="{ 'opacity-100': showTip === 'pins' }">
                         Pins
                     </span>
                 </button>
                 <button wire:click="toggleMembers"
                         wire:loading.attr="disabled"
                         wire:target="toggleMembers"
-                        @click="pressed = 'members'"
+                        @click="pressed = 'members'; showTip = 'members'"
+                        @mouseleave="if (showTip === 'members') showTip = null"
                         class="relative group flex items-center justify-center w-8 h-8 rounded-lg text-xs font-semibold border transition disabled:opacity-70"
                         :style="(pressed === 'members' || {{ $showMembers ? 'true' : 'false' }})
                             ? 'background:rgba(255,255,255,.25);color:#fff;border-color:rgba(255,255,255,.35);'
@@ -1527,7 +1558,8 @@ new class extends Component {
                     <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2
                                  whitespace-nowrap px-2 py-1 rounded-md text-[11px] font-medium
                                  bg-black text-white opacity-0 group-hover:opacity-100 transition-opacity
-                                 duration-150 z-50">
+                                 duration-150 z-50"
+                          :class="{ 'opacity-100': showTip === 'members' }">
                         Members
                     </span>
                 </button>
@@ -1620,8 +1652,10 @@ new class extends Component {
                                 </div>
                                 @endif
 
-                                {{-- Reply quote --}}
-                                @if($msg['reply_to'])
+                                {{-- Reply quote — hidden once the message itself
+                                     was unsent; showing who it replied to serves
+                                     no purpose once the message is gone. --}}
+                                @if($msg['reply_to'] && ! $msg['deleted'])
                                 <div class="text-[11px] rounded-lg px-2 py-1 mb-0.5 max-w-full border-l-[3px] leading-snug
                                     {{ $msg['is_mine']
                                         ? 'bg-purple-200/60 border-white/70 text-purple-900'
@@ -1681,8 +1715,9 @@ new class extends Component {
                                     $ppIsEvent   = ($pp['type'] ?? 'job') === 'event';
                                     $ppCompleted = $ppIsEvent && ($pp['is_completed'] ?? false);
                                 @endphp
-                                <div @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }})"
-                                     class="msgr-post-card cursor-pointer {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
+                                                                <div wire:key="postcard-{{ $msg['id'] }}"
+                                     @click.stop="openMessageId = (openMessageId === {{ $msg['id'] }} ? null : {{ $msg['id'] }}); if (openMessageId === {{ $msg['id'] }}) { $nextTick(() => { const el = document.getElementById('toolbar-anchor-{{ $msg['id'] }}'); if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }); }"
+                                     class="msgr-post-card {{ $msg['is_mine'] ? 'is-mine' : '' }} {{ ! $ppAvailable ? 'is-unavailable' : '' }}">
                                     <div class="msgr-post-thumb">
                                         @if($ppAvailable)
                                             @if(! empty($pp['image']))
@@ -1721,15 +1756,6 @@ new class extends Component {
                                             </p>
                                         </div>
 
-                                        @if($ppAvailable)
-                                        <div class="msgr-post-thumb-overlay">
-                                            <a href="{{ $pp['url'] }}" wire:navigate
-                                               @click.stop="postNavigating = true"
-                                               class="msgr-post-view-btn px-3 py-1.5 rounded-full bg-white text-[#5c2d7a] text-xs font-bold shadow-md inline-flex items-center gap-1.5">
-                                                <i class="fa-solid fa-eye"></i>View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}
-                                            </a>
-                                        </div>
-                                        @endif
                                     </div>
 
                                     <div class="msgr-post-caption">
@@ -1744,6 +1770,15 @@ new class extends Component {
                                             <span>PHILCST</span>
                                         </div>
                                     </div>
+
+                                    @if($ppAvailable)
+                                    <a href="{{ $pp['url'] }}" wire:navigate
+                                       @click.stop="postNavigating = true"
+                                       class="msgr-post-view-footer-btn cursor-pointer">
+                                        <i class="fa-solid fa-eye"></i>
+                                        <span>View {{ $pp['type'] === 'job' ? 'Job' : 'Event' }}</span>
+                                    </a>
+                                    @endif
                                 </div>
 
                                 {{-- ══ NORMAL BUBBLE ══ --}}
@@ -1780,7 +1815,8 @@ new class extends Component {
                                      the actual bubble content. Only shown for non-deleted
                                      messages. ── --}}
                                 @if(!$msg['deleted'])
-                                <div x-show="openMessageId === {{ $msg['id'] }}"
+                                                                <div id="toolbar-anchor-{{ $msg['id'] }}"
+                                     x-show="openMessageId === {{ $msg['id'] }}"
                                      x-transition:enter="transition ease-out duration-150"
                                      x-transition:enter-start="opacity-0 scale-95 translate-y-2"
                                      x-transition:enter-end="opacity-100 scale-100 translate-y-0"
@@ -1798,11 +1834,11 @@ new class extends Component {
                                                  w-3.5 h-3.5 bg-white border-l border-t border-[#E8E0F0] rotate-45"
                                           style="box-shadow:-2px -2px 4px rgba(0,0,0,.04);"></span>
 
-                                    @foreach(['heart' => '❤️', 'purple' => '💜', 'like' => '👍', 'dislike' => '👎'] as $rk => $re)
+                                    @foreach(['heart' => '❤️', 'purple' => '💜', 'like' => '👍', 'dislike' => '👎', 'haha' => '😂', 'sad' => '😢'] as $rk => $re)
                                     <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
-                                            @click.stop
+                                            @click.stop="{{ ($msg['is_censored'] ?? false) ? '' : 'openMessageId = null' }}"
                                             @if($msg['is_censored'] ?? false) disabled @endif
-                                            class="text-[1.3rem] leading-none transition-transform
+                                            class="text-[1.7rem] leading-none transition-transform
                                                    {{ ($msg['is_censored'] ?? false)
                                                         ? 'opacity-25 grayscale cursor-not-allowed'
                                                         : 'hover:scale-125 active:scale-110 ' . ($msg['my_reaction'] === $rk ? 'opacity-100 scale-110' : 'opacity-50 hover:opacity-100') }}">{{ $re }}</button>
@@ -1822,7 +1858,7 @@ new class extends Component {
                                     </button>
 
                                     <button wire:click="togglePin({{ $msg['id'] }})"
-                                            @click.stop
+                                            @click.stop="{{ ($msg['is_censored'] ?? false) ? '' : 'openMessageId = null' }}"
                                             @if($msg['is_censored'] ?? false) disabled @endif
                                             class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
                                                    {{ ($msg['is_censored'] ?? false)
@@ -1834,29 +1870,19 @@ new class extends Component {
                                         <span class="hidden sm:inline">{{ $msg['is_pinned'] ? 'Unpin' : 'Pin' }}</span>
                                     </button>
 
-                                    @if(! empty($msg['reactions']))
-                                    <button wire:click="openReactionsPopup({{ $msg['id'] }})"
-                                            @click.stop
-                                            class="flex items-center gap-1 px-2 py-1 rounded-lg transition text-xs font-semibold
-                                                   {{ $reactionsPopupMsgId === $msg['id']
-                                                        ? 'text-[#7a3f91] bg-[#f3eef8]'
-                                                        : 'text-[#666666] hover:text-[#7a3f91] hover:bg-[#f3eef8]' }}">
-                                        <i class="fa-solid fa-face-smile text-xs"></i>
-                                        <span class="hidden sm:inline">Reactions</span>
-                                    </button>
-                                    @endif
-
                                     @if($msg['is_mine'])
                                     <span class="w-px h-5 bg-[#E8E0F0] block"></span>
 
                                     @if($msg['is_censored'] ?? false)
+                                    @if(! $msg['post_preview'])
                                     <button disabled
                                             class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#bbbbbb]
                                                    cursor-not-allowed text-xs font-semibold">
                                         <i class="fa-solid fa-pen text-xs"></i>
                                         <span class="hidden sm:inline">Edit</span>
                                     </button>
-                                    @else
+                                    @endif
+                                    @elseif(! $msg['post_preview'])
                                     <button wire:click="startEdit({{ $msg['id'] }})"
                                             @click.stop="openMessageId = null; $nextTick(() => window.dispatchEvent(new CustomEvent('focus-input')))"
                                             class="flex items-center gap-1 px-2 py-1 rounded-lg text-[#666666]
@@ -1881,60 +1907,63 @@ new class extends Component {
 
                                 </div>{{-- /bubble+action-bar anchor --}}
 
-                                {{-- ── View Reactions Popup ── --}}
+                                {{-- ── View Reactions Popup — true centered modal, matching
+                                     other messenger apps' "who reacted" dialog. Fixed overlay
+                                     so it always appears centered on screen instead of
+                                     growing inline below the toolbar. ── --}}
                                 @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
-                                <div class="mt-2 bg-white border border-[#E8E0F0] rounded-2xl shadow-xl z-20 w-64 overflow-hidden"
-                                     @click.stop>
-                                    <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#fafafa]">
-                                        <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
-                                            <i class="fa-solid fa-face-smile text-[#7a3f91] mr-1.5"></i>Reactions
-                                        </p>
-                                        <button wire:click="closeReactionsPopup"
-                                                class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999]
-                                                       hover:text-[#333333] hover:bg-[#f5f5f5] transition">
-                                            <i class="fa-solid fa-xmark text-xs"></i>
-                                        </button>
-                                    </div>
-                                    <div class="max-h-52 overflow-y-auto">
-                                        @php $emojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎']; @endphp
-                                        @foreach($reactionsPopupData as $rKey => $rGroup)
-                                        <div class="px-3.5 py-2 border-b border-[#E8E0F0] last:border-0">
-                                            <div class="flex items-center gap-1.5 mb-1.5">
-                                                <span class="text-base">{{ $emojiMap[$rKey] ?? '👍' }}</span>
-                                                <span class="text-xs font-semibold text-[#666666]">
-                                                    {{ count($rGroup) }} {{ count($rGroup) === 1 ? 'person' : 'people' }}
-                                                </span>
-                                            </div>
-                                            @foreach($rGroup as $reactor)
-                                            <div class="flex items-center gap-2 py-1">
-                                                <div class="w-6 h-6 rounded-full flex-shrink-0 overflow-hidden
-                                                            flex items-center justify-center text-xs font-semibold text-white"
-                                                     style="background:#7a3f91;">
-                                                    @if($reactor['photo'] ?? null)
-                                                        <img src="{{ $reactor['photo'] }}"
-                                                             class="w-full h-full object-cover"
-                                                             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-                                                             alt="">
-                                                        <span style="display:none">{{ strtoupper(substr($reactor['name'], 0, 1)) }}</span>
-                                                    @else
-                                                        {{ strtoupper(substr($reactor['name'], 0, 1)) }}
-                                                    @endif
-                                                </div>
-                                                <div class="flex-1 min-w-0">
-                                                    <p class="text-xs font-semibold text-[#333333] truncate">
-                                                        {{ $reactor['name'] }}
-                                                        @if($reactor['is_me'])
-                                                            <span class="text-[#7a3f91] font-semibold">(You)</span>
+                                <div class="fixed inset-0 z-[100] flex items-center justify-center p-4"
+                                     style="background:rgba(0,0,0,.35);"
+                                     wire:click="closeReactionsPopup">
+                                    <div id="reactions-popup-{{ $msg['id'] }}"
+                                         class="bg-white border border-[#E8E0F0] rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden"
+                                         @click.stop>
+                                        <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#fafafa]">
+                                            <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
+                                                <i class="fa-solid fa-face-smile text-[#7a3f91] mr-1.5"></i>Reactions
+                                                @php $totalReactors = collect($reactionsPopupData)->sum(fn($g) => count($g)); @endphp
+                                                <span class="ml-1 text-[#7a3f91]">({{ $totalReactors }})</span>
+                                            </p>
+                                            <button wire:click="closeReactionsPopup"
+                                                    class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999]
+                                                           hover:text-[#333333] hover:bg-[#f5f5f5] transition">
+                                                <i class="fa-solid fa-xmark text-xs"></i>
+                                            </button>
+                                        </div>
+                                        <div class="h-72 overflow-y-auto">
+                                            @php $emojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','haha'=>'😂','sad'=>'😢']; @endphp
+                                            @foreach($reactionsPopupData as $rKey => $rGroup)
+                                                @foreach($rGroup as $reactor)
+                                                <div class="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-[#f0eaf7] last:border-0">
+                                                    <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden
+                                                                flex items-center justify-center text-sm font-semibold text-white"
+                                                         style="background:#7a3f91;">
+                                                        @if($reactor['photo'] ?? null)
+                                                            <img src="{{ $reactor['photo'] }}"
+                                                                 class="w-full h-full object-cover"
+                                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
+                                                                 alt="">
+                                                            <span style="display:none">{{ strtoupper(substr($reactor['name'], 0, 1)) }}</span>
+                                                        @else
+                                                            {{ strtoupper(substr($reactor['name'], 0, 1)) }}
                                                         @endif
-                                                    </p>
-                                                    <p class="text-[10px] font-medium text-purple-600">
-                                                        {{ ucfirst($reactor['type']) }}
-                                                    </p>
+                                                    </div>
+                                                    <div class="flex-1 min-w-0">
+                                                        <p class="text-sm font-semibold text-[#333333] truncate">
+                                                            {{ $reactor['name'] }}
+                                                            @if($reactor['is_me'])
+                                                                <span class="text-[#7a3f91] font-semibold">(You)</span>
+                                                            @endif
+                                                        </p>
+                                                        <p class="text-xs font-medium text-purple-600">
+                                                            {{ ucfirst($reactor['type']) }}
+                                                        </p>
+                                                    </div>
+                                                    <span class="text-xl leading-none pointer-events-none flex-shrink-0">{{ $emojiMap[$rKey] ?? '👍' }}</span>
                                                 </div>
-                                            </div>
+                                                @endforeach
                                             @endforeach
                                         </div>
-                                        @endforeach
                                     </div>
                                 </div>
                                 @endif
@@ -1943,13 +1972,13 @@ new class extends Component {
                                 @if(! empty($msg['reactions']) && !$msg['deleted'])
                                 <div class="flex gap-1 mt-0.5 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
                                     @foreach($msg['reactions'] as $rk => $cnt)
-                                    @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎',default=>'👍' }; @endphp
-                                    <button wire:click="react({{ $msg['id'] }}, '{{ $rk }}')"
-                                            class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded-full border transition-all
+                                    @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','haha'=>'😂','sad'=>'😢',default=>'👍' }; @endphp
+                                    <button wire:click="openReactionsPopup({{ $msg['id'] }})"
+                                            class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border transition-all
                                                    {{ $msg['my_reaction'] === $rk
                                                         ? 'bg-[#f3eef8] border-[#d9c9e8] text-[#7a3f91] font-semibold'
                                                         : 'bg-white border-[#E8E0F0] text-[#666666] hover:border-[#d9c9e8]' }}">
-                                        {{ $emoji }}<span class="font-semibold ml-0.5">{{ $cnt }}</span>
+                                        <span class="text-base leading-none">{{ $emoji }}</span><span class="font-semibold">{{ $cnt }}</span>
                                     </button>
                                     @endforeach
                                 </div>
@@ -2088,7 +2117,8 @@ new class extends Component {
                     </div>
                     @endif
 
-                    <div class="flex items-end gap-2">
+                    <div class="flex items-end gap-2" x-data="{ hasText: {{ trim($body) !== '' ? 'true' : 'false' }} }"
+                         @chat-scroll-bottom.window="hasText = false">
                         <div class="flex-1 relative">
                             @if($editingId)
                             <textarea
@@ -2128,6 +2158,7 @@ new class extends Component {
                                 @keydown.enter="if (!$event.shiftKey) {
                                     $event.preventDefault();
                                     if ($event.isComposing) return;
+                                    if (!hasText) return;
                                     $wire.body = $event.target.value;
                                     $wire.sendMessage();
                                 }"
@@ -2136,6 +2167,7 @@ new class extends Component {
                                     $el.addEventListener('input', function () {
                                         this.style.height = 'auto';
                                         this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+                                        hasText = this.value.trim() !== '';
                                     });
                                 "
                                 class="w-full resize-none rounded-lg border-2 border-[#7a3f91] bg-white
@@ -2159,6 +2191,8 @@ new class extends Component {
                         </button>
                         @else
                         <button wire:click="sendMessage" wire:loading.attr="disabled" wire:target="sendMessage"
+                                :disabled="! hasText"
+                                @if(trim($body) === '') disabled @endif
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0
                                        transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60"
                                 style="background:#7a3f91;">
@@ -2171,25 +2205,17 @@ new class extends Component {
                         </button>
                         @endif
                     </div>
-
-                    <p class="text-xs text-[#999999] text-center mt-1.5">
-                        @if($editingId)
-                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> save &nbsp;·&nbsp;
-                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
-                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Esc</kbd> cancel
-                        @else
-                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Enter</kbd> send &nbsp;·&nbsp;
-                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">Shift+Enter</kbd> new line &nbsp;·&nbsp;
-                            <kbd class="bg-[#f5f5f5] border border-[#E8E0F0] rounded px-1 py-0.5 text-xs">@</kbd> mention &nbsp;·&nbsp;
-                            <span class="text-[#bbbbbb]">tap message for actions</span>
-                        @endif
-                    </p>
                 </div>
             </div>
 
-            {{-- ── SIDE PANEL ── --}}
+            {{-- ── SIDE PANEL ──
+                 Mobile: full-screen overlay (fixed inset-0, above everything)
+                 so Pins/Members don't render as a squeezed sliver next to
+                 the chat list. Desktop (md+): reverts to the normal w-72
+                 in-flow sidebar. ── --}}
             @if($showMembers || $showPins)
-            <div class="w-72 border-l border-[#E8E0F0] flex flex-col flex-shrink-0 bg-white">
+            <div class="fixed inset-0 z-40 flex flex-col bg-white
+                        md:static md:inset-auto md:z-auto md:w-72 md:border-l md:border-[#E8E0F0] md:flex-shrink-0">
 
                 <div class="flex items-center gap-2.5 px-4 py-3 border-b border-[#E8E0F0] flex-shrink-0"
                      style="background:#7a3f91;">
@@ -2369,6 +2395,10 @@ new class extends Component {
                     @elseif($showPins)
                     <div class="flex-1 overflow-y-auto p-3 space-y-2">
                         @forelse($pinnedMessages as $pin)
+                        @php
+                            $ppv = $pin['preview'] ?? null;
+                            $ppvAvailable = $ppv['available'] ?? true;
+                        @endphp
                         <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
                             <div class="flex items-start justify-between gap-2 mb-1.5">
                                 <div class="flex items-center gap-1.5 min-w-0">
@@ -2386,9 +2416,39 @@ new class extends Component {
                                     <i class="fa-solid fa-xmark text-xs"></i>
                                 </button>
                             </div>
-                            <p class="text-sm text-[#333333] leading-snug break-words">
-                                {{ Str::limit($pin['body'], 140) }}
-                            </p>
+
+                            @if($ppv)
+                                {{-- Job/Event pin: thumbnail + direct click-through --}}
+                                <a href="{{ $ppvAvailable ? $ppv['url'] : '#' }}"
+                                   @if($ppvAvailable) wire:navigate @else onclick="return false;" @endif
+                                   class="flex items-center gap-2.5 rounded-md {{ $ppvAvailable ? 'cursor-pointer hover:bg-amber-100/60' : 'opacity-60 cursor-not-allowed' }} transition p-1 -m-1">
+                                    <div class="w-12 h-12 rounded-md overflow-hidden flex-shrink-0 bg-[#7A3F91]/10 flex items-center justify-center">
+                                        @if($ppvAvailable && ! empty($ppv['image']))
+                                        <img src="{{ $ppv['image'] }}" alt="{{ $ppv['title'] }}" class="w-full h-full object-cover">
+                                        @elseif($ppvAvailable && ($ppv['type'] ?? 'job') === 'event')
+                                        <i class="fa-solid fa-calendar-days text-[#7A3F91] text-lg"></i>
+                                        @elseif($ppvAvailable)
+                                        <img src="{{ asset('storage/job/default-photo-job.jpg') }}" alt="{{ $ppv['title'] }}" class="w-full h-full object-cover">
+                                        @else
+                                        <i class="fa-solid {{ ($ppv['type'] ?? 'job') === 'job' ? 'fa-briefcase' : 'fa-calendar-xmark' }} text-[#999999] text-lg"></i>
+                                        @endif
+                                    </div>
+                                    <div class="min-w-0 flex-1">
+                                        <p class="text-sm font-semibold text-[#333333] truncate">{{ $ppv['title'] }}</p>
+                                        @if(!empty($ppv['subtitle']))
+                                        <p class="text-xs text-[#999999] truncate">{{ $ppv['subtitle'] }}</p>
+                                        @endif
+                                    </div>
+                                    @if($ppvAvailable)
+                                    <i class="fa-solid fa-chevron-right text-[10px] text-[#999999] flex-shrink-0"></i>
+                                    @endif
+                                </a>
+                            @else
+                                <p class="text-sm text-[#333333] leading-snug break-words">
+                                    {{ Str::limit($pin['body'], 140) }}
+                                </p>
+                            @endif
+
                             <p class="text-xs text-[#999999] mt-1.5">{{ $pin['pinned_at'] }}</p>
                         </div>
                         @empty

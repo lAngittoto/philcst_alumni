@@ -1789,6 +1789,16 @@ mark.mgjob-hl {
 .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
+/* ── Kill the default gray/blue tap-highlight flash some browsers
+   (mobile Safari/Chrome) show on tap, so clicking a job row only
+   ever shows our own purple hover/active tint — never a flat gray
+   flash on top of it. ── */
+#dm-table-scroll table,
+#dm-table-scroll tr,
+#dm-table-scroll td {
+    -webkit-tap-highlight-color: transparent;
+}
+
 /* ══ MOBILE FIX: Post/Edit/View modals stack their columns in a
    flex-col layout on phones. Each column had its OWN overflow-y:auto,
    but a flex-col child with no fixed height (only its natural content
@@ -1933,14 +1943,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 .img-preview-thumb-sm { width:100%; height:100px; object-fit:cover; border-radius:10px; display:block; }
 
 .view-field-display {
-    padding: 0.5rem 0.75rem;
+    padding: 0.55rem 0.75rem;
     background: #fafafa;
     border: 1.5px solid #e8e0f0;
-    border-radius: 0.75rem;
-    font-size: 0.875rem;
+    border-radius: 0.6rem;
+    font-size: 0.78rem;
     color: #222;
-    line-height: 1.6;
-    min-height: 2.25rem;
+    line-height: 1.3;
+    box-sizing: border-box;
+    display: block;
+    word-break: break-word;
 }
 .view-field-display.multiline { white-space: pre-wrap; min-height: 100px; }
 .view-field-display.empty     { color: #aaa; font-style: italic; }
@@ -1981,6 +1993,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 #dm-table-scroll tbody,
 #dm-table-scroll tr {
     background: #ffffff !important;
+}
+/* Hover tint on job rows — needs !important to beat the white-force
+   rule right above it (that rule pins every <tr> to #fff, which was
+   silently killing Tailwind's hover:bg-* class on the row). Excludes
+   the deleted-job rows, which keep their own red hover tint. */
+#dm-table-scroll tr[data-eo-row]:not(.is-org-del):hover {
+    background: #F0F0F0 !important;
 }
 #dm-table-scroll .overflow-x-auto {
     overflow-x: visible !important;
@@ -2034,22 +2053,40 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div id="dir-managejob-root" class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+
+<style>
+/* ── Disable text selection/copy across the whole Manage Job page ──
+   Covers header, stat chips, and the whole jobs table (title, company,
+   status, dates, etc). Buttons/links/inputs still work fine since this
+   only blocks text selection, not clicks. Matches the same treatment
+   already used on the Director Dashboard (#dir-dashboard-root). ── */
+#dir-managejob-root,
+#dir-managejob-root * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+</style>
 
     {{-- ══ PAGE HEADER ══ --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center gap-4" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
-                 style="background:#7a3f91;">
-                <i class="fas fa-briefcase text-white text-lg"></i>
+        <div class="flex items-center gap-4">
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-briefcase text-white text-base"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Job Overview</h1>
-                <p class="text-xs leading-relaxed mt-0.5 text-[#7a3f91] font-medium">Review, moderate, and manage all job postings.</p>
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Job Overview</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                    <i class="fas fa-circle text-[5px] text-emerald-500 align-middle"></i>
+                    <span>Review, moderate, and manage all job postings.</span>
+                </p>
             </div>
         </div>
         <div class="flex items-center gap-2.5 flex-wrap">
-            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide">
                 <i class="fas fa-briefcase text-purple-600 text-[10px]"></i>
                 {{ $this->jobPostings->total() }} {{ $this->jobPostings->total() !== 1 ? 'Jobs' : 'Job' }}
             </span>
@@ -2269,7 +2306,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             $canShare         = $isActive && !$isDeadlinePassed;
                             $isDirectorJob    = is_null($job->organizer_id);
                         @endphp
-                        <tr class="transition-colors duration-100 cursor-pointer {{ $isOrgDel ? 'bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60' : 'bg-white hover:bg-[#f5f0fa]' }}"
+                        <tr class="transition-colors duration-100 cursor-pointer select-none {{ $isOrgDel ? 'is-org-del bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60 active:bg-red-100/60' : 'bg-white hover:bg-[#F0F0F0] active:bg-[#F0F0F0]' }}"
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="job-row-{{ $job->id }}"
                             data-eo-row>
@@ -2735,7 +2772,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Organization Category --}}
                 <div class="bg-white border-[1.5px] {{ isset($postErrors['postOrgCategory']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         <i class="fas fa-building text-[9px] text-[#555555]"></i> Organization
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
@@ -2772,24 +2809,35 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
 
                         @if($postOrgCategory === 'partner')
-                        <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v,false)},syncT(v){$wire.set('postPartnerType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
+                        {{-- BUG FIX: these used $wire.set(prop, value, false) — the
+                             third arg `false` tells Livewire to update the property
+                             WITHOUT triggering a server round-trip/re-render. That
+                             meant isPostFormValid() (a #[Computed] property baked
+                             into the Blade output) never recalculated after typing
+                             here, so the Post Job button stayed disabled forever
+                             even once every field was filled — it only "unstuck"
+                             once some other live-bound field (e.g. Job Title)
+                             happened to trigger a real commit. Dropping the `false`
+                             (equivalent to passing `true`) makes each field commit
+                             normally, same as every other input in this form. --}}
+                        <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v)},syncT(v){$wire.set('postPartnerType',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Name <span class="text-red-500">*</span></label>
                                     <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Acme Corp" maxlength="150"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Type <span class="text-red-500">*</span></label>
                                     <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Private, NGO" maxlength="100"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
                                     <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postLocation'] }}</p>@endif
                                 </div>
                             </div>
@@ -2797,24 +2845,24 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
 
                         @if($postOrgCategory === 'custom')
-                        <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v,false)},syncT(v){$wire.set('postCustomType',v,false)},syncL(v){$wire.set('postLocation',v,false)}}">
+                        <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v)},syncT(v){$wire.set('postCustomType',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Name <span class="text-red-500">*</span></label>
                                     <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Type <span class="text-red-500">*</span></label>
                                     <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomType'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
                                     <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postLocation'] }}</p>@endif
                                 </div>
                             </div>
@@ -2829,23 +2877,48 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                 </div>
 
-                {{-- Target Colleges --}}
-                <div class="bg-white border-[1.5px] {{ isset($postErrors['postTargetColleges']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                {{-- Target Colleges — Alpine-driven local state gives instant
+                     visual feedback on click (checkbox + card highlight flip
+                     immediately), then syncs to Livewire in the background.
+                     Before this, every checkbox click waited on a full
+                     server round-trip before the UI updated at all, which is
+                     what made "All Colleges" and the individual toggles feel
+                     laggy/janky instead of smooth. --}}
+                <div class="bg-white border-[1.5px] {{ isset($postErrors['postTargetColleges']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden"
+                     wire:key="post-target-colleges-card"
+                     x-data="{
+                         selected: @js($postTargetColleges),
+                         all: @js($postAllColleges),
+                         allNames: @js(collect($this->collegesWithDepts)->pluck('name')->values()->all()),
+                         toggleAll() {
+                             this.all = !this.all;
+                             this.selected = this.all ? [...this.allNames] : [];
+                             $wire.set('postAllColleges', this.all);
+                         },
+                         toggleOne(name) {
+                             const i = this.selected.indexOf(name);
+                             if (i === -1) { this.selected.push(name); } else { this.selected.splice(i, 1); }
+                             this.all = this.allNames.length > 0 && this.allNames.every(n => this.selected.includes(n));
+                             $wire.set('postTargetColleges', this.selected);
+                         }
+                     }">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         <i class="fas fa-building-columns text-[9px] text-[#555555]"></i> Target Colleges
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 space-y-2">
-                        <label class="flex items-center gap-2 px-3 py-2 border-2 border-[#7a3f91] bg-[#f5eef9] rounded-xl cursor-pointer">
-                            <input type="checkbox" wire:model.live="postAllColleges" class="w-4 h-4 flex-shrink-0 accent-[#7a3f91]">
-                            <span class="text-sm font-semibold text-[#5e2f72]">All Colleges</span>
+                        <label @click.prevent="toggleAll()"
+                               class="flex items-center gap-2 px-3 py-2 border-2 rounded-xl cursor-pointer transition-colors duration-150"
+                               :class="all ? 'border-[#7a3f91] bg-[#f5eef9]' : 'border-gray-200 hover:border-[#7a3f91]/40 hover:bg-[#f5eef9]/40'">
+                            <input type="checkbox" :checked="all" class="w-4 h-4 flex-shrink-0 accent-[#7a3f91] pointer-events-none">
+                            <span class="text-sm font-semibold" :class="all ? 'text-[#5e2f72]' : 'text-[#555555]'">All Colleges</span>
                         </label>
                         <div class="grid grid-cols-1 gap-1.5">
                             @foreach($this->collegesWithDepts as $college)
-                                <label class="flex items-center gap-2 px-3 py-2 border rounded-xl cursor-pointer transition font-semibold
-                                              {{ in_array($college['name'], $postTargetColleges) ? 'border-[#7a3f91]/40 bg-[#f5eef9] text-[#7a3f91]' : 'border-gray-200 hover:border-[#7a3f91]/30 hover:bg-[#f5eef9]/40 text-[#555555]' }}">
-                                    <input type="checkbox" wire:model.live="postTargetColleges" value="{{ $college['name'] }}"
-                                           class="w-4 h-4 flex-shrink-0 accent-[#7a3f91]">
+                                <label @click.prevent="toggleOne(@js($college['name']))"
+                                       class="flex items-center gap-2 px-3 py-2 border rounded-xl cursor-pointer transition-colors duration-150 font-semibold"
+                                       :class="selected.includes(@js($college['name'])) ? 'border-[#7a3f91]/40 bg-[#f5eef9] text-[#7a3f91]' : 'border-gray-200 hover:border-[#7a3f91]/30 hover:bg-[#f5eef9]/40 text-[#555555]'">
+                                    <input type="checkbox" :checked="selected.includes(@js($college['name']))" class="w-4 h-4 flex-shrink-0 accent-[#7a3f91] pointer-events-none">
                                     <span class="truncate text-xs">{{ $college['name'] }}</span>
                                 </label>
                             @endforeach
@@ -2862,21 +2935,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             <div class="p-3 space-y-3 flex flex-col flex-1">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         Job Information
                     </div>
                     <div class="p-3.5 space-y-3">
                         <div>
                             <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Job Title <span class="text-red-500">*</span></label>
                             <input wire:model.live.debounce.300ms="postJobTitle" type="text" placeholder="e.g. Software Engineer" maxlength="200"
-                                   class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                   class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                             @if(isset($postErrors['postJobTitle']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postJobTitle'] }}</p>@endif
                         </div>
                         <div class="grid grid-cols-2 gap-2">
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employment Type <span class="text-red-500">*</span></label>
                                 <select wire:model.live="postEmpType"
-                                        class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                                        class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
                                     <option value="">Select Type</option>
                                     @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
                                         <option value="{{ $opt->label }}">{{ $opt->label }}</option>
@@ -2887,7 +2960,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Experience Level <span class="text-red-500">*</span></label>
                                 <select wire:model.live="postExpLevel"
-                                        class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                                        class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
                                     <option value="">Select Level</option>
                                     @foreach($this->orderedExpLevels as $lvl)
                                         <option value="{{ $lvl }}">{{ $lvl }}</option>
@@ -2901,7 +2974,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Salary <span class="font-normal normal-case tracking-normal text-[#777777] text-xs">— optional</span></label>
                                 <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000/mo" maxlength="100"
                                        oninput="window.__eoFormatSalaryInput(this)"
-                                       class="w-full px-3.5 py-2.5 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                       class="w-full px-3.5 py-2.5 border-[1.5px] border-gray-300 rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                             </div>
                             <div>
                                 <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Deadline <span class="text-red-500">*</span></label>
@@ -2911,7 +2984,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                        onchange="window.__eoGuardDeadlineInput(this)"
                                        onclick="window.__eoOpenDatePicker(this)"
                                        onfocus="window.__eoOpenDatePicker(this)"
-                                       class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
+                                       class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
                                 @if(isset($postErrors['postDeadline']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postDeadline'] }}</p>@endif
                             </div>
                         </div>
@@ -2921,12 +2994,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 {{-- Textareas --}}
                 @foreach([['postDescription','Description','fas fa-file-lines','Describe the role, responsibilities, and what the candidate will be doing…','5000'],['postQualifications','Qualifications','fas fa-list-check','e.g. Bachelor\'s degree in a relevant field, at least 1 year experience…','3000'],['postApplicationInstructions','How to Apply','fas fa-paper-plane','e.g. Send your resume to hr@company.com with subject: Application – [Position]','3000']] as [$field,$title,$ico,$placeholder,$maxlen])
                 <div class="bg-white border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91] shrink-0">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91] shrink-0">
                         <i class="{{ $ico }} text-[9px] text-[#555555]"></i> {{ $title }} <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <textarea wire:model.live.debounce.400ms="{{ $field }}"
-                                  class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-sm bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition resize-none"
+                                  class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition resize-none"
                                   placeholder="{{ $placeholder }}" maxlength="{{ $maxlen }}"
                                   style="min-height:100px;"></textarea>
                         @if(isset($postErrors[$field]))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors[$field] }}</p>@endif
@@ -2996,7 +3069,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                              $wire.set('postJobImage', null);
                          }
                      }">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
                         <span class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
@@ -3043,7 +3116,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Posted As --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         Posted As
                     </div>
                     <div class="p-3.5">
@@ -3059,7 +3132,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Tips --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         Tips
                     </div>
                     <div class="p-3.5">
@@ -3241,13 +3314,256 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden mobile-scroll-body">
 
-        {{-- LEFT: Photo + Org Details + Target Colleges + Status --}}
+        {{-- LEFT: Org Details + Target Colleges + Status --}}
         <div class="mobile-scroll-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto scroll-c bg-white job-view-info-pane">
-            <div class="p-2.5 space-y-2.5">
+            <div class="p-3 space-y-3">
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
+                        Organization Details
+                    </div>
+                    <div class="p-3 space-y-2.5">
+                        @php $editIsPhilcst = str_contains(strtoupper($editCompanyType ?? ''), 'PHILCST'); @endphp
+
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <div x-show="!editMode" class="view-field-display">{{ $editCompanyType ?: '—' }}</div>
+                            <div x-show="editMode" x-cloak>
+                                <select wire:model.live="editCompanyType"
+                                        class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                    <option value="">Select Organization</option>
+                                    @foreach($this->jobOptions->get('company_type', collect()) as $opt)
+                                        <option value="{{ $opt->label }}" @selected($editCompanyType === $opt->label)>{{ $opt->label }}</option>
+                                    @endforeach
+                                </select>
+                                @if(isset($editErrors['editCompanyType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company Name <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <div x-show="!editMode" class="view-field-display">{{ $editCompany ?: '—' }}</div>
+                            <div x-show="editMode" x-cloak>
+                                <input wire:model.defer="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif
+                                       class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
+                                @if(isset($editErrors['editCompany']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Location <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <div x-show="!editMode" class="view-field-display">{{ $editLocation ?: '—' }}</div>
+                            <div x-show="editMode" x-cloak>
+                                <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif
+                                       class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
+                                @if(isset($editErrors['editLocation']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white border-[1.5px] {{ isset($editErrors['editTargetColleges']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
+                        <i class="fas fa-building-columns text-[9px] text-[#555555]"></i> Target Colleges
+                        <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
+                    </div>
+                    <div class="p-3">
+                        {{-- View mode: pills --}}
+                        <div x-show="!editMode" class="flex flex-wrap gap-1.5">
+                            @forelse($editTargetColleges as $tc)
+                                <span class="inline-flex items-center px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 text-xs font-semibold">{{ trim($tc) }}</span>
+                            @empty
+                                <span class="view-field-display empty text-sm w-full">No college selected.</span>
+                            @endforelse
+                        </div>
+
+                        {{-- Edit mode: checkboxes --}}
+                        <div x-show="editMode" x-cloak class="space-y-1.5">
+                            <label class="flex items-center gap-2 px-3 py-2 border-2 border-[#7a3f91] bg-[#f5eef9] rounded-xl cursor-pointer">
+                                <input type="checkbox" wire:model.live="editAllColleges" class="w-4 h-4 flex-shrink-0 accent-[#7a3f91]">
+                                <span class="text-sm font-semibold text-[#5e2f72]">All Colleges</span>
+                            </label>
+                            @foreach($this->collegesWithDepts as $college)
+                                <label class="flex items-center gap-2 px-3 py-2 border rounded-xl cursor-pointer transition font-semibold
+                                              {{ in_array($college['name'], $editTargetColleges) ? 'border-[#7a3f91]/40 bg-[#f5eef9] text-[#7a3f91]' : 'border-gray-200 hover:border-[#7a3f91]/30 hover:bg-[#f5eef9]/40 text-[#555555]' }}">
+                                    <input type="checkbox" wire:model.live="editTargetColleges" value="{{ $college['name'] }}"
+                                           class="w-4 h-4 flex-shrink-0 accent-[#7a3f91]">
+                                    <span class="truncate text-xs">{{ $college['name'] }}</span>
+                                </label>
+                            @endforeach
+                            @if(isset($editErrors['editTargetColleges']))<p class="text-red-600 text-xs mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editTargetColleges'] }}</p>@endif
+                        </div>
+                    </div>
+                </div>
+
+                @if($editingJob)
+                @php
+                    $statusColor = match($editingJob->status) {
+                        'ACTIVE'        => ['bg-emerald-50 border-emerald-200', 'text-emerald-900', 'fa-circle-check text-emerald-500', 'text-emerald-700', 'Currently Active'],
+                        'INACTIVE'      => ['bg-amber-50 border-amber-200',   'text-amber-900',   'fa-circle-pause text-amber-500',   'text-amber-700',   'Currently Inactive'],
+                        'ADMIN_DELETED' => ['bg-red-50 border-red-200',       'text-red-900',     'fa-trash text-red-500',            'text-red-700',     'Deleted'],
+                        default         => ['bg-gray-50 border-gray-200',     'text-gray-900',    'fa-circle text-gray-500',          'text-gray-700',    $editingJob->status],
+                    };
+                @endphp
+                <div class="rounded-xl px-3 py-2 border {{ $statusColor[0] }}">
+                    <p class="font-semibold flex items-center gap-1.5 text-sm {{ $statusColor[1] }}">
+                        <i class="fas {{ $statusColor[2] }} text-sm"></i> {{ $statusColor[4] }}
+                    </p>
+                    <p class="text-xs mt-0.5 {{ $statusColor[3] }}">
+                        @if($editingJob->status === 'INACTIVE' && $editJobDeadlinePassed) Update the deadline above first, save, then use <strong>Activate</strong>.
+                        @else Use the {{ $editingJob->status === 'ACTIVE' ? 'Deactivate' : 'Activate' }} button in the top-right to toggle.
+                        @endif
+                    </p>
+                </div>
+                @endif
+
+            </div>
+        </div>
+
+        {{-- MIDDLE: Job Info + Textareas --}}
+        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+            <div class="mobile-scroll-inner flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
+                        Job Information
+                    </div>
+                    <div class="p-3 space-y-2.5">
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Job Title <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                            <div x-show="!editMode" class="view-field-display font-semibold">{{ $editJobTitle ?: '—' }}</div>
+                            <div x-show="editMode" x-cloak>
+                                <input wire:model.defer="editJobTitle" type="text" maxlength="200"
+                                       class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                @if(isset($editErrors['editJobTitle']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Employment Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                                <div x-show="!editMode" class="view-field-display">{{ $editEmpType ?: '—' }}</div>
+                                <div x-show="editMode" x-cloak>
+                                    <select wire:model.defer="editEmpType"
+                                            class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                        <option value="">Select Type</option>
+                                        @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
+                                            <option value="{{ $opt->label }}" @selected($editEmpType === $opt->label)>{{ $opt->label }}</option>
+                                        @endforeach
+                                    </select>
+                                    @if(isset($editErrors['editEmpType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editEmpType'] }}</p>@endif
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Experience Level <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                                <div x-show="!editMode" class="view-field-display">{{ $editExpLevel ?: '—' }}</div>
+                                <div x-show="editMode" x-cloak>
+                                    <select wire:model.defer="editExpLevel"
+                                            class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                        <option value="">Select Level</option>
+                                        @foreach($this->orderedExpLevels as $lvl)
+                                            <option value="{{ $lvl }}" @selected($editExpLevel === $lvl)>{{ $lvl }}</option>
+                                        @endforeach
+                                    </select>
+                                    @if(isset($editErrors['editExpLevel']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editExpLevel'] }}</p>@endif
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">
+                                    Salary <span class="font-normal normal-case tracking-normal text-[#777777] text-[10px]">optional</span>
+                                </label>
+                                <div x-show="!editMode" class="view-field-display">{{ $editSalary ?: 'Not disclosed' }}</div>
+                                <div x-show="editMode" x-cloak>
+                                    <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25k/mo"
+                                           oninput="window.__eoFormatSalaryInput(this)"
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] border-gray-300 rounded-xl text-[0.85rem] leading-tight bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Deadline <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                                <div x-show="!editMode" class="view-field-display">
+                                    @if($editDeadline)
+                                        {{ \Carbon\Carbon::parse($editDeadline)->setTimezone('Asia/Manila')->format('M d, Y') }}
+                                    @else —
+                                    @endif
+                                </div>
+                                <div x-show="editMode" x-cloak>
+                                    <input wire:model.defer="editDeadline" type="date"
+                                           min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
+                                           oninput="window.__eoGuardDeadlineInput(this)"
+                                           onchange="window.__eoGuardDeadlineInput(this)"
+                                           onclick="window.__eoOpenDatePicker(this)"
+                                           onfocus="window.__eoOpenDatePicker(this)"
+                                           class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.85rem] leading-tight bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                    @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDeadline'] }}</p>@endif
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91] flex-shrink-0">
+                        Description <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
+                    </div>
+                    <div class="p-3.5 flex flex-col flex-1">
+                        <div x-show="!editMode"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-[0.95rem] text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
+                             style="min-height:160px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editDescription ?: 'No description provided.' }}</div>
+                        <textarea x-show="editMode" x-cloak
+                                  wire:model.defer="editDescription"
+                                  class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                  placeholder="Describe the role, responsibilities…" maxlength="5000"
+                                  style="min-height:160px;"></textarea>
+                        @if(isset($editErrors['editDescription']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDescription'] }}</p>@endif
+                    </div>
+                </div>
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91] flex-shrink-0">
+                        Qualifications <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
+                    </div>
+                    <div class="p-3.5 flex flex-col flex-1">
+                        <div x-show="!editMode"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-[0.95rem] text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
+                             style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
+                        <textarea x-show="editMode" x-cloak
+                                  wire:model.defer="editQualifications"
+                                  class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                  placeholder="e.g. Bachelor's degree in relevant field…" maxlength="3000"
+                                  style="min-height:120px;"></textarea>
+                        @if(isset($editErrors['editQualifications']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editQualifications'] }}</p>@endif
+                    </div>
+                </div>
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91] flex-shrink-0">
+                        How to Apply <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
+                    </div>
+                    <div class="p-3.5 flex flex-col flex-1">
+                        <div x-show="!editMode"
+                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-[0.95rem] text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
+                             style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
+                        <textarea x-show="editMode" x-cloak
+                                  wire:model.defer="editApplicationInstructions"
+                                  class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                  placeholder="e.g. Send your resume to hr@company.com…" maxlength="3000"
+                                  style="min-height:120px;"></textarea>
+                        @if(isset($editErrors['editApplicationInstructions']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editApplicationInstructions'] }}</p>@endif
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        {{-- RIGHT: Job Photo + History + Tips + Actions (Photo moved here from
+             the LEFT column so this modal matches the Post Job modal's column
+             layout: Left = org info, Middle = job details, Right = photo). --}}
+        <div class="mobile-scroll-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c job-view-info-pane">
+            <div class="p-3 space-y-3 flex-1">
 
                 @if($editingJob)
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
                         <span x-show="editMode" x-cloak class="font-normal normal-case tracking-normal text-[10px] ml-1 text-[#777777]">— optional</span>
                     </div>
@@ -3392,250 +3708,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 </div>
                 @endif
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
-                        Organization Details
-                    </div>
-                    <div class="p-2.5 space-y-2">
-                        @php $editIsPhilcst = str_contains(strtoupper($editCompanyType ?? ''), 'PHILCST'); @endphp
-
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Company Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display text-sm">{{ $editCompanyType ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <select wire:model.live="editCompanyType"
-                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    <option value="">Select Organization</option>
-                                    @foreach($this->jobOptions->get('company_type', collect()) as $opt)
-                                        <option value="{{ $opt->label }}" @selected($editCompanyType === $opt->label)>{{ $opt->label }}</option>
-                                    @endforeach
-                                </select>
-                                @if(isset($editErrors['editCompanyType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Company Name <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display text-sm">{{ $editCompany ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <input wire:model.defer="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
-                                @if(isset($editErrors['editCompany']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Location <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display text-sm">{{ $editLocation ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
-                                @if(isset($editErrors['editLocation']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-white border-[1.5px] {{ isset($editErrors['editTargetColleges']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
-                        <i class="fas fa-building-columns text-[9px] text-[#555555]"></i> Target Colleges
-                        <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
-                    </div>
-                    <div class="p-2.5">
-                        {{-- View mode: pills --}}
-                        <div x-show="!editMode" class="flex flex-wrap gap-1.5">
-                            @forelse($editTargetColleges as $tc)
-                                <span class="inline-flex items-center px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 text-xs font-semibold">{{ trim($tc) }}</span>
-                            @empty
-                                <span class="view-field-display empty text-sm w-full">No college selected.</span>
-                            @endforelse
-                        </div>
-
-                        {{-- Edit mode: checkboxes --}}
-                        <div x-show="editMode" x-cloak class="space-y-1.5">
-                            <label class="flex items-center gap-2 px-3 py-2 border-2 border-[#7a3f91] bg-[#f5eef9] rounded-xl cursor-pointer">
-                                <input type="checkbox" wire:model.live="editAllColleges" class="w-4 h-4 flex-shrink-0 accent-[#7a3f91]">
-                                <span class="text-sm font-semibold text-[#5e2f72]">All Colleges</span>
-                            </label>
-                            @foreach($this->collegesWithDepts as $college)
-                                <label class="flex items-center gap-2 px-3 py-2 border rounded-xl cursor-pointer transition font-semibold
-                                              {{ in_array($college['name'], $editTargetColleges) ? 'border-[#7a3f91]/40 bg-[#f5eef9] text-[#7a3f91]' : 'border-gray-200 hover:border-[#7a3f91]/30 hover:bg-[#f5eef9]/40 text-[#555555]' }}">
-                                    <input type="checkbox" wire:model.live="editTargetColleges" value="{{ $college['name'] }}"
-                                           class="w-4 h-4 flex-shrink-0 accent-[#7a3f91]">
-                                    <span class="truncate text-xs">{{ $college['name'] }}</span>
-                                </label>
-                            @endforeach
-                            @if(isset($editErrors['editTargetColleges']))<p class="text-red-600 text-xs mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editTargetColleges'] }}</p>@endif
-                        </div>
-                    </div>
-                </div>
-
-                @if($editingJob)
-                @php
-                    $statusColor = match($editingJob->status) {
-                        'ACTIVE'        => ['bg-emerald-50 border-emerald-200', 'text-emerald-900', 'fa-circle-check text-emerald-500', 'text-emerald-700', 'Currently Active'],
-                        'INACTIVE'      => ['bg-amber-50 border-amber-200',   'text-amber-900',   'fa-circle-pause text-amber-500',   'text-amber-700',   'Currently Inactive'],
-                        'ADMIN_DELETED' => ['bg-red-50 border-red-200',       'text-red-900',     'fa-trash text-red-500',            'text-red-700',     'Deleted'],
-                        default         => ['bg-gray-50 border-gray-200',     'text-gray-900',    'fa-circle text-gray-500',          'text-gray-700',    $editingJob->status],
-                    };
-                @endphp
-                <div class="rounded-xl px-3 py-2 border {{ $statusColor[0] }}">
-                    <p class="font-semibold flex items-center gap-1.5 text-sm {{ $statusColor[1] }}">
-                        <i class="fas {{ $statusColor[2] }} text-sm"></i> {{ $statusColor[4] }}
-                    </p>
-                    <p class="text-xs mt-0.5 {{ $statusColor[3] }}">
-                        @if($editingJob->status === 'INACTIVE' && $editJobDeadlinePassed) Update the deadline above first, save, then use <strong>Activate</strong>.
-                        @else Use the {{ $editingJob->status === 'ACTIVE' ? 'Deactivate' : 'Activate' }} button in the top-right to toggle.
-                        @endif
-                    </p>
-                </div>
-                @endif
-
-            </div>
-        </div>
-
-        {{-- MIDDLE: Job Info + Textareas --}}
-        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
-            <div class="mobile-scroll-inner flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
-
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
-                        Job Information
-                    </div>
-                    <div class="p-2.5 space-y-2">
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display text-sm font-semibold">{{ $editJobTitle ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <input wire:model.defer="editJobTitle" type="text" maxlength="200"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editJobTitle']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                @if(isset($editErrors['editJobTitle']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editJobTitle'] }}</p>@endif
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                                <div x-show="!editMode" class="view-field-display text-sm">{{ $editEmpType ?: '—' }}</div>
-                                <div x-show="editMode" x-cloak>
-                                    <select wire:model.defer="editEmpType"
-                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editEmpType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                        <option value="">Select Type</option>
-                                        @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
-                                            <option value="{{ $opt->label }}" @selected($editEmpType === $opt->label)>{{ $opt->label }}</option>
-                                        @endforeach
-                                    </select>
-                                    @if(isset($editErrors['editEmpType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editEmpType'] }}</p>@endif
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                                <div x-show="!editMode" class="view-field-display text-sm">{{ $editExpLevel ?: '—' }}</div>
-                                <div x-show="editMode" x-cloak>
-                                    <select wire:model.defer="editExpLevel"
-                                            class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editExpLevel']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                        <option value="">Select Level</option>
-                                        @foreach($this->orderedExpLevels as $lvl)
-                                            <option value="{{ $lvl }}" @selected($editExpLevel === $lvl)>{{ $lvl }}</option>
-                                        @endforeach
-                                    </select>
-                                    @if(isset($editErrors['editExpLevel']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editExpLevel'] }}</p>@endif
-                                </div>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
-                                    Salary <span class="font-normal normal-case tracking-normal text-[#777777] text-[10px]">optional</span>
-                                </label>
-                                <div x-show="!editMode" class="view-field-display text-sm">{{ $editSalary ?: 'Not disclosed' }}</div>
-                                <div x-show="editMode" x-cloak>
-                                    <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25k/mo"
-                                           oninput="window.__eoFormatSalaryInput(this)"
-                                           class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
-                                </div>
-                            </div>
-                            <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Deadline <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                                <div x-show="!editMode" class="view-field-display text-sm">
-                                    @if($editDeadline)
-                                        {{ \Carbon\Carbon::parse($editDeadline)->setTimezone('Asia/Manila')->format('M d, Y') }}
-                                    @else —
-                                    @endif
-                                </div>
-                                <div x-show="editMode" x-cloak>
-                                    <input wire:model.defer="editDeadline" type="date"
-                                           min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
-                                           oninput="window.__eoGuardDeadlineInput(this)"
-                                           onchange="window.__eoGuardDeadlineInput(this)"
-                                           onclick="window.__eoOpenDatePicker(this)"
-                                           onfocus="window.__eoOpenDatePicker(this)"
-                                           class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDeadline'] }}</p>@endif
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91] flex-shrink-0">
-                        Description <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
-                    </div>
-                    <div class="p-3.5 flex flex-col flex-1">
-                        <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
-                             style="min-height:160px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editDescription ?: 'No description provided.' }}</div>
-                        <textarea x-show="editMode" x-cloak
-                                  wire:model.defer="editDescription"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editDescription']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  placeholder="Describe the role, responsibilities…" maxlength="5000"
-                                  style="min-height:160px;"></textarea>
-                        @if(isset($editErrors['editDescription']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDescription'] }}</p>@endif
-                    </div>
-                </div>
-
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91] flex-shrink-0">
-                        Qualifications <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
-                    </div>
-                    <div class="p-3.5 flex flex-col flex-1">
-                        <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
-                             style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editQualifications ?: 'No qualifications listed.' }}</div>
-                        <textarea x-show="editMode" x-cloak
-                                  wire:model.defer="editQualifications"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editQualifications']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  placeholder="e.g. Bachelor's degree in relevant field…" maxlength="3000"
-                                  style="min-height:120px;"></textarea>
-                        @if(isset($editErrors['editQualifications']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editQualifications'] }}</p>@endif
-                    </div>
-                </div>
-
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91] flex-shrink-0">
-                        How to Apply <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
-                    </div>
-                    <div class="p-3.5 flex flex-col flex-1">
-                        <div x-show="!editMode"
-                             class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto"
-                             style="min-height:120px;background:#ffffff;border:1.5px solid #e8e0f0;">{{ $editApplicationInstructions ?: 'No application instructions provided.' }}</div>
-                        <textarea x-show="editMode" x-cloak
-                                  wire:model.defer="editApplicationInstructions"
-                                  class="w-full flex-1 px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editApplicationInstructions']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
-                                  placeholder="e.g. Send your resume to hr@company.com…" maxlength="3000"
-                                  style="min-height:120px;"></textarea>
-                        @if(isset($editErrors['editApplicationInstructions']))<p class="text-red-600 flex items-center gap-1 mt-1 text-xs"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editApplicationInstructions'] }}</p>@endif
-                    </div>
-                </div>
-
-            </div>
-        </div>
-
-        {{-- RIGHT: History + Tips + Actions --}}
-        <div class="mobile-scroll-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c job-view-info-pane">
-            <div class="p-3 space-y-3 flex-1">
-
                 @if($editingJob)
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         Job History
                     </div>
                     <div class="p-3.5 space-y-2">
@@ -3658,7 +3733,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 @endif
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.7rem] font-semibold uppercase tracking-[.07em] text-[#7a3f91]">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
                         Tips
                     </div>
                     <div class="p-3.5">
@@ -3777,16 +3852,143 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden mobile-scroll-body">
 
-        {{-- LEFT: card-style info panel — matches the organizer/director
-             "View Job" card layout (Job Photo / Company Details / Job
-             Information cards) instead of the old icon-row sidebar. Every
-             field here is read-only (no edit toggle) since this modal is
-             strictly view-only for Coordinator-posted jobs. --}}
-        <div class="mobile-scroll-col w-full lg:w-[300px] xl:w-[320px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto scroll-c bg-white job-view-info-pane">
-            <div class="p-2.5 space-y-2.5">
+        {{-- LEFT: Company Details + Target College — matches the Post Job
+             modal's column layout (Left = org info, Middle = job details,
+             Right = photo). Every field here is read-only (no edit toggle)
+             since this modal is strictly view-only for Coordinator-posted
+             jobs. --}}
+        <div class="mobile-scroll-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto scroll-c bg-white job-view-info-pane">
+            <div class="p-3 space-y-3">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide">
+                        Company Details
+                    </div>
+                    <div class="p-3 space-y-2.5">
+                        @if($organizerName)
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Posted By</label>
+                            <div class="view-field-display">{{ $organizerName }}</div>
+                        </div>
+                        @endif
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Industry</label>
+                            <div class="view-field-display">{{ $displayType ?: '—' }}</div>
+                        </div>
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company Name</label>
+                            <div class="view-field-display">{{ $job->company_name ?: '—' }}</div>
+                        </div>
+                        <div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Location</label>
+                            <div class="view-field-display">{{ $job->location ?: '—' }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                @if($job->target_college)
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide">
+                        Target College
+                    </div>
+                    <div class="p-3">
+                        <div class="flex flex-wrap gap-1.5">
+                            @foreach(explode(',', $job->target_college) as $col)
+                                <span class="inline-flex items-center font-semibold px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 text-xs">{{ trim($col) }}</span>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+                @endif
+            </div>
+        </div>
+
+        {{-- MIDDLE: Job Information + Description / Qualifications / How to
+             Apply — matches the organizer's view-content-box treatment. --}}
+        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 flex flex-col overflow-y-auto scroll-c border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+            <div class="p-3 flex flex-col gap-3">
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-visible">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] rounded-t-2xl flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide">
+                        Job Information
+                    </div>
+                    <div class="p-2.5 space-y-2">
+                        <div>
+                            <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Job Title</label>
+                            <div class="view-field-display font-semibold">{{ $job->job_title ?: '—' }}</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Employment Type</label>
+                                <div class="view-field-display">{{ $job->employment_type ?: '—' }}</div>
+                            </div>
+                            <div>
+                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Experience Level</label>
+                                <div class="view-field-display">{{ $job->experience_level ?: '—' }}</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <div>
+                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Salary</label>
+                                <div class="view-field-display">{{ $job->salary ?: 'Not disclosed' }}</div>
+                            </div>
+                            <div>
+                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Deadline</label>
+                                <div class="view-field-display {{ $isExp ? 'text-red-700' : ($isUrgentView ? 'text-amber-700' : '') }}">{{ $dl->format('M d, Y') }}</div>
+                            </div>
+                        </div>
+                        <p class="text-[0.68rem] {{ $isExp ? 'text-red-600 font-semibold' : ($isUrgentView ? 'text-amber-600 font-semibold' : 'text-[#777777]') }}">
+                            @if($isExp) <i class="fas fa-ban text-[8px] mr-0.5"></i>No longer accepting applications
+                            @elseif($daysLeft === 0) <i class="fas fa-fire text-[8px] mr-0.5"></i>Closing today!
+                            @elseif($daysLeft === 1) <i class="fas fa-fire text-[8px] mr-0.5"></i>Closes tomorrow
+                            @else {{ $daysLeft }} days remaining
+                            @endif
+                        </p>
+                    </div>
+                </div>
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide flex-shrink-0">
+                        Job Description
+                    </div>
+                    <div class="p-3.5 flex flex-col flex-1">
+                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-[0.95rem] text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:120px;">{{ trim($job->description) ?: 'No description provided.' }}</div>
+                    </div>
+                </div>
+
+                @if($job->qualifications)
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:150px;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide flex-shrink-0">
+                        Qualifications
+                    </div>
+                    <div class="p-3.5 flex flex-col flex-1">
+                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-[0.95rem] text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:100px;">{{ trim($job->qualifications) }}</div>
+                    </div>
+                </div>
+                @endif
+
+                @if($job->application_instructions)
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:150px;">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide flex-shrink-0">
+                        How to Apply
+                    </div>
+                    <div class="p-3.5 flex flex-col flex-1">
+                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-[0.95rem] text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:100px;">{{ trim($job->application_instructions) }}</div>
+                    </div>
+                </div>
+                @endif
+
+            </div>
+        </div>
+
+        {{-- RIGHT: Job Photo + Posted meta — matches the Post Job modal's
+             column layout (Left = org info, Middle = job details, Right =
+             photo). --}}
+        <div class="mobile-scroll-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c job-view-info-pane">
+            <div class="p-3 space-y-3 flex-1">
+
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide">
                         <i class="fas fa-image text-[9px] text-[#555555]"></i> Job Photo
                     </div>
                     <div class="p-3">
@@ -3807,125 +4009,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Company Details
-                    </div>
-                    <div class="p-2.5 space-y-2">
-                        @if($organizerName)
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Posted By</label>
-                            <div class="view-field-display text-sm">{{ $organizerName }}</div>
-                        </div>
-                        @endif
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Industry</label>
-                            <div class="view-field-display text-sm">{{ $displayType ?: '—' }}</div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Company Name</label>
-                            <div class="view-field-display text-sm">{{ $job->company_name ?: '—' }}</div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Location</label>
-                            <div class="view-field-display text-sm">{{ $job->location ?: '—' }}</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Job Information
-                    </div>
-                    <div class="p-2.5 space-y-2">
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Job Title</label>
-                            <div class="view-field-display text-sm font-semibold">{{ $job->job_title ?: '—' }}</div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Employment Type</label>
-                            <div class="view-field-display text-sm">{{ $job->employment_type ?: '—' }}</div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Experience Level</label>
-                            <div class="view-field-display text-sm">{{ $job->experience_level ?: '—' }}</div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Salary</label>
-                                <div class="view-field-display text-sm">{{ $job->salary ?: 'Not disclosed' }}</div>
-                            </div>
-                            <div>
-                                <label class="block text-[0.7rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Deadline</label>
-                                <div class="view-field-display text-sm {{ $isExp ? 'text-red-700' : ($isUrgentView ? 'text-amber-700' : '') }}">{{ $dl->format('M d, Y') }}</div>
-                            </div>
-                        </div>
-                        <p class="text-xs {{ $isExp ? 'text-red-600 font-semibold' : ($isUrgentView ? 'text-amber-600 font-semibold' : 'text-[#777777]') }}">
-                            @if($isExp) <i class="fas fa-ban text-[9px] mr-0.5"></i>No longer accepting applications
-                            @elseif($daysLeft === 0) <i class="fas fa-fire text-[9px] mr-0.5"></i>Closing today!
-                            @elseif($daysLeft === 1) <i class="fas fa-fire text-[9px] mr-0.5"></i>Closes tomorrow
-                            @else {{ $daysLeft }} days remaining
-                            @endif
-                        </p>
-                    </div>
-                </div>
-
-                @if($job->target_college)
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest">
-                        Target College
-                    </div>
-                    <div class="p-2.5">
-                        <div class="flex flex-wrap gap-1.5">
-                            @foreach(explode(',', $job->target_college) as $col)
-                                <span class="inline-flex items-center font-semibold px-2 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-200 text-xs">{{ trim($col) }}</span>
-                            @endforeach
-                        </div>
-                    </div>
-                </div>
-                @endif
-
                 <p class="text-center text-xs text-[#777777] pt-1 pb-1">Posted {{ $createdPH->diffForHumans() }} · {{ $createdPH->format('M d, Y g:i A') }}</p>
-            </div>
-        </div>
-
-        {{-- MIDDLE/RIGHT: read-only content cards — matches the organizer's
-             view-content-box treatment for Description / Qualifications /
-             How to Apply. --}}
-        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden bg-gray-50">
-            <div class="mobile-scroll-inner flex-1 min-h-0 overflow-y-auto scroll-c p-3 flex flex-col gap-3">
-
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
-                        Job Description
-                    </div>
-                    <div class="p-3.5 flex flex-col flex-1">
-                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:120px;">{{ trim($job->description) ?: 'No description provided.' }}</div>
-                    </div>
-                </div>
-
-                @if($job->qualifications)
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:150px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
-                        Qualifications
-                    </div>
-                    <div class="p-3.5 flex flex-col flex-1">
-                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:100px;">{{ trim($job->qualifications) }}</div>
-                    </div>
-                </div>
-                @endif
-
-                @if($job->application_instructions)
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:150px;">
-                    <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.7rem] font-semibold uppercase tracking-widest flex-shrink-0">
-                        How to Apply
-                    </div>
-                    <div class="p-3.5 flex flex-col flex-1">
-                        <div class="view-content-box flex-1 px-3 py-2 rounded-xl text-sm text-[#333333] leading-relaxed whitespace-pre-wrap overflow-y-auto" style="min-height:100px;">{{ trim($job->application_instructions) }}</div>
-                    </div>
-                </div>
-                @endif
-
             </div>
         </div>
     </div>
@@ -4232,7 +4316,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 </div>
 @endif
 
-{{-- ══ CLEAN-URL SCRIPT (strip ?job=46 and ?page=N from address bar on load) ══ --}}
+{{-- ══ CLEAN-URL SCRIPT (strip ?job=46 and ?page=N from address bar) ══ --}}
 <script>
     (function () {
         // Pure client-side: just rewrites the address bar in place so the
@@ -4240,11 +4324,30 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         // ?page=2 — no navigation, no reload, so it never touches the View
         // Job modal that the server already opened on this page load via
         // viewJob().
-        var params = new URLSearchParams(window.location.search);
-        if (params.has('job') || params.has('page')) {
-            var cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, '', cleanUrl);
+        function stripCleanParams() {
+            var params = new URLSearchParams(window.location.search);
+            if (params.has('job') || params.has('page')) {
+                var cleanUrl = window.location.origin + window.location.pathname;
+                window.history.replaceState({}, '', cleanUrl);
+            }
         }
+
+        // Run once on initial load (covers a fresh visit with ?job=46).
+        stripCleanParams();
+
+        // Also re-run after every Livewire update — pagination clicks push
+        // "?page=N" into the URL via Livewire's own history.pushState call,
+        // which happens AFTER this script's initial run and doesn't trigger
+        // a full page load, so the one-shot check above never sees it. This
+        // hook fires after each commit (including page-link clicks), so the
+        // URL gets cleaned every time, not just on first paint.
+        document.addEventListener('livewire:init', function () {
+            Livewire.hook('commit', function ({ succeed }) {
+                succeed(function () {
+                    stripCleanParams();
+                });
+            });
+        });
     })();
 </script>
 
@@ -4385,20 +4488,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         }
     };
 })();
-</script>
-
-{{-- ══ CLEAN-URL SCRIPT (strip ?job=46 from address bar on load) ══ --}}
-<script>
-    (function () {
-        // Pure client-side: just rewrites the address bar in place so the
-        // URL shows /director/job/management instead of ?job=46 — no
-        // navigation, no reload, so it never touches the View Details
-        // modal that the server already opened on this page load.
-        if (window.location.search.indexOf('job=') !== -1) {
-            var cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, '', cleanUrl);
-        }
-    })();
 </script>
 
 {{-- ══ ROW HOVER TOOLTIP + DEADLINE-OVERLAY TOOLTIP SCRIPT ══ --}}

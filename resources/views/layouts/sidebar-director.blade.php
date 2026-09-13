@@ -228,6 +228,11 @@
             background: #FFFFFF;
             border-right: 1px solid #E8E0F0;
             transition: width 0.2s ease, min-width 0.2s ease;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
         }
 
         @media (min-width: 1024px) {
@@ -680,6 +685,14 @@
 
     <script>
     // ─────────────────────────────────────────────────────────────────────────
+    //  CURRENT DIRECTOR ID — scopes the client-side notif "read order"
+    //  tracker (localStorage) per director, so switching accounts on a
+    //  shared browser never mixes one director's read-history with
+    //  another's "Already Read" ordering.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__dirDirectorId = {{ auth()->id() ?? 'null' }};
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  LOGOUT-IN-PROGRESS FLAG
     //  Set to true the instant the Logout button is clicked (before the
     //  POST /logout request is even sent). Every 419-handling path below
@@ -739,6 +752,24 @@
     // that don't go through the hook above (defensive double-cover).
     window.addEventListener('livewire:navigate:failed', function () {
         window.__dirShowSessionExpired();
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  BELL REFRESH ON APPROVE / REJECT / COMPLETE
+    //  manage-event.blade.php (and similar pages) dispatch a browser event
+    //  called 'dir-notif-refresh' right after updateDirectorReviewNotif()
+    //  writes the event's new status into director_notifications — but
+    //  nothing was ever listening for it on this side, so the bell kept
+    //  showing the stale "New Event for Review" / "...→ Pending" title
+    //  until the next 10s poll happened to land (or, if the director never
+    //  revisited a page that runs the one-time DB self-heal, indefinitely).
+    //  Listening here makes the bell reflect Approved/Rejected/Completed
+    //  the instant the action completes, without waiting on the poll.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.addEventListener('dir-notif-refresh', function () {
+        if (window.__dirLoggingOut) return;
+        var s = window.__safeDirNotifsStore();
+        if (s) s._fetch();
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -802,18 +833,27 @@
         return (window.__dirIconColors[icon] || window.__dirIconColors['bell']).color;
     };
 
-    // Builds the "New Event for Review → <status>" title for an event
+    // Builds the "Event Submitted → <status>" title for an event
     // submission/resubmission notif — mirrors the job posting's
     // "You Posted a Job → Active/Inactive" chain title convention.
     // The backend (manage-event component) overwrites the row's title
-    // in place to "...→ Approved" / "...→ Rejected" once the director
-    // acts on it; until then the row still carries the plain
-    // "New Event for Review" / "Event Resubmitted for Review" wording,
-    // so we append "→ Pending" here purely for display so the status is
-    // always visible, without needing to touch the submission code.
+    // in place to "...→ Approved" / "...→ Rejected" / "...→ Completed"
+    // once the director acts on it; until then the row still carries the
+    // plain "Event Submitted" / "Event Resubmitted" wording, so we append
+    // "→ Pending" here purely for display so the status is always
+    // visible, without needing to touch the submission code.
+    //
+    // Also recognizes the older "New Event for Review" / "Event
+    // Resubmitted for Review" wording from rows written before this
+    // rename, so legacy rows still display correctly instead of falling
+    // through with no "→ Pending" suffix appended.
     window.__dirEventReviewTitle = function (rawTitle, isSubmit) {
-        var base = rawTitle || (isSubmit ? 'New Event for Review' : 'Event Resubmitted for Review');
-        if (base === 'New Event for Review' || base === 'Event Resubmitted for Review') {
+        var base = rawTitle || (isSubmit ? 'Event Submitted' : 'Event Resubmitted');
+        var plainTitles = [
+            'Event Submitted', 'Event Resubmitted',
+            'New Event for Review', 'Event Resubmitted for Review',
+        ];
+        if (plainTitles.indexOf(base) !== -1) {
             base += ' \u2192 Pending';
         }
         return base;
@@ -1073,11 +1113,20 @@
 
                 var result = Array.from(map.values());
 
-                // Unread items float to the top (newest first), read items
-                // sit below (also newest first) — mirrors coordinator's
-                // sort so the panel behaves the same way across roles.
+                // Unread items float to the top (newest first). Read items
+                // sit below, ordered by when they were actually marked
+                // read (most recently read first) — falling back to
+                // created_at for items with no stamped read time (e.g.
+                // read before this tracking existed, or read on another
+                // device/browser).
+                var self = this;
                 result.sort(function (a, b) {
                     if (!!a.read !== !!b.read) return a.read ? 1 : -1;
+                    if (a.read && b.read) {
+                        var aReadAt = self._readAtFor(a);
+                        var bReadAt = self._readAtFor(b);
+                        if (aReadAt !== bReadAt) return bReadAt - aReadAt;
+                    }
                     return new Date(b.created_at) - new Date(a.created_at);
                 });
 
@@ -1088,7 +1137,57 @@
                 return this.items.filter(function (n) { return !n.read; }).length;
             },
 
-            toggle() { this.open = !this.open; },
+            // ── Tracks WHEN each notif was actually marked read (client
+            //    time), separate from the notif's created_at. Needed so
+            //    "Already Read" can be sorted by most-recently-read-first
+            //    like a real inbox, instead of by the notif's original
+            //    creation date — otherwise a notif you just opened today
+            //    stays buried under older items that merely happened to
+            //    be created more recently but read earlier/longer ago.
+            //    Persisted in localStorage so it survives refreshes/polls;
+            //    scoped per-director so switching accounts on the same
+            //    browser doesn't mix histories.
+            _readOrderKey() { return 'dirNotifReadOrder_' + (window.__dirDirectorId || 'default'); },
+            _readOrder: null,
+            _loadReadOrder() {
+                if (this._readOrder) return this._readOrder;
+                try {
+                    var raw = window.localStorage.getItem(this._readOrderKey());
+                    this._readOrder = raw ? JSON.parse(raw) : {};
+                } catch (e) { this._readOrder = {}; }
+                return this._readOrder;
+            },
+            _stampReadNow(id) {
+                var map = this._loadReadOrder();
+                map[id] = Date.now();
+                try { window.localStorage.setItem(this._readOrderKey(), JSON.stringify(map)); } catch (e) { /* ignore */ }
+            },
+            _readAtFor(item) {
+                var map = this._loadReadOrder();
+                var ids = Array.isArray(item._ids) ? item._ids : [item.id];
+                var latest = 0;
+                for (var i = 0; i < ids.length; i++) {
+                    var t = map[ids[i]];
+                    if (t && t > latest) latest = t;
+                }
+                return latest; // 0 if never stamped (read before this feature, or read on another device)
+            },
+
+
+            toggle() {
+                this.open = !this.open;
+                // Position the panel synchronously, in the SAME tick the
+                // click sets open=true — before Alpine's x-show/transition
+                // paints anything. Previously this only happened via
+                // x-effect + $nextTick on the panel element, which runs
+                // AFTER the panel's default inline position (top:88px;
+                // left:12px, near the sidebar) had already been painted —
+                // causing a visible flash/jump from the top-left corner
+                // over to its real spot under the bell button on the
+                // right. Calling it here first means the panel is already
+                // correctly placed before it's ever shown.
+                if (this.open && window.positionDirPanel) window.positionDirPanel();
+            },
             close()  {
                 // Don't let the panel be closed (outside click, X button,
                 // etc.) while a notif click is still navigating/loading —
@@ -1102,6 +1201,7 @@
                 if (item.read) return;
                 item.read = true;
                 var ids  = Array.isArray(item._ids) ? item._ids : [item.id];
+                ids.forEach(function (id) { this._stampReadNow(id); }, this);
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
                 for (var i = 0; i < ids.length; i++) {
                     try {
@@ -1119,7 +1219,14 @@
 
             async markAllRead() {
                 if (window.__dirLoggingOut) return;
-                this.items.forEach(function (n) { n.read = true; });
+                var self = this;
+                this.items.forEach(function (n) {
+                    if (!n.read) {
+                        var ids = Array.isArray(n._ids) ? n._ids : [n.id];
+                        ids.forEach(function (id) { self._stampReadNow(id); });
+                    }
+                    n.read = true;
+                });
                 try {
                     var r = await window.fetch('/director/notifications/read-all', {
                         method: 'PATCH',
@@ -1142,6 +1249,7 @@
                 for (var i = 0; i < matched.length; i++) {
                     matched[i].read = true;
                     var ids = matched[i]._ids || [matched[i].id];
+                    ids.forEach(function (id) { this._stampReadNow(id); }, this);
                     for (var j = 0; j < ids.length; j++) {
                         try {
                             var r = await window.fetch('/director/notifications/' + ids[j] + '/read', {
@@ -1374,22 +1482,30 @@
 
         window.addEventListener('dir-coordinator-updated', function (e) {
             if (window.__dirLoggingOut) return;
-            var d      = _dirDetail(e);
-            var name   = d.name   || 'A coordinator';
-            var action = d.action || 'updated';
-            var id     = d.id     || Math.floor(Date.now() / 60000);
+            var d       = _dirDetail(e);
+            var name    = d.name    || 'A coordinator';
+            var action  = d.action  || 'updated';
+            var id      = d.id      || Math.floor(Date.now() / 60000);
+            var college = d.college || '';
 
             var titleMap = {
-                created:       'New Coordinator Registered',
-                activated:     'Coordinator Activated',
-                deactivated:   'Coordinator Deactivated',
-                email_updated: 'Coordinator Email Updated',
+                created:         'New Coordinator Registered',
+                activated:       'Coordinator Activated',
+                deactivated:     'Coordinator Deactivated',
+                email_updated:   'Coordinator Email Updated',
+                college_updated: 'Coordinator College Reassigned',
+                photo_updated:   'Coordinator Photo Updated',
             };
             var msgMap = {
-                created:       name + ' has been registered as a new coordinator.',
-                activated:     name + ' has been activated.',
-                deactivated:   name + ' has been deactivated.',
-                email_updated: name + "'s email address has been updated.",
+                created:         name + ' has been registered as a new coordinator'
+                                     + (college ? ' for ' + college + '.' : '.'),
+                activated:       name + ' has been activated.',
+                deactivated:     name + ' has been deactivated.',
+                email_updated:   name + "'s email address has been updated.",
+                college_updated: college
+                                     ? name + ' has been reassigned to ' + college + '.'
+                                     : name + "'s college assignment has been updated.",
+                photo_updated:   name + "'s profile photo has been updated.",
             };
 
             _saveDirNotif({
@@ -1434,12 +1550,12 @@
             if (window.__dirLoggingOut) return;
             var d = _dirDetail(e);
             var sender = d.sender || 'Someone';
-            var room   = d.room   || 'Chat Room';
+            var room   = d.room   || 'Chat Room'; // kept only for dedup_key uniqueness below, no longer shown in the message text
             var body   = d.body   || '';
             var count  = Number(d.count) || 1;
             var msgText = count > 1
-                ? sender + ' and others sent ' + count + ' new messages in ' + room + '.'
-                : sender + ' sent a message in ' + room +
+                ? sender + ' and others sent ' + count + ' new messages.'
+                : sender + ' sent a message' +
                   (body ? ': "' + body.substring(0, 50) + (body.length > 50 ? '…' : '') + '"' : '.');
             _saveDirNotif({
                 icon:       'comments',
@@ -1703,7 +1819,7 @@
             <button
                 id="dir-bell-btn"
                 type="button"
-                @click.stop="$store.dirNotifs && $store.dirNotifs.toggle(); positionDirPanel();"
+                @click.stop="$store.dirNotifs && $store.dirNotifs.toggle();"
                 title="Notifications"
                 aria-label="Open notifications"
                 class="dir-topbar-bell">
@@ -1884,7 +2000,7 @@
                     x-transition:leave-end="opacity-0 translate-x-full"
                     style="overflow: hidden;">
                     <div class="dir-notif-divider"
-                         x-show="notif.read && notifIdx > 0 && !$store.dirNotifs.items[notifIdx - 1].read"
+                         x-show="notif.read && notifIdx > 0 && !$store.dirNotifs.items[notifIdx - 1].read && !($store.dirNotifs.navigating && $store.dirNotifs.loadingId === notif.id)"
                          x-cloak>
                         <span class="dir-notif-divider-label">Already Read</span>
                     </div>
@@ -1909,6 +2025,14 @@
                                 url += (url.indexOf('?') === -1 ? '?' : '&') + 'event=' + encodeURIComponent(notif.event_id);
                             } else if (notif.link_route === 'director.job/management' && notif.job_id) {
                                 url += (url.indexOf('?') === -1 ? '?' : '&') + 'job=' + encodeURIComponent(notif.job_id);
+                            } else if (notif.link_route === 'director.coordinator/management') {
+                                var coordDedup = notif.dedup_key || '';
+                                var coordMatch = coordDedup.indexOf('coordinator-self::') === 0
+                                    ? coordDedup.split('::')[1]
+                                    : null;
+                                if (coordMatch) {
+                                    url += (url.indexOf('?') === -1 ? '?' : '&') + 'coordinator=' + encodeURIComponent(coordMatch);
+                                }
                             }
                             // Panel stays open with the spinner overlay showing
                             // on this row — it only closes once the destination
@@ -1921,8 +2045,20 @@
                             // a hard reload there (page unload clears the
                             // spinner naturally) — same fix as the registrar
                             // sidebar's notif click.
-                            let isSameLocation = window.location.pathname === url.split('?')[0];
-                            if (isSameLocation) {
+                            //
+                            // Deep-links carrying ?event= or ?job= are meant to
+                            // pop the View/Manage modal open on arrival, via that
+                            // target page's own mount(). Livewire.navigate() is a
+                            // SPA morph, not a real page load — the destination
+                            // component's mount() doesn't reliably re-run the
+                            // same way a fresh request does, so the modal could
+                            // sit there NOT opening (or opening late) until the
+                            // user manually refreshes. Force a hard navigation
+                            // for these so mount() always runs top-to-bottom on
+                            // a clean request and the modal opens immediately.
+                            let hasDeepLinkParam = /[?&](event|job)=/.test(url);
+                            let isSameLocation   = window.location.pathname === url.split('?')[0];
+                            if (isSameLocation || hasDeepLinkParam) {
                                 window.location.href = url;
                             } else if (window.Livewire && typeof window.Livewire.navigate === 'function') {
                                 window.Livewire.navigate(url);
