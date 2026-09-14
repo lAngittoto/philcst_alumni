@@ -225,8 +225,7 @@ new class extends Component {
                   ->where('batch', '<=', $this->alumniBatchTo);
             }
             if (!empty($this->alumniCourses)) $q->whereIn('course_code', $this->alumniCourses);
-            if ($this->alumniProfileFilter === 'complete')   $q->where('profile_completed', 1);
-            elseif ($this->alumniProfileFilter === 'incomplete') $q->where('profile_completed', 0);
+            if ($this->alumniProfileFilter !== 'all') $this->applyProfileCompletionFilter($q, $this->alumniProfileFilter);
             if (!empty($this->alumniEmploymentStatuses)) $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatuses);
 
             $target = Alumni::find($alumniId);
@@ -357,6 +356,37 @@ new class extends Component {
                     ->whereNull('employment_trackings.deleted_at'));
             }
         });
+    }
+
+    /** Same required-field set as isProfileComplete() / user-management's
+     *  computed_status, applied at the query level so the Complete/Pending
+     *  filter always agrees with what's shown per row — instead of relying
+     *  on the profile_completed DB flag, which can go stale (e.g. an
+     *  alumnus edits their profile down to blank fields after the flag was
+     *  already set, or the flag was never backfilled for older records).
+     *  date_of_birth is a DATE column, so only IS NOT NULL applies to it —
+     *  comparing a DATE column to '' throws in MySQL strict mode. */
+    protected function applyProfileCompletionFilter($q, string $mode): void
+    {
+        $required = [
+            'email', 'gender', 'contact_number',
+            'father_last_name', 'father_given_name', 'father_middle_name',
+            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
+        ];
+
+        $complete = function ($w) use ($required) {
+            $w->whereNotNull('date_of_birth');
+            foreach ($required as $field) {
+                $w->whereNotNull($field)->where($field, '!=', '');
+            }
+        };
+
+        if ($mode === 'complete') {
+            $q->where($complete);
+        } elseif ($mode === 'incomplete') {
+            $q->whereNot($complete);
+        }
     }
 
     /** Label / color classes / icon for an employment status badge,
@@ -699,10 +729,8 @@ new class extends Component {
         }
         if (!empty($this->alumniCourses)) $q->whereIn('course_code', $this->alumniCourses);
 
-        if ($this->alumniProfileFilter === 'complete')
-            $q->where('profile_completed', 1);
-        elseif ($this->alumniProfileFilter === 'incomplete')
-            $q->where('profile_completed', 0);
+        if ($this->alumniProfileFilter !== 'all')
+            $this->applyProfileCompletionFilter($q, $this->alumniProfileFilter);
 
         if (!empty($this->alumniEmploymentStatuses))
             $this->applyEmploymentStatusFilter($q, $this->alumniEmploymentStatuses);

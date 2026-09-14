@@ -253,6 +253,24 @@ new class extends Component {
 
         return trim($name);
     }
+
+    /** Wraps matches of the current search term in a light-blue <mark>,
+     *  same visual treatment as the Alumni Records page's highlight().
+     *  Name is built via formatAlumniName() (already escaped-safe text,
+     *  no raw HTML), so this is safe to render with {!! !!}. */
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="yb-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
 };
 ?>
 
@@ -276,6 +294,15 @@ new class extends Component {
      oncut="return false;">
 
 <style>
+/* ── Search highlight ── */
+mark.yb-hl {
+    background: #BFDBFE;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    font-weight: 700;
+}
+
 /* ── Card hover ── */
 .yb-adm-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
 .yb-adm-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
@@ -476,8 +503,8 @@ new class extends Component {
                     <i class="fas fa-book-open text-white text-lg"></i>
                 </div>
                 <div>
-                    <h1 class="yb-adm-mobile-title text-xl font-semibold tracking-tight" style="color:#333333;">Alumni Yearbook</h1>
-                    <p class="yb-adm-mobile-subtitle text-xs leading-relaxed mt-0.5 font-semibold" style="color:#7A3F91;">All Colleges &amp; Courses</p>
+                    <h1 class="yb-adm-mobile-title text-2xl font-semibold tracking-tight leading-tight" style="color:#333333;">Alumni Yearbook</h1>
+                    <p class="yb-adm-mobile-subtitle text-sm leading-relaxed mt-0.5 font-semibold" style="color:#7A3F91;">All Colleges &amp; Courses</p>
                 </div>
             </div>
             <div class="flex items-center gap-2">
@@ -509,7 +536,7 @@ new class extends Component {
                 <input type="text"
                        x-model="q"
                        @input.debounce.350ms="$wire.set('search', q)"
-                       placeholder="Search name or student ID…"
+                       placeholder="Search..."
                        class="yb-adm-search-input"
                        autocomplete="off" spellcheck="false">
             </div>
@@ -582,8 +609,9 @@ new class extends Component {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    @if($search === '' && $batch === '' && $course === '') disabled @endif
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer ml-auto order-2"
+                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer ml-auto order-2"
                     style="color:#333333;">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm"></i>
@@ -663,7 +691,7 @@ new class extends Component {
                                 <div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
                                     <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
                                        style="color:#111111;">
-                                        {{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}
+                                        {!! $this->highlight($this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null), $search) !!}
                                     </p>
                                     <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
                                        style="color:#111111; letter-spacing:0.02em;">

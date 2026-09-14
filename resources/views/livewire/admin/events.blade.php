@@ -6,6 +6,7 @@ use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\WithPagination;
+use Livewire\WithoutUrlPagination;
 use App\Models\AdminEvent;
 use App\Models\AuditLog;
 use App\Http\Controllers\AdminEventController;
@@ -14,7 +15,9 @@ use Illuminate\Support\Facades\RateLimiter;
 use App\Models\Alumni;
 
 new class extends Component {
-    use WithPagination;
+    use WithPagination, WithoutUrlPagination;
+
+    protected function queryString(): array { return []; }
 
     protected string $paginationTheme = 'tailwind';
 
@@ -264,6 +267,25 @@ new class extends Component {
         $this->resetPage();
     }
 
+    /** Wraps matches of the current search term in a light-blue <mark>,
+     *  same visual treatment as Alumni Records / Yearbook / Job Postings'
+     *  highlight(). Used on title, since that's the only searched field
+     *  actually shown on the row/card (venue and target_participants are
+     *  search-matched but only surface in the detail modal). */
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="ev-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
     // ── View ──────────────────────────────────────────────────────────────────
     public function viewEvent(int $id): void
     {
@@ -340,6 +362,15 @@ new class extends Component {
 <div class="flex flex-col h-full min-h-0" style="overflow: hidden;">
 
 <style>
+/* ── Search highlight ── */
+mark.ev-hl {
+    background: #BFDBFE;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    font-weight: 700;
+}
+
 @keyframes admModalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
     to   { opacity:1; transform:none; }
@@ -635,7 +666,7 @@ select.adm-select-arrow {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#111111] z-[1]"></i>
                 <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
-                       placeholder="Search title, venue…"
+                       placeholder="Search..."
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] placeholder-[#aaaaaa] font-normal
                               hover:border-[#bbbbbb] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
@@ -699,8 +730,9 @@ select.adm-select-arrow {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    @if($search === '' && $filterStatus === '' && $filterCollege === '' && $filterSort === 'recent') disabled @endif
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
-                           bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                           bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
                 </span>
@@ -760,7 +792,7 @@ select.adm-select-arrow {
                             data-adm-row>
 
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $event->title }}</p>
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($event->title, $search) !!}</p>
                                 <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $eventDate->diffForHumans() }}</p>
                             </td>
 
@@ -843,7 +875,7 @@ select.adm-select-arrow {
                     <div class="adm-mrow" wire:click="viewEvent({{ $event->id }})" wire:key="adm-event-mrow-{{ $event->id }}">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-start justify-between gap-2">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $event->title }}</p>
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($event->title, $search) !!}</p>
                                 @if($isCompleted)
                                     <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-green-200 bg-green-50 text-green-700 whitespace-nowrap flex-shrink-0">
                                         <i class="fas fa-flag-checkered text-[8px] mr-1"></i>Completed
@@ -1524,7 +1556,7 @@ select.adm-select-arrow {
                     <span class="label-text text-xs font-semibold" x-text="sharingTo==='messenger' ? 'Opening…' : 'Send via Messenger'"></span>
                 </button>
 
-                <p class="text-[10px] text-center text-[#666666]">Sharing highlights is available even after the event.</p>
+                <p class="text-xs text-center text-[#666666]">Sharing highlights is available even after the event.</p>
             </div>
         </div>
 

@@ -171,7 +171,26 @@ new class extends Component {
             $regInactive = DB::table('users')->where('role','registrar')->where('user_status','INACTIVE')->count();
 
             $alumniTotal    = $rows->get('alumni', 0);
-            $alumniVerified = DB::table('alumni')->whereNotNull('password_changed_at')->count();
+            // FIX: same as computed_status/statusFilter above — Complete
+            // means every required profile field is filled in, not
+            // "has ever logged in" (password_changed_at). Kept in sync
+            // with alumni_blade.php's PROFILE_REQUIRED_FIELDS.
+            $alumniVerified = DB::table('alumni')
+                ->whereNotNull('email')->where('email', '!=', '')
+                ->whereNotNull('gender')->where('gender', '!=', '')
+                ->whereNotNull('date_of_birth')
+                ->whereNotNull('contact_number')->where('contact_number', '!=', '')
+                ->whereNotNull('father_last_name')->where('father_last_name', '!=', '')
+                ->whereNotNull('father_given_name')->where('father_given_name', '!=', '')
+                ->whereNotNull('father_middle_name')->where('father_middle_name', '!=', '')
+                ->whereNotNull('mother_last_name')->where('mother_last_name', '!=', '')
+                ->whereNotNull('mother_given_name')->where('mother_given_name', '!=', '')
+                ->whereNotNull('mother_middle_name')->where('mother_middle_name', '!=', '')
+                ->whereNotNull('address_street')->where('address_street', '!=', '')
+                ->whereNotNull('address_barangay')->where('address_barangay', '!=', '')
+                ->whereNotNull('address_municipality')->where('address_municipality', '!=', '')
+                ->whereNotNull('address_province')->where('address_province', '!=', '')
+                ->count();
             $alumniPending  = $alumniTotal - $alumniVerified;
 
             // Newly registered alumni — created_at falls within the current
@@ -250,8 +269,35 @@ new class extends Component {
         // immediately by bustUserListCache() whenever an action actually
         // changes a row this query reads.
         $result = \Illuminate\Support\Facades\Cache::remember($this->usersCacheKey(), 15, function () {
+            // FIX: alumni Complete/Pending here used to be based on
+            // al.password_changed_at (whether the alumnus has ever
+            // logged in / set a password) — a completely different
+            // concept from PROFILE completeness. The alumni management
+            // page (alumni_blade.php's isProfileComplete()/
+            // applyProfileCompletionFilter()) is the correct reference:
+            // Complete means every required profile field is actually
+            // filled in — email, gender, DOB, contact number, BOTH
+            // parents' full names, and full home address — regardless
+            // of whether the account has ever been logged into. This
+            // now checks the exact same field list so "Complete" reads
+            // the same on both pages.
             $st = "(CASE
-                WHEN users.role='alumni'    THEN IF(al.password_changed_at IS NOT NULL,'VERIFIED','PENDING')
+                WHEN users.role='alumni'    THEN IF(
+                    al.email IS NOT NULL AND al.email != '' AND
+                    al.gender IS NOT NULL AND al.gender != '' AND
+                    al.date_of_birth IS NOT NULL AND
+                    al.contact_number IS NOT NULL AND al.contact_number != '' AND
+                    al.father_last_name IS NOT NULL AND al.father_last_name != '' AND
+                    al.father_given_name IS NOT NULL AND al.father_given_name != '' AND
+                    al.father_middle_name IS NOT NULL AND al.father_middle_name != '' AND
+                    al.mother_last_name IS NOT NULL AND al.mother_last_name != '' AND
+                    al.mother_given_name IS NOT NULL AND al.mother_given_name != '' AND
+                    al.mother_middle_name IS NOT NULL AND al.mother_middle_name != '' AND
+                    al.address_street IS NOT NULL AND al.address_street != '' AND
+                    al.address_barangay IS NOT NULL AND al.address_barangay != '' AND
+                    al.address_municipality IS NOT NULL AND al.address_municipality != '' AND
+                    al.address_province IS NOT NULL AND al.address_province != '',
+                    'VERIFIED','PENDING')
                 WHEN users.role='organizer' THEN COALESCE(org.status,'ACTIVE')
                 WHEN users.role='director'  THEN COALESCE(dir.status,'ACTIVE')
                 WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
@@ -290,10 +336,26 @@ new class extends Component {
                 $q->where('users.role', $map[$this->activeRole]);
 
             if ($this->activeRole === 'alumni' && in_array($this->statusFilter, ['complete', 'pending', 'new_this_month'], true)) {
+                // Same required-field list as the CASE expression above
+                // and alumni_blade.php's PROFILE_REQUIRED_FIELDS — kept
+                // in sync so this filter and the computed_status column
+                // it's filtering against never disagree.
+                $profileFields = [
+                    'al.email', 'al.gender', 'al.date_of_birth', 'al.contact_number',
+                    'al.father_last_name', 'al.father_given_name', 'al.father_middle_name',
+                    'al.mother_last_name', 'al.mother_given_name', 'al.mother_middle_name',
+                    'al.address_street', 'al.address_barangay', 'al.address_municipality', 'al.address_province',
+                ];
                 if ($this->statusFilter === 'complete') {
-                    $q->whereNotNull('al.password_changed_at');
+                    foreach ($profileFields as $field) {
+                        $q->whereNotNull($field)->where($field, '!=', '');
+                    }
                 } elseif ($this->statusFilter === 'pending') {
-                    $q->whereNull('al.password_changed_at');
+                    $q->where(function ($s) use ($profileFields) {
+                        foreach ($profileFields as $field) {
+                            $s->orWhereNull($field)->orWhere($field, '=', '');
+                        }
+                    });
                 } else { // new_this_month
                     $q->whereMonth('users.created_at', now('Asia/Manila')->month)
                       ->whereYear('users.created_at', now('Asia/Manila')->year);
@@ -431,7 +493,22 @@ new class extends Component {
             ->select([
                 'users.id','users.name','users.email','users.role','users.created_at',
                 DB::raw("(CASE
-                    WHEN users.role='alumni'    THEN IF(al.password_changed_at IS NOT NULL,'VERIFIED','PENDING')
+                    WHEN users.role='alumni'    THEN IF(
+                        al.email IS NOT NULL AND al.email != '' AND
+                        al.gender IS NOT NULL AND al.gender != '' AND
+                        al.date_of_birth IS NOT NULL AND
+                        al.contact_number IS NOT NULL AND al.contact_number != '' AND
+                        al.father_last_name IS NOT NULL AND al.father_last_name != '' AND
+                        al.father_given_name IS NOT NULL AND al.father_given_name != '' AND
+                        al.father_middle_name IS NOT NULL AND al.father_middle_name != '' AND
+                        al.mother_last_name IS NOT NULL AND al.mother_last_name != '' AND
+                        al.mother_given_name IS NOT NULL AND al.mother_given_name != '' AND
+                        al.mother_middle_name IS NOT NULL AND al.mother_middle_name != '' AND
+                        al.address_street IS NOT NULL AND al.address_street != '' AND
+                        al.address_barangay IS NOT NULL AND al.address_barangay != '' AND
+                        al.address_municipality IS NOT NULL AND al.address_municipality != '' AND
+                        al.address_province IS NOT NULL AND al.address_province != '',
+                        'VERIFIED','PENDING')
                     WHEN users.role='organizer' THEN COALESCE(org.status,'ACTIVE')
                     WHEN users.role='director'  THEN COALESCE(dir.status,'ACTIVE')
                     WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
@@ -839,6 +916,108 @@ select.mu-filter-input.mu-active {
 .mu-smooth-btn:active:not(:disabled) { transform: scale(0.98); }
 .mu-smooth-btn:disabled { opacity: .7; cursor: wait; }
 
+/* ── Suffix picker: floating-label trigger + scrollable panel,
+   matching the purple brand treatment used across the admin pages'
+   other dropdowns. ── */
+.mu-sfx-field { position: relative; }
+.mu-sfx-trigger {
+    border: 1.5px solid #E8E0F0;
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    height: 2.6rem;
+    background: #ffffff;
+    color: #000000;
+    cursor: pointer;
+    text-align: left;
+}
+.mu-sfx-trigger:hover { border-color: #c4b5d4; }
+.mu-sfx-trigger--open {
+    border-color: #7A3F91;
+    box-shadow: 0 0 0 3px rgba(122,63,145,.12);
+}
+.mu-sfx-label {
+    position: absolute;
+    top: -0.55rem;
+    left: 0.7rem;
+    background: #ffffff;
+    padding: 0 0.35rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #7A3F91;
+}
+.mu-sfx-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 9998;
+    background: #ffffff;
+    border: 1px solid #E8E0F0;
+    border-radius: 0.75rem;
+    box-shadow: 0 10px 30px rgba(122,63,145,.25);
+    overflow: hidden;
+}
+.mu-sfx-panel-title {
+    padding: 0.7rem 0.9rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: #7A3F91;
+    background: #FAF7FC;
+    border-bottom: 1px solid #F0ECF5;
+}
+.mu-sfx-list {
+    height: 200px;
+    max-height: 200px;
+    overflow-y: scroll;
+    scrollbar-width: thin;
+    scrollbar-color: #d4b8e8 #F5F5F5;
+}
+.mu-sfx-list::-webkit-scrollbar { width: 4px; }
+.mu-sfx-list::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
+.mu-sfx-item {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.55rem 0.9rem;
+    text-align: left;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: background-color .1s ease;
+}
+.mu-sfx-item:hover { background: #F5F0FA; }
+.mu-sfx-item--sel  { background: #F0E6F8; }
+.mu-sfx-item-code {
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #000000;
+    min-width: 2.25rem;
+    flex-shrink: 0;
+}
+.mu-sfx-item-label {
+    font-size: 0.85rem;
+    color: #333333;
+    font-weight: 500;
+}
+.mu-sfx-panel-footer {
+    width: 100%;
+    padding: 0.55rem 0.9rem;
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #8a8a8a;
+    background: #FAFAFA;
+    border: none;
+    border-top: 1px solid #F0ECF5;
+    cursor: pointer;
+}
+.mu-sfx-panel-footer:hover { background: #F5F5F5; color: #7A3F91; }
+
 .mu-stat-grid {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -949,6 +1128,30 @@ select.mu-filter-input.mu-active {
    "ID R…"/"…N…" on desktop. Columns that must never wrap mid-word
    (badges, dates) get white-space: nowrap individually instead. */
 .mu-users-table { table-layout: auto; }
+
+/* ── Prevent text selection across the whole page (header, stat cards,
+   filter bar, table, pagination) — dragging across any of it used to
+   highlight text like a giant select-all, which fights with the
+   click-to-open-profile row behavior and just looks broken. Modals
+   (View Details, Create Director, the deactivate/activate confirm)
+   opt back into normal selection via .mu-modal-selectable below, since
+   copying an email/name from a profile is still expected to work
+   there. Inputs/textareas anywhere are also exempted so typing and
+   selecting typed text still works normally. ── */
+.mu-page-root,
+.mu-page-root *:not(.mu-modal-selectable):not(.mu-modal-selectable *) {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+.mu-page-root input,
+.mu-page-root textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
 
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
@@ -1095,8 +1298,8 @@ select.mu-filter-input.mu-active {
             <i class="fas fa-users-cog text-white text-lg"></i>
         </div>
         <div>
-            <h1 class="text-xl font-semibold tracking-tight" style="color:#000000;">User Management</h1>
-            <p class="text-xs leading-relaxed mt-0.5" style="color:#000000;">Manage all system users across every role</p>
+            <h1 class="text-lg sm:text-2xl font-semibold tracking-tight leading-tight" style="color:#000000;">User Management</h1>
+            <p class="text-xs sm:text-sm leading-relaxed mt-0.5" style="color:#000000;">Manage all system users across every role</p>
         </div>
         <div class="ml-auto relative" x-data="{tip:false}">
             <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
@@ -1188,7 +1391,7 @@ select.mu-filter-input.mu-active {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#000000;z-index:1;"></i>
                 <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
-                       placeholder="Search name or email…"
+                       placeholder="Search…"
                        class="mu-filter-input w-full" style="padding-left:2.25rem;padding-right:1rem;"
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
@@ -1261,12 +1464,14 @@ select.mu-filter-input.mu-active {
                 @endforeach
             </div>
 
+            @php $muNoActiveFilter = $activeRole === 'all' && $statusFilter === 'all' && $search === ''; @endphp
             <button wire:click="switchTab('all')"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="switchTab('all')"
+                    @if($muNoActiveFilter) disabled @endif
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer disabled:pointer-events-none ml-auto"
+                           bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed ml-auto"
                     style="color:#000000;">
                 <span wire:loading.remove wire:target="switchTab('all')">
                     <i class="fas fa-rotate-left text-sm"></i>
@@ -1525,7 +1730,7 @@ select.mu-filter-input.mu-active {
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
-<div class="fixed inset-0"
+<div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
      x-data="{ muClosing: false }"
      x-show="!muClosing"
@@ -1642,15 +1847,10 @@ select.mu-filter-input.mu-active {
             {{-- ALUMNI: STUDENT ID + STUDENT'S NAME --}}
             @if($isAlumni)
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                    <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Student ID</p>
-                    </div>
-                    <div class="p-3">
-                        <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Student ID</p>
-                            <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['student_id'] ?: '—' }}</p>
-                        </div>
+                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden p-3">
+                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Student ID</p>
+                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['student_id'] ?: '—' }}</p>
                     </div>
                 </div>
 
@@ -1675,19 +1875,10 @@ select.mu-filter-input.mu-active {
             </div>
 
             {{-- ALUMNI: PROGRAM --}}
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Program</p>
-                </div>
-                <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Code</p>
-                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_code'] ?: '—' }}</p>
-                    </div>
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program Name</p>
-                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_name'] ?: '—' }}</p>
-                    </div>
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden p-3">
+                <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
+                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program</p>
+                    <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_name'] ?: '—' }}</p>
                 </div>
             </div>
             @endif
@@ -1977,9 +2168,24 @@ select.mu-filter-input.mu-active {
      CREATE DIRECTOR MODAL
      ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'createDirector')
-<div class="fixed inset-0"
+<div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     x-data="{ muClosing: false, dPhotoFull: false }"
+     x-data="{
+        muClosing: false,
+        dPhotoFull: false,
+        dFnLive: @js($dFn),
+        dMnLive: @js($dMn),
+        dLnLive: @js($dLn),
+        dUsernameLive: @js($dUsername),
+        dEmailLive: @js($dEmail),
+        get dRequiredFilled() {
+            return this.dFnLive.trim() !== ''
+                && this.dMnLive.trim() !== ''
+                && this.dLnLive.trim() !== ''
+                && /^\d{8}$/.test(this.dUsernameLive.trim())
+                && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.dEmailLive.trim());
+        }
+     }"
      x-show="!muClosing"
      x-init="muClosing = false"
      @keydown.escape.window="dPhotoFull ? (dPhotoFull = false) : ($wire.closeModal(), setTimeout(() => muClosing = true, 220))">
@@ -2055,8 +2261,7 @@ select.mu-filter-input.mu-active {
             @if(!$dOk)
             <div class="space-y-4" wire:loading.class="opacity-60 pointer-events-none" wire:target="createDirector" style="transition: opacity .15s ease;">
 
-                {{-- PERSONAL INFORMATION card --}}
-                <div class="rounded-xl border overflow-hidden" style="border-color:#E5E5E5;">
+                <div class="rounded-xl border overflow-visible" style="border-color:#E5E5E5;">
                     <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
                         <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Personal Information</p>
                     </div>
@@ -2065,17 +2270,19 @@ select.mu-filter-input.mu-active {
                              x-data="{ dragging: false }"
                              @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false"
                              @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
-                            <div class="relative w-32 h-32">
+                            <div class="relative w-32 h-32 group">
                                 <label for="dPhotoInput"
-                                       :class="dragging ? 'border-black bg-black/5' : 'border-[#E5E5E5] bg-[#FAFAFA] hover:border-black'"
-                                       class="w-32 h-32 rounded-xl border-2 border-dashed cursor-pointer transition-all flex flex-col items-center justify-center gap-1 text-center px-2 overflow-hidden">
+                                       :class="dragging ? 'border-[#7A3F91] bg-[#7A3F91]/5' : 'border-[#E8E0F0] bg-[#FAFAFA] hover:border-[#c4b5d4]'"
+                                       class="w-32 h-32 rounded-xl border-2 cursor-pointer transition-all flex flex-col items-center justify-center gap-1 text-center px-2 overflow-hidden">
                                     @if($vPhoto)
                                         <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
                                     @else
-                                        <i class="fas fa-arrow-up-from-bracket text-base" style="color:#8a8a8a;"></i>
-                                        <span class="text-sm font-bold" style="color:#000000;">Profile Photo</span>
-                                        <span class="text-xs font-medium" style="color:#8a8a8a;">JPG, PNG, WebP · 5 MB</span>
+                                        <img src="{{ asset('storage/alumni-photos/default.png') }}" class="w-full h-full object-cover" alt="Default profile photo">
                                     @endif
+                                    <div class="absolute inset-0 rounded-xl bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 pointer-events-none">
+                                        <i class="fas fa-camera text-white text-base"></i>
+                                        <span class="text-white text-xs font-semibold">Click to upload</span>
+                                    </div>
                                     <input id="dPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
                                 </label>
                                 @if($vPhoto)
@@ -2088,32 +2295,80 @@ select.mu-filter-input.mu-active {
                             <div wire:loading wire:target="vPhoto" class="flex items-center gap-1.5 text-xs font-semibold" style="color:#000000;">
                                 <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
                             </div>
-                            <span class="text-xs font-medium" style="color:#6b6b6b;">Optional — leave blank for default</span>
+                            <span class="text-xs font-medium text-center" style="color:#6b6b6b;">JPG, PNG, WebP · 5 MB<br>Optional — leave blank for default</span>
                         </div>
 
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dFn" type="text" placeholder="e.g. Juan" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <input wire:model.defer="dFn" x-model="dFnLive" type="text" placeholder="e.g. Juan" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dLn" type="text" placeholder="e.g. dela Cruz" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <input wire:model.defer="dLn" x-model="dLnLive" type="text" placeholder="e.g. dela Cruz" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
-                                <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <input wire:model.defer="dMn" x-model="dMnLive" type="text" placeholder="e.g. Santos" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
                             </div>
-                            <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix</p>
-                                <select wire:model.defer="dSfx" class="mu-filter-input w-full mu-smooth-input text-base">
-                                    <option value="">None</option>
-                                    <option value="Jr.">Jr.</option>
-                                    <option value="Sr.">Sr.</option>
-                                    <option value="II">II</option>
-                                    <option value="III">III</option>
-                                    <option value="IV">IV</option>
-                                </select>
+                            <div class="relative" x-data="{ open: false, sfxOptions: [
+                                    { v: 'I',    l: 'The First' },
+                                    { v: 'II',   l: 'The Second' },
+                                    { v: 'III',  l: 'The Third' },
+                                    { v: 'IV',   l: 'The Fourth' },
+                                    { v: 'V',    l: 'The Fifth' },
+                                    { v: 'VI',   l: 'The Sixth' },
+                                    { v: 'VII',  l: 'The Seventh' },
+                                    { v: 'VIII', l: 'The Eighth' },
+                                    { v: 'IX',   l: 'The Ninth' },
+                                    { v: 'X',    l: 'The Tenth' },
+                                    { v: 'XI',   l: 'The Eleventh' },
+                                    { v: 'XII',  l: 'The Twelfth' },
+                                    { v: 'XIII', l: 'The Thirteenth' },
+                                    { v: 'XIV',  l: 'The Fourteenth' },
+                                    { v: 'XV',   l: 'The Fifteenth' },
+                                    { v: 'XVI',  l: 'The Sixteenth' },
+                                    { v: 'XVII', l: 'The Seventeenth' },
+                                    { v: 'XVIII',l: 'The Eighteenth' },
+                                    { v: 'XIX',  l: 'The Nineteenth' },
+                                    { v: 'XX',   l: 'The Twentieth' },
+                                    { v: 'Jr.',  l: 'Junior' },
+                                    { v: 'Sr.',  l: 'Senior' },
+                                ] }" @click.away="open = false">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="text-red-400 font-normal">*</span></p>
+                                <div class="mu-sfx-field">
+                                    <button type="button" @click="open = !open"
+                                            class="mu-sfx-trigger w-full mu-smooth-input text-base flex items-center justify-between"
+                                            :class="open ? 'mu-sfx-trigger--open' : ''">
+                                        <span class="flex items-center gap-2 truncate" :class="'{{ $dSfx }}' === '' ? '' : ''">
+                                            <i class="fas fa-tag text-xs shrink-0" style="color:#7A3F91;"></i>
+                                            <span style="{{ $dSfx === '' ? 'color:#595959;font-weight:400;' : '' }}">{{ $dSfx !== '' ? $dSfx : 'None' }}</span>
+                                        </span>
+                                        <i class="fas fa-chevron-down text-xs transition-transform shrink-0" style="color:#7A3F91;" :class="open ? 'rotate-180' : ''"></i>
+                                    </button>
+                                    <div x-show="open" x-cloak
+                                         x-transition:enter="transition ease-out duration-100"
+                                         x-transition:enter-start="opacity-0 scale-95"
+                                         x-transition:enter-end="opacity-100 scale-100"
+                                         class="mu-sfx-panel">
+                                        <p class="mu-sfx-panel-title">Select Suffix</p>
+                                        <div class="mu-sfx-list">
+                                            <template x-for="opt in sfxOptions" :key="opt.v">
+                                                <button type="button"
+                                                        @click="$wire.set('dSfx', opt.v); open = false"
+                                                        class="mu-sfx-item"
+                                                        :class="'{{ $dSfx }}' === opt.v ? 'mu-sfx-item--sel' : ''">
+                                                    <span class="mu-sfx-item-code" x-text="opt.v"></span>
+                                                    <span class="mu-sfx-item-label" x-text="opt.l"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                        <button type="button" @click="$wire.set('dSfx', ''); open = false"
+                                                class="mu-sfx-panel-footer">
+                                            Optional — leave blank if none
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2128,13 +2383,13 @@ select.mu-filter-input.mu-active {
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Teacher ID <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dUsername" type="text" inputmode="numeric" maxlength="8"
+                                <input wire:model.defer="dUsername" x-model="dUsernameLive" type="text" inputmode="numeric" maxlength="8"
                                        placeholder="e.g. 20240001" class="mu-filter-input w-full mu-smooth-input font-mono text-base" autocomplete="off">
                                 <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Must be exactly 8 digits</p>
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dEmail" type="email" placeholder="director@example.com"
+                                <input wire:model.defer="dEmail" x-model="dEmailLive" type="email" placeholder="director@example.com"
                                        class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
                                 <p class="text-xs font-medium mt-1.5" style="color:#6b6b6b;">Login credentials will be sent here</p>
                             </div>
@@ -2157,7 +2412,9 @@ select.mu-filter-input.mu-active {
                         <span>Cancel</span>
                     </button>
                     <button wire:click="createDirector" wire:loading.attr="disabled" wire:target="createDirector"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2 mu-smooth-btn"
+                            :disabled="!dRequiredFilled"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn"
+                            :class="dRequiredFilled ? 'hover:opacity-90' : 'opacity-40 cursor-not-allowed'"
                             style="background:#7A3F91;">
                         <span wire:loading.remove wire:target="createDirector" class="flex items-center gap-2">
                             <i class="fas fa-user-tie text-sm"></i> Create Director
@@ -2180,7 +2437,7 @@ select.mu-filter-input.mu-active {
      TOGGLE CONFIRM MODAL
      ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'toggleConfirm' && $tId)
-<div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm"
+<div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm mu-modal-selectable"
      style="z-index:9996;"
      x-data="{ muClosing: false }"
      x-show="!muClosing"

@@ -81,7 +81,7 @@ new #[Layout('app')] class extends Component {
     public function goToAlumni(string $filter = ''): void
     {
         session()->put('admin_alumni_filter', $filter);
-        $this->redirect(route('user.management'));
+        $this->redirect(route('user.management'), navigate: true);
     }
 
     public function goToEmployment(string $filter = ''): void
@@ -94,26 +94,26 @@ new #[Layout('app')] class extends Component {
             default         => '',
         };
         session()->put('admin_employment_filter', $mapped);
-        $this->redirect(route('employment.tracking'));
+        $this->redirect(route('employment.tracking'), navigate: true);
     }
 
     public function goToEvents(string $filter = ''): void
     {
         session()->put('admin_events_filter', $filter);
-        $this->redirect(route('events'));
+        $this->redirect(route('events'), navigate: true);
     }
 
     public function goToJobs(string $filter = ''): void
     {
         session()->put('admin_jobs_filter', $filter);
-        $this->redirect(route('job.posts'));
+        $this->redirect(route('job.posts'), navigate: true);
     }
 
     public function goToUsers(string $tab = '', string $status = ''): void
     {
         session()->put('admin_users_tab', $tab);
         session()->put('admin_users_status', $status);
-        $this->redirect(route('user.management'));
+        $this->redirect(route('user.management'), navigate: true);
     }
 
     private function loadStats(): void
@@ -253,8 +253,13 @@ new #[Layout('app')] class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     private function jobImageUrl(?string $path): string
     {
-        if ($path && Storage::disk('public')->exists($path)) {
-            return Storage::url($path);
+        // asset('storage/' . $path) — same fix already applied in
+        // manage-job / job-management. Storage::disk('public')->exists()
+        // and Storage::url() were resolving incorrectly on this server
+        // even with a correct DB path, silently forcing the default
+        // photo for every job even when a real image was uploaded.
+        if ($path) {
+            return asset('storage/' . $path);
         }
         return asset('storage/job/default-photo-job.jpg');
     }
@@ -637,6 +642,52 @@ new #[Layout('app')] class extends Component {
 }
 .adm-snap-mini-tile-clickable:hover { background: #F0E6F8; border-color: #d4b8e8; }
 
+/* ── Click loading spinner — purple "..." dot loader ─────────────────
+   Same treatment on every clickable card/tile on this dashboard
+   (KPI stat cards, role tiles, Employment/Events/Jobs snapshot cards
+   and their mini status tiles): content underneath blurs + dims while
+   the wire:click navigation is in flight, and three pulsing purple
+   dots sit centered on top, so every card feels the same "this is
+   working" pattern instead of a dead click. Applied via wire:loading
+   toggling the .is-loading class on the card, scoped with
+   wire:target so only the card actually clicked lights up. */
+.adm-stat-card, .adm-role-tile, .adm-snap-card, .adm-snap-mini-tile {
+    position: relative;
+}
+.adm-click-spinner {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    z-index: 40;
+    border-radius: inherit;
+    background: rgba(255,255,255,.55);
+}
+.adm-click-spinner span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #7A3F91;
+    animation: admDotPulse 1.1s ease-in-out infinite;
+}
+.adm-click-spinner span:nth-child(2) { animation-delay: 0.15s; }
+.adm-click-spinner span:nth-child(3) { animation-delay: 0.3s; }
+.adm-click-spinner--sm span { width: 5px; height: 5px; }
+@keyframes admDotPulse {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+.is-loading > *:not(.adm-click-spinner) {
+    filter: blur(4px);
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
+}
+.is-loading .adm-click-spinner { display: flex; }
+.is-loading { pointer-events: none; }
+
 /* Events status tiles — hover keeps the shared purple background but the
    border color matches each tile's own status theme instead of purple. */
 .adm-tile-pending:hover   { border-color: #d97706; }
@@ -818,9 +869,23 @@ new #[Layout('app')] class extends Component {
 </div>
 
 {{-- ══ KPI STRIP — icon left, text right ══ --}}
+{{-- dashNav Alpine store (registered in the script block below) tracks
+     which card was clicked so its spinner stays visible through the
+     ENTIRE redirect(navigate:true) hop, not just until the Livewire
+     method call itself returns. wire:loading alone unbinds as soon as
+     the server response lands — but with navigate:true, Livewire then
+     fetches + swaps in the destination page's HTML as a SEPARATE step
+     after that, which is exactly the gap that looked like "the
+     spinner stopped but nothing happened yet". Same pattern as the
+     sidebar's navClickedRoute. A global store (not a local x-data)
+     because the clickable cards are spread across several unrelated
+     DOM sections on this page, not one common wrapper. --}}
 <div class="adm-stat-grid">
 
-    <div wire:click="goToAlumni" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#7A3F91;--stat-accent-shadow:rgba(122,63,145,.15);">
+    <div wire:click="goToAlumni"
+         @click="$store.dashNav.clicked = 'alumni-all'" :class="{ 'is-loading': $store.dashNav.clicked === 'alumni-all' }"
+         class="adm-stat-card adm-tip-wrap" style="--stat-accent:#7A3F91;--stat-accent-shadow:rgba(122,63,145,.15);">
+        <div class="adm-click-spinner"><span></span><span></span><span></span></div>
         <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View All Alumni</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
             <i class="fas fa-users text-white"></i>
@@ -832,7 +897,10 @@ new #[Layout('app')] class extends Component {
         </div>
     </div>
 
-    <div wire:click="goToAlumni('complete')" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#059669;--stat-accent-shadow:rgba(5,150,105,.15);">
+    <div wire:click="goToAlumni('complete')"
+         @click="$store.dashNav.clicked = 'alumni-complete'" :class="{ 'is-loading': $store.dashNav.clicked === 'alumni-complete' }"
+         class="adm-stat-card adm-tip-wrap" style="--stat-accent:#059669;--stat-accent-shadow:rgba(5,150,105,.15);">
+        <div class="adm-click-spinner"><span></span><span></span><span></span></div>
         <span class="adm-tip"><i class="fas fa-circle-check mr-1.5"></i>View Complete Profiles</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#027a4f,#059669);">
             <i class="fas fa-circle-check text-white"></i>
@@ -844,7 +912,10 @@ new #[Layout('app')] class extends Component {
         </div>
     </div>
 
-    <div wire:click="goToAlumni('pending')" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#d97706;--stat-accent-shadow:rgba(217,119,6,.15);">
+    <div wire:click="goToAlumni('pending')"
+         @click="$store.dashNav.clicked = 'alumni-pending'" :class="{ 'is-loading': $store.dashNav.clicked === 'alumni-pending' }"
+         class="adm-stat-card adm-tip-wrap" style="--stat-accent:#d97706;--stat-accent-shadow:rgba(217,119,6,.15);">
+        <div class="adm-click-spinner"><span></span><span></span><span></span></div>
         <span class="adm-tip"><i class="fas fa-clock mr-1.5"></i>Review Pending Profiles</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#b55a05,#d97706);">
             <i class="fas fa-clock text-white"></i>
@@ -856,7 +927,10 @@ new #[Layout('app')] class extends Component {
         </div>
     </div>
 
-    <div wire:click="goToAlumni('this_month')" class="adm-stat-card adm-tip-wrap" style="--stat-accent:#2563eb;--stat-accent-shadow:rgba(37,99,235,.15);">
+    <div wire:click="goToAlumni('this_month')"
+         @click="$store.dashNav.clicked = 'alumni-month'" :class="{ 'is-loading': $store.dashNav.clicked === 'alumni-month' }"
+         class="adm-stat-card adm-tip-wrap" style="--stat-accent:#2563eb;--stat-accent-shadow:rgba(37,99,235,.15);">
+        <div class="adm-click-spinner"><span></span><span></span><span></span></div>
         <span class="adm-tip"><i class="fas fa-calendar-plus mr-1.5"></i>View New Registrations</span>
         <div class="adm-stat-icon-lg" style="background:linear-gradient(135deg,#1a4db5,#2563eb);">
             <i class="fas fa-calendar-plus text-white"></i>
@@ -933,7 +1007,10 @@ new #[Layout('app')] class extends Component {
             @endphp
 
             {{-- Directors --}}
-            <div wire:click="goToUsers('director')" class="adm-role-tile adm-tip-wrap" style="--stat-accent:#6366f1;--stat-accent-shadow:rgba(99,102,241,.15);">
+            <div wire:click="goToUsers('director')"
+                 @click="$store.dashNav.clicked = 'users-director'" :class="{ 'is-loading': $store.dashNav.clicked === 'users-director' }"
+                 class="adm-role-tile adm-tip-wrap" style="--stat-accent:#6366f1;--stat-accent-shadow:rgba(99,102,241,.15);">
+                <div class="adm-click-spinner"><span></span><span></span><span></span></div>
                 <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Directors</span>
                 <div class="adm-role-tile-top">
                     <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#4f46e5,#6366f1);">
@@ -955,7 +1032,10 @@ new #[Layout('app')] class extends Component {
             </div>
 
             {{-- Coordinators --}}
-            <div wire:click="goToUsers('coordinator')" class="adm-role-tile adm-tip-wrap" style="--stat-accent:#7A3F91;--stat-accent-shadow:rgba(122,63,145,.15);">
+            <div wire:click="goToUsers('coordinator')"
+                 @click="$store.dashNav.clicked = 'users-coordinator'" :class="{ 'is-loading': $store.dashNav.clicked === 'users-coordinator' }"
+                 class="adm-role-tile adm-tip-wrap" style="--stat-accent:#7A3F91;--stat-accent-shadow:rgba(122,63,145,.15);">
+                <div class="adm-click-spinner"><span></span><span></span><span></span></div>
                 <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Coordinators</span>
                 <div class="adm-role-tile-top">
                     <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -977,7 +1057,10 @@ new #[Layout('app')] class extends Component {
             </div>
 
             {{-- Registrars --}}
-            <div wire:click="goToUsers('registrar')" class="adm-role-tile adm-tip-wrap" style="--stat-accent:#059669;--stat-accent-shadow:rgba(5,150,105,.15);">
+            <div wire:click="goToUsers('registrar')"
+                 @click="$store.dashNav.clicked = 'users-registrar'" :class="{ 'is-loading': $store.dashNav.clicked === 'users-registrar' }"
+                 class="adm-role-tile adm-tip-wrap" style="--stat-accent:#059669;--stat-accent-shadow:rgba(5,150,105,.15);">
+                <div class="adm-click-spinner"><span></span><span></span><span></span></div>
                 <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View Registrars</span>
                 <div class="adm-role-tile-top">
                     <div class="adm-role-tile-icon" style="background:linear-gradient(135deg,#059669,#10b981);">
@@ -1071,7 +1154,10 @@ new #[Layout('app')] class extends Component {
              same unfiltered "View All Alumni Employment" destination now
              (goToEmployment() with no arg), instead of each mini-tile
              deep-linking into its own status filter. ── --}}
-        <div wire:click="goToEmployment" class="adm-card adm-snap-card adm-snap-card-clickable adm-tip-wrap">
+        <div wire:click="goToEmployment"
+             @click="$store.dashNav.clicked = 'employment'" :class="{ 'is-loading': $store.dashNav.clicked === 'employment' }"
+             class="adm-card adm-snap-card adm-snap-card-clickable adm-tip-wrap">
+            <div class="adm-click-spinner"><span></span><span></span><span></span></div>
             <span class="adm-tip"><i class="fas fa-eye mr-1.5"></i>View All Alumni Employment</span>
             <div class="adm-panel-head">
                 <div class="adm-snap-head-text">
@@ -1128,22 +1214,34 @@ new #[Layout('app')] class extends Component {
                     <canvas id="adm_barEventsSnapshot"></canvas>
                 </div>
                 <div class="adm-snap-mini-tiles">
-                    <div wire:click="goToEvents('PENDING')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-pending adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('PENDING')"
+                         @click="$store.dashNav.clicked = 'events-pending'" :class="{ 'is-loading': $store.dashNav.clicked === 'events-pending' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-pending adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Pending</span>
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($eventsPending) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#d97706;">Pending</p>
                     </div>
-                    <div wire:click="goToEvents('APPROVED')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-approved adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('APPROVED')"
+                         @click="$store.dashNav.clicked = 'events-approved'" :class="{ 'is-loading': $store.dashNav.clicked === 'events-approved' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-approved adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Approved</span>
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($eventsApproved) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#059669;">Approved</p>
                     </div>
-                    <div wire:click="goToEvents('COMPLETED')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-completed adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('COMPLETED')"
+                         @click="$store.dashNav.clicked = 'events-completed'" :class="{ 'is-loading': $store.dashNav.clicked === 'events-completed' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-completed adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Completed</span>
                         <p class="adm-snap-mini-num" style="color:#16a34a;">{{ number_format($eventsCompleted) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#16a34a;">Completed</p>
                     </div>
-                    <div wire:click="goToEvents('REJECTED')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-rejected adm-mini-tip-wrap">
+                    <div wire:click="goToEvents('REJECTED')"
+                         @click="$store.dashNav.clicked = 'events-rejected'" :class="{ 'is-loading': $store.dashNav.clicked === 'events-rejected' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-rejected adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Rejected</span>
                         <p class="adm-snap-mini-num" style="color:#dc2626;">{{ number_format($eventsRejected) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#dc2626;">Rejected</p>
@@ -1174,22 +1272,34 @@ new #[Layout('app')] class extends Component {
                     <canvas id="adm_barJobsSnapshot"></canvas>
                 </div>
                 <div class="adm-snap-mini-tiles">
-                    <div wire:click="goToJobs('ACTIVE')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-active adm-mini-tip-wrap">
+                    <div wire:click="goToJobs('ACTIVE')"
+                         @click="$store.dashNav.clicked = 'jobs-active'" :class="{ 'is-loading': $store.dashNav.clicked === 'jobs-active' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-active adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Active</span>
                         <p class="adm-snap-mini-num" style="color:#059669;">{{ number_format($jobsActive) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#059669;">Active</p>
                     </div>
-                    <div wire:click="goToJobs('INACTIVE')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-inactive adm-mini-tip-wrap">
+                    <div wire:click="goToJobs('INACTIVE')"
+                         @click="$store.dashNav.clicked = 'jobs-inactive'" :class="{ 'is-loading': $store.dashNav.clicked === 'jobs-inactive' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-inactive adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Inactive</span>
                         <p class="adm-snap-mini-num" style="color:#d97706;">{{ number_format($jobsInactive) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#d97706;">Inactive</p>
                     </div>
-                    <div wire:click="goToJobs('EXPIRING')" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-expiring adm-mini-tip-wrap">
+                    <div wire:click="goToJobs('EXPIRING')"
+                         @click="$store.dashNav.clicked = 'jobs-expiring'" :class="{ 'is-loading': $store.dashNav.clicked === 'jobs-expiring' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-expiring adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View Expiring Soon</span>
                         <p class="adm-snap-mini-num" style="color:#f97316;">{{ number_format($jobsExpiring) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#f97316;">Expiring Soon</p>
                     </div>
-                    <div wire:click="goToJobs" class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-total adm-mini-tip-wrap">
+                    <div wire:click="goToJobs"
+                         @click="$store.dashNav.clicked = 'jobs-total'" :class="{ 'is-loading': $store.dashNav.clicked === 'jobs-total' }"
+                         class="adm-snap-mini-tile adm-snap-mini-tile-clickable adm-tile-total adm-mini-tip-wrap">
+                        <div class="adm-click-spinner adm-click-spinner--sm"><span></span><span></span><span></span></div>
                         <span class="adm-mini-tip"><i class="fas fa-eye mr-1"></i>View All Postings</span>
                         <p class="adm-snap-mini-num" style="color:#7a3f91;">{{ number_format($jobsTotal) }}</p>
                         <p class="adm-snap-mini-lbl" style="color:#7a3f91;">Total Postings</p>
@@ -1208,6 +1318,45 @@ new #[Layout('app')] class extends Component {
      data-eventssnapshot="{{ $chartEventsSnapshotData }}"
      data-jobssnapshot="{{ $chartJobsSnapshotData }}">
 </div>
+
+<script>
+(function(){
+    'use strict';
+
+    // ── dashNav Alpine store ────────────────────────────────────────
+    // Tracks which dashboard card was clicked so its purple dot
+    // spinner (.adm-click-spinner / .is-loading) stays visible for the
+    // WHOLE redirect(navigate:true) hop, not just until the Livewire
+    // method call returns. wire:loading alone unbinds as soon as the
+    // server responds — but navigate:true then fetches + swaps in the
+    // destination page's HTML as a separate step after that, which is
+    // exactly the gap that used to look like "the spinner stopped but
+    // nothing happened yet" (the tab's own "Waiting for..." spinner
+    // was the only sign anything was still going on). Registered as a
+    // global store (not a local x-data) since the 16 clickable cards
+    // are spread across several unrelated sections of this page.
+    function registerDashNav(){
+        if (!window.Alpine || typeof Alpine.store !== 'function') return;
+        if (!Alpine.store('dashNav')) {
+            Alpine.store('dashNav', { clicked: null });
+        }
+    }
+
+    document.addEventListener('alpine:init', registerDashNav);
+    if (window.Alpine) registerDashNav();
+
+    // Clear ONLY on actual landing (livewire:navigated) — no fallback
+    // timeout. The spinner is meant to stay lit for however long the
+    // navigation actually takes, matching what's really happening
+    // instead of guessing a cutoff and going "not loading" while the
+    // page still hasn't changed.
+    document.addEventListener('livewire:navigated', function(){
+        registerDashNav();
+        var s = Alpine.store('dashNav');
+        if (s) s.clicked = null;
+    });
+})();
+</script>
 
 <script>
 (function(){

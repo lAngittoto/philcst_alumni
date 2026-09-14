@@ -128,6 +128,18 @@
             user-select: none;
         }
 
+        /* Disable text selection/copy across the whole sidebar — menu
+           labels, section headers ("MENU"), logout button, etc. Links
+           and buttons stay fully clickable; only highlighting/selecting
+           the text is blocked. */
+        #admin-sidebar-aside,
+        #admin-sidebar-aside * {
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+        }
+
         .admin-notif-close-wrap {
             position: relative;
             display: inline-flex;
@@ -311,6 +323,16 @@
         .admin-collapse-icon-btn i { pointer-events: none; }
 
         @media (min-width: 1024px) {
+            /* Sidebar must stay perfectly still on desktop — the
+               open/closed slide (translate-x) is a mobile-only concept.
+               Force the transform every time and drop the transition on
+               that property so a stray `open` flip (e.g. during a
+               Livewire navigate re-render) never produces a visible
+               slide/jump on desktop. */
+            #admin-sidebar-aside {
+                transform: none !important;
+                transition-property: width, min-width, background-color !important;
+            }
             #admin-sidebar-aside.is-collapsed {
                 width: 5rem !important;
                 min-width: 5rem !important;
@@ -1324,9 +1346,12 @@
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
     }"
-    x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('admin_sidebar_collapsed', val ? '1' : '0'); })"
+    x-init="
+        $watch('sidebarCollapsed', function (val) { localStorage.setItem('admin_sidebar_collapsed', val ? '1' : '0'); });
+        $watch('open', function (val) { if (val && sidebarCollapsed) open = false; });
+    "
     @click="$store.adminNotifs && $store.adminNotifs.open && $store.adminNotifs.close()"
-    @@livewire:navigated.window="navClickedRoute = null; open = false;">
+    @@livewire:navigated.window="navClickedRoute = null; if (!sidebarCollapsed) open = false;">
 
 @php
     $authAdmin = auth()->user();
@@ -1353,7 +1378,7 @@
         id="admin-sidebar-aside"
         :class="[open ? 'translate-x-0' : '-translate-x-full', sidebarCollapsed ? 'is-collapsed' : '']"
         class="fixed inset-y-0 left-0 w-72 min-w-[18rem] transform transition-all duration-300
-               shadow-2xl lg:translate-x-0 lg:static lg:inset-0
+               shadow-2xl lg:!translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
         style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0; z-index: 9991;">
 
@@ -1451,7 +1476,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024) open = false;"
+                   @click="navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024 && !sidebarCollapsed) open = false;"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="admin-nav-link flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
                           {{ $isActive

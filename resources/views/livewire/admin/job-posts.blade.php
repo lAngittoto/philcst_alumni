@@ -6,6 +6,7 @@ use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\WithPagination;
+use Livewire\WithoutUrlPagination;
 use App\Models\JobPosting;
 use App\Models\JobOption;
 use App\Models\Course;
@@ -16,7 +17,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
-    use WithPagination;
+    use WithPagination, WithoutUrlPagination;
+
+    protected function queryString(): array { return []; }
 
     protected string $paginationTheme = 'tailwind';
 
@@ -156,6 +159,24 @@ new class extends Component {
         return strip_tags(trim($value));
     }
 
+    /** Wraps matches of the current search term in a light-blue <mark>,
+     *  same visual treatment as the Alumni Records / Yearbook pages'
+     *  highlight(). Used on job_title and company_name, since those are
+     *  the only two fields the search box matches against. */
+    public function highlight(string $text, string $search): string
+    {
+        if (!$search || !$text) return e($text);
+        $pattern = '/(' . preg_quote($search, '/') . ')/iu';
+        $parts   = preg_split($pattern, $text, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out     = '';
+        foreach ($parts as $i => $part) {
+            $out .= ($i % 2 === 1)
+                ? '<mark class="jp-hl">' . e($part) . '</mark>'
+                : e($part);
+        }
+        return $out;
+    }
+
     private function writeAuditLog(
         string $action,
         string $description,
@@ -185,8 +206,13 @@ new class extends Component {
 
     public static function jobImageUrl(?string $path): string
     {
-        if ($path && Storage::disk('public')->exists($path)) {
-            return Storage::url($path);
+        // asset('storage/' . $path) — same fix applied in the dashboard's
+        // announcement feed. Storage::disk('public')->exists() and
+        // Storage::url() were resolving incorrectly on this server even
+        // with a correct DB path, silently forcing the default photo for
+        // every job even when a real image was uploaded.
+        if ($path) {
+            return asset('storage/' . $path);
         }
         return asset('storage/job/default-photo-job.jpg');
     }
@@ -479,6 +505,15 @@ new class extends Component {
 <div class="flex flex-col h-full min-h-0" style="overflow: hidden;">
 
 <style>
+/* ── Search highlight ── */
+mark.jp-hl {
+    background: #BFDBFE;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+    font-weight: 700;
+}
+
 @keyframes admModalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
     to   { opacity:1; transform:none; }
@@ -789,7 +824,7 @@ select.adm-select-arrow {
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#111111] z-[1]"></i>
                 <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
-                       placeholder="Search title or company…"
+                       placeholder="Search..."
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] placeholder-[#aaaaaa] font-normal
                               hover:border-[#bbbbbb] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
@@ -886,8 +921,9 @@ select.adm-select-arrow {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    @if($search === '' && $filterStatus === '' && $filterType === '' && $filterCollege === '' && $filterSort === 'recent') disabled @endif
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
-                           bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none cursor-pointer">
+                           bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
                 </span>
@@ -943,8 +979,8 @@ select.adm-select-arrow {
                             data-adm-row>
 
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $job->job_title }}</p>
-                                <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $job->company_name }} &middot; {{ $job->created_at->diffForHumans() }}</p>
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($job->job_title, $search) !!}</p>
+                                <p class="text-xs mt-0.5 text-[#666666] truncate">{!! $this->highlight($job->company_name, $search) !!} &middot; {{ $job->created_at->diffForHumans() }}</p>
                             </td>
 
                             <td class="px-4 sm:px-5 py-4 overflow-hidden">
@@ -1020,7 +1056,7 @@ select.adm-select-arrow {
                     <div class="adm-mrow" wire:click="viewJob({{ $job->id }})" wire:key="admjob-mrow-{{ $job->id }}">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-start justify-between gap-2">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{{ $job->job_title }}</p>
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($job->job_title, $search) !!}</p>
                                 @if($isActive && $isUrgent)
                                     <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap flex-shrink-0">
                                         <i class="fas fa-fire text-[8px] mr-1"></i>Expiring
@@ -1036,7 +1072,7 @@ select.adm-select-arrow {
                                 @endif
                             </div>
                             <p class="text-xs mt-1 text-[#666666]">
-                                {{ $job->company_name }} &middot; {{ $job->employment_type }}
+                                {!! $this->highlight($job->company_name, $search) !!} &middot; {{ $job->employment_type }}
                             </p>
                             <div class="flex items-center justify-between mt-2">
                                 <p class="text-xs text-[#7a3f91] font-semibold truncate">
@@ -1709,7 +1745,7 @@ select.adm-select-arrow {
                     <span class="label-text text-xs font-semibold" x-text="sharingTo==='messenger' ? 'Opening…' : 'Send via Messenger'"></span>
                 </button>
 
-                <p class="text-[10px] text-center text-[#666666]">Sharing this job is available until its deadline passes.</p>
+                <p class="text-xs text-center text-[#666666]">Sharing this job is available until its deadline passes.</p>
             </div>
         </div>
 

@@ -863,8 +863,8 @@ new class extends Component {
                 <i class="fa-solid fa-chart-column text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-xl font-semibold tracking-tight text-[#333333]">Employment Analytics</h1>
-                <p class="text-xs leading-relaxed mt-0.5 font-medium" style="color:#7a3f91;">
+                <h1 class="text-2xl font-semibold tracking-tight leading-tight text-[#333333]">Employment Analytics</h1>
+                <p class="text-sm leading-relaxed mt-0.5 font-medium" style="color:#7a3f91;">
                     System-wide employment intelligence
                 </p>
             </div>
@@ -1187,28 +1187,28 @@ new class extends Component {
                 {{-- ── RANGE MODE ── --}}
                 <template x-if="mode === 'range'">
                     <div>
-                        <div class="px-3.5 pt-2.5 pb-1.5 text-[0.72rem] font-bold uppercase tracking-wide text-[#7a3f91]"
-                             x-text="rFrom && rTo ? ('Batch ' + (rFrom <= rTo ? rFrom : rTo) + '–' + (rFrom <= rTo ? rTo : rFrom)) : 'Select a range'"></div>
+                        <div class="px-3.5 pt-2.5 pb-1.5 text-[0.72rem] font-bold uppercase tracking-wide text-[#7a3f91] flex items-center gap-1.5"
+                             x-text="(rFrom || '—') + ' → ' + (rTo || '—')"></div>
                         <div class="grid grid-cols-2 border-t border-[#F0EAF5]">
                             <div class="border-r border-[#F0EAF5]">
-                                <div class="px-3 pt-2 pb-1 text-[0.68rem] font-bold uppercase tracking-wide text-[#999999]">From: <span x-text="rFrom || '—'"></span></div>
-                                <div class="max-h-[104px] overflow-y-auto">
+                                <div class="max-h-[160px] overflow-y-auto">
                                     @foreach($batches as $b)
                                     <button type="button" @click="rFrom = '{{ $b }}'"
-                                            class="w-full text-left px-3 py-1.5 text-[0.8rem]"
-                                            :class="rFrom === '{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333] hover:bg-[#faf7fc] font-medium'">
+                                            :disabled="rTo === '{{ $b }}'"
+                                            class="w-full text-left px-3 py-1.5 text-[0.8rem] disabled:opacity-30 disabled:cursor-not-allowed"
+                                            :class="rFrom === '{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : (rTo === '{{ $b }}' ? 'text-[#999999]' : 'text-[#333333] hover:bg-[#faf7fc] font-medium')">
                                         {{ $b }}
                                     </button>
                                     @endforeach
                                 </div>
                             </div>
                             <div>
-                                <div class="px-3 pt-2 pb-1 text-[0.68rem] font-bold uppercase tracking-wide text-[#999999]">To: <span x-text="rTo || '—'"></span></div>
-                                <div class="max-h-[104px] overflow-y-auto">
+                                <div class="max-h-[160px] overflow-y-auto">
                                     @foreach($batches as $b)
                                     <button type="button" @click="rTo = '{{ $b }}'"
-                                            class="w-full text-left px-3 py-1.5 text-[0.8rem]"
-                                            :class="rTo === '{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : 'text-[#333333] hover:bg-[#faf7fc] font-medium'">
+                                            :disabled="rFrom === '{{ $b }}'"
+                                            class="w-full text-left px-3 py-1.5 text-[0.8rem] disabled:opacity-30 disabled:cursor-not-allowed"
+                                            :class="rTo === '{{ $b }}' ? 'bg-[#7a3f91] text-white font-bold' : (rFrom === '{{ $b }}' ? 'text-[#999999]' : 'text-[#333333] hover:bg-[#faf7fc] font-medium')">
                                         {{ $b }}
                                     </button>
                                     @endforeach
@@ -1297,22 +1297,22 @@ new class extends Component {
                  x-transition:enter="transition ease-out duration-100"
                  x-transition:enter-start="opacity-0 scale-95"
                  x-transition:enter-end="opacity-100 scale-100"
-                 class="absolute left-0 top-[calc(100%+6px)] z-30 w-[260px] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
+                 class="absolute left-0 top-[calc(100%+6px)] z-30 w-[340px] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
 
                 <label class="flex items-center gap-2.5 px-3.5 py-2 text-[0.82rem] font-semibold text-[#333333] hover:bg-[#faf7fc] cursor-pointer border-b border-[#F0EAF5]">
-                    <span class="adm-chk" :class="isAllSelected() ? 'adm-chk-on' : ''" @click.prevent="toggleAll()">
+                    <span class="adm-chk shrink-0" :class="isAllSelected() ? 'adm-chk-on' : ''" @click.prevent="toggleAll()">
                         <i class="fa-solid fa-check" x-show="isAllSelected()" x-cloak></i>
                     </span>
                     Select All
                 </label>
 
-                <div class="max-h-[220px] overflow-y-auto">
+                <div class="max-h-[260px] overflow-y-auto">
                     @foreach($courses as $c)
-                    <label class="flex items-center gap-2.5 px-3.5 py-1.5 text-[0.8rem] font-medium text-[#333333] hover:bg-[#faf7fc] cursor-pointer">
-                        <span class="adm-chk" :class="selected.includes('{{ $c['code'] }}') ? 'adm-chk-on' : ''" @click.prevent="toggle('{{ $c['code'] }}')">
+                    <label class="flex items-start gap-2.5 px-3.5 py-1.5 text-[0.8rem] font-medium text-[#333333] hover:bg-[#faf7fc] cursor-pointer">
+                        <span class="adm-chk shrink-0 mt-0.5" :class="selected.includes('{{ $c['code'] }}') ? 'adm-chk-on' : ''" @click.prevent="toggle('{{ $c['code'] }}')">
                             <i class="fa-solid fa-check" x-show="selected.includes('{{ $c['code'] }}')" x-cloak></i>
                         </span>
-                        <span class="truncate">{{ $c['name'] }}</span>
+                        <span class="leading-snug">{{ $c['name'] }}</span>
                     </label>
                     @endforeach
                 </div>
@@ -1338,11 +1338,22 @@ new class extends Component {
              the far right of the filter bar with ml-auto (the bar is
              flex flex-wrap, so this pushes it past every filter control
              regardless of how many are added before it) and given the
-             purple brand treatment instead of the plain gray it had. ── --}}
+             purple brand treatment instead of the plain gray it had.
+             Disabled (inert, no navigation) when no filter is actually
+             active — batch range empty and no programs selected —
+             same "nothing to reset" affordance as the other admin
+             pages' Reset buttons. Since this is an <a>, not a <button>,
+             the HTML disabled attribute doesn't apply — pointer-events
+             and the onclick guard do the disabling instead. ── --}}
+        @php
+            $empHasActiveFilter = $filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses);
+        @endphp
         <a href="{{ route('employment.tracking') }}"
-           onclick="window.__admEmpShowFilterLoading()"
+           @if($empHasActiveFilter) onclick="window.__admEmpShowFilterLoading()" @else onclick="return false;" @endif
+           @if(!$empHasActiveFilter) aria-disabled="true" tabindex="-1" @endif
            class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                  bg-white border transition active:scale-95 cursor-pointer no-underline hover:bg-[#faf7fc]"
+                  bg-white border transition active:scale-95 no-underline
+                  {{ $empHasActiveFilter ? 'cursor-pointer hover:bg-[#faf7fc]' : 'opacity-40 pointer-events-none cursor-default' }}"
            style="color:#7a3f91; border-color:#E0D3EC;">
             <i class="fas fa-rotate-left text-sm"></i>
             <span class="hidden sm:inline">Reset</span>

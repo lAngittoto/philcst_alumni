@@ -34,10 +34,16 @@ new class extends Component {
     public function totalAlumni(): int { return Alumni::count(); }
 
     #[Computed]
-    public function profileComplete(): int { return Alumni::where('profile_completed', 1)->count(); }
+    public function profileComplete(): int
+    {
+        return $this->applyProfileCompletionFilter(Alumni::query(), 'complete')->count();
+    }
 
     #[Computed]
-    public function profileIncomplete(): int { return Alumni::where('profile_completed', 0)->count(); }
+    public function profileIncomplete(): int
+    {
+        return $this->applyProfileCompletionFilter(Alumni::query(), 'incomplete')->count();
+    }
 
     #[Computed]
     public function totalCourses(): int { return Course::count(); }
@@ -58,6 +64,58 @@ new class extends Component {
     {
         $total = $this->totalAlumni;
         return $total === 0 ? 0 : (int) round(($this->profileComplete / $total) * 100);
+    }
+
+    /** Same required-field set as alumni_blade.php's isProfileComplete() /
+     *  applyProfileCompletionFilter() and user-management_blade.php's
+     *  computed_status — kept in sync so the dashboard counts, the alumni
+     *  list filter, and the per-row badge all agree, instead of relying on
+     *  the profile_completed DB flag which can go stale. date_of_birth is a
+     *  DATE column, so only whereNotNull applies to it — comparing a DATE
+     *  column to '' throws in MySQL strict mode. Returns the query builder
+     *  so callers can chain ->count(), ->get(), etc. */
+    protected function applyProfileCompletionFilter($q, string $mode)
+    {
+        $required = [
+            'email', 'gender', 'contact_number',
+            'father_last_name', 'father_given_name', 'father_middle_name',
+            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
+        ];
+
+        $complete = function ($w) use ($required) {
+            $w->whereNotNull('date_of_birth');
+            foreach ($required as $field) {
+                $w->whereNotNull($field)->where($field, '!=', '');
+            }
+        };
+
+        if ($mode === 'complete') {
+            $q->where($complete);
+        } elseif ($mode === 'incomplete') {
+            $q->whereNot($complete);
+        }
+
+        return $q;
+    }
+
+    /** Row-level mirror of applyProfileCompletionFilter()'s field list, for
+     *  the per-row Complete/Pending badge — same fields, same DB-flag
+     *  fast path as alumni_blade.php's isProfileComplete(). */
+    public function isProfileComplete($alumni): bool
+    {
+        if (!empty($alumni->profile_completed)) return true;
+
+        $required = [
+            'email', 'gender', 'date_of_birth', 'contact_number',
+            'father_last_name', 'father_given_name', 'father_middle_name',
+            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
+        ];
+        foreach ($required as $field) {
+            if (empty(trim((string) ($alumni->{$field} ?? '')))) return false;
+        }
+        return true;
     }
 
     // ─── Employment counts ────────────────────────────────────
@@ -202,12 +260,14 @@ new class extends Component {
             'id', 'first_name', 'middle_initial', 'last_name', 'suffix',
             'student_id', 'course_code', 'batch', 'profile_photo',
             'profile_completed', 'email', 'created_at',
+            'gender', 'date_of_birth', 'contact_number',
+            'father_last_name', 'father_given_name', 'father_middle_name',
+            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
         ]);
 
-        if ($this->alumniModalFilter === 'complete')
-            $q->where('profile_completed', 1);
-        elseif ($this->alumniModalFilter === 'incomplete')
-            $q->where('profile_completed', 0);
+        if ($this->alumniModalFilter !== 'all')
+            $this->applyProfileCompletionFilter($q, $this->alumniModalFilter);
 
         if ($this->alumniModalBatch !== null)
             $q->where('batch', $this->alumniModalBatch);
@@ -1088,7 +1148,7 @@ new class extends Component {
                             <span class="text-sm font-semibold text-[#111111]">{{ $alumni->batch }}</span>
                         </td>
                         <td class="px-4 py-3 text-center">
-                            @if($alumni->profile_completed)
+                            @if($this->isProfileComplete($alumni))
                                 <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border bg-emerald-50 text-emerald-700 border-emerald-200">
                                     Complete
                                 </span>

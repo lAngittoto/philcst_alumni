@@ -429,25 +429,18 @@ new class extends Component {
 
                     {{-- Course Code --}}
                     <div>
-                        <div class="crs-float-field" x-data="{ val: @entangle('courseCode').live }">
-                            <input wire:model.live.debounce.400ms="courseCode"
-                                   id="courseCodeInput"
-                                   type="text"
-                                   placeholder=" "
-                                   class="crs-float-input w-full px-3 pt-3 pb-3 border-2 rounded-xl text-base bg-white text-[#333333] font-mono uppercase
-                                          focus:outline-none focus:border-[#7A3F91] transition
-                                          {{ $codeError
-                                              ? 'border-red-300 bg-red-50/40 crs-float-input--error'
-                                              : 'border-[#E8E0F0]' }}"
-                                   maxlength="20"
-                                   autocomplete="off"
-                                   @keydown.enter.prevent="$wire.saveCourse()">
-                            <label for="courseCodeInput"
-                                   class="crs-float-label font-sans normal-case {{ $codeError ? 'crs-float-label--error' : '' }}"
-                                   :class="(val && val.length) ? 'crs-float-label--up' : ''">
-                                Standard Abbreviation
-                            </label>
-                        </div>
+                        <input wire:model.live.debounce.400ms="courseCode"
+                               id="courseCodeInput"
+                               type="text"
+                               placeholder="e.g. BSIT"
+                               class="crs-float-input w-full px-3 py-3 border-2 rounded-xl text-base bg-white text-[#333333] font-mono uppercase
+                                      focus:outline-none focus:border-[#7A3F91] transition
+                                      {{ $codeError
+                                          ? 'border-red-300 bg-red-50/40 crs-float-input--error'
+                                          : 'border-[#E8E0F0]' }}"
+                               maxlength="20"
+                               autocomplete="off"
+                               @keydown.enter.prevent="$wire.saveCourse()">
                         <p class="text-xs text-[#333333] font-normal mt-1">
                             Unique identifier — e.g. BSIT, BSN, BSED
                         </p>
@@ -455,25 +448,18 @@ new class extends Component {
 
                     {{-- Course Name --}}
                     <div>
-                        <div class="crs-float-field" x-data="{ val: @entangle('courseName').live }">
-                            <input wire:model.live.debounce.400ms="courseName"
-                                   id="courseNameInput"
-                                   type="text"
-                                   placeholder=" "
-                                   class="crs-float-input w-full px-3 pt-3 pb-3 border-2 rounded-xl text-base bg-white text-[#333333]
-                                          focus:outline-none focus:border-[#7A3F91] transition
-                                          {{ $nameError
-                                              ? 'border-red-300 bg-red-50/40 crs-float-input--error'
-                                              : 'border-[#E8E0F0]' }}"
-                                   maxlength="150"
-                                   autocomplete="off"
-                                   @keydown.enter.prevent="$wire.saveCourse()">
-                            <label for="courseNameInput"
-                                   class="crs-float-label {{ $nameError ? 'crs-float-label--error' : '' }}"
-                                   :class="(val && val.length) ? 'crs-float-label--up' : ''">
-                                Program
-                            </label>
-                        </div>
+                        <input wire:model.live.debounce.400ms="courseName"
+                               id="courseNameInput"
+                               type="text"
+                               placeholder="e.g. Bachelor of Science in Information Technology"
+                               class="crs-float-input w-full px-3 py-3 border-2 rounded-xl text-base bg-white text-[#333333]
+                                      focus:outline-none focus:border-[#7A3F91] transition
+                                      {{ $nameError
+                                          ? 'border-red-300 bg-red-50/40 crs-float-input--error'
+                                          : 'border-[#E8E0F0]' }}"
+                               maxlength="150"
+                               autocomplete="off"
+                               @keydown.enter.prevent="$wire.saveCourse()">
                         <p class="text-xs text-[#333333] font-normal mt-1">
                             e.g. Bachelor of Science in Information Technology
                         </p>
