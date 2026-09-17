@@ -330,21 +330,6 @@ new class extends Component {
     }
 
     /**
-     * Toggles a single program code in/out of the modal's multi-select —
-     * mirrors toggleFilterCourse() on the dashboard filter bar.
-     */
-    public function toggleModalCourse(string $code): void
-    {
-        if (in_array($code, $this->modalCourse, true)) {
-            $this->modalCourse = array_values(array_diff($this->modalCourse, [$code]));
-        } else {
-            $this->modalCourse[] = $code;
-        }
-        $this->modalPage = 1;
-        unset($this->modalRecords);
-    }
-
-    /**
      * "All Program Codes" inside the modal's Program dropdown — clears
      * ONLY the program selection, same split as clearFilterCourse() vs
      * clearFilters() on the dashboard.
@@ -357,91 +342,43 @@ new class extends Component {
     }
 
     /**
-     * "Select All" inside the modal's Program dropdown.
-     */
-    public function selectAllModalCourse(): void
-    {
-        $this->modalCourse = array_values(array_keys($this->courseMap));
-        $this->modalPage   = 1;
-        unset($this->modalRecords);
-    }
-
-    /**
-     * "Apply" inside the modal's Program dropdown — replaces modalCourse
-     * wholesale with the Alpine-built draft in ONE Livewire call, same
-     * dedupe/filter guard as applyFilterCourse().
+     * Picking a program from the modal's plain single-select Program
+     * dropdown — replaces modalCourse with just that one code. Keeps the
+     * array shape (still $modalCourse[0]) so applyModalBatchAndCourse()
+     * and the rest of the query/display code don't need to change.
      */
     public function applyModalCourse(array $codes): void
     {
-        $this->modalCourse = array_values(array_unique(array_filter(
-            $codes,
-            fn ($c) => $c !== '' && $c !== null
-        )));
+        $code = $codes[0] ?? null;
+        $this->modalCourse = ($code !== null && $code !== '') ? [$code] : [];
         $this->modalPage = 1;
         unset($this->modalRecords);
     }
 
     /**
-     * If the modal's From year ends up later than To (or vice versa),
-     * swap them — mirrors normalizeBatchRange() on the dashboard filter.
-     */
-    private function normalizeModalBatchRange(): void
-    {
-        if ($this->modalBatchFrom !== '' && $this->modalBatchTo !== ''
-            && (int)$this->modalBatchFrom > (int)$this->modalBatchTo) {
-            [$this->modalBatchFrom, $this->modalBatchTo] = [$this->modalBatchTo, $this->modalBatchFrom];
-        }
-    }
-
-    /**
-     * Single-year quick pick from the modal's default (non-range) Batch
-     * Year list — sets modalBatchFrom/modalBatchTo to the same year in
-     * ONE round-trip and clears the legacy single modalBatch value (the
-     * range pair is now the source of truth once either is used).
-     * Mirrors setSingleBatchYear() on the dashboard.
+     * Single-year pick from the modal's plain Batch Year list — sets
+     * modalBatchFrom and clears the legacy single modalBatch value.
+     * Mirrors setSingleBatchYear() on the dashboard (no range mode here).
      */
     public function setSingleModalBatchYear(string $year): void
     {
         $this->modalBatchFrom = $year;
-        $this->modalBatchTo   = $year;
         $this->modalBatch     = null;
         $this->modalPage = 1;
         unset($this->modalRecords);
     }
 
     /**
-     * "All Batch Years" inside the modal — clears both ends of the range
-     * plus the legacy single modalBatch value, same reasoning as
+     * "All Batch Years" inside the modal — clears the year plus the
+     * legacy single modalBatch value, same reasoning as
      * clearFilterBatch() on the dashboard.
      */
     public function clearModalBatchYear(): void
     {
         $this->modalBatchFrom = '';
-        $this->modalBatchTo   = '';
         $this->modalBatch     = null;
         $this->modalPage = 1;
         unset($this->modalRecords);
-    }
-
-    /**
-     * Applies a From–To range inside the modal in ONE round-trip — mirrors
-     * setBatchRange() on the dashboard filter bar exactly.
-     */
-    public function setModalBatchRange(string $from, string $to): void
-    {
-        $this->modalBatchFrom = $from;
-        $this->modalBatchTo   = $to;
-        $this->modalBatch     = null;
-        $this->normalizeModalBatchRange();
-        $this->modalPage = 1;
-        unset($this->modalRecords);
-    }
-
-    /** True only once BOTH ends of the modal's Batch range are set —
-     *  mirrors batchRangeIsComplete() for the dashboard filter. */
-    private function modalBatchRangeIsComplete(): bool
-    {
-        return $this->modalBatchFrom !== '' && $this->modalBatchTo !== '';
     }
 
     public function clearFilters(): void
@@ -858,15 +795,14 @@ new class extends Component {
      */
     private function applyModalBatchAndCourse($q): void
     {
-        if ($this->modalBatchRangeIsComplete()) {
-            $q->where('a.batch', '>=', $this->modalBatchFrom)
-              ->where('a.batch', '<=', $this->modalBatchTo);
+        if ($this->modalBatchFrom !== '') {
+            $q->where('a.batch', $this->modalBatchFrom);
         } elseif ($this->modalBatch !== null) {
             $q->where('a.batch', $this->modalBatch);
         }
 
         if (!empty($this->modalCourse)) {
-            $q->whereIn('a.course_code', $this->modalCourse);
+            $q->where('a.course_code', $this->modalCourse[0]);
         }
     }
 
@@ -953,20 +889,14 @@ new class extends Component {
     #[Computed]
     public function modalTitle(): string
     {
-        if ($this->modalBatchRangeIsComplete()) {
-            $batchSuffix = $this->modalBatchFrom === $this->modalBatchTo
-                ? ' — Batch ' . $this->modalBatchFrom
-                : ' — Batch ' . $this->modalBatchFrom . '–' . $this->modalBatchTo;
-        } else {
-            $batchSuffix = $this->modalBatch ? ' — Batch ' . $this->modalBatch : '';
-        }
+        $batchSuffix = $this->modalBatchFrom !== ''
+            ? ' — Batch ' . $this->modalBatchFrom
+            : ($this->modalBatch ? ' — Batch ' . $this->modalBatch : '');
 
-        $courseSuffix = count($this->modalCourse) === 1
-            ? ' — ' . $this->modalCourse[0]
-            : (count($this->modalCourse) > 1 ? ' — ' . count($this->modalCourse) . ' Programs' : '');
+        $courseSuffix = count($this->modalCourse) > 0 ? ' — ' . $this->modalCourse[0] : '';
         $suffix       = $batchSuffix . $courseSuffix;
 
-        $hasBatchScope = $this->modalBatchRangeIsComplete() || $this->modalBatch;
+        $hasBatchScope = $this->modalBatchFrom !== '' || $this->modalBatch;
 
         return match ($this->modalFilter) {
             'employed'            => 'Employed Alumni'               . $suffix,
@@ -980,13 +910,11 @@ new class extends Component {
             'relevance_partially' => 'Partially Relevant Employment' . $suffix,
             'relevance_no'        => 'Not Relevant to Course'        . $suffix,
             default               => $hasBatchScope
-                                        ? ltrim(($this->modalBatchRangeIsComplete()
-                                            ? ($this->modalBatchFrom === $this->modalBatchTo
-                                                ? 'Batch ' . $this->modalBatchFrom
-                                                : 'Batch ' . $this->modalBatchFrom . '–' . $this->modalBatchTo)
+                                        ? ltrim(($this->modalBatchFrom !== ''
+                                            ? 'Batch ' . $this->modalBatchFrom
                                             : 'Batch ' . $this->modalBatch) . ' — Employment Records' . $courseSuffix)
                                         : (count($this->modalCourse) > 0
-                                            ? (count($this->modalCourse) === 1 ? $this->modalCourse[0] : count($this->modalCourse) . ' Programs') . ' — All Employment Records'
+                                            ? $this->modalCourse[0] . ' — All Employment Records'
                                             : 'All Employment Records'),
         };
     }
@@ -2617,10 +2545,9 @@ new class extends Component {
                 <p class="text-white/60 text-[11px] sm:text-xs">
                     {{ number_format($records->total()) }} record(s)
                     @if(count($modalCourse) === 1) &middot; {{ $modalCourse[0] }}
-                    @elseif(count($modalCourse) > 1) &middot; {{ count($modalCourse) }} Programs
                     @endif
-                    @if($this->modalBatchRangeIsComplete())
-                        &middot; Batch {{ $modalBatchFrom === $modalBatchTo ? $modalBatchFrom : $modalBatchFrom.'–'.$modalBatchTo }}
+                    @if($modalBatchFrom !== '')
+                        &middot; Batch {{ $modalBatchFrom }}
                     @elseif($modalBatch)
                         &middot; Batch {{ $modalBatch }}
                     @endif
@@ -2678,51 +2605,33 @@ new class extends Component {
 
             <div class="h-5 w-px bg-[#E8E0F0] shrink-0"></div>
 
-            {{-- Batch Year — same plain year list + opt-in "Add Range"
-                 treatment as the dashboard-level filter bar (scroll-capped
-                 list, range is all-or-nothing until both ends are picked).
-                 Uses the shared $store.empFilters coordination so opening
-                 this closes the Program dropdown below (and vice versa),
-                 same as the dashboard bar — just under its own 'modal-batch'
-                 key so it never collides with the dashboard bar's 'batch'
-                 key sitting underneath this full-screen modal. --}}
+            {{-- Batch Year — plain single-select year list. Click a year,
+                 done — no range mode inside the modal (that stays a
+                 dashboard-level-only feature). Uses the shared
+                 $store.empFilters coordination so opening this closes the
+                 Program dropdown below (and vice versa), under its own
+                 'modal-batch' key so it never collides with the dashboard
+                 bar's 'batch' key sitting underneath this full-screen
+                 modal. --}}
             <div class="ar-dropdown shrink-0"
                  x-data="{
                     get open(){ return $store.empFilters.isOpen('modal-batch'); },
-                    rangeMode: {{ ($modalBatchFrom !== '' && $modalBatchTo !== '' && $modalBatchFrom !== $modalBatchTo) ? 'true' : 'false' }},
-                    rangeFrom: '{{ $modalBatchFrom }}',
-                    rangeTo: '{{ $modalBatchTo }}',
                     toggle(){ $store.empFilters.toggle('modal-batch'); },
                     close(){ $store.empFilters.close('modal-batch'); },
                     selectYear(val){
                         $wire.setSingleModalBatchYear(val);
                         this.close();
                     },
-                    clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearModalBatchYear(); this.close(); },
-                    startRange(){ this.rangeFrom=$wire.modalBatchFrom||''; this.rangeTo=$wire.modalBatchTo||''; this.rangeMode=true; },
-                    pickFrom(val){ if (this.rangeTo === val) return; this.rangeFrom = (this.rangeFrom===val ? '' : val); },
-                    pickTo(val){ if (this.rangeFrom === val) return; this.rangeTo = (this.rangeTo===val ? '' : val); },
-                    get rangeComplete(){ return this.rangeFrom!=='' && this.rangeTo!==''; },
-                    applyRange(){
-                        if(!this.rangeComplete) return;
-                        $wire.setModalBatchRange(this.rangeFrom, this.rangeTo);
-                        this.close();
-                    }
+                    clearYear(){ $wire.clearModalBatchYear(); this.close(); },
                  }"
                  @click.outside="close()" wire:key="emp-modal-batch-dropdown">
                 <button type="button" @click.stop="toggle()"
-                        :class="{ 'has-value': $wire.modalBatchFrom!=='' && $wire.modalBatchTo!=='' || $wire.modalBatch!==null, 'open':open }"
+                        :class="{ 'has-value': $wire.modalBatchFrom!=='' || $wire.modalBatch!==null, 'open':open }"
                         class="ar-dropdown-trigger">
                     <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
                     <span>
-                        @if($modalBatchFrom !== '' && $modalBatchTo !== '' && $modalBatchFrom !== $modalBatchTo)
-                            Batch {{ $modalBatchFrom }}–{{ $modalBatchTo }}
-                        @elseif($modalBatchFrom !== '' && $modalBatchTo !== '')
+                        @if($modalBatchFrom !== '')
                             {{ $modalBatchFrom }}
-                        @elseif($modalBatchFrom !== '')
-                            Batch {{ $modalBatchFrom }} → pick end year
-                        @elseif($modalBatchTo !== '')
-                            pick start year → Batch {{ $modalBatchTo }}
                         @elseif($modalBatch)
                             {{ $modalBatch }}
                         @else
@@ -2734,93 +2643,27 @@ new class extends Component {
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" :class="{ 'ar-dropdown-menu--range': rangeMode }" style="display:none;min-width:190px;" @click.stop>
-
-                    <template x-if="!rangeMode">
-                        <div>
-                            <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
-                                <button type="button" @click.stop="clearYear()" :class="{'active':$wire.modalBatchFrom==='' && $wire.modalBatchTo==='' && $wire.modalBatch===null}" class="ar-dropdown-item">All Batch Years</button>
-                                @foreach($this->batchYears as $year)
-                                <button type="button" @click.stop="selectYear('{{ $year }}')" :class="{'active': $wire.modalBatchFrom==='{{ $year }}' && $wire.modalBatchTo==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
-                                @endforeach
-                            </div>
-                            <div class="h-px bg-[#E8E0F0] my-1"></div>
-                            <button type="button" @click.stop="startRange()"
-                                    class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
-                                <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
-                            </button>
-                        </div>
-                    </template>
-
-                    <template x-if="rangeMode">
-                        <div class="p-2" style="width:220px;">
-                            <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
-                                <template x-if="rangeFrom !== '' || rangeTo !== ''">
-                                    <span>
-                                        <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
-                                        <span style="color:#B9A8CB;"> → </span>
-                                        <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
-                                    </span>
-                                </template>
-                            </div>
-                            <div class="flex items-start gap-2">
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                    @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickFrom('{{ $year }}')"
-                                            :disabled="rangeTo==='{{ $year }}'"
-                                            :class="{'active':rangeFrom==='{{ $year }}', 'ar-range-item-disabled':rangeTo==='{{ $year }}'}"
-                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
-                                    @endforeach
-                                </div>
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                    @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickTo('{{ $year }}')"
-                                            :disabled="rangeFrom==='{{ $year }}'"
-                                            :class="{'active':rangeTo==='{{ $year }}', 'ar-range-item-disabled':rangeFrom==='{{ $year }}'}"
-                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
-                                    @endforeach
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-2 mt-3">
-                                <button type="button" @click.stop="rangeMode=false"
-                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                    Back to List
-                                </button>
-                                <button type="button" @click.stop="applyRange()"
-                                        :disabled="!rangeComplete"
-                                        :class="rangeComplete ? 'text-white bg-[#7A3F91] hover:bg-[#6a3580] cursor-pointer' : 'text-[#B9A9C4] bg-[#F3EDF7] cursor-not-allowed'"
-                                        class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                    Apply
-                                </button>
-                            </div>
-                        </div>
-                    </template>
+                     class="ar-dropdown-menu" style="display:none;min-width:190px;" @click.stop>
+                    <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
+                        <button type="button" @click.stop="clearYear()" :class="{'active':$wire.modalBatchFrom==='' && $wire.modalBatch===null}" class="ar-dropdown-item">All Batch Years</button>
+                        @foreach($this->batchYears as $year)
+                        <button type="button" @click.stop="selectYear('{{ $year }}')" :class="{'active': $wire.modalBatchFrom==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
+                        @endforeach
+                    </div>
                 </div>
             </div>
 
-            {{-- Program Code — same multi-select checkbox + Select All +
-                 Apply treatment as the dashboard-level filter bar. Draft
-                 stays local (Alpine) until Apply fires applyModalCourse()
-                 in one Livewire call. --}}
+            {{-- Program Code — plain single-select list, same treatment as
+                 Batch Year above. Click a program, done — no checkboxes /
+                 Select All / Apply here (that multi-select treatment stays
+                 dashboard-level-only). --}}
             <div class="ar-dropdown shrink-0"
                  x-data="{
                     get open(){ return $store.empFilters.isOpen('modal-course'); },
-                    draftCourse: [],
-                    toggle(){
-                        $store.empFilters.toggle('modal-course');
-                        if(this.open){
-                            this.draftCourse = [...$wire.modalCourse];
-                            this.$nextTick(()=>{ if(this.$refs.modalCourseMenu) this.$refs.modalCourseMenu.scrollTop = 0; });
-                        }
-                    },
+                    toggle(){ $store.empFilters.toggle('modal-course'); },
                     close(){ $store.empFilters.close('modal-course'); },
-                    toggleDraft(code){
-                        if(this.draftCourse.includes(code)){ this.draftCourse = this.draftCourse.filter(c => c !== code); }
-                        else { this.draftCourse.push(code); }
-                    },
-                    selectAllDraft(){ this.draftCourse = {{ Js::from(array_values(array_keys($this->courseMap))) }}; },
-                    clearDraft(){ this.draftCourse = []; },
-                    applyDraft(){ $wire.applyModalCourse(this.draftCourse); this.close(); },
+                    selectCourse(code){ $wire.applyModalCourse([code]); this.close(); },
+                    clearCourse(){ $wire.clearModalCourse(); this.close(); },
                  }"
                  @click.outside="close()" wire:key="emp-modal-course-dropdown">
                 <button type="button" @click.stop="toggle()" :class="{ 'has-value':$wire.modalCourse.length>0,'open':open }" class="ar-dropdown-trigger">
@@ -2828,58 +2671,21 @@ new class extends Component {
                     <span>
                         @if(count($modalCourse) === 0)
                             All Program Codes
-                        @elseif(count($modalCourse) === 1)
-                            {{ $modalCourse[0] }}
                         @else
-                            {{ count($modalCourse) }} Programs
+                            {{ $modalCourse[0] }}
                         @endif
                     </span>
                     <i class="fas fa-chevron-down ar-chevron"></i>
                 </button>
-                <div x-show="open" x-ref="modalCourseMenu"
+                <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
                      class="ar-dropdown-menu" style="display:none;min-width:220px;" @click.stop>
-
-                    <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-[#E8E0F0] sticky -top-1 -mx-1 -mt-1 bg-white z-10 rounded-t-[8px]">
-                        <label class="flex items-center gap-2 text-xs font-semibold text-[#333333] cursor-pointer select-none">
-                            <input type="checkbox"
-                                   :checked="draftCourse.length === {{ count($this->courseMap) }}"
-                                   :indeterminate="draftCourse.length > 0 && draftCourse.length < {{ count($this->courseMap) }}"
-                                   @change="$event.target.checked ? selectAllDraft() : clearDraft()"
-                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer">
-                            Select All
-                        </label>
-                        <span class="text-xs font-bold text-[#7A3F91] select-none" x-show="draftCourse.length > 0">
-                            <span x-text="draftCourse.length"></span> selected
-                        </span>
-                    </div>
-
                     <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
+                        <button type="button" @click.stop="clearCourse()" :class="{'active': $wire.modalCourse.length===0}" class="ar-dropdown-item">All Program Codes</button>
                         @foreach($this->courseMap as $code => $name)
-                        <label class="ar-dropdown-item flex items-center gap-2 cursor-pointer select-none"
-                               :class="{'active': draftCourse.includes('{{ $code }}')}">
-                            <input type="checkbox" @change="toggleDraft('{{ $code }}')"
-                                   :checked="draftCourse.includes('{{ $code }}')"
-                                   class="w-3.5 h-3.5 rounded border-[#D4C5E8] accent-[#7A3F91] focus:ring-[#7A3F91]/30 cursor-pointer shrink-0">
-                            <span>{{ $name }}</span>
-                        </label>
+                        <button type="button" @click.stop="selectCourse('{{ $code }}')" :class="{'active': $wire.modalCourse[0]==='{{ $code }}'}" class="ar-dropdown-item">{{ $name }}</button>
                         @endforeach
-                    </div>
-
-                    <div class="flex items-center gap-2 mt-2 px-1 pb-1">
-                        <button type="button" @click.stop="clearDraft()"
-                                :disabled="draftCourse.length === 0"
-                                :class="draftCourse.length === 0 ? 'text-[#B9A9C4] bg-[#F9F7FC] cursor-not-allowed' : 'text-[#333333] hover:bg-[#F5F5F5] cursor-pointer'"
-                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                            Clear
-                        </button>
-                        <button type="button" @click.stop="applyDraft()"
-                                :disabled="draftCourse.length === 0"
-                                :class="draftCourse.length === 0 ? 'text-[#B9A9C4] bg-[#F3EDF7] cursor-not-allowed' : 'text-white bg-[#7A3F91] hover:bg-[#6a3580] cursor-pointer'"
-                                class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                            Apply
-                        </button>
                     </div>
                 </div>
             </div>
@@ -2888,7 +2694,7 @@ new class extends Component {
                  batch/program filter is currently active (nothing to reset). --}}
             <button wire:click="clearModalFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearModalFilters"
                     type="button"
-                    @if(!($this->modalBatchRangeIsComplete() || count($modalCourse) > 0)) disabled @endif
+                    @if(!($modalBatchFrom !== '' || $modalBatch !== null || count($modalCourse) > 0)) disabled @endif
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto">
                 <span wire:loading wire:target="clearModalFilters">
                     <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>

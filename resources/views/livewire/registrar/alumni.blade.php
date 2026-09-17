@@ -1044,6 +1044,44 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     }
     .ar-row:hover { background: #F0ECF5 !important; }
 
+    /* ── Row click loading (same blurred-dots language as the
+       dashboard's stat cards) — clicked row blurs + dims while its
+       viewProfile() request is in flight, dots overlay on top. The
+       spinner cell is position:absolute so it sits outside normal
+       table flow and never affects column widths. ── */
+    .ar-row { position: relative; }
+    .ar-row.is-loading > td:not(.ar-row-spinner-td) {
+        filter: blur(4px);
+        opacity: 0.5;
+        pointer-events: none;
+        user-select: none;
+    }
+    .ar-row-spinner-td {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        z-index: 40;
+        pointer-events: none;
+    }
+    .ar-row-spinner-td span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7A3F91;
+        animation: arRowDotPulse 1.1s ease-in-out infinite;
+    }
+    .ar-row-spinner-td span:nth-child(2) { animation-delay: 0.15s; }
+    .ar-row-spinner-td span:nth-child(3) { animation-delay: 0.3s; }
+    .ar-row.is-loading .ar-row-spinner-td { display: flex; }
+    .ar-row.is-loading { cursor: wait; }
+    @keyframes arRowDotPulse {
+        0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+
     /* ── Responsive table columns ──────────────────────────────────
        The table panel can get squeezed narrower than its own viewport
        breakpoint would suggest (e.g. a notification/side panel opens
@@ -1080,6 +1118,38 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         transition: background .12s ease;
     }
     .ar-mrow:active { background: #F0ECF5; }
+
+    /* ── Mobile card row loading — same overlay pattern, but the row
+       is a flex div here instead of a <tr>, so the spinner is a
+       plain absolutely-positioned child instead of a <td>. ── */
+    .ar-mrow { position: relative; }
+    .ar-mrow.is-loading > *:not(.ar-mrow-spinner) {
+        filter: blur(4px);
+        opacity: 0.5;
+        pointer-events: none;
+        user-select: none;
+    }
+    .ar-mrow-spinner {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        z-index: 40;
+        pointer-events: none;
+    }
+    .ar-mrow-spinner span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7A3F91;
+        animation: arRowDotPulse 1.1s ease-in-out infinite;
+    }
+    .ar-mrow-spinner span:nth-child(2) { animation-delay: 0.15s; }
+    .ar-mrow-spinner span:nth-child(3) { animation-delay: 0.3s; }
+    .ar-mrow.is-loading .ar-mrow-spinner { display: flex; }
+    .ar-mrow.is-loading { cursor: wait; }
 
     /* ── Pagination ──────────────────────────────────────────────── */
     .ar-pg-btn {
@@ -1358,26 +1428,38 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         box-shadow: 0 1px 3px rgba(0,0,0,.06);
     }
     .ar-card-header {
-        padding: 8px 12px;
+        padding: 10px 14px;
         border-bottom: 1.5px solid #EEEEEE;
         background: #F7F7F7;
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 7px;
+        gap: 8px;
     }
     .ar-card-header p {
-        font-size: .72rem;
+        font-size: .78rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: .06em;
         color: #333333;
         margin: 0;
     }
+    .ar-card-header i {
+        color: #7A3F91 !important;
+        font-size: .85rem;
+        width: 16px;
+        text-align: center;
+        flex-shrink: 0;
+    }
+    .ar-emp-updated {
+        font-size: .7rem;
+        font-weight: 700;
+        color: #555555;
+        white-space: nowrap;
+    }
 
     /* ── Cells — WHITE background ─────────────────────────────── */
     .ar-cell {
-        padding: 8px 11px;
+        padding: 10px 13px;
         border: 1.5px solid #EEEEEE;
         background: #ffffff;
         border-radius: 8px;
@@ -1399,18 +1481,46 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
     /* ── Mobile responsiveness ─────────────────────────────────── */
     .ar-profile-body {
-        padding: 10px 14px;
+        padding: 16px 20px;
         background: #F2F2F2;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
+        height: 100%;
+        box-sizing: border-box;
     }
     .ar-profile-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        grid-template-rows: auto auto auto auto auto auto;
-        gap: 8px;
-        height: 100%;
+        grid-template-columns: 1fr 1fr;
+        align-items: stretch;
+        gap: 16px;
+        min-height: 100%;
         box-sizing: border-box;
+        padding-bottom: 6px;
+    }
+    .ar-col {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-width: 0;
+        height: 100%;
+    }
+    .ar-col > .ar-card:last-child {
+        flex: 1;
+    }
+    .ar-meta-card {
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 12px 16px;
+    }
+    .ar-meta-text {
+        font-size: .7rem;
+        font-weight: 600;
+        color: #777777;
+        margin: 0;
+        text-align: right;
     }
     @media (max-width: 768px) {
         .ar-profile-body {
@@ -1423,6 +1533,9 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             gap: 10px;
         }
         .ar-profile-grid > div { grid-column: 1 / -1 !important; }
+        .ar-col { gap: 10px; }
+        .ar-meta-card { min-height: 0; justify-content: flex-start; }
+        .ar-meta-text { text-align: left; }
         .ar-avatar-strip { flex-direction: column; }
         .ar-photo-col {
             border-right: none;
@@ -1495,14 +1608,14 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     .ar-photo-col {
         display: flex;
         flex-direction: column;
-        align-items: flex-start;
+        align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        padding: 12px 14px;
+        padding: 10px;
         border-right: 1.5px solid #EEEEEE;
         background: #F7F7F7;
         gap: 5px;
-        min-width: 160px;
+        min-width: 0;
     }
     .ar-info-col {
         flex: 1;
@@ -1510,15 +1623,15 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         display: flex;
         flex-direction: column;
         justify-content: center;
-        padding: 12px 16px;
-        gap: 6px;
+        padding: 10px 12px;
+        gap: 3px;
         background: #ffffff;
     }
 
     /* ── Employment 2-col grid ────────────────────────────────── */
     .ar-emp-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 6px;
         padding: 8px;
     }
@@ -2227,7 +2340,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                 $item->last_name ?? '', $item->suffix ?? ''
                             );
                         @endphp
-                        <tr class="ar-row bg-white {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-row-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
+                        <tr class="ar-row bg-white {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-row-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})"
+                            wire:loading.class="is-loading" wire:target="viewProfile({{ $item->id }})">
                             <td class="px-4 py-3 overflow-hidden">
                                 <div class="flex items-center gap-2.5">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
@@ -2277,6 +2391,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                     {!! $this->highlight($item->email ?? '', $this->alumniSearch) !!}
                                 </span>
                             </td>
+                            <td class="ar-row-spinner-td"><span></span><span></span><span></span></td>
                         </tr>
                         @empty
                         <tr>
@@ -2303,7 +2418,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             $item->last_name ?? '', $item->suffix ?? ''
                         );
                     @endphp
-                    <div class="ar-mrow {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-mrow-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
+                    <div class="ar-mrow {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-mrow-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})"
+                         wire:loading.class="is-loading" wire:target="viewProfile({{ $item->id }})">
                         <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                              class="w-10 h-10 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false"
                              onerror="this.onerror=null;this.src='{{ asset('storage/alumni-photos/default.png') }}';">
@@ -2343,6 +2459,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             </div>
                         </div>
                         <i class="fas fa-chevron-right text-[#CCCCCC] text-xs shrink-0"></i>
+                        <div class="ar-mrow-spinner"><span></span><span></span><span></span></div>
                     </div>
                     @empty
                     <div class="py-24 text-center px-4">
@@ -2534,8 +2651,9 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         <div class="flex-1 min-h-0 ar-profile-body">
             <div class="ar-profile-grid">
 
-                <div style="grid-column:1/-1;"
-                     x-data="{
+                <div class="ar-col">
+
+                <div x-data="{
                          previewSrc: '{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}',
                          originalSrc: '{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}',
                          defaultSrc: '{{ asset('storage/alumni-photos/default.png') }}',
@@ -2641,7 +2759,7 @@ compressImage(file, maxW, maxH, quality) {
 
                     <div class="ar-photo-col">
                         <div class="flex items-start gap-2">
-                            <div class="relative group" style="width:108px;height:108px;flex-shrink:0;">
+                            <div class="relative group ar-photo-box" style="width:74px;height:74px;flex-shrink:0;">
                                 <img :src="previewSrc" alt="{{ $viewingProfile['first_name'] ?? '' }}"
                                      class="w-full h-full object-cover shadow-md transition-all" style="border-radius:12px;"
                                      :class="hasFile ? 'ring-2 ring-[#7A3F91] ring-offset-2' : 'ring-2 ring-[#E0E0E0]'"
@@ -2652,7 +2770,7 @@ compressImage(file, maxW, maxH, quality) {
                                 <label x-show="!saving"
                                        class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                                        style="border-radius:12px;">
-                                    <i class="fas fa-camera text-white" style="font-size:16px;"></i>
+                                    <i class="fas fa-camera text-white" style="font-size:13px;"></i>
                                     <input type="file" x-ref="photoInput" class="hidden"
                                            accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
                                 </label>
@@ -2705,16 +2823,16 @@ compressImage(file, maxW, maxH, quality) {
                         </div>
 
                         <p x-show="!hasFile && !saving" class="text-center font-semibold leading-tight select-none"
-                           style="font-size:.72rem;color:#666666;max-width:108px;display:block;">
+                           style="font-size:.62rem;color:#666666;max-width:84px;display:block;">
                             Hover photo to change
                         </p>
                     </div>
 
                     <div class="ar-info-col">
-                        <p class="font-bold uppercase leading-tight" style="font-size:1.15rem;color:#111111;">
+                        <p class="font-bold uppercase leading-tight" style="font-size:.98rem;color:#111111;">
                             {{ $this->formatDisplayName($viewingProfile['first_name']??'',$viewingProfile['middle_initial']??'',$viewingProfile['last_name']??'',$viewingProfile['suffix']??'') }}
                         </p>
-                        <p class="font-mono" style="font-size:.82rem;color:#444444;letter-spacing:.03em;">
+                        <p class="font-mono font-semibold" style="font-size:.92rem;color:#333333;letter-spacing:.03em;">
                             {{ $viewingProfile['student_id'] ?? '—' }}
                         </p>
                         <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
@@ -2732,14 +2850,14 @@ compressImage(file, maxW, maxH, quality) {
                                 <span class="ar-info-chip" style="background:#FFFBEB;color:#D97706;border:1px solid #fcd34d;">Incomplete</span>
                             @endif
                         </div>
-                        <p style="font-size:.9rem;color:#444444;font-weight:500;">
+                        <p style="font-size:.78rem;color:#444444;font-weight:500;word-break:break-all;">
                             {{ $viewingProfile['email'] ?? '—' }}
                         </p>
                     </div>
                 </div>{{-- end avatar strip --}}
 
-                <div class="ar-card" style="grid-column:1/2;">
-                    <div class="ar-card-header"><p>Student ID</p></div>
+    <div class="ar-card" >
+                    <div class="ar-card-header"><i class="fas fa-id-card" style="color:#7A3F91 !important;"></i><p>Student ID</p></div>
                     <div class="p-2">
                         <div class="ar-cell">
                             <p class="ar-field-label">Student ID</p>
@@ -2748,9 +2866,9 @@ compressImage(file, maxW, maxH, quality) {
                     </div>
                 </div>
 
-                <div class="ar-card" style="grid-column:2/-1;">
-                    <div class="ar-card-header"><p>Student's Name</p></div>
-                    <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+    <div class="ar-card">
+                    <div class="ar-card-header"><i class="fas fa-user-graduate" style="color:#7A3F91 !important;"></i><p>Student's Name</p></div>
+                    <div class="p-2 grid grid-cols-2 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Last Name</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['last_name'] ?? '') ?: '—' }}</p>
@@ -2770,8 +2888,8 @@ compressImage(file, maxW, maxH, quality) {
                     </div>
                 </div>
 
-                <div class="ar-card">
-                    <div class="ar-card-header"><p>Student's Data</p></div>
+    <div class="ar-card">
+                    <div class="ar-card-header"><i class="fas fa-user" style="color:#7A3F91 !important;"></i><p>Student's Data</p></div>
                     <div class="p-2 grid grid-cols-2 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Sex</p>
@@ -2781,52 +2899,16 @@ compressImage(file, maxW, maxH, quality) {
                             <p class="ar-field-label">Birthdate</p>
                             <p class="ar-field-value">{{ $dob }}</p>
                         </div>
-                        <div class="ar-cell">
+                        <div class="ar-cell col-span-2">
                             <p class="ar-field-label">Program</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['course_name'] ?? $viewingProfile['course_code'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
-                <div class="ar-card">
-                    <div class="ar-card-header"><p>Father's Name</p></div>
-                    <div class="p-2 grid grid-cols-3 gap-1.5">
-                        <div class="ar-cell">
-                            <p class="ar-field-label">Last Name</p>
-                            <p class="ar-field-value">{{ $up($viewingProfile['father_last_name'] ?? '') ?: '—' }}</p>
-                        </div>
-                        <div class="ar-cell">
-                            <p class="ar-field-label">Given Name</p>
-                            <p class="ar-field-value">{{ $up($viewingProfile['father_given_name'] ?? '') ?: '—' }}</p>
-                        </div>
-                        <div class="ar-cell">
-                            <p class="ar-field-label">Middle Name</p>
-                            <p class="ar-field-value">{{ $up($viewingProfile['father_middle_name'] ?? '') ?: '—' }}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="ar-card">
-                    <div class="ar-card-header"><p>Mother's Maiden Name</p></div>
-                    <div class="p-2 grid grid-cols-3 gap-1.5">
-                        <div class="ar-cell">
-                            <p class="ar-field-label">Last Name</p>
-                            <p class="ar-field-value">{{ $up($viewingProfile['mother_last_name'] ?? '') ?: '—' }}</p>
-                        </div>
-                        <div class="ar-cell">
-                            <p class="ar-field-label">Given Name</p>
-                            <p class="ar-field-value">{{ $up($viewingProfile['mother_given_name'] ?? '') ?: '—' }}</p>
-                        </div>
-                        <div class="ar-cell">
-                            <p class="ar-field-label">Middle Name</p>
-                            <p class="ar-field-value">{{ $up($viewingProfile['mother_middle_name'] ?? '') ?: '—' }}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="ar-card" style="grid-column:1/-1;">
-                    <div class="ar-card-header"><p>Permanent Address</p></div>
-                    <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+    <div class="ar-card" >
+                    <div class="ar-card-header"><i class="fas fa-location-dot" style="color:#7A3F91 !important;"></i><p>Permanent Address</p></div>
+                    <div class="p-2 grid grid-cols-2 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">Street</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['address_street'] ?? '') ?: '—' }}</p>
@@ -2846,9 +2928,49 @@ compressImage(file, maxW, maxH, quality) {
                     </div>
                 </div>
 
-                <div class="ar-card" style="grid-column:1/-1;">
-                    <div class="ar-card-header"><p>Additional Information</p></div>
-                    <div class="p-2 grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                </div>{{-- end col 1 --}}
+
+                <div class="ar-col">
+
+    <div class="ar-card">
+                    <div class="ar-card-header"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p></div>
+                    <div class="p-2 grid grid-cols-3 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Last Name</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['father_last_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Given Name</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['father_given_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Middle Name</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['father_middle_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+    <div class="ar-card">
+                    <div class="ar-card-header"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p></div>
+                    <div class="p-2 grid grid-cols-3 gap-1.5">
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Last Name</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['mother_last_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Given Name</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['mother_given_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                        <div class="ar-cell">
+                            <p class="ar-field-label">Middle Name</p>
+                            <p class="ar-field-value">{{ $up($viewingProfile['mother_middle_name'] ?? '') ?: '—' }}</p>
+                        </div>
+                    </div>
+                </div>
+
+    <div class="ar-card" >
+                    <div class="ar-card-header"><i class="fas fa-file-lines" style="color:#7A3F91 !important;"></i><p>Additional Information</p></div>
+                    <div class="p-2 grid grid-cols-2 gap-1.5">
                         <div class="ar-cell">
                             <p class="ar-field-label">DSWD Household No.</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['dswd_household_no'] ?? '') ?: '—' }}</p>
@@ -2857,25 +2979,23 @@ compressImage(file, maxW, maxH, quality) {
                             <p class="ar-field-label">Disability</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['disability'] ?? '') ?: '—' }}</p>
                         </div>
-                        <div class="ar-cell">
+                        <div class="ar-cell col-span-2">
                             <p class="ar-field-label">Contact Number</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['contact_number'] ?? '') ?: '—' }}</p>
                         </div>
-                        <div class="ar-cell">
+                        <div class="ar-cell col-span-2">
                             <p class="ar-field-label">Email Address</p>
                             <p class="ar-field-value">{{ trim($viewingProfile['email'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
 
-                <div class="ar-card" style="grid-column:1/-1; margin-bottom:4px;">
+    <div class="ar-card">
 
-                    <div class="ar-card-header">
-                        <p>Employment</p>
+                    <div class="ar-card-header flex items-center justify-between">
+                        <span class="flex items-center gap-2"><i class="fas fa-briefcase" style="color:#7A3F91 !important;"></i><p>Employment</p></span>
                         @if($emp && $updatedAt)
-                            <span style="font-size:.7rem;font-weight:600;color:#555555;text-transform:none;letter-spacing:0;font-family:inherit;">
-                                Last updated {{ $updatedAt }}
-                            </span>
+                            <span class="ar-emp-updated">Last updated {{ $updatedAt }}</span>
                         @endif
                     </div>
 
@@ -2887,9 +3007,7 @@ compressImage(file, maxW, maxH, quality) {
                             </div>
                         </div>
                     @else
-                        <div class="ar-emp-grid">
-
-                            <div class="flex flex-col gap-1.5">
+                        <div class="p-2 grid grid-cols-4 gap-1.5">
 
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Status</p>
@@ -2931,36 +3049,11 @@ compressImage(file, maxW, maxH, quality) {
                                 </div>
                                 @endif
 
-                                @if($submittedAt)
-                                <div class="ar-cell">
-                                    <p class="ar-field-label">Date Submitted</p>
-                                    <p class="ar-field-value">{{ $submittedAt }}</p>
-                                </div>
-                                @endif
-
-                            </div>
-
-                            <div class="flex flex-col gap-1.5">
-
                                 @if($isWorking)
-                                    @if(!empty($emp['job_title']))
-                                    <div class="ar-cell">
-                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Position / Role' : 'Job Title' }}</p>
-                                        <p class="ar-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['job_title']) }}</p>
-                                    </div>
-                                    @endif
-
                                     @if(!empty($emp['company_name']))
                                     <div class="ar-cell">
-                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company' }}</p>
+                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Employer' }}</p>
                                         <p class="ar-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p>
-                                    </div>
-                                    @endif
-
-                                    @if($dateHired)
-                                    <div class="ar-cell">
-                                        <p class="ar-field-label">Date Hired</p>
-                                        <p class="ar-field-value">{{ $dateHired }}</p>
                                     </div>
                                     @endif
 
@@ -2981,11 +3074,12 @@ compressImage(file, maxW, maxH, quality) {
                                     @endif
                                 @endif
 
-                            </div>
-
                         </div>
                     @endif
                 </div>{{-- end employment card --}}
+
+                </div>{{-- end col 2 --}}
+
 
             </div>{{-- end grid --}}
         </div>{{-- end body --}}
