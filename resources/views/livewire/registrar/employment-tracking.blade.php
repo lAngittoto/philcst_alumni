@@ -1144,6 +1144,139 @@ new class extends Component {
     .stat-card-unemployed:hover{ border-color: #fcd34d !important; }
     .stat-card-nofill:hover    { border-color: #d1d5db !important; }
 
+    /* ── Stat card click spinner — same purple "..." dot loader used on
+       the main Dashboard, for consistency across pages. Blurs/dims the
+       card content instead of covering it, so it still reads as busy
+       rather than an empty gap. ── */
+    .stat-card { position: relative; }
+    .stat-card.is-loading > *:not(.stat-card-spinner) {
+        filter: blur(4px);
+        opacity: 0.5;
+        pointer-events: none;
+        user-select: none;
+    }
+    .stat-card-spinner {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        z-index: 40;
+    }
+    .stat-card-spinner span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7A3F91;
+        animation: empDotPulse 1.1s ease-in-out infinite;
+    }
+    .stat-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+    .stat-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes empDotPulse {
+        0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+        40% { transform: scale(1); opacity: 1; }
+    }
+    .stat-card.is-loading .stat-card-spinner { display: flex; }
+    .stat-card.is-loading { pointer-events: none; }
+
+    /* ── Dashboard-wide click lock — while ANY clickable widget is busy
+       (a stat card, the Work Location buttons, the Job Relevance donut,
+       the Employment Breakdown batch bar, or a Top Programs rank card is
+       clicked and awaiting either full navigation or the openModal()
+       Livewire round-trip), every OTHER clickable widget on the page gets
+       dimmed + inert until that request resolves. This is a single
+       dashboard-wide flag (.emp-dashboard-root.emp-busy) rather than a
+       per-widget one, since a click on Work Location should just as much
+       block the stat cards / donut / batch chart as it blocks its own
+       sibling button, and vice-versa. Each .emp-clickable marks itself
+       .emp-active while it's the one that was clicked, so it keeps its
+       own visual (spinner / normal look) instead of also being dimmed. ── */
+    .emp-dashboard-root.emp-busy .emp-clickable:not(.emp-active) {
+        pointer-events: none;
+        cursor: default !important;
+        opacity: 0.45;
+        filter: grayscale(0.3);
+        transition: opacity .15s ease, filter .15s ease;
+    }
+    .emp-clickable { transition: opacity .15s ease, filter .15s ease; }
+
+    /* Stat cards used their own is-loading/busy pairing before; keep it
+       working as an alias of the dashboard-wide lock above. */
+    #stat-cards-row.stat-cards-busy .stat-card:not(.is-loading) {
+        pointer-events: none;
+        cursor: default !important;
+        opacity: 0.45;
+        filter: grayscale(0.3);
+        transition: opacity .15s ease, filter .15s ease;
+    }
+
+    /* View Local / View Abroad buttons — same purple dot loader as the
+       stat cards / main Dashboard, swapped in for the label while its
+       own click is in flight. */
+    .emp-btn-spinner {
+        display: none;
+        position: absolute; inset: 0;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }
+    .emp-btn-spinner span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7A3F91;
+        animation: empDotPulse 1.1s ease-in-out infinite;
+    }
+    .emp-btn-spinner span:nth-child(2) { animation-delay: 0.15s; }
+    .emp-btn-spinner span:nth-child(3) { animation-delay: 0.3s; }
+    .emp-clickable.emp-active .emp-btn-label { visibility: hidden; }
+    .emp-clickable.emp-active .emp-btn-spinner { display: flex; }
+
+    /* Job Relevance donut + Employment Breakdown batch chart — while the
+       card itself is the one that was clicked (.emp-active), show the
+       exact same purple dot loader as the stat cards, centered over
+       the card. */
+    #emp-relevance-card.emp-active, #emp-batch-card.emp-active,
+    #emp-worklocation-card.emp-active { position: relative; }
+    .emp-chart-card-spinner {
+        position: absolute;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        z-index: 30;
+        background: rgba(255,255,255,.6);
+    }
+    .emp-chart-card-spinner span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #7A3F91;
+        animation: empDotPulse 1.1s ease-in-out infinite;
+    }
+    .emp-chart-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+    .emp-chart-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+    #emp-relevance-card.emp-active .emp-chart-card-spinner,
+    #emp-batch-card.emp-active .emp-chart-card-spinner,
+    #emp-worklocation-card.emp-active .emp-chart-card-spinner { display: flex; }
+    #emp-relevance-card.emp-active canvas,
+    #emp-batch-card.emp-active canvas {
+        filter: blur(4px);
+        opacity: 0.5;
+    }
+    /* Work Location card — same full-card blur + centered dot-loader
+       overlay as the Job Relevance donut, applied to the card's content
+       (numbers/bar/buttons) instead of a canvas. */
+    #emp-worklocation-card.emp-active .emp-worklocation-content {
+        filter: blur(4px);
+        opacity: 0.5;
+    }
+    /* Loading is now shown via the card-level overlay above (matching
+       Job Relevance), so the buttons' own inline spinner never shows. */
+    #emp-worklocation-card .emp-btn-spinner { display: none !important; }
+
     /* ── Stat cards row stays pinned at the top of the scroll area so
        they never get scrolled out of view — including when a single
        Batch Year or a Batch Year range is applied and the page
@@ -1467,9 +1600,16 @@ new class extends Component {
     .ar-report-menu-item.item-print .ar-item-icon { background: #555555; color: #fff; }
     .ar-report-menu-item:disabled { opacity: .55; cursor: wait; }
 
+    /* ── Stat cards: smooth column scaling instead of one hard flex-wrap
+       jump at 640px. 2 across on tablets/small screens, single column
+       only on the narrowest phones — never lets a card get clipped by
+       min-w-[190px] fighting a narrower container. ── */
+    @media (max-width: 1279px) {
+        .stat-cards-grid { display:grid!important; grid-template-columns:repeat(2,1fr)!important; gap:8px!important; }
+        .stat-cards-grid > div,
+        .stat-cards-grid > a { flex:none!important; min-width:0!important; width:100%!important; }
+    }
     @media (max-width: 640px) {
-        .stat-cards-grid { display:grid!important; grid-template-columns:1fr 1fr!important; gap:8px!important; }
-        .stat-cards-grid > div { flex:none!important; min-width:0!important; }
         .stat-cards-grid .text-2xl { font-size:1.25rem!important; }
         .charts-row-1 { display:flex!important; flex-direction:column!important; height:auto!important; }
         .charts-row-1 > div { height:260px!important; }
@@ -1477,11 +1617,52 @@ new class extends Component {
         .chart-trend-wrap { height:240px!important; }
         .emp-page-header h1 { font-size:1.5rem!important; }
         .course-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
-        .modal-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
         .modal-footer-inner { flex-direction:column; align-items:flex-start; gap:8px; }
+    }
+    @media (max-width: 380px) {
+        /* Truly tiny phones: even 2-up stat cards get tight. Drop to 1
+           column here only, so numbers/labels never get clipped. */
+        .stat-cards-grid { grid-template-columns:1fr!important; }
     }
     @media (max-width:400px) {
         .emp-pg-btn { min-width:26px; height:26px; padding:0 6px; font-size:.68rem; }
+    }
+
+    /* ── Modal table: NEVER horizontal-scroll, on any screen size. Below
+       1024px (tablet and phone) we stop hiding Email/Contact and instead
+       let each row's extra columns wrap underneath the Name cell
+       ("sunod-sunod") instead of being cut off or pushed into a
+       side-scroll. table-layout:fixed + width:100% keeps the table
+       locked to the viewport width at every size. ── */
+    @media (max-width: 1024px) {
+        .modal-table-wrap { overflow-x:hidden!important; }
+        .modal-table-wrap table { min-width:0!important; width:100%!important; table-layout:fixed; }
+
+        /* Collapse everything but Name out of the header row — their
+           data moves inline under the Name cell in the body instead. */
+        .modal-table-wrap thead .modal-col-id,
+        .modal-table-wrap thead .modal-col-program,
+        .modal-table-wrap thead .modal-col-batch,
+        .modal-table-wrap thead .modal-col-status,
+        .modal-table-wrap thead .modal-col-email,
+        .modal-table-wrap thead .modal-col-contact { display:none!important; }
+        .modal-table-wrap thead .modal-col-name { width:100%; }
+
+        /* Body cells for the collapsed columns stop being separate <td>
+           boxes and instead lay out as wrapping inline chips underneath
+           the name — nothing gets truncated, everything just flows to
+           the next line when it runs out of room. */
+        .modal-table-wrap tbody tr { display:flex!important; flex-wrap:wrap!important; align-items:flex-start; gap:4px 10px; padding:10px 12px; }
+        .modal-table-wrap tbody td { display:inline-flex!important; align-items:center; padding:0!important; border:none!important; width:auto!important; max-width:100%; }
+        .modal-table-wrap tbody .modal-col-name { flex:1 1 100%; padding-left:0!important; }
+        .modal-table-wrap tbody .modal-col-id,
+        .modal-table-wrap tbody .modal-col-program,
+        .modal-table-wrap tbody .modal-col-batch,
+        .modal-table-wrap tbody .modal-col-status,
+        .modal-table-wrap tbody .modal-col-email,
+        .modal-table-wrap tbody .modal-col-contact { flex:0 1 auto; }
+        .modal-table-wrap tbody .modal-col-email span,
+        .modal-table-wrap tbody .modal-col-contact span { white-space:normal!important; word-break:break-word; max-width:100%!important; }
     }
 
     /* ── Default cursor rules: only actionable elements show pointer ───────
@@ -1647,7 +1828,7 @@ new class extends Component {
              filter value can NEVER be mistaken for a click on the
              dashboard cards/charts underneath. ══ --}}
         <div class="emp-filter-bar flex items-center gap-2 mt-3 flex-wrap"
-             wire:loading.class="opacity-60" wire:target="applyFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters"
+             wire:loading.class="opacity-60 pointer-events-none" wire:target="applyFilterCourse,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters"
              @click.stop>
 
             <span class="ar-filter-label text-sm font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
@@ -2015,7 +2196,8 @@ new class extends Component {
         <a href="{{ $alumniUrl }}"
              data-tip="View {{ $label }} in Alumni Records"
              class="group relative bg-white rounded-2xl p-3 sm:p-4 flex items-center gap-3
-                    shadow-sm cursor-pointer flex-1 min-w-[190px] stat-card {{ $hoverClass }}">
+                    shadow-sm cursor-pointer flex-1 min-w-[190px] stat-card emp-clickable {{ $hoverClass }}">
+            <div class="stat-card-spinner"><span></span><span></span><span></span></div>
             <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 {{ $iconBg }}">
                 <i class="fa-solid {{ $icon }} {{ $iconColor }}" style="font-size:.9rem;"></i>
             </div>
@@ -2033,9 +2215,11 @@ new class extends Component {
         </a>
         @else
         <div wire:click="openModal('{{ $filter }}')"
+             wire:loading.class="is-loading" wire:target="openModal('{{ $filter }}')"
              data-tip="View {{ $label }}"
              class="group relative bg-white rounded-2xl p-3 sm:p-4 flex items-center gap-3
-                    shadow-sm cursor-pointer flex-1 min-w-[190px] stat-card {{ $hoverClass }}">
+                    shadow-sm cursor-pointer flex-1 min-w-[190px] stat-card emp-clickable {{ $hoverClass }}">
+            <div class="stat-card-spinner"><span></span><span></span><span></span></div>
             <div class="w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shrink-0 {{ $iconBg }}">
                 <i class="fa-solid {{ $icon }} {{ $iconColor }}" style="font-size:.9rem;"></i>
             </div>
@@ -2082,8 +2266,8 @@ new class extends Component {
             $localPct  = $locTotal > 0 ? round($totalLocal  / $locTotal * 100, 1) : 0;
             $abroadPct = $locTotal > 0 ? round($totalAbroad / $locTotal * 100, 1) : 0;
         @endphp
-        <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
-                    transition-all flex flex-col overflow-hidden">
+        <div id="emp-worklocation-card" class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
+                    transition-all flex flex-col overflow-hidden emp-clickable">
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                 <span class="w-2 h-2 rounded-full bg-[#7a3f91] shrink-0"></span>
                 <div class="flex flex-col min-w-0 flex-1">
@@ -2092,7 +2276,7 @@ new class extends Component {
                 </div>
                 <span class="text-xs font-bold text-[#7a3f91] bg-[#f0e6f8] px-2 py-0.5 rounded-full shrink-0">{{ number_format($locTotal) }} working</span>
             </div>
-            <div class="flex-1 flex flex-col justify-center px-4 sm:px-5 py-3 gap-3">
+            <div class="emp-worklocation-content flex-1 flex flex-col justify-center px-4 sm:px-5 py-3 gap-3">
                 <div class="flex items-end justify-between">
                     <div>
                         <p class="text-2xl sm:text-3xl font-black leading-none" style="color:#7a3f91;">{{ number_format($totalLocal) }}</p>
@@ -2115,20 +2299,21 @@ new class extends Component {
                     @endif
                 </div>
                 <div class="flex gap-2">
-                    <button onclick="empOpenModal('local','',null)"
+                    <button onclick="empOpenModal('local','',null,document.getElementById('emp-worklocation-card'))"
                             class="flex-1 py-[7px] rounded-xl text-sm font-bold border border-[#7a3f91]/20
                                    bg-[#F9F7FC] text-[#7a3f91] hover:bg-[#7a3f91] hover:text-white hover:border-[#7a3f91]
-                                   transition-all duration-150 cursor-pointer">
-                        View Local
+                                   transition-all duration-150 cursor-pointer relative">
+                        <span class="emp-btn-label">View Local</span>
                     </button>
-                    <button onclick="empOpenModal('abroad','',null)"
+                    <button onclick="empOpenModal('abroad','',null,document.getElementById('emp-worklocation-card'))"
                             class="flex-1 py-[7px] rounded-xl text-sm font-bold border border-purple-200
                                    bg-purple-50 text-[#c084fc] hover:bg-[#c084fc] hover:text-white hover:border-[#c084fc]
-                                   transition-all duration-150 cursor-pointer">
-                        View Abroad
+                                   transition-all duration-150 cursor-pointer relative">
+                        <span class="emp-btn-label">View Abroad</span>
                     </button>
                 </div>
             </div>
+            <div class="emp-chart-card-spinner"><span></span><span></span><span></span></div>
         </div>
 
         {{-- Relevance Donut — cursor-pointer removed from the outer card;
@@ -2137,8 +2322,8 @@ new class extends Component {
              description/padding around it now shows the normal default
              cursor instead of falsely suggesting the whole card is one
              big clickable button. --}}
-        <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
-                    transition-all flex flex-col overflow-hidden">
+        <div id="emp-relevance-card" class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
+                    transition-all flex flex-col overflow-hidden emp-clickable">
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center gap-2 shrink-0">
                 <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
                 <div class="flex flex-col min-w-0">
@@ -2149,6 +2334,7 @@ new class extends Component {
             <div class="flex-1 min-h-0 flex items-center justify-center p-2" wire:ignore>
                 <canvas id="chartRelevance" class="chart-clickable" style="max-height:100%;max-width:100%;"></canvas>
             </div>
+            <div class="emp-chart-card-spinner"><span></span><span></span><span></span></div>
         </div>
 
         {{-- Top Programs — ranking board (top 3), or rank card when scoped to one Program.
@@ -2219,7 +2405,7 @@ new class extends Component {
                 @if($courseRank && $rankTier)
                 <div wire:click="openModal('employed_all','{{ $singleCourse }}',null)"
                      wire:key="emp-top-programs-rank"
-                     class="flex-1 min-h-0 flex flex-col items-center justify-center gap-1.5 p-3 cursor-pointer">
+                     class="flex-1 min-h-0 flex flex-col items-center justify-center gap-1.5 p-3 cursor-pointer emp-clickable">
                         <div class="w-14 h-14 rounded-2xl flex items-center justify-center font-black text-xl leading-none"
                              style="background:{{ $rankTier['bg'] }}; color:{{ $rankTier['text'] }}; border:2px solid {{ $rankTier['ring'] }};">
                             #{{ $courseRank }}
@@ -2247,7 +2433,7 @@ new class extends Component {
                      not the full catalog). Same visual language as the
                      rank card list — badge, code, working count — but as
                      a compact stacked list instead of one big number. --}}
-                <div wire:key="emp-top-programs-multi" class="flex-1 min-h-0 overflow-y-auto px-2.5 py-1.5 scroll-c">
+                <div wire:key="emp-top-programs-multi" class="flex-1 min-h-0 overflow-y-auto px-2.5 py-1.5 scroll-c emp-clickable">
                     @forelse(json_decode($topProgramsSelectedData, true) ?? [] as $row)
                     <div wire:click="openModal('employed_all','{{ $row['code'] }}',null)"
                          class="flex items-center gap-2.5 py-1.5 px-1.5 rounded-lg hover:bg-[#F9F7FC] transition-colors cursor-pointer">
@@ -2378,8 +2564,8 @@ new class extends Component {
     </script>
 
     {{-- ── CHARTS ROW 2: Stacked Batch Bar ── --}}
-    <div class="chart-batch-wrap bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
-                transition-all flex flex-col overflow-hidden" style="height:280px;">
+    <div id="emp-batch-card" class="chart-batch-wrap bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
+                transition-all flex flex-col overflow-hidden emp-clickable" style="height:280px;">
         <div class="px-3 sm:px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
             <div class="flex items-center gap-[7px] min-w-0">
                 <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
@@ -2388,10 +2574,20 @@ new class extends Component {
                     <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">Number of employed, self-employed &amp; unemployed per batch</span>
                 </div>
             </div>
+            <div id="batchNavControls" class="hidden items-center gap-1.5 shrink-0">
+                <button type="button" id="batchPrev" class="w-6 h-6 rounded-md flex items-center justify-center text-[#7A3F91] hover:bg-[#EDE4F5] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition" aria-label="Previous batch years">
+                    <i class="fas fa-chevron-left" style="font-size:10px;"></i>
+                </button>
+                <span id="batchPageInfo" class="text-xs font-semibold text-[#333333] tabular-nums select-none min-w-[36px] text-center"></span>
+                <button type="button" id="batchNext" class="w-6 h-6 rounded-md flex items-center justify-center text-[#7A3F91] hover:bg-[#EDE4F5] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition" aria-label="Next batch years">
+                    <i class="fas fa-chevron-right" style="font-size:10px;"></i>
+                </button>
+            </div>
         </div>
         <div class="flex-1 min-h-0 p-[10px]" wire:ignore>
             <canvas id="chartBatch" class="chart-clickable" style="width:100%;height:100%;"></canvas>
         </div>
+        <div class="emp-chart-card-spinner"><span></span><span></span><span></span></div>
     </div>
 
     {{-- ── CHARTS ROW 3: Employment Rate Trend Line — now the sole home for
@@ -2407,6 +2603,15 @@ new class extends Component {
                     <span class="text-sm sm:text-base font-bold text-[#111111] uppercase tracking-[.04em] leading-tight">Employment Rate Trend per Batch Year</span>
                     <span class="text-xs text-[#333333] font-medium leading-tight mt-0.5 hidden sm:block">% of alumni (employed + self-employed) out of total per batch</span>
                 </div>
+            </div>
+            <div id="trendNavControls" class="hidden items-center gap-1.5 shrink-0">
+                <button type="button" id="trendPrev" class="w-6 h-6 rounded-md flex items-center justify-center text-[#7A3F91] hover:bg-[#EDE4F5] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition" aria-label="Previous batch years">
+                    <i class="fas fa-chevron-left" style="font-size:10px;"></i>
+                </button>
+                <span id="trendPageInfo" class="text-xs font-semibold text-[#333333] tabular-nums select-none min-w-[36px] text-center"></span>
+                <button type="button" id="trendNext" class="w-6 h-6 rounded-md flex items-center justify-center text-[#7A3F91] hover:bg-[#EDE4F5] disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent transition" aria-label="Next batch years">
+                    <i class="fas fa-chevron-right" style="font-size:10px;"></i>
+                </button>
             </div>
         </div>
         <div class="flex-1 min-h-0 px-3 sm:px-4 py-2" wire:ignore>
@@ -2576,7 +2781,7 @@ new class extends Component {
          used elsewhere, and highlights matches in blue (mark.ar-hl) like
          Alumni Records. Wraps instead of scrolling if space is tight. ── --}}
     <div class="emp-modal-filter-bar px-4 sm:px-6 lg:px-10 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2 shrink-0"
-         wire:loading.class="opacity-60" wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,clearModalFilters,modalPage">
+         wire:loading.class="opacity-60 pointer-events-none" wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,clearModalFilters,modalPage">
 
         {{-- Row 1: Search + result count --}}
         <div class="flex items-center gap-2 flex-wrap">
@@ -2670,7 +2875,7 @@ new class extends Component {
                     <i class="fas fa-graduation-cap" style="font-size:11px;opacity:.7;"></i>
                     <span>
                         @if(count($modalCourse) === 0)
-                            All Program Codes
+                            All Programs
                         @else
                             {{ $modalCourse[0] }}
                         @endif
@@ -2682,7 +2887,7 @@ new class extends Component {
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
                      class="ar-dropdown-menu" style="display:none;min-width:220px;" @click.stop>
                     <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
-                        <button type="button" @click.stop="clearCourse()" :class="{'active': $wire.modalCourse.length===0}" class="ar-dropdown-item">All Program Codes</button>
+                        <button type="button" @click.stop="clearCourse()" :class="{'active': $wire.modalCourse.length===0}" class="ar-dropdown-item">All Programs</button>
                         @foreach($this->courseMap as $code => $name)
                         <button type="button" @click.stop="selectCourse('{{ $code }}')" :class="{'active': $wire.modalCourse[0]==='{{ $code }}'}" class="ar-dropdown-item">{{ $name }}</button>
                         @endforeach
@@ -2731,15 +2936,15 @@ new class extends Component {
         <table class="w-full border-collapse" style="min-width:700px;">
             <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                 <tr class="border-b-2 border-[#E8E0F0]">
-                    <th class="pl-4 sm:pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Program</th>
-                    <th class="px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Batch</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">
+                    <th class="modal-col-name pl-4 sm:pl-6 lg:pl-10 pr-3 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Name</th>
+                    <th class="modal-col-id px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Student ID</th>
+                    <th class="modal-col-program px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Program</th>
+                    <th class="modal-col-batch px-4 py-2.5 text-center text-xs font-semibold text-[#111111] uppercase tracking-wider">Batch</th>
+                    <th class="modal-col-status px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">
                         {{ $isRelevanceFilter ? 'Relevance' : 'Status' }}
                     </th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Email</th>
-                    <th class="px-4 pr-6 lg:pr-10 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Contact No.</th>
+                    <th class="modal-col-email px-4 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Email</th>
+                    <th class="modal-col-contact px-4 pr-6 lg:pr-10 py-2.5 text-left text-xs font-semibold text-[#111111] uppercase tracking-wider">Contact No.</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
@@ -2751,25 +2956,25 @@ new class extends Component {
                     $dName  = $this->formatName($row->first_name??'',$row->middle_initial??'',$row->last_name??'',$row->suffix??'');
                 @endphp
                 <tr class="bg-white hover:bg-[#F5F0FA] transition-colors duration-100">
-                    <td class="pl-4 sm:pl-6 lg:pl-10 pr-3 py-3">
+                    <td class="modal-col-name pl-4 sm:pl-6 lg:pl-10 pr-3 py-3">
                         <div class="flex items-center gap-2.5">
                             <img src="{{ $photo }}" alt="{{ e($row->first_name ?? '') }}"
                                  class="w-8 h-8 rounded-xl object-cover ring-1 ring-[#E8E0F0] shrink-0">
                             <p class="text-sm font-semibold truncate uppercase text-[#111111]">{!! $this->highlight($dName, $modalSearch) !!}</p>
                         </div>
                     </td>
-                    <td class="px-4 py-3">
+                    <td class="modal-col-id px-4 py-3">
                         <span class="text-sm font-mono font-semibold text-[#111111]">{!! $this->highlight($row->student_id ?? '—', $modalSearch) !!}</span>
                     </td>
-                    <td class="px-4 py-3">
+                    <td class="modal-col-program px-4 py-3">
                         <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold bg-[#F9F7FC] text-[#7a3f91]">
                             {!! $this->highlight($row->course_code ?? '—', $modalSearch) !!}
                         </span>
                     </td>
-                    <td class="px-4 py-3 text-center">
+                    <td class="modal-col-batch px-4 py-3 text-center">
                         <span class="text-sm font-semibold text-[#111111]">{{ $row->batch ?? '—' }}</span>
                     </td>
-                    <td class="px-4 py-3">
+                    <td class="modal-col-status px-4 py-3">
                         @if($isNoRecord || is_null($row->employment_status ?? null))
                             <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border text-[#333333] bg-gray-50 border-gray-200">
                                 No Record
@@ -2786,14 +2991,14 @@ new class extends Component {
                             <span class="text-xs text-[#333333]">—</span>
                         @endif
                     </td>
-                    <td class="px-4 py-3">
+                    <td class="modal-col-email px-4 py-3">
                         @if($row->email ?? null)
                             <span class="text-sm text-[#333333] truncate block max-w-[200px]">{!! $this->highlight(strtolower($row->email), $modalSearch) !!}</span>
                         @else
                             <span class="text-xs text-[#333333]">—</span>
                         @endif
                     </td>
-                    <td class="px-4 pr-6 lg:pr-10 py-3">
+                    <td class="modal-col-contact px-4 pr-6 lg:pr-10 py-3">
                         @if($row->contact_number ?? null)
                             <span class="text-sm text-[#333333]">{{ $row->contact_number }}</span>
                         @else
@@ -3257,7 +3462,35 @@ new class extends Component {
     var trendPageIndex  = 0;
     var allTrendData    = null;
 
-    window.empOpenModal = function (filter, course, batch) {
+    // ── Dashboard-wide click lock ───────────────────────────────────────────
+    // Any clickable widget (stat card, Work Location button, Job Relevance
+    // donut, Employment Breakdown batch bar, Top Programs rank card) calls
+    // markEmpBusy(el) the instant it's clicked. That flags the dashboard
+    // root .emp-busy (dims/disables every other .emp-clickable via CSS) and
+    // flags `el` itself .emp-active (keeps its own look — spinner/blur —
+    // instead of being dimmed like everything else). clearEmpBusy() lifts
+    // the lock once the triggering request actually resolves.
+    function markEmpBusy(el) {
+        var root = document.querySelector('.emp-dashboard-root');
+        document.querySelectorAll('.emp-clickable.emp-active').forEach(function (e) {
+            if (e !== el) e.classList.remove('emp-active');
+        });
+        if (el) el.classList.add('emp-active');
+        if (root) root.classList.add('emp-busy');
+    }
+
+    function clearEmpBusy() {
+        document.querySelectorAll('.emp-clickable.emp-active').forEach(function (e) {
+            e.classList.remove('emp-active');
+        });
+        var root = document.querySelector('.emp-dashboard-root');
+        if (root) root.classList.remove('emp-busy');
+    }
+    window.__empClearBusy = clearEmpBusy;
+    window.markEmpBusy    = markEmpBusy;
+
+    window.empOpenModal = function (filter, course, batch, sourceEl) {
+        markEmpBusy(sourceEl || (window.event && window.event.currentTarget) || null);
         window.dispatchEvent(new CustomEvent('open-emp-modal', {
             detail: { filter: filter || '', batch: batch || null, course: course || '' }
         }));
@@ -3434,6 +3667,7 @@ new class extends Component {
                     var idx    = elements[0].index;
                     var filter = (data.filters && data.filters[idx]) ? data.filters[idx] : '';
                     if (!filter) return;
+                    markEmpBusy(document.getElementById('emp-relevance-card'));
                     window.dispatchEvent(new CustomEvent('open-emp-modal', {
                         detail: { filter: filter, batch: null, course: '' }
                     }));
@@ -3498,6 +3732,7 @@ new class extends Component {
                     if (!elements || !elements.length) return;
                     var batch = slice.labels[elements[0].index];
                     if (batch === undefined || batch === null) return;
+                    markEmpBusy(document.getElementById('emp-batch-card'));
                     window.dispatchEvent(new CustomEvent('open-emp-modal',{detail:{filter:'',batch:parseInt(batch),course:''}}));
                 },
             },
@@ -3802,6 +4037,100 @@ new class extends Component {
         // PHP every time computeStats()+buildCharts() run, so it's a
         // complete, reliable, single source of truth — no fallback needed.
     });
+
+})();
+</script>
+
+<script>
+(function () {
+    'use strict';
+
+    // ─── DASHBOARD-WIDE CLICK SPINNER + LOCK ─────────────────────────────────
+    // Binds every clickable widget on this page — the 5 stat cards, the
+    // Work Location "View Local"/"View Abroad" buttons, the Job Relevance
+    // donut & Employment Breakdown batch bar (handled separately inside
+    // their Chart.js onClick — see markEmpBusy() calls up above — this
+    // block just covers the plain DOM elements: <a>/wire:click stat cards
+    // and the Top Programs rank card/list), so that clicking ANY one of
+    // them locks out every other .emp-clickable via the dashboard-wide
+    // .emp-busy flag (see markEmpBusy()/clearEmpBusy() defined earlier in
+    // this file, and the .emp-dashboard-root.emp-busy CSS rule). Cleared
+    // once the new page loads / the Livewire request finishes (or via
+    // pageshow as a fallback if navigation fails / the page is restored
+    // from bfcache).
+    function clearAllEmpStatCardSpinners() {
+        if (window.__empClearBusy) window.__empClearBusy();
+    }
+
+    function initEmpStatCardSpinners() {
+        // Plain <a> nav cards (Employed / Self-Employed / Unemployed / No Record)
+        document.querySelectorAll('a.stat-card[href]').forEach(function (card) {
+            if (card.__empSpinnerBound) return;
+            card.__empSpinnerBound = true;
+            card.addEventListener('click', function () {
+                card.classList.add('is-loading'); // keeps its own spinner visual
+                markEmpBusy(card);
+            });
+        });
+        // Livewire wire:click stat card (Submitted → openModal)
+        document.querySelectorAll('.stat-card[wire\\:click]').forEach(function (card) {
+            if (card.__empSpinnerBound) return;
+            card.__empSpinnerBound = true;
+            card.addEventListener('click', function () {
+                markEmpBusy(card);
+            });
+        });
+        // Top Programs — single-program rank card (wire:click openModal)
+        var rankCard = document.querySelector('[wire\\:key="emp-top-programs-rank"]');
+        if (rankCard && !rankCard.__empSpinnerBound) {
+            rankCard.__empSpinnerBound = true;
+            rankCard.addEventListener('click', function () { markEmpBusy(rankCard); });
+        }
+        // Top Programs — multi-select list (each row wire:click openModal;
+        // the whole list dims together as one .emp-clickable unit)
+        var multiList = document.querySelector('[wire\\:key="emp-top-programs-multi"]');
+        if (multiList && !multiList.__empSpinnerBound) {
+            multiList.__empSpinnerBound = true;
+            multiList.addEventListener('click', function (e) {
+                if (e.target.closest('[wire\\:click]')) markEmpBusy(multiList);
+            });
+        }
+    }
+
+    window.addEventListener('pageshow', clearAllEmpStatCardSpinners);
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initEmpStatCardSpinners);
+    } else {
+        initEmpStatCardSpinners();
+    }
+    document.addEventListener('livewire:navigated', function () {
+        clearAllEmpStatCardSpinners();
+        document.querySelectorAll('.stat-card.is-loading').forEach(function (el) {
+            el.classList.remove('is-loading');
+        });
+        initEmpStatCardSpinners();
+    });
+
+    // Everything that resolves via Livewire (the "Submitted" stat card,
+    // Job Relevance donut, Employment Breakdown batch bar, Top Programs
+    // rank card/list — all of them ultimately call $wire.openModal via the
+    // open-emp-modal event) resolves through the same Livewire commit, so
+    // one hook releases the lock for all of them — otherwise emp-busy
+    // would stay stuck on until the user navigates away.
+    function hookBusyClearOnCommit() {
+        if (!window.Livewire) return;
+        Livewire.hook('commit', function ({ succeed }) {
+            succeed(function () {
+                clearAllEmpStatCardSpinners();
+                document.querySelectorAll('.stat-card.is-loading').forEach(function (el) {
+                    el.classList.remove('is-loading');
+                });
+            });
+        });
+    }
+    if (window.Livewire) { hookBusyClearOnCommit(); }
+    else { document.addEventListener('livewire:initialized', hookBusyClearOnCommit); }
 
 })();
 </script>

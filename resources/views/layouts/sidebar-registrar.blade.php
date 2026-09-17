@@ -148,6 +148,26 @@
 
         .reg-nav-link.is-active .reg-nav-icon { background: #FFFFFF; color: #7A3F91 !important; }
 
+        /* ── Lock the rest of the menu while one link is navigating ──
+           Same "only the clicked one stays interactive" pattern used
+           on Alumni Records' table rows and the dashboard's stat
+           cards — while nav is in flight, every OTHER sidebar link
+           (and the collapse toggle) goes inert and visibly dimmed so
+           nothing suggests a second click would do anything. The
+           link that's actually loading keeps its own is-navigating
+           look (spinner) untouched. */
+        .reg-sidebar.is-navigating-any .reg-nav-link:not(.is-navigating) {
+            pointer-events: none !important;
+            opacity: 0.45 !important;
+            filter: grayscale(0.3);
+            cursor: default !important;
+        }
+        .reg-sidebar.is-navigating-any .reg-collapse-icon-btn {
+            pointer-events: none !important;
+            opacity: 0.45 !important;
+        }
+        .reg-nav-link.is-navigating { cursor: wait !important; }
+
         /* ── Strip icon color while navigating ──────────────────────
            While a link is mid-navigation (spinner showing), the chip
            drops its clr-* accent color and goes neutral gray — the
@@ -1556,6 +1576,23 @@
         }
         document.querySelectorAll('.reg-nav-link[href]').forEach(prefetchOnIntent);
     });
+
+    // ── Safety net: if a wire:navigate request errors out or the user
+    //    hits back/forward mid-navigation, make sure the sidebar lock
+    //    (navClickedRoute) doesn't stay stuck forever with every other
+    //    link permanently dimmed and unclickable. livewire:navigated
+    //    already clears it on a successful nav — this covers the
+    //    failure paths that event doesn't fire for. ──
+    document.addEventListener('livewire:navigate-failed', function () {
+        document.querySelectorAll('[x-data]').forEach(function (el) {
+            if (el.__x) el.__x.$data.navClickedRoute = null;
+        });
+    });
+    window.addEventListener('popstate', function () {
+        document.querySelectorAll('[x-data]').forEach(function (el) {
+            if (el.__x) el.__x.$data.navClickedRoute = null;
+        });
+    });
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
@@ -1601,7 +1638,8 @@
                 'translate-x-0':  sidebarOpen && !($store.modal && $store.modal.open),
                 'is-collapsed':   sidebarCollapsed,
                 'is-modal-hidden': ($store.modal && $store.modal.open),
-                'no-transition':  !sidebarSettled
+                'no-transition':  !sidebarSettled,
+                'is-navigating-any': navClickedRoute !== null
            }"
            class="reg-sidebar fixed inset-y-0 left-0 z-[9995] w-20 min-w-[5rem] lg:w-72 lg:min-w-[18rem] -translate-x-full transform
                   transition-transform duration-300
@@ -1658,7 +1696,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="navClickedRoute = '{{ $link['route'] }}';"
+                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}';"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
                     <div class="reg-nav-icon {{ $link['color'] }}">

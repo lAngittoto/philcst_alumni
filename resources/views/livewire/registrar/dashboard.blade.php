@@ -540,6 +540,13 @@ new class extends Component {
         .dash-card-clickable.is-loading {
             pointer-events: none;
         }
+        /* Once ANY card is navigating, freeze every other card too —
+           default cursor, no hover/active feedback, no click. Prevents
+           a second card from queuing a click mid-loading. */
+        body.dash-nav-busy .dash-card-clickable:not(.is-loading) {
+            pointer-events: none;
+            cursor: default !important;
+        }
 
         /* ── Chart card loading overlay ──────────────────────────────
            Same dot-loader language again, and the same blur-the-
@@ -1587,12 +1594,15 @@ new class extends Component {
         document.querySelectorAll('a.dash-card-clickable[href]').forEach(function (card) {
             if (card.__dashSpinnerBound) return;
             card.__dashSpinnerBound = true;
-            card.addEventListener('click', function () {
-                // Clear any other card that might still be mid-navigation.
-                document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
-                    if (el !== card) el.classList.remove('is-loading');
-                });
+            card.addEventListener('click', function (e) {
+                // Already navigating somewhere (this card or another) —
+                // ignore the click entirely instead of restarting/racing it.
+                if (document.body.classList.contains('dash-nav-busy')) {
+                    e.preventDefault();
+                    return;
+                }
                 card.classList.add('is-loading');
+                document.body.classList.add('dash-nav-busy');
             });
         });
     }
@@ -1601,6 +1611,7 @@ new class extends Component {
         document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
             el.classList.remove('is-loading');
         });
+        document.body.classList.remove('dash-nav-busy');
     }
 
     // Safety net: if navigation fails or the page is restored from bfcache,

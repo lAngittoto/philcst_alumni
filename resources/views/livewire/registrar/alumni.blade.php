@@ -1043,6 +1043,8 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
         transition: background .12s ease;
     }
     .ar-row:hover { background: #F0ECF5 !important; }
+    .ar-row.is-loading:hover,
+    .ar-table-busy .ar-row:hover { background: #fff !important; }
 
     /* ── Row click loading (same blurred-dots language as the
        dashboard's stat cards) — clicked row blurs + dims while its
@@ -1077,6 +1079,22 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
     .ar-row-spinner-td span:nth-child(3) { animation-delay: 0.3s; }
     .ar-row.is-loading .ar-row-spinner-td { display: flex; }
     .ar-row.is-loading { cursor: wait; }
+
+    /* ── One row at a time — while ANY row's viewProfile() request is in
+       flight (desktop .ar-row or mobile .ar-mrow), every OTHER row gets
+       dimmed, inert, and shows the plain default cursor instead of the
+       pointer — same "only the clicked one stays interactive" lock used
+       on the Employment dashboard's clickable cards. The loading row
+       itself keeps its own is-loading look (blur + dots) untouched. ── */
+    .ar-table-busy .ar-row:not(.is-loading),
+    .ar-table-busy .ar-mrow:not(.is-loading) {
+        pointer-events: none;
+        cursor: default !important;
+        opacity: 0.45;
+        filter: grayscale(0.3);
+        transition: opacity .15s ease, filter .15s ease;
+    }
+    .ar-row, .ar-mrow { transition: opacity .15s ease, filter .15s ease; }
     @keyframes arRowDotPulse {
         0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
         40% { transform: scale(1); opacity: 1; }
@@ -1874,9 +1892,14 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                     <input type="text" x-model="q" @input.debounce.200ms="$wire.set('alumniSearch',q)"
                            placeholder="Search name, ID, email…"
                            aria-label="Search alumni by name, ID, or email"
-                           class="w-full pl-8 pr-3 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
+                           class="w-full pl-8 pr-8 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
                                   placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
                            autocomplete="off" spellcheck="false">
+                    <button type="button" x-show="q" @click="q=''; $wire.set('alumniSearch','')"
+                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#7A3F91] transition"
+                            style="display:none;">
+                        <i class="fas fa-xmark text-xs"></i>
+                    </button>
                 </div>
 
                 <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block" aria-hidden="true"></div>
@@ -2340,7 +2363,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                                 $item->last_name ?? '', $item->suffix ?? ''
                             );
                         @endphp
-                        <tr class="ar-row bg-white {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-row-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})"
+                        <tr class="ar-row bg-white {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-row-{{ $item->id }}" data-ar-id="{{ $item->id }}" x-on:click="window.__arGuardedViewProfile({{ $item->id }}, $wire)"
                             wire:loading.class="is-loading" wire:target="viewProfile({{ $item->id }})">
                             <td class="px-4 py-3 overflow-hidden">
                                 <div class="flex items-center gap-2.5">
@@ -2418,7 +2441,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                             $item->last_name ?? '', $item->suffix ?? ''
                         );
                     @endphp
-                    <div class="ar-mrow {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-mrow-{{ $item->id }}" data-ar-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})"
+                    <div class="ar-mrow {{ in_array($item->id, $highlightIds) ? 'is-notif-target' : '' }}" wire:key="ar-mrow-{{ $item->id }}" data-ar-id="{{ $item->id }}" x-on:click="window.__arGuardedViewProfile({{ $item->id }}, $wire)"
                          wire:loading.class="is-loading" wire:target="viewProfile({{ $item->id }})">
                         <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                              class="w-10 h-10 rounded-lg object-cover shrink-0 ring-1 ring-[#E8E0F0]" draggable="false"
@@ -3312,6 +3335,25 @@ compressImage(file, maxW, maxH, quality) {
 
     var tip = document.getElementById('ar-hover-tip');
 
+    // ── Single in-flight guard for viewProfile() clicks ─────────────
+    // Prevents the "clicked row A, then clicked row B while A was still
+    // loading, and both modals/requests fired" bug. This is a hard JS
+    // gate BEFORE Livewire is ever called — it doesn't rely on
+    // pointer-events/CSS timing, which can lag a frame behind a fast
+    // second click.
+    window.__arProfileRequestBusy = false;
+    window.__arGuardedViewProfile = function (id, wireComponent) {
+        if (window.__arProfileRequestBusy) return; // drop the second click entirely
+        window.__arProfileRequestBusy = true;
+        wireComponent.call('viewProfile', id).finally(function () {
+            window.__arProfileRequestBusy = false;
+        });
+    };
+    // Safety nets in case a request errors out or the page navigates
+    // away mid-flight without ever resolving the promise above.
+    document.addEventListener('livewire:navigating', function () { window.__arProfileRequestBusy = false; });
+    document.addEventListener('livewire:navigated', function () { window.__arProfileRequestBusy = false; });
+
     function isHoverCapable() {
         return window.matchMedia('(hover: hover) and (pointer: fine)').matches
             && window.innerWidth > 768;
@@ -3336,7 +3378,12 @@ compressImage(file, maxW, maxH, quality) {
     document.addEventListener('mousemove', function (e) {
         if (!tip || !isHoverCapable()) return;
         var row = e.target.closest ? e.target.closest('.ar-row') : null;
-        if (row) {
+        // Don't show "View Details" while ANY row is mid-request (the
+        // clicked row is .is-loading, or the table is locked via
+        // .ar-table-busy for the others) — matches the no-hover-bg fix
+        // above so nothing suggests the row is clickable right now.
+        var tableBusy = document.querySelector('.ar-table-busy');
+        if (row && !tableBusy && !row.classList.contains('is-loading')) {
             tip.style.left = e.clientX + 'px';
             tip.style.top  = e.clientY + 'px';
             tip.classList.add('visible');
