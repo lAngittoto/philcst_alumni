@@ -11,9 +11,12 @@ use App\Models\JobOption;
 use App\Models\Course;
 use App\Models\AuditLog;
 use App\Http\Controllers\AlumniNotificationController;
+use App\Mail\NewJobPostingMail;
+use App\Models\Alumni;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 
 new class extends Component {
@@ -277,6 +280,174 @@ new class extends Component {
                 'is_flagged'    => false,
             ]);
         } catch (\Throwable) {}
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Email every alumnus whose college matches this job's target_college(s).
+    // Mirrors the same college-match rule used for validation above
+    // (Alumni::whereHas('course', fn($q) => $q->where('college', $college))),
+    // so only alumni actually covered by the post's target college(s) get
+    // emailed — e.g. if only BSIT was selected, only BSIT alumni receive it.
+    // Sends a teaser only (title/company/location/type/deadline) — full
+    // description/qualifications/salary stay behind the portal link, by
+    // design, so the email drives a visit rather than replacing it.
+    //
+    // WHY: none of ->send(), ->queue() (with no worker running), or
+    // dispatch()->afterResponse() actually solve this on XAMPP/php artisan
+    // serve — afterResponse() still blocks the SAME PHP process/request
+    // until it finishes, because there's no FastCGI (fastcgi_finish_request)
+    // to detach the connection early on this local dev server. So the
+    // posting page still waits for every email to send either way.
+    //
+    // THE FIX: ->queue() puts every email onto the `jobs` DB table INSTANTLY
+    // (just an INSERT — no network, no waiting) so the posting request
+    // finishes right away. Then, right after that, we spawn a completely
+    // separate OS-level background process — `start /B php artisan
+    // queue:work --stop-when-empty` — using popen(). Windows starts that
+    // process and hands control back to THIS PHP script immediately
+    // (popen() with "start /B" does not wait for it to finish); the spawned
+    // process does all the actual emailing on its own, fully independent of
+    // this HTTP request. No terminal to babysit, no separate composer
+    // package, no manual `php artisan queue:work` typed by hand ever again.
+    // ─────────────────────────────────────────────────────────────────────
+    // Quick pre-check so we don't burn an SMTP round-trip (and time) on an
+    // email address that's obviously never going to deliver:
+    //   1. Format check — catches typos, missing @, empty domain, etc.
+    //      instantly, no network call.
+    //   2. MX record check — confirms the DOMAIN can actually receive mail
+    //      at all (catches typo'd domains like "gmial.com", made-up
+    //      domains, etc.). This is a DNS lookup, not a full mailbox check —
+    //      it can't tell you the exact mailbox exists, but it reliably
+    //      filters out domains that can't receive mail at all.
+    // This check runs INSIDE the Mailable's build (via a guard in the mail
+    // class isn't needed) — instead we filter recipients before queuing,
+    // which is a fast in-memory DNS check per address, done before the
+    // page returns (typically well under a second per domain — the actual
+    // SMTP handshake, not this DNS lookup, was what caused the 120s
+    // timeout before).
+    // ─────────────────────────────────────────────────────────────────────
+    private static function isEmailPlausiblyValid(string $email): bool
+    {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        $domain = substr(strrchr($email, '@'), 1);
+        if (!$domain) {
+            return false;
+        }
+
+        return getmxrr($domain, $mxRecords)
+            || checkdnsrr($domain, 'A')
+            || checkdnsrr($domain, 'AAAA');
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Queues every teaser email (instant DB inserts), then spawns a
+    // detached background `queue:work` process so sending happens fully
+    // outside this request — the posting page returns immediately either
+    // way, whether there are 5 or 5,000 matched alumni.
+    // ─────────────────────────────────────────────────────────────────────
+    private function notifyMatchedAlumniOfNewJob(JobPosting $job): void
+    {
+        $colleges = $job->target_college
+            ? array_filter(array_map('trim', explode(',', $job->target_college)))
+            : [];
+
+        // DEBUG — remove once confirmed working. Logs the exact
+        // target_college string saved on the job and the exact college
+        // list we're about to match against, so we can see immediately
+        // if it's a mismatch (extra spaces, different casing, "Education"
+        // vs "College of Education", etc.) versus genuinely zero alumni
+        // in that college.
+        \Illuminate\Support\Facades\Log::info('[JobMail][Director] target_college raw: ' . var_export($job->target_college, true));
+        \Illuminate\Support\Facades\Log::info('[JobMail][Director] parsed colleges: ' . json_encode($colleges));
+
+        $query = Alumni::query()
+            ->whereNotNull('email')
+            ->where('email', '!=', '');
+
+        if (!empty($colleges)) {
+            $query->whereHas('course', function ($q) use ($colleges) {
+                $q->whereIn('college', $colleges);
+            });
+        }
+
+        $recipients = $query
+            ->select(['id', 'first_name', 'last_name', 'email', 'course_code'])
+            ->get();
+
+        // DEBUG
+        \Illuminate\Support\Facades\Log::info('[JobMail][Director] matched alumni count: ' . $recipients->count());
+
+        if ($recipients->isEmpty()) {
+            return;
+        }
+
+        $queuedCount = 0;
+
+        foreach ($recipients as $alumnus) {
+            if (!self::isEmailPlausiblyValid($alumnus->email)) {
+                \Illuminate\Support\Facades\Log::info(
+                    "Skipped new-job-posting email for alumnus #{$alumnus->id} — invalid/undeliverable address: {$alumnus->email}"
+                );
+                continue;
+            }
+
+            // ->queue() here is just a fast DB INSERT into the `jobs`
+            // table — no network call, no waiting. Safe to do in a loop.
+            Mail::to($alumnus->email)->queue(new NewJobPostingMail($job, $alumnus));
+            $queuedCount++;
+        }
+
+        if ($queuedCount === 0) {
+            return;
+        }
+
+        $this->spawnBackgroundQueueWorker();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Fires a detached, one-shot queue worker that exits on its own once
+    // the queue is empty (--stop-when-empty) — so it never lingers as a
+    // zombie process. `start /B` is the Windows equivalent of "run this
+    // and don't wait for it" (background, no new window). popen() returns
+    // control to THIS script the moment the `start` command itself has
+    // launched the child process — it does not wait for queue:work to
+    // finish, which is exactly the "don't make the director/organizer
+    // wait" behavior needed here.
+    //
+    // If this project is later deployed to a Linux server instead of
+    // Windows, swap the exec string below for the Linux equivalent:
+    //   nohup php artisan queue:work --stop-when-empty > /dev/null 2>&1 &
+    // ─────────────────────────────────────────────────────────────────────
+    private function spawnBackgroundQueueWorker(): void
+    {
+        try {
+            $phpBinary = PHP_BINARY; // path to the exact php.exe currently running this request
+            $artisan   = base_path('artisan');
+
+            if (stripos(PHP_OS, 'WIN') === 0) {
+                $cmd = sprintf(
+                    'start /B "" %s %s queue:work --stop-when-empty --tries=1',
+                    escapeshellarg($phpBinary),
+                    escapeshellarg($artisan)
+                );
+                pclose(popen('cmd /C "' . $cmd . '"', 'r'));
+            } else {
+                $cmd = sprintf(
+                    'nohup %s %s queue:work --stop-when-empty --tries=1 > /dev/null 2>&1 &',
+                    escapeshellarg($phpBinary),
+                    escapeshellarg($artisan)
+                );
+                exec($cmd);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning(
+                "Could not spawn background queue worker for new-job-posting emails: {$e->getMessage()}. " .
+                "Emails are queued in the jobs table but need a manual `php artisan queue:work` to send."
+            );
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1039,6 +1210,8 @@ new class extends Component {
             'updated_by'               => $this->myDisplayName,
             'updated_by_role'          => auth()->user()->role,
         ]);
+
+        $this->notifyMatchedAlumniOfNewJob($job);
 
         $this->writeAuditLog(
             action:      'created',
