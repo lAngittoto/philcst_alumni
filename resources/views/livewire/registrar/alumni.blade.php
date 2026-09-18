@@ -1904,15 +1904,13 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
                 <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block" aria-hidden="true"></div>
 
-                <div class="flex items-center gap-1.5 shrink-0" role="group" aria-label="Filter by profile status"
-                     x-data="{ active:'{{ $alumniProfileFilter }}' }"
-                     x-init="$wire.$watch('alumniProfileFilter', v => active = v)">
-                    <button type="button" @click="active='all'" wire:click="$set('alumniProfileFilter','all')"
-                            :class="{ 'active-all': active==='all' }" :aria-pressed="active==='all'" class="ar-status-pill">All</button>
-                    <button type="button" @click="active='complete'" wire:click="$set('alumniProfileFilter','complete')"
-                            :class="{ 'active-complete': active==='complete' }" :aria-pressed="active==='complete'" class="ar-status-pill">Complete</button>
-                    <button type="button" @click="active='incomplete'" wire:click="$set('alumniProfileFilter','incomplete')"
-                            :class="{ 'active-incomplete': active==='incomplete' }" :aria-pressed="active==='incomplete'" class="ar-status-pill">Pending</button>
+                <div class="flex items-center gap-1.5 shrink-0" role="group" aria-label="Filter by profile status">
+                    <button type="button" wire:click="$set('alumniProfileFilter','all')"
+                            :class="{ 'active-all': $wire.alumniProfileFilter==='all' }" :aria-pressed="$wire.alumniProfileFilter==='all'" class="ar-status-pill">All</button>
+                    <button type="button" wire:click="$set('alumniProfileFilter','complete')"
+                            :class="{ 'active-complete': $wire.alumniProfileFilter==='complete' }" :aria-pressed="$wire.alumniProfileFilter==='complete'" class="ar-status-pill">Complete</button>
+                    <button type="button" wire:click="$set('alumniProfileFilter','incomplete')"
+                            :class="{ 'active-incomplete': $wire.alumniProfileFilter==='incomplete' }" :aria-pressed="$wire.alumniProfileFilter==='incomplete'" class="ar-status-pill">Pending</button>
                 </div>
             </div>
 

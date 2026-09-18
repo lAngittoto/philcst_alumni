@@ -475,6 +475,23 @@ new class extends Component {
     .dash-card-clickable.is-loading {
         pointer-events: none;
     }
+
+    /* ── Lock OTHER cards while one card is loading ──────────────────
+       The instant a card is clicked, every other .dash-card-clickable
+       gets .is-blocked: clicks are swallowed (pointer-events: none),
+       the cursor drops back to not-allowed instead of pointer, and the
+       card dims slightly so it visibly reads as "disabled for now".
+       Cleared together with the spinner on livewire:navigated / pageshow. */
+    .dash-card-clickable.is-blocked {
+        pointer-events: none !important;
+        cursor: not-allowed !important;
+        opacity: 0.55;
+        filter: grayscale(25%);
+    }
+    .dash-card-clickable.is-blocked:hover {
+        box-shadow: none !important;
+        border-color: inherit !important;
+    }
 </style>
 
 {{-- ═══ DASHBOARD ROOT ════════════════════════════════════════════ --}}
@@ -523,7 +540,7 @@ new class extends Component {
                 <div class="relative w-full overflow-hidden shrink-0 h-[300px] sm:h-[220px] bg-[#EDE0F5]">
                     <img src="{{ $photoUrl }}"
                          alt="{{ $alumniFirstName }}"
-                         class="w-full h-full object-cover object-top"
+                         class="w-full h-full object-cover object-[center_25%]"
                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                     <div class="w-full h-full items-center justify-center font-black text-white hidden text-[5rem] bg-[#7A3F91]" style="display:none;">
                         {{ strtoupper(substr($alumniFirstName, 0, 1)) ?: '?' }}
@@ -1043,30 +1060,40 @@ new class extends Component {
         document.querySelectorAll('a.dash-card-clickable[href]').forEach(function (card) {
             if (card.__dashSpinnerBound) return;
             card.__dashSpinnerBound = true;
-            card.addEventListener('click', function () {
-                clearOtherDashCardSpinners(card);
-                card.classList.add('is-loading');
+            card.addEventListener('click', function (e) {
+                if (card.classList.contains('is-blocked')) { e.preventDefault(); return; }
+                lockDashCards(card);
             });
         });
         document.querySelectorAll('button.dash-card-nav-btn').forEach(function (card) {
             if (card.__dashSpinnerBound) return;
             card.__dashSpinnerBound = true;
-            card.addEventListener('click', function () {
-                clearOtherDashCardSpinners(card);
-                card.classList.add('is-loading');
+            card.addEventListener('click', function (e) {
+                if (card.classList.contains('is-blocked')) { e.preventDefault(); e.stopPropagation(); return; }
+                lockDashCards(card);
             });
         });
     }
 
-    function clearOtherDashCardSpinners(except) {
-        document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
-            if (el !== except) el.classList.remove('is-loading');
+    // The clicked card gets .is-loading (spinner shows).
+    // Every OTHER dash-card-clickable gets .is-blocked (no click,
+    // no pointer cursor, dimmed) so the user literally cannot fire
+    // off a second navigation while the first one is still loading.
+    function lockDashCards(clicked) {
+        document.querySelectorAll('.dash-card-clickable').forEach(function (el) {
+            if (el === clicked) {
+                el.classList.remove('is-blocked');
+                el.classList.add('is-loading');
+            } else {
+                el.classList.remove('is-loading');
+                el.classList.add('is-blocked');
+            }
         });
     }
 
     function clearAllDashCardSpinners() {
-        document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
-            el.classList.remove('is-loading');
+        document.querySelectorAll('.dash-card-clickable').forEach(function (el) {
+            el.classList.remove('is-loading', 'is-blocked');
         });
     }
 

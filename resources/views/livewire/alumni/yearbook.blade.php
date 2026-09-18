@@ -305,6 +305,22 @@ new class extends Component {
 <div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height yb-no-select"
      oncontextmenu="return false;"
      x-data="{
+        // ── One-filter-at-a-time lock ──────────────────────────────
+        // 'search' | 'course' | null — whichever filter currently has
+        // something typed/selected owns the lock. While one is active,
+        // the other control is disabled (search input can't be typed
+        // into, dropdown button can't be opened) so they can't collide.
+        activeFilter: null,
+        // True while a setCourse/clearCourse request is in flight.
+        // Needed on top of activeFilter: the click handlers used to
+        // toggle purely client-side (instant), so a fast double-click
+        // on the dropdown could fire a second wire:click before the
+        // first request's response came back and actually applied the
+        // filter — the two commits raced each other. Blocking input
+        // while courseBusy is true forces 'wait for this filter to
+        // finish' before another click is accepted, same as the Reset
+        // button already does via wire:loading.attr='disabled'.
+        courseBusy: false,
         setAvailHeight() {
             const rect = this.$el.getBoundingClientRect();
             const bottomSafe = 8;
@@ -1110,6 +1126,16 @@ new class extends Component {
                     init() {
                         this.q = $wire.search ?? '';
                         $wire.$watch('search', v => { if (v !== this.q) this.q = v; });
+                        // Keep the shared lock in sync even if $search
+                        // changes from outside this input (e.g. the
+                        // Reset button clearing it server-side).
+                        this.$watch('q', v => {
+                            if (v !== '') {
+                                this.activeFilter = 'search';
+                            } else if (this.activeFilter === 'search') {
+                                this.activeFilter = null;
+                            }
+                        });
                     }
                  }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-xs"
@@ -1119,14 +1145,16 @@ new class extends Component {
                        @input.debounce.300ms="$wire.set('search', q)"
                        placeholder="Search…"
                        class="yb-search-input"
-                       :class="{ 'yb-search-input-active': q !== '' }"
+                       :class="{ 'yb-search-input-active': q !== '', 'opacity-50 cursor-not-allowed': activeFilter === 'course' || courseBusy }"
+                       :disabled="activeFilter === 'course' || courseBusy"
                        autocomplete="off" spellcheck="false">
             </div>
 
             <div class="relative" x-data="{ open: false }" @click.outside="open = false">
                 <button type="button"
-                        @click="open = !open"
-                        :class="{ 'active': $wire.course !== '' }"
+                        @click="if (activeFilter === 'search' || courseBusy) return; open = !open"
+                        :class="{ 'active': $wire.course !== '', 'opacity-50 cursor-not-allowed': activeFilter === 'search' || courseBusy }"
+                        :disabled="activeFilter === 'search' || courseBusy"
                         class="yb-dd-btn">
                     @if($course !== '')
                         <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
@@ -1144,15 +1172,31 @@ new class extends Component {
                      class="yb-dd-panel"
                      style="display:none; min-width:280px;">
                     <button type="button"
-                            wire:click="clearCourse"
-                            @click="open = false"
-                            :class="{ 'sel': $wire.course === '' }"
+                            :disabled="courseBusy"
+                            :class="{ 'sel': $wire.course === '', 'opacity-50 cursor-not-allowed': courseBusy }"
+                            @click="
+                                if (courseBusy) return;
+                                open = false;
+                                courseBusy = true;
+                                $wire.clearCourse().then(() => {
+                                    activeFilter = null;
+                                    courseBusy = false;
+                                });
+                            "
                             class="yb-dd-item">All Programs</button>
                     @forelse($this->courses as $c)
                     <button type="button"
-                            wire:click="setCourse('{{ $c->code }}')"
-                            @click="open = false"
-                            :class="{ 'sel': $wire.course === '{{ $c->code }}' }"
+                            :disabled="courseBusy"
+                            :class="{ 'sel': $wire.course === '{{ $c->code }}', 'opacity-50 cursor-not-allowed': courseBusy }"
+                            @click="
+                                if (courseBusy) return;
+                                open = false;
+                                courseBusy = true;
+                                $wire.setCourse('{{ $c->code }}').then(() => {
+                                    activeFilter = 'course';
+                                    courseBusy = false;
+                                });
+                            "
                             class="yb-dd-item">{{ $c->name }}</button>
                     @empty
                     <p class="px-3 py-2 text-xs" style="color:#999;">No other courses in your batch yet.</p>
@@ -1163,6 +1207,7 @@ new class extends Component {
             {{-- Reset --}}
             @php $hasActiveFilters = $search !== '' || $course !== ''; @endphp
             <button wire:click="resetFilters"
+                    @click="activeFilter = null"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
@@ -1273,6 +1318,7 @@ new class extends Component {
                         <p class="text-sm mt-1" style="color:#555555;">Try adjusting your filters.</p>
                         @if($search || $course)
                         <button wire:click="resetFilters"
+                                @click="activeFilter = null"
                                 class="mt-4 px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer"
                                 style="background-color:#7a3f91;">
                             <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters

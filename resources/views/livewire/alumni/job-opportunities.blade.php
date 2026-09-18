@@ -642,6 +642,26 @@ select.filter-input {
     pointer-events: none;
 }
 
+/* ── Global "one loading at a time" lock ──────────────────────────
+   Applied to the cards grid + filter bar while a card is opening OR
+   a filter/search request is in flight, so the alumni can't click
+   another card, change a filter, or trigger pagination mid-request. */
+.jb-body-busy {
+    pointer-events: none !important;
+    cursor: default !important;
+}
+.jb-body-busy * {
+    cursor: default !important;
+}
+.jb-body-busy [data-jb-card]:not(.is-loading) {
+    opacity: 0.55;
+    cursor: default !important;
+}
+.jb-body-busy [data-jb-card].is-loading {
+    pointer-events: none !important;
+    cursor: default !important;
+}
+
 .card-share-btn {
     position: relative;
     display: inline-flex; align-items: center; justify-content: center;
@@ -744,17 +764,17 @@ select.filter-input {
 .philcst-post-card { background: #fff; border: 1px solid #E8E0F0; border-radius: 14px; overflow: hidden; }
 .philcst-post-banner { width: 100%; height: 180px; object-fit: cover; display: block; background: #f3f4f6; }
 .philcst-post-ribbon {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
     color: #7a3f91; background: #f5eef9; border: 1px solid #e3cdf0;
-    padding: 4px 10px; border-radius: 999px;
+    padding: 5px 12px; border-radius: 999px;
 }
-.philcst-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.philcst-checklist li { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; line-height: 1.55; color: #333333; }
+.philcst-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.philcst-checklist li { display: flex; align-items: flex-start; gap: 10px; font-size: 16px; line-height: 1.6; color: #333333; }
 .philcst-checklist li .chk {
-    flex-shrink: 0; width: 18px; height: 18px; border-radius: 5px;
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
     background: #f5eef9; color: #7a3f91;
-    display: flex; align-items: center; justify-content: center; font-size: 10px; margin-top: 1px;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; margin-top: 1px;
 }
 
 /* ─────────────────────────────────────────────
@@ -766,12 +786,12 @@ select.filter-input {
 ───────────────────────────────────────────── */
 .detail-side-item { display: flex; align-items: flex-start; gap: 10px; }
 .detail-side-icon {
-    flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px;
+    flex-shrink: 0; width: 34px; height: 34px; border-radius: 9px;
     background: #f5eef9; color: #7a3f91;
-    display: flex; align-items: center; justify-content: center; font-size: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
 }
-.detail-side-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #666; margin: 0; }
-.detail-side-value { font-size: 13.5px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
+.detail-side-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #666; margin: 0; }
+.detail-side-value { font-size: 16px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
 
 /* ─────────────────────────────────────────────
    RESPONSIVE — icon-only on small / touch screens:
@@ -897,8 +917,25 @@ select.filter-input {
         </div>
     </div>
 
-    {{-- ══ CONTENT BLOCK ══ --}}
-    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative">
+    {{-- ══ CONTENT BLOCK ══ ── wrapped so ONE global "busy" flag blocks
+         every other click (filters, cards, pagination) while a search,
+         filter, sort, page-change, or "View Details" request is in
+         flight — prevents opening a second job or changing filters
+         mid-request. ── --}}
+    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
+         x-data="{ jbBusy: false }"
+         x-init="
+            Livewire.hook('commit', ({ component, commit, succeed, fail }) => {
+                const targets = ['search','filterType','filterLevel','filterSort','previousPage','nextPage','page','viewJob','resetFilters'];
+                const hit = (commit.calls || []).some(c => targets.includes(c.method))
+                    || Object.keys(commit.updates || {}).some(k => targets.includes(k));
+                if (!hit) return;
+                jbBusy = true;
+                succeed(() => { jbBusy = false; });
+                fail(() => { jbBusy = false; });
+            });
+         "
+         :class="{ 'jb-body-busy': jbBusy }">
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
@@ -1239,50 +1276,46 @@ select.filter-input {
         </div>
     </div>
 
-    <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row lg:overflow-hidden">
+    <div class="flex-1 min-h-0 overflow-hidden bg-gray-100 flex items-stretch justify-center p-3 sm:p-4">
+        <div class="w-full max-w-[1400px] bg-white border border-[#E8E0F0] rounded-2xl overflow-hidden flex flex-col">
+            <div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 sm:px-8 py-5 flex flex-col gap-4">
 
-        <div class="w-full lg:w-[340px] lg:flex-none bg-white border-b lg:border-b-0 lg:border-r border-gray-200 lg:overflow-y-auto lg:scroll-thin flex flex-col">
+                {{-- Top section: banner + hiring intro side-by-side with job title/tags --}}
+                <div class="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-5 items-start">
+                    <img src="{{ $detailImg }}" alt="{{ $job->job_title }}"
+                         class="w-full h-36 lg:h-full object-contain bg-white border border-gray-100 rounded-xl"
+                         onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
 
-            <img src="{{ $detailImg }}" alt="{{ $job->job_title }}"
-                 class="w-full h-48 sm:h-56 object-contain flex-shrink-0"
-                 onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
-
-            <div class="p-5 flex flex-col gap-4">
-                @if($isPhilcst)
-                    <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[10px]"></i> Official PHILCST Posting</span>
-                @endif
-
-                <div>
-                    <p class="text-[11px] font-bold uppercase tracking-[.16em] mb-1" style="color:#666;">Job Title</p>
-                    <h2 class="text-xl font-semibold leading-snug mb-1.5" style="color:#333333;">{{ $job->job_title }}</h2>
-                    <p class="text-sm font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $job->company_name }}</p>
-                </div>
-
-                <div class="flex flex-wrap gap-1.5">
-                    @if($isExpired)
-                        <span class="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                            <i class="fas fa-ban mr-1 text-[10px]"></i>Expired
-                        </span>
-                    @endif
-                    @if($displayType)
-                        <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $displayType }}</span>
-                    @endif
-                    <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->employment_type }}</span>
-                    <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-gray-200 bg-white" style="color:#333333;">{{ $job->experience_level }}</span>
-                    @if($isUrgent)
-                        <span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded border border-red-200 bg-white text-red-700">
-                            <i class="fas fa-fire mr-1 text-[10px]"></i>{{ $dlLabel }}
-                        </span>
-                    @endif
+                    <div class="flex flex-col gap-2.5 min-w-0">
+                        @if($isPhilcst)
+                            <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[11px]"></i> Official PHILCST Posting</span>
+                        @endif
+                        <p class="text-2xl font-bold leading-snug" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
+                        <p class="text-base leading-relaxed" style="color:#333333;">
+                            @if($isPhilcst)
+                                The Philippine College of Science and Technology is looking for passionate, dedicated individuals to join our growing academic community! ✨
+                            @else
+                                {{ $job->company_name }} is looking for passionate, dedicated individuals to join their growing team! ✨
+                            @endif
+                        </p>
+                        @if($isExpired)
+                        <div class="flex flex-wrap gap-2 mt-1">
+                            <span class="inline-flex items-center text-sm font-bold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+                                <i class="fas fa-ban mr-1.5 text-xs"></i>Expired
+                            </span>
+                        </div>
+                        @endif
+                    </div>
                 </div>
 
                 <div class="border-t border-gray-100"></div>
 
-                <div class="flex flex-col gap-4">
+                {{-- Meta info row 1: Employer / Location / Salary / Deadline / Posted, side by side --}}
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-building"></i></span>
                         <div class="min-w-0">
-                            <p class="detail-side-label">Company</p>
+                            <p class="detail-side-label">Employer</p>
                             <p class="detail-side-value">{{ $job->company_name }}</p>
                         </div>
                     </div>
@@ -1323,14 +1356,38 @@ select.filter-input {
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <div class="flex-1 min-w-0 lg:overflow-y-auto lg:scroll-thin bg-gray-100">
-            <div class="max-w-[900px] mx-auto px-5 py-4 pb-8 flex flex-col gap-4">
+                <div class="border-t border-gray-100"></div>
+
+                {{-- Meta info row 2: Source / Employment Type / Experience Level, labeled like row 1 --}}
+                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                    @if($displayType)
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-tag"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Employer Type</p>
+                            <p class="detail-side-value">{{ $displayType }}</p>
+                        </div>
+                    </div>
+                    @endif
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-briefcase"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Employment Type</p>
+                            <p class="detail-side-value">{{ $job->employment_type }}</p>
+                        </div>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-chart-line"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Experience Level</p>
+                            <p class="detail-side-value">{{ $job->experience_level }}</p>
+                        </div>
+                    </div>
+                </div>
 
                 @if($isUrgent)
-                <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg px-4 py-3 text-sm text-gray-900 leading-relaxed">
+                <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
                     @if($daysLeft === 0) Deadline is <strong class="text-red-600">today</strong>. Apply before it's too late.
                     @elseif($daysLeft === 1) Only <strong class="text-red-600">1 day</strong> left — apply now.
                     @else Only <strong class="text-red-600">{{ $daysLeft }} days</strong> left. Closes {{ $dl->format('F d, Y') }}.
@@ -1338,86 +1395,45 @@ select.filter-input {
                 </div>
                 @endif
 
-                @if($isPhilcst)
-                    {{-- ═══ PHILCST "OFFICIAL POST" LAYOUT ═══ --}}
-                    <div class="philcst-post-card">
-                        <div class="px-5 py-4 flex flex-col gap-4">
-                            <div>
-                                <p class="text-lg font-bold" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
-                                <p class="text-sm mt-1 leading-relaxed" style="color:#333333;">
-                                    The Philippine College of Science and Technology is looking for passionate, dedicated individuals to join our growing academic community! ✨
-                                </p>
-                            </div>
+                <div class="border-t border-gray-100"></div>
 
-                            <div>
-                                <p class="text-sm font-bold mb-2" style="color:#333333;">📄 Job Description:</p>
-                                <div class="pre-wrap text-[15px] leading-relaxed" style="color:#333333;">{{ trim($job->description) }}</div>
-                            </div>
-
-                            @if($hasQual)
-                            <div>
-                                <p class="text-sm font-bold mb-2" style="color:#333333;">📌 Requirements &amp; Qualifications:</p>
-                                <ul class="philcst-checklist">
-                                    @foreach($qualLines as $line)
-                                        <li><span class="chk"><i class="fas fa-check"></i></span><span>{{ $line }}</span></li>
-                                    @endforeach
-                                </ul>
-                            </div>
-                            @endif
-
-                            @if($hasInstr)
-                            <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-4 py-3">
-                                <p class="text-sm font-bold text-emerald-800 mb-2">📝 How to Apply:</p>
-                                <ul class="philcst-checklist">
-                                    @foreach($instrLines as $line)
-                                        <li><span class="chk" style="background:#d1fae5;color:#047857;"><i class="fas fa-arrow-right"></i></span><span>{{ $line }}</span></li>
-                                    @endforeach
-                                </ul>
-                            </div>
-                            @endif
-                        </div>
-                    </div>
-                @else
-                    <div class="bg-white border border-gray-200 rounded-xl px-5 py-4">
-                        <p class="text-lg font-bold" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
-                        <p class="text-sm mt-1 leading-relaxed" style="color:#333333;">
-                            {{ $job->company_name }} is looking for passionate, dedicated individuals to join their growing team! ✨
-                        </p>
-                    </div>
-
-                    <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                        <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                            <span class="text-[11px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Job Description</span>
-                        </div>
-                        <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->description }}</div>
+                {{-- ═══ Job Description / Qualifications / How to Apply ═══ --}}
+                <div class="grid grid-cols-1 {{ ($hasQual || $hasInstr) ? 'lg:grid-cols-2' : '' }} gap-5">
+                    <div class="border border-gray-200 rounded-xl px-5 py-4">
+                        <p class="text-base font-bold mb-2.5" style="color:#333333;">📄 Job Description:</p>
+                        <div class="pre-wrap text-base leading-relaxed" style="color:#333333;">{{ trim($job->description) }}</div>
                     </div>
 
                     @if($hasQual || $hasInstr)
-                    <div class="{{ ($hasQual && $hasInstr) ? 'grid grid-cols-1 md:grid-cols-2 gap-4' : '' }}">
+                    <div class="flex flex-col gap-4">
                         @if($hasQual)
-                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                            <div class="px-5 py-3 border-b border-gray-100 bg-gray-50">
-                                <span class="text-[11px] font-bold uppercase tracking-[.14em] detail-label" style="color:#333333;">Qualifications</span>
-                            </div>
-                            <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->qualifications }}</div>
+                        <div class="border border-gray-200 rounded-xl px-5 py-4">
+                            <p class="text-base font-bold mb-2.5" style="color:#333333;">📌 Requirements &amp; Qualifications:</p>
+                            <ul class="philcst-checklist">
+                                @foreach($qualLines as $line)
+                                    <li><span class="chk"><i class="fas fa-check"></i></span><span>{{ $line }}</span></li>
+                                @endforeach
+                            </ul>
                         </div>
                         @endif
+
                         @if($hasInstr)
-                        <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                            <div class="px-5 py-3 border-b border-gray-100 bg-emerald-50">
-                                <span class="text-[11px] font-bold uppercase tracking-[.14em] detail-label text-emerald-700">How to Apply</span>
-                            </div>
-                            <div class="px-5 py-4 text-[15px] leading-relaxed pre-wrap" style="color:#333333;">{{ $job->application_instructions }}</div>
+                        <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-5 py-4">
+                            <p class="text-base font-bold text-emerald-800 mb-2.5">📝 How to Apply:</p>
+                            <ul class="philcst-checklist">
+                                @foreach($instrLines as $line)
+                                    <li><span class="chk" style="background:#d1fae5;color:#047857;"><i class="fas fa-arrow-right"></i></span><span>{{ $line }}</span></li>
+                                @endforeach
+                            </ul>
                         </div>
                         @endif
                     </div>
                     @endif
-                @endif
+                </div>
 
-                <p class="text-center text-xs" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
+                <p class="text-center text-sm" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
             </div>
         </div>
-
     </div>
 
 </div>
@@ -1976,6 +1992,15 @@ select.filter-input {
         function onCardClick(e) {
             if (e.target.closest('[data-jb-share]')) return;
             const card = e.currentTarget;
+            // If another card is already loading, ignore this click —
+            // prevents a second job from opening mid-request even in the
+            // brief window before Alpine's jbBusy lock takes effect.
+            const alreadyLoading = document.querySelector('[data-jb-card].is-loading');
+            if (alreadyLoading && alreadyLoading !== card) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
             clearOtherJbCardSpinners(card);
             card.classList.add('is-loading');
             hide();

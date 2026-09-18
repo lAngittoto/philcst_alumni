@@ -230,6 +230,21 @@ new class extends Component {
         return (int) ceil(now()->diffInSeconds($unlockAt) / 86400);
     }
 
+    // ── Live "has anything actually changed?" check used to enable/disable
+    //    the Save button in real time. Same comparison saveProfile() uses
+    //    server-side (case-insensitive, trimmed) so re-typing the exact
+    //    original value — even after clearing and retyping it — correctly
+    //    flips the button back to disabled instead of leaving it stuck on. ──
+    public function getIsProfileDirtyProperty(): bool
+    {
+        foreach ($this->editableKeys() as $key) {
+            $snap    = trim((string)($this->snapshot[$key] ?? ''));
+            $current = trim((string)($this->$key ?? ''));
+            if (strtoupper($snap) !== strtoupper($current)) return true;
+        }
+        return false;
+    }
+
     // ══════════ EMPLOYMENT COOLDOWN ══════════
     public function getCanEditEmploymentProperty(): bool
     {
@@ -1084,8 +1099,8 @@ new class extends Component {
     font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     color: #333333; margin: 0; line-height: 1.4; padding-top: 1px;
 }
-.field-value { font-size: 1rem; font-weight: 600; color: #333333; word-break: break-word; margin: 0; }
-.field-value-empty { font-size: 0.9rem; font-style: italic; font-weight: 400; color: #333333; margin: 0; }
+.field-value { font-size: 1.15rem; font-weight: 700; color: #111111; word-break: break-word; margin: 0; }
+.field-value-empty { font-size: 0.95rem; font-style: italic; font-weight: 500; color: #6b7280; margin: 0; }
 
 .addr-toggle {
     display: inline-flex; align-items: center; background: #f3f4f6; border: 1px solid #dcdcdc;
@@ -1099,7 +1114,7 @@ new class extends Component {
 .addr-toggle-opt:hover { color: #333333; }
 .addr-toggle-opt.is-active { background: #7a3f91; color: #ffffff; box-shadow: 0 1px 3px rgba(122,63,145,.35); }
 .addr-select {
-    width: 100%; box-sizing: border-box; font-size: 1.05rem; font-weight: 600; color: #333333;
+    width: 100%; box-sizing: border-box; font-size: 1.15rem; font-weight: 700; color: #111111;
     background: #ffffff; border: 1.5px solid #d6d6d6; border-radius: 0.5rem; padding: 0.45rem 0.65rem;
     outline: none; transition: border-color .15s, background .15s, box-shadow .15s;
 }
@@ -1107,7 +1122,7 @@ new class extends Component {
 .addr-select:focus { border-color: #7a3f91; box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
 .addr-select:disabled { background: #f3f4f6; color: #333333; cursor: not-allowed; border-color: #e5e7eb; }
 .field-input {
-    width: 100%; box-sizing: border-box; font-size: 1.05rem; font-weight: 600; color: #333333;
+    width: 100%; box-sizing: border-box; font-size: 1.15rem; font-weight: 700; color: #111111;
     background: #ffffff; border: 1.5px solid #d6d6d6; border-radius: 0.5rem; padding: 0.45rem 0.65rem;
     outline: none; transition: border-color .15s, background .15s, box-shadow .15s;
 }
@@ -1153,6 +1168,49 @@ input[type="date"].field-input:disabled {
 }
 
 .field-block { padding-top: 2px; }
+
+/* ═══════════ 2-column info card layout (matches Registrar's
+   "View Alumni" design) — white bordered cards with a purple-icon
+   header, laid out in two equal columns side by side. ═══════════ */
+.ai-info-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+}
+@media (min-width: 1024px) {
+    .ai-info-grid { grid-template-columns: 1fr 1fr; align-items: start; }
+}
+.ai-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ai-card {
+    background: #ffffff;
+    border: 1.5px solid #E4E4E4;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.ai-card-header {
+    padding: 10px 14px;
+    border-bottom: 1.5px solid #EEEEEE;
+    background: #F7F7F7;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.ai-card-header-title { display: flex; align-items: center; gap: 8px; }
+.ai-card-header-title p {
+    font-size: .78rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .06em; color: #333333; margin: 0;
+}
+.ai-card-header-title i { color: #7A3F91 !important; font-size: .85rem; width: 16px; text-align: center; flex-shrink: 0; }
+.ai-card-body { padding: 10px; }
+.ai-cell {
+    padding: 10px 13px;
+    border: 1.5px solid #EEEEEE;
+    background: #ffffff;
+    border-radius: 8px;
+}
 
 /* ═══════════ Compact suffix dropdown (Father's Name) ═══════════
    Same short height as .field-input / .addr-select — NOT the tall
@@ -1288,15 +1346,15 @@ input[type="date"].field-input:disabled {
 .emp-card-body { padding: 0.7rem 0.85rem; }
 .emp-radio-tile {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
-    font-size: 0.95rem; font-weight: 500; color: #333333;
+    font-size: 1rem; font-weight: 600; color: #333333;
     padding: 6px 11px; border-radius: 999px; border: 1.5px solid #e5e7eb;
     transition: border-color .15s, background .15s;
     white-space: nowrap;
 }
 .emp-radio-tile:hover { border-color: #c9b3d6; }
-.emp-radio-tile input:checked ~ span { color: #5e2f72; font-weight: 600; }
+.emp-radio-tile input:checked ~ span { color: #5e2f72; font-weight: 700; }
 .emp-input-sm {
-    width: 100%; box-sizing: border-box; font-size: 1rem; font-weight: 500; color: #1f2937;
+    width: 100%; box-sizing: border-box; font-size: 1.1rem; font-weight: 700; color: #111111;
     background: #f9fafb; border: 1.5px solid #e5e7eb; border-radius: 0.5rem; padding: 0.45rem 0.65rem;
     outline: none; transition: border-color .15s, background .15s, box-shadow .15s;
 }
@@ -1536,6 +1594,9 @@ function phAddress(initial) {
                 <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
                     @if($editingProfile)
                         Complete your details below. Fields marked <span class="text-red-500 font-semibold">*</span> are required.
+                        <span class="inline-flex items-center gap-1 text-amber-700 font-semibold">
+                            <i class="fas fa-lock text-[10px]"></i> School Record — Not Editable
+                        </span>
                     @else
                         Keep your alumni profile accurate and up to date.
                     @endif
@@ -1575,10 +1636,14 @@ function phAddress(initial) {
                 </button>
             @else
                 <button type="button" @click="showProfileConfirm = true"
+                        @disabled(!$this->isProfileDirty)
+                        title="{{ $this->isProfileDirty ? 'Save Profile' : 'No changes yet' }}"
                         class="group relative w-9 h-9 rounded-lg flex items-center justify-center
-                               bg-emerald-500 border border-emerald-600 text-white
-                               hover:bg-emerald-600 transition active:scale-95 cursor-pointer shadow-sm">
-                    <span class="ai-tooltip">Save Profile</span>
+                               transition active:scale-95 shadow-sm
+                               {{ $this->isProfileDirty
+                                    ? 'bg-emerald-500 border border-emerald-600 text-white hover:bg-emerald-600 cursor-pointer'
+                                    : 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed' }}">
+                    <span class="ai-tooltip">{{ $this->isProfileDirty ? 'Save Profile' : 'No changes yet' }}</span>
                     <i class="fas fa-floppy-disk text-sm"></i>
                 </button>
                 @if($profileComplete)
@@ -1624,235 +1689,122 @@ function phAddress(initial) {
 
         <div class="bg-white flex-1 overflow-y-auto">
 
-            {{-- ROW 1: Student ID | Student's Name --}}
-            <div class="flex flex-col lg:flex-row border-b border-gray-200">
-                <div class="w-full lg:w-[200px] lg:flex-none lg:border-r border-b lg:border-b-0 border-gray-200">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Student ID</p></div>
-                    <div class="px-3 py-2.5">
-                        <div class="flex flex-col gap-1 field-block">
-                            <p class="field-label"></p>
-                            @if($student_id)<p class="field-value font-mono tracking-wide">{{ strtoupper($student_id) }}</p>
-                            @else<p class="field-value-empty">Not provided</p>@endif
+            <div class="ai-info-grid p-3 sm:p-4">
+
+                {{-- ══ LEFT COLUMN ══ --}}
+                <div class="ai-col">
+
+                    {{-- Student ID --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-id-card" style="color:#7A3F91 !important;"></i><p>Student ID</p> <i class="fas fa-lock text-[9px] text-gray-400" title="School record — not editable"></i></div>
+                        </div>
+                        <div class="ai-card-body">
+                            <div class="ai-cell">
+                                <p class="field-label">Student ID</p>
+                                @if($student_id)<p class="field-value font-mono tracking-wide">{{ strtoupper($student_id) }}</p>
+                                @else<p class="field-value-empty">Not provided</p>@endif
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Student's Name</p></div>
-                    <div class="px-3 py-2.5">
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                            <div class="flex flex-col gap-1 field-block">
+
+                    {{-- Student's Name --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-user-graduate" style="color:#7A3F91 !important;"></i><p>Student's Name</p> <i class="fas fa-lock text-[9px] text-gray-400" title="School record — not editable"></i></div>
+                        </div>
+                        <div class="ai-card-body grid grid-cols-2 gap-1.5">
+                            <div class="ai-cell">
                                 <p class="field-label">Last Name</p>
                                 @if($last_name)<p class="field-value">{{ strtoupper($last_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Given Name</p>
                                 @if($first_name)<p class="field-value">{{ strtoupper($first_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Middle Name</p>
                                 @if($middle_initial)<p class="field-value">{{ strtoupper($middle_initial) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Ext.</p>
                                 @if($suffix)<p class="field-value">{{ strtoupper($suffix) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            {{-- ROW 2: Student's Data | Father's Name | Mother's Maiden Name --}}
-            <div class="flex flex-col xl:flex-row border-b border-gray-200">
-
-                <div class="w-full xl:w-[340px] xl:flex-none xl:border-r border-b xl:border-b-0 border-gray-200">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Student's Data</p></div>
-                    <div class="px-3 py-2.5 flex flex-col gap-2.5">
-                        <div class="grid grid-cols-1 sm:grid-cols-[auto_1fr] gap-2.5">
-                            <div class="flex flex-col gap-1 field-block sm:min-w-[92px]">
-                                <p class="field-label">Sex @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <div class="flex sm:flex-col gap-2 sm:gap-1.5 flex-wrap pt-1">
-                                        <label class="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 cursor-pointer">
-                                            <input wire:model="gender" type="radio" value="Male" class="w-4 h-4 accent-[#7a3f91] cursor-pointer"> Male
-                                        </label>
-                                        <label class="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 cursor-pointer">
-                                            <input wire:model="gender" type="radio" value="Female" class="w-4 h-4 accent-[#7a3f91] cursor-pointer"> Female
-                                        </label>
-                                    </div>
-                                    @error('gender') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($gender)<p class="field-value">{{ strtoupper($gender) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                            <div class="flex flex-col gap-1 field-block min-w-0">
-                                <p class="field-label">Birthdate @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <input wire:model="date_of_birth" type="date" max="{{ date('Y-m-d') }}"
-                                        class="field-input {{ $errors->has('date_of_birth') ? 'field-error' : '' }}">
-                                    @error('date_of_birth') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($date_of_birth)<p class="field-value">{{ \Carbon\Carbon::parse($date_of_birth)->format('m/d/Y') }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
+                    {{-- Student's Data --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-user" style="color:#7A3F91 !important;"></i><p>Student's Data</p></div>
                         </div>
-                        <div class="flex flex-col gap-1 field-block">
-                            <p class="field-label">Program</p>
-                            @if($course_name)<p class="field-value">{{ $course_name }}</p>@elseif($course_code)<p class="field-value">{{ strtoupper($course_code) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex-1 min-w-0 xl:border-r border-b xl:border-b-0 border-gray-200">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Father's Name</p></div>
-                    <div class="px-3 py-2.5">
-                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                            <div class="flex flex-col items-center gap-1 text-center field-block">
-                                <p class="field-label">Last Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <input wire:model="father_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
-                                        class="field-input text-center uppercase {{ $errors->has('father_last_name') ? 'field-error' : '' }}">
-                                    @error('father_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($father_last_name)<p class="field-value">{{ strtoupper($father_last_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                            <div class="flex flex-col items-center gap-1 text-center field-block">
-                                <p class="field-label">Given Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <input wire:model="father_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
-                                        class="field-input text-center uppercase {{ $errors->has('father_given_name') ? 'field-error' : '' }}">
-                                    @error('father_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($father_given_name)<p class="field-value">{{ strtoupper($father_given_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                            <div class="flex flex-col items-center gap-1 text-center field-block">
-                                <p class="field-label">Middle Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <input wire:model="father_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
-                                        class="field-input text-center uppercase {{ $errors->has('father_middle_name') ? 'field-error' : '' }}">
-                                    @error('father_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($father_middle_name)<p class="field-value">{{ strtoupper($father_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                            <div class="flex flex-col items-center gap-1 text-center field-block">
-                                <p class="field-label">Ext.</p>
-                                @if($editingProfile)
-                                    <div class="suffix-compact-wrap w-full"
-                                         x-data="{
-                                             open: false,
-                                             suffixes: ['Jr.','Sr.','II','III','IV','V','VI','VII','VIII','IX','X'],
-                                             toggle() { this.open = !this.open; },
-                                             close()  { this.open = false; },
-                                             select(val) { $wire.set('father_suffix', val); this.close(); },
-                                             clear()  { $wire.set('father_suffix', ''); this.close(); },
-                                         }"
-                                         @click.outside="close()">
-                                        <button type="button" @click="toggle()"
-                                                :class="{ 'has-value': $wire.father_suffix !== '', 'open': open }"
-                                                class="suffix-compact-trigger {{ $errors->has('father_suffix') ? 'field-error' : '' }}">
-                                            <span x-show="$wire.father_suffix !== ''" x-text="$wire.father_suffix" style="display:none;"></span>
-                                            <span class="sfx-placeholder" x-show="$wire.father_suffix === ''">None</span>
-                                            <i class="fas fa-chevron-down sfx-chevron"></i>
-                                        </button>
-                                        <div x-show="open"
-                                             x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 -translate-y-1 scale-95" x-transition:enter-end="opacity-100 translate-y-0 scale-100"
-                                             x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                                             class="suffix-compact-panel" style="display:none;">
-                                            <div class="suffix-compact-list">
-                                                <template x-for="s in suffixes" :key="s">
-                                                    <button type="button" @click.stop="select(s)"
-                                                            :class="{ 'is-selected': $wire.father_suffix === s }"
-                                                            class="suffix-compact-item" x-text="s"></button>
-                                                </template>
-                                            </div>
-                                            <div class="suffix-compact-footer">
-                                                <button type="button" @click.stop="clear()" class="suffix-compact-clear">Clear</button>
-                                            </div>
+                        <div class="ai-card-body flex flex-col gap-1.5">
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <div class="ai-cell">
+                                    <p class="field-label">Sex @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                    @if($editingProfile)
+                                        <div class="flex gap-3 flex-wrap pt-1">
+                                            <label class="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 cursor-pointer">
+                                                <input wire:model.live="gender" type="radio" value="Male" class="w-4 h-4 accent-[#7a3f91] cursor-pointer"> Male
+                                            </label>
+                                            <label class="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 cursor-pointer">
+                                                <input wire:model.live="gender" type="radio" value="Female" class="w-4 h-4 accent-[#7a3f91] cursor-pointer"> Female
+                                            </label>
                                         </div>
-                                    </div>
-                                    @error('father_suffix') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($father_suffix)<p class="field-value">{{ strtoupper($father_suffix) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="flex-1 min-w-0">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Mother's Maiden Name</p></div>
-                    <div class="px-3 py-2.5">
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            <div class="flex flex-col items-center gap-1 text-center field-block">
-                                <p class="field-label">Last Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <input wire:model="mother_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
-                                        class="field-input text-center uppercase {{ $errors->has('mother_last_name') ? 'field-error' : '' }}">
-                                    @error('mother_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($mother_last_name)<p class="field-value">{{ strtoupper($mother_last_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                            <div class="flex flex-col items-center gap-1 text-center field-block">
-                                <p class="field-label">Given Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <input wire:model="mother_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
-                                        class="field-input text-center uppercase {{ $errors->has('mother_given_name') ? 'field-error' : '' }}">
-                                    @error('mother_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($mother_given_name)<p class="field-value">{{ strtoupper($mother_given_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                            <div class="flex flex-col items-center gap-1 text-center field-block">
-                                <p class="field-label">Middle Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
-                                    <input wire:model="mother_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
-                                        class="field-input text-center uppercase {{ $errors->has('mother_middle_name') ? 'field-error' : '' }}">
-                                    @error('mother_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
-                                @else
-                                    @if($mother_middle_name)<p class="field-value">{{ strtoupper($mother_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
-                                @endif
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-            </div>
-
-            {{-- ROW 3: Permanent Address --}}
-            <div class="flex border-b border-gray-200"
-                 x-data="phAddress({
-                     province: @js($address_province),
-                     municipality: @js($address_municipality),
-                     barangay: @js($address_barangay),
-                 })" x-init="init()">
-                <div class="flex-1 min-w-0">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
-                        <p class="field-label">Permanent Address</p>
-                        @if($editingProfile)
-                            <div class="flex items-center gap-3">
-                                <p class="text-[10px] font-semibold text-[#333333] flex items-center gap-1" x-show="loading">
-                                    <i class="fas fa-circle-notch fa-spin"></i> Loading location list…
-                                </p>
-                                <button type="button" x-show="loadFailed" @click="retryLoad()"
-                                        class="text-[10px] font-semibold text-amber-600 flex items-center gap-1 hover:text-amber-700">
-                                    <i class="fas fa-triangle-exclamation"></i>
-                                    Location list unavailable. Click to retry.
-                                </button>
-                                <div class="addr-toggle" x-show="!loading">
-                                    <button type="button" @click="setMode('dropdown')" class="addr-toggle-opt" :class="mode === 'dropdown' ? 'is-active' : ''">List</button>
-                                    <button type="button" @click="setMode('manual')" class="addr-toggle-opt" :class="mode === 'manual' ? 'is-active' : ''">Type</button>
+                                        @error('gender') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                    @else
+                                        @if($gender)<p class="field-value">{{ strtoupper($gender) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                    @endif
+                                </div>
+                                <div class="ai-cell">
+                                    <p class="field-label">Birthdate @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                    @if($editingProfile)
+                                        <input wire:model.live.debounce.300ms="date_of_birth" type="date" max="{{ date('Y-m-d') }}"
+                                            onclick="this.showPicker && this.showPicker()"
+                                            class="field-input cursor-pointer {{ $errors->has('date_of_birth') ? 'field-error' : '' }}">
+                                        @error('date_of_birth') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                    @else
+                                        @if($date_of_birth)<p class="field-value">{{ \Carbon\Carbon::parse($date_of_birth)->format('m/d/Y') }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                    @endif
                                 </div>
                             </div>
-                        @endif
+                            <div class="ai-cell">
+                                <p class="field-label flex items-center gap-1">Program <i class="fas fa-lock text-[9px] text-gray-400" title="School record — not editable"></i></p>
+                                @if($course_name)<p class="field-value">{{ $course_name }}</p>@elseif($course_code)<p class="field-value">{{ strtoupper($course_code) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                            </div>
+                        </div>
                     </div>
-                    <div class="px-3 py-2.5">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+
+                    {{-- Permanent Address --}}
+                    <div class="ai-card"
+                         x-data="phAddress({
+                             province: @js($address_province),
+                             municipality: @js($address_municipality),
+                             barangay: @js($address_barangay),
+                         })" x-init="init()">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-location-dot" style="color:#7A3F91 !important;"></i><p>Permanent Address</p></div>
+                            @if($editingProfile)
+                                <div class="flex items-center gap-3">
+                                    <p class="text-[10px] font-semibold text-[#333333] flex items-center gap-1" x-show="loading">
+                                        <i class="fas fa-circle-notch fa-spin"></i> Loading location list…
+                                    </p>
+                                    <button type="button" x-show="loadFailed" @click="retryLoad()"
+                                            class="text-[10px] font-semibold text-amber-600 flex items-center gap-1 hover:text-amber-700">
+                                        <i class="fas fa-triangle-exclamation"></i>
+                                        Location list unavailable. Click to retry.
+                                    </button>
+                                    <div class="addr-toggle" x-show="!loading">
+                                        <button type="button" @click="setMode('dropdown')" class="addr-toggle-opt" :class="mode === 'dropdown' ? 'is-active' : ''">List</button>
+                                        <button type="button" @click="setMode('manual')" class="addr-toggle-opt" :class="mode === 'manual' ? 'is-active' : ''">Type</button>
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                        <div class="ai-card-body grid grid-cols-2 gap-1.5">
 
                             {{-- Province --}}
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Province @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
                                     <select x-show="mode === 'dropdown'" wire:ignore
@@ -1860,7 +1812,7 @@ function phAddress(initial) {
                                             class="addr-select {{ $errors->has('address_province') ? 'field-error' : '' }}"
                                             @change="selected.provinceCode = $event.target.value; onProvinceChange()" :disabled="loading">
                                     </select>
-                                    <input x-show="mode === 'manual'" wire:model="address_province" type="text" oninput="this.value=this.value.toUpperCase()"
+                                    <input x-show="mode === 'manual'" wire:model.live.debounce.300ms="address_province" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input uppercase {{ $errors->has('address_province') ? 'field-error' : '' }}">
                                     <p class="text-[12.5px] text-[#333333] m-0" x-show="mode === 'dropdown' && !loading && provinces.length === 0">No provinces loaded. Switch to Type instead.</p>
                                     @error('address_province') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1870,7 +1822,7 @@ function phAddress(initial) {
                             </div>
 
                             {{-- Municipality / City --}}
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Municipality / City @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
                                     <select x-show="mode === 'dropdown'" wire:ignore
@@ -1879,7 +1831,7 @@ function phAddress(initial) {
                                         <option value="">Select Municipality / City</option>
                                         <template x-for="c in filteredCities" :key="c.city_code"><option :value="c.city_code" x-text="c.city_name"></option></template>
                                     </select>
-                                    <input x-show="mode === 'manual'" wire:model="address_municipality" type="text" oninput="this.value=this.value.toUpperCase()"
+                                    <input x-show="mode === 'manual'" wire:model.live.debounce.300ms="address_municipality" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input uppercase {{ $errors->has('address_municipality') ? 'field-error' : '' }}">
                                     <p class="text-[12.5px] text-[#333333] m-0" x-show="mode === 'dropdown' && !selected.provinceCode">Select province first.</p>
                                     @error('address_municipality') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1889,7 +1841,7 @@ function phAddress(initial) {
                             </div>
 
                             {{-- Barangay --}}
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Barangay @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
                                     <select x-show="mode === 'dropdown'" wire:ignore
@@ -1898,7 +1850,7 @@ function phAddress(initial) {
                                         <option value="">Select Barangay</option>
                                         <template x-for="b in filteredBarangays" :key="b.brgy_code"><option :value="b.brgy_code" x-text="b.brgy_name"></option></template>
                                     </select>
-                                    <input x-show="mode === 'manual'" wire:model="address_barangay" type="text" oninput="this.value=this.value.toUpperCase()"
+                                    <input x-show="mode === 'manual'" wire:model.live.debounce.300ms="address_barangay" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input uppercase {{ $errors->has('address_barangay') ? 'field-error' : '' }}">
                                     <p class="text-[12.5px] text-[#333333] m-0" x-show="mode === 'dropdown' && !selected.cityCode">Select municipality/city first.</p>
                                     @error('address_barangay') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1908,10 +1860,10 @@ function phAddress(initial) {
                             </div>
 
                             {{-- Street --}}
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Street Name, Building, House No. @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
-                                    <input wire:model="address_street" type="text" oninput="this.value=this.value.toUpperCase()"
+                                    <input wire:model.live.debounce.300ms="address_street" type="text" oninput="this.value=this.value.toUpperCase()"
                                         placeholder="Street Name, Building, House No."
                                         class="field-input uppercase {{ $errors->has('address_street') ? 'field-error' : '' }}">
                                     @error('address_street') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1922,48 +1874,128 @@ function phAddress(initial) {
 
                         </div>
                     </div>
-                </div>
-            </div>
 
-            {{-- ROW 4: Additional Information --}}
-            <div class="flex">
-                <div class="flex-1 min-w-0">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100"><p class="field-label">Additional Information</p></div>
-                    <div class="px-3 py-2.5">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                            <div class="flex flex-col gap-1 field-block">
+                </div>{{-- end left column --}}
+
+                {{-- ══ RIGHT COLUMN ══ --}}
+                <div class="ai-col">
+
+                    {{-- Father's Name --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p></div>
+                        </div>
+                        <div class="ai-card-body grid grid-cols-3 gap-1.5">
+                            <div class="ai-cell text-center">
+                                <p class="field-label">Last Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile)
+                                    <input wire:model.live.debounce.300ms="father_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
+                                        class="field-input text-center uppercase {{ $errors->has('father_last_name') ? 'field-error' : '' }}">
+                                    @error('father_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                @else
+                                    @if($father_last_name)<p class="field-value">{{ strtoupper($father_last_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                @endif
+                            </div>
+                            <div class="ai-cell text-center">
+                                <p class="field-label">Given Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile)
+                                    <input wire:model.live.debounce.300ms="father_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
+                                        class="field-input text-center uppercase {{ $errors->has('father_given_name') ? 'field-error' : '' }}">
+                                    @error('father_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                @else
+                                    @if($father_given_name)<p class="field-value">{{ strtoupper($father_given_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                @endif
+                            </div>
+                            <div class="ai-cell text-center">
+                                <p class="field-label">Middle Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile)
+                                    <input wire:model.live.debounce.300ms="father_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
+                                        class="field-input text-center uppercase {{ $errors->has('father_middle_name') ? 'field-error' : '' }}">
+                                    @error('father_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                @else
+                                    @if($father_middle_name)<p class="field-value">{{ strtoupper($father_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Mother's Maiden Name --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p></div>
+                        </div>
+                        <div class="ai-card-body grid grid-cols-3 gap-1.5">
+                            <div class="ai-cell text-center">
+                                <p class="field-label">Last Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile)
+                                    <input wire:model.live.debounce.300ms="mother_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
+                                        class="field-input text-center uppercase {{ $errors->has('mother_last_name') ? 'field-error' : '' }}">
+                                    @error('mother_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                @else
+                                    @if($mother_last_name)<p class="field-value">{{ strtoupper($mother_last_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                @endif
+                            </div>
+                            <div class="ai-cell text-center">
+                                <p class="field-label">Given Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile)
+                                    <input wire:model.live.debounce.300ms="mother_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
+                                        class="field-input text-center uppercase {{ $errors->has('mother_given_name') ? 'field-error' : '' }}">
+                                    @error('mother_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                @else
+                                    @if($mother_given_name)<p class="field-value">{{ strtoupper($mother_given_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                @endif
+                            </div>
+                            <div class="ai-cell text-center">
+                                <p class="field-label">Middle Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile)
+                                    <input wire:model.live.debounce.300ms="mother_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
+                                        class="field-input text-center uppercase {{ $errors->has('mother_middle_name') ? 'field-error' : '' }}">
+                                    @error('mother_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
+                                @else
+                                    @if($mother_middle_name)<p class="field-value">{{ strtoupper($mother_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Additional Information --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-file-lines" style="color:#7A3F91 !important;"></i><p>Additional Information</p></div>
+                        </div>
+                        <div class="ai-card-body grid grid-cols-2 gap-1.5">
+                            <div class="ai-cell">
                                 <p class="field-label">DSWD Household No.</p>
                                 @if($editingProfile)
-                                    <input wire:model="dswd_household_no" type="text" oninput="this.value=this.value.toUpperCase()" class="field-input uppercase">
+                                    <input wire:model.live.debounce.300ms="dswd_household_no" type="text" oninput="this.value=this.value.toUpperCase()" class="field-input uppercase">
                                     <p class="text-xs text-[#333333] font-normal mt-0.5 m-0">Leave blank if not applicable.</p>
                                 @else
                                     @if($dswd_household_no)<p class="field-value">{{ strtoupper($dswd_household_no) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell">
                                 <p class="field-label">Disability</p>
                                 @if($editingProfile)
-                                    <input wire:model="disability" type="text" oninput="this.value=this.value.toUpperCase()" class="field-input uppercase">
+                                    <input wire:model.live.debounce.300ms="disability" type="text" oninput="this.value=this.value.toUpperCase()" class="field-input uppercase">
                                     <p class="text-xs text-[#333333] font-normal mt-0.5 m-0">Leave blank if not applicable.</p>
                                 @else
                                     @if($disability)<p class="field-value">{{ strtoupper($disability) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell col-span-2">
                                 <p class="field-label">Contact Number @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
-                                    <input wire:model="contact_number" type="tel" oninput="this.value=this.value.toUpperCase()"
+                                    <input wire:model.live.debounce.300ms="contact_number" type="tel" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input uppercase {{ $errors->has('contact_number') ? 'field-error' : '' }}">
                                     @error('contact_number') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
                                 @else
                                     @if($contact_number)<p class="field-value">{{ strtoupper($contact_number) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
-
-                            <div class="flex flex-col gap-1 field-block">
+                            <div class="ai-cell col-span-2">
                                 <p class="field-label">Email Address @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile)
-                                    <input wire:model="email" type="email"
+                                    <input wire:model.live.debounce.300ms="email" type="email"
                                         @disabled(!$this->canEditEmail)
                                         class="field-input {{ $errors->has('email') ? 'field-error' : '' }}">
                                     @error('email') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1980,60 +2012,78 @@ function phAddress(initial) {
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            {{-- ROW 5: Employment Snapshot (read-only) --}}
-            <div class="flex border-t border-gray-200">
-                <div class="flex-1 min-w-0">
-                    <div class="px-3 py-1.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2 flex-wrap">
-                        <p class="field-label">Employment Information</p>
-                        @if($hasEmploymentRecord && !$this->canEditEmployment)
-                            <span class="text-[10px] font-semibold text-[#333333] flex items-center gap-1">
-                                <i class="fas fa-lock"></i> Locked for {{ $this->employmentCooldownDaysLeft }} day(s)
-                            </span>
-                        @endif
-                    </div>
-                    <div class="px-3 py-2.5">
-                        @if(!$currentRecord)
-                           <p class="field-value-empty">No employment record yet. You can update your employment details once you've finished updating your <strong>Alumni Information</strong>.</p>
-                        @else
-                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                                <div class="flex flex-col gap-1 field-block">
-                                    <p class="field-label">Status</p>
-                                    <p class="field-value">{{ $currentRecord['employment_status'] }}</p>
-                                </div>
-                                @if($currentRecord['is_working'])
-                                    <div class="flex flex-col gap-1 field-block">
-                                        <p class="field-label">Company / Business</p>
-                                        <p class="field-value">{{ strtoupper($currentRecord['company_name']) ?: '—' }}</p>
-                                    </div>
-                                    <div class="flex flex-col gap-1 field-block">
-                                        <p class="field-label">Job Title</p>
-                                        <p class="field-value">{{ $currentRecord['job_title'] ?: '—' }}</p>
-                                    </div>
-                                    <div class="flex flex-col gap-1 field-block">
-                                        <p class="field-label">Type / Location</p>
-                                        <p class="field-value">{{ implode(' · ', array_filter([$currentRecord['employment_type'], $currentRecord['work_location']])) ?: '—' }}</p>
-                                    </div>
-                                @else
-                                    <div class="flex flex-col gap-1 field-block">
-                                        <p class="field-label">Job Search Status</p>
-                                        <p class="field-value">{{ $currentRecord['unemployment_status'] ?: '—' }}</p>
-                                    </div>
-                                    @if(($currentRecord['unemployment_reason'] ?? '') !== '')
-                                    <div class="flex flex-col gap-1 field-block">
-                                        <p class="field-label">Reason</p>
-                                        <p class="field-value">{{ $currentRecord['unemployment_reason'] }}</p>
-                                    </div>
-                                    @endif
+                    {{-- Employment (read-only snapshot) --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title"><i class="fas fa-briefcase" style="color:#7A3F91 !important;"></i><p>Employment</p></div>
+                            <span class="flex items-center gap-2">
+                                @if($currentRecord && ($currentRecord['submitted_at'] ?? ''))
+                                    <span class="text-[10px] font-semibold text-gray-400">Last updated {{ $currentRecord['submitted_at'] }}</span>
                                 @endif
-                            </div>
-                            <p class="text-xs text-[#333333] mt-3">Submitted: {{ $currentRecord['submitted_at'] }}</p>
-                        @endif
+                                @if($hasEmploymentRecord && !$this->canEditEmployment)
+                                    <span class="text-[10px] font-semibold text-[#333333] flex items-center gap-1">
+                                        <i class="fas fa-lock"></i> Locked for {{ $this->employmentCooldownDaysLeft }} day(s)
+                                    </span>
+                                @endif
+                            </span>
+                        </div>
+                        <div class="ai-card-body">
+                            @if(!$currentRecord)
+                               <p class="field-value-empty">No employment record yet. You can update your employment details once you've finished updating your <strong>Alumni Information</strong>.</p>
+                            @else
+                                <div class="grid grid-cols-2 gap-1.5">
+                                    <div class="ai-cell">
+                                        <p class="field-label">Status</p>
+                                        <p class="field-value">{{ $currentRecord['employment_status'] }}</p>
+                                    </div>
+                                    @if($currentRecord['is_working'])
+                                        <div class="ai-cell">
+                                            <p class="field-label">Employment Type</p>
+                                            <p class="field-value">{{ $currentRecord['employment_type'] ?: '—' }}</p>
+                                        </div>
+                                        <div class="ai-cell">
+                                            <p class="field-label">Work Location</p>
+                                            <p class="field-value">{{ $currentRecord['work_location'] ?: '—' }}</p>
+                                        </div>
+                                        <div class="ai-cell">
+                                            <p class="field-label">Employer</p>
+                                            <p class="field-value">{{ strtoupper($currentRecord['company_name']) ?: '—' }}</p>
+                                        </div>
+                                        <div class="ai-cell">
+                                            <p class="field-label">Job Title</p>
+                                            <p class="field-value">{{ $currentRecord['job_title'] ?: '—' }}</p>
+                                        </div>
+                                        <div class="ai-cell">
+                                            <p class="field-label">Course Relevance</p>
+                                            <p class="field-value">{{ $currentRecord['course_relevance'] ?: '—' }}</p>
+                                        </div>
+                                        @if(!empty($currentRecord['career_path_labels']))
+                                        <div class="ai-cell">
+                                            <p class="field-label">Career Path</p>
+                                            <p class="field-value">{{ implode(', ', $currentRecord['career_path_labels']) }}</p>
+                                        </div>
+                                        @endif
+                                    @else
+                                        <div class="ai-cell">
+                                            <p class="field-label">Job Search Status</p>
+                                            <p class="field-value">{{ $currentRecord['unemployment_status'] ?: '—' }}</p>
+                                        </div>
+                                        @if(($currentRecord['unemployment_reason'] ?? '') !== '')
+                                        <div class="ai-cell">
+                                            <p class="field-label">Reason</p>
+                                            <p class="field-value">{{ $currentRecord['unemployment_reason'] }}</p>
+                                        </div>
+                                        @endif
+                                    @endif
+                                </div>
+                            @endif
+                        </div>
                     </div>
-                </div>
-            </div>
+
+                </div>{{-- end right column --}}
+
+            </div>{{-- end ai-info-grid --}}
 
         </div>{{-- end card body --}}
 
@@ -2058,23 +2108,22 @@ function phAddress(initial) {
          x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
          x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
          class="fixed inset-0 z-[60] flex items-center justify-center p-4" style="display:none;">
-        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showProfileConfirm = false"></div>
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="p-6 text-center">
                 <div class="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
                     <i class="fas fa-triangle-exclamation text-amber-600 text-lg"></i>
                 </div>
                 <h3 class="text-base font-semibold text-gray-900">Confirm Profile Update</h3>
-                <p class="text-sm text-gray-500 mt-2">
+                <p class="text-base text-gray-900 font-medium mt-2 leading-relaxed">
                     Once saved, you won't be able to update your profile again for
-                    <strong class="text-gray-800">30 days</strong>. Make sure all information is correct before continuing.
+                    <strong class="text-gray-900 font-bold">30 days</strong>. Make sure all information is correct before continuing.
                 </p>
             </div>
             <div class="px-6 pb-6 flex gap-2">
-                <button type="button" @click="showProfileConfirm = false"
-                        wire:loading.attr="disabled" wire:target="saveProfile"
-                        wire:loading.class="opacity-60 cursor-wait" wire:target="saveProfile"
-                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition disabled:opacity-60 disabled:cursor-wait">
+                <button type="button"
+                        @click.stop.prevent="showProfileConfirm = false"
+                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition">
                     Cancel
                 </button>
                 <button type="button" wire:click="saveProfile"
@@ -2211,7 +2260,7 @@ function phAddress(initial) {
                         <div class="emp-card-title">Employment Details</div>
                         <div class="emp-card-body flex flex-col gap-3">
                             <div>
-                                <label class="emp-label-sm">{{ $isSelf ? 'Business Name' : 'Company Name' }} <span class="text-red-500">*</span></label>
+                                <label class="emp-label-sm">{{ $isSelf ? 'Business Name' : 'Employer' }} <span class="text-red-500">*</span></label>
                                 <input wire:model.live.debounce.400ms="company_name" type="text"
                                        oninput="this.value=this.value.toUpperCase()"
                                        class="emp-input-sm uppercase {{ $errors->has('company_name') ? 'field-error' : '' }}">
@@ -2315,23 +2364,22 @@ function phAddress(initial) {
          x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
          x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
          class="fixed inset-0 z-[70] flex items-center justify-center p-4" style="display:none;">
-        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" @click="showEmpConfirm = false"></div>
+        <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="p-6 text-center">
                 <div class="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-3">
                     <i class="fas fa-triangle-exclamation text-amber-600 text-lg"></i>
                 </div>
                 <h3 class="text-base font-semibold text-gray-900">Confirm Employment Update</h3>
-                <p class="text-sm text-gray-500 mt-2">
+                <p class="text-base text-gray-900 font-medium mt-2 leading-relaxed">
                     Once saved, you won't be able to update your employment information again for
-                    <strong class="text-gray-800">30 days</strong>. Make sure all information is correct before continuing.
+                    <strong class="text-gray-900 font-bold">30 days</strong>. Make sure all information is correct before continuing.
                 </p>
             </div>
             <div class="px-6 pb-6 flex gap-2">
-                <button type="button" @click="showEmpConfirm = false"
-                        wire:loading.attr="disabled" wire:target="saveEmployment"
-                        wire:loading.class="opacity-60 cursor-wait" wire:target="saveEmployment"
-                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition disabled:opacity-60 disabled:cursor-wait">
+                <button type="button"
+                        @click.stop.prevent="showEmpConfirm = false"
+                        class="flex-1 px-4 py-2.5 rounded-lg bg-gray-100 text-gray-700 text-sm font-semibold cursor-pointer hover:bg-gray-200 transition">
                     Cancel
                 </button>
                 <button type="button" wire:click="saveEmployment"

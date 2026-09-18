@@ -334,9 +334,26 @@ new class extends Component {
         }
     }
 
+    #[Computed]
+    public function rsvpIsLocked(): bool
+    {
+        return $this->rsvpLocked();
+    }
+
     public function openRsvpModal(): void  { $this->showRsvpModal = true; }
     public function closeRsvpModal(): void { $this->showRsvpModal = false; $this->resetRsvpModal(); }
     private function resetRsvpModal(): void { $this->rsvpResponse = null; }
+
+    // RSVP is only editable up until the event actually starts — once the
+    // start time has passed, the response is locked in (whether or not it
+    // has already ended), so alumni can't retroactively change a "Maybe"
+    // into "Attending" after the fact.
+    private function rsvpLocked(): bool
+    {
+        $event = $this->viewingEvent;
+        if (!$event) return true;
+        return $event->event_date <= now('UTC');
+    }
 
     public function submitRsvp(string $response): void
     {
@@ -344,6 +361,10 @@ new class extends Component {
         $alumni = $user?->alumni;
         if (!$alumni || !$this->viewingEventId) {
             $this->dispatch('flash-message', type: 'error', message: 'Something went wrong. Please try again.');
+            return;
+        }
+        if ($this->rsvpLocked()) {
+            $this->dispatch('flash-message', type: 'warning', message: 'RSVP is closed — this event has already started.');
             return;
         }
         try {
@@ -355,6 +376,32 @@ new class extends Component {
             unset($this->alumniRsvp);
         } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to save RSVP. Please try again.');
+        }
+    }
+
+    // Clears the alumni's RSVP entirely, returning the event to "Not
+    // responded" — lets them undo a response instead of being stuck
+    // picking between the three options forever.
+    public function removeRsvp(): void
+    {
+        $user   = Auth::user();
+        $alumni = $user?->alumni;
+        if (!$alumni || !$this->viewingEventId) {
+            $this->dispatch('flash-message', type: 'error', message: 'Something went wrong. Please try again.');
+            return;
+        }
+        if ($this->rsvpLocked()) {
+            $this->dispatch('flash-message', type: 'warning', message: 'RSVP is closed — this event has already started.');
+            return;
+        }
+        try {
+            EventRsvp::where('event_id', $this->viewingEventId)
+                ->where('alumni_id', $alumni->id)
+                ->delete();
+            $this->dispatch('flash-message', type: 'info', message: 'Your RSVP has been removed.');
+            unset($this->alumniRsvp);
+        } catch (\Exception $e) {
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to remove RSVP. Please try again.');
         }
     }
 
@@ -499,6 +546,8 @@ new class extends Component {
 <div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
 
 <style>
+[x-cloak] { display: none !important; }
+
 select.filter-input {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.6rem center;
@@ -604,6 +653,27 @@ select.filter-input {
 }
 [data-ev-card].is-loading {
     pointer-events: none;
+}
+
+/* ── Global "one loading at a time" lock ──────────────────────────
+   Applied to the cards grid + filter bar while a card is opening OR
+   a filter/search request is in flight, so the alumni can't click
+   another card, change a filter, or trigger pagination mid-request.
+   Mirrors .jb-body-busy on the Job Opportunities page. */
+.ev-body-busy {
+    pointer-events: none !important;
+    cursor: default !important;
+}
+.ev-body-busy * {
+    cursor: default !important;
+}
+.ev-body-busy [data-ev-card]:not(.is-loading) {
+    opacity: 0.55;
+    cursor: default !important;
+}
+.ev-body-busy [data-ev-card].is-loading {
+    pointer-events: none !important;
+    cursor: default !important;
 }
 
 .card-share-btn {
@@ -716,10 +786,10 @@ select.filter-input {
 
 .philcst-post-card { background: #fff; border: 1px solid #E8E0F0; border-radius: 14px; overflow: hidden; }
 .philcst-post-ribbon {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
     color: #7a3f91; background: #f5eef9; border: 1px solid #e3cdf0;
-    padding: 4px 10px; border-radius: 999px;
+    padding: 5px 12px; border-radius: 999px;
 }
 
 /* ─────────────────────────────────────────────
@@ -733,16 +803,16 @@ select.filter-input {
 ───────────────────────────────────────────── */
 .detail-side-item { display: flex; align-items: flex-start; gap: 10px; }
 .detail-side-icon {
-    flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px;
+    flex-shrink: 0; width: 34px; height: 34px; border-radius: 9px;
     background: #f5eef9; color: #7a3f91;
-    display: flex; align-items: center; justify-content: center; font-size: 13px;
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
 }
 .detail-side-label {
-    font-size: 11.5px; font-weight: 600; text-transform: uppercase;
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
     letter-spacing: .08em; color: #666; margin: 0; font-style: normal !important;
 }
-.detail-side-value { font-size: 15.5px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
-.detail-side-sub   { font-size: 13px; margin-top: 2px; color: #666; }
+.detail-side-value { font-size: 16px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
+.detail-side-sub   { font-size: 14px; margin-top: 2px; color: #666; }
 
 #ev-detail-outer { position: relative; }
 
@@ -889,7 +959,20 @@ select.filter-input {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
+    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
+         x-data="{ evBusy: false }"
+         x-init="
+            Livewire.hook('commit', ({ component, commit, succeed, fail }) => {
+                const targets = ['search','filterStatus','previousPage','nextPage','page','viewEvent','resetFilters'];
+                const hit = (commit.calls || []).some(c => targets.includes(c.method))
+                    || Object.keys(commit.updates || {}).some(k => targets.includes(k));
+                if (!hit) return;
+                evBusy = true;
+                succeed(() => { evBusy = false; });
+                fail(() => { evBusy = false; });
+            });
+         "
+         :class="{ 'ev-body-busy': evBusy }">
 
         <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
 
@@ -1168,6 +1251,7 @@ select.filter-input {
     $hasContact  = $event->contact_person || $event->contact_email || $event->contact_phone;
     $isPhilcst   = $event->event_source === 'ADMIN';
     $displaySrc  = $isPhilcst ? 'PHILCST' : ($event->event_source === 'ORGANIZER' ? 'Organizer' : null);
+    $rsvpLocked  = $this->rsvpIsLocked;
 @endphp
 
 <div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-y-auto lg:overflow-hidden"
@@ -1195,7 +1279,7 @@ select.filter-input {
                 </span>
                 <span class="tip">Share</span>
             </button>
-            @if(!$isCompleted)
+            @if(!$isCompleted && !$rsvpLocked)
             <button type="button" wire:click="openRsvpModal"
                     wire:loading.attr="disabled"
                     wire:target="openRsvpModal"
@@ -1222,76 +1306,105 @@ select.filter-input {
         </div>
     </div>
 
-    <div class="flex-1 lg:min-h-0 flex flex-col lg:flex-row">
+    <div class="flex-1 min-h-0 overflow-hidden bg-gray-100 flex items-stretch justify-center p-3 sm:p-4">
+        <div class="w-full max-w-[1400px] bg-white border border-[#E8E0F0] rounded-2xl overflow-hidden flex flex-col">
+            <div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 sm:px-8 py-5 flex flex-col gap-4">
 
-        <div class="w-full lg:w-[440px] lg:flex-none lg:min-h-0 bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col">
-
-            @if($hasPhoto)
-                <div class="px-4 pt-4">
-                    <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                         class="w-full h-auto max-h-[560px] object-contain rounded-xl flex-shrink-0"
-                         onerror="this.parentElement.style.display='none'">
-                </div>
-            @endif
-
-            <div class="px-4 pt-3 pb-4 flex flex-col gap-3">
-                @if($isPhilcst)
-                    <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[10px]"></i> Official PHILCST Event</span>
-                @endif
-
-                <div>
-                    <p class="detail-side-label mb-1">Event Title</p>
-                    <h2 class="text-lg font-semibold leading-snug mb-1" style="color:#333333;">{{ $event->title }}</h2>
-                    @if($displaySrc)
-                    <p class="text-xs font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $displaySrc }}</p>
-                    @endif
-                </div>
-
-                <div class="flex flex-wrap gap-1.5">
-                    @if($isCompleted)
-                        <span class="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded border border-green-200 bg-white text-green-700">
-                            <i class="fas fa-circle-check mr-1 text-[9px]"></i>Completed
-                        </span>
+                @if(!$isCompleted)
+                    @if($rsvpLocked)
+                    <div class="bg-gray-50 border border-gray-200 border-l-4 border-l-gray-400 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
+                        This event has already <strong>started</strong>, so RSVP responses are now closed. If you had submitted a response earlier, it has been kept on record as your final answer.
+                    </div>
+                    @elseif(!$alumniRsvp)
+                    <div class="bg-blue-50 border border-blue-200 border-l-4 border-l-blue-600 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
+                        This event is <strong class="text-blue-700">upcoming</strong>. We'd appreciate it if you could take a moment to let us know whether you'll be joining — your response helps the organizers plan seating, materials, and refreshments accordingly.
+                        <button wire:click="openRsvpModal" class="font-semibold text-[#7a3f91] hover:underline cursor-pointer">RSVP now →</button>
+                        You're welcome to update your response at any time before the event begins.
+                    </div>
                     @else
-                        <span class="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded border border-blue-200 bg-white text-blue-700">
-                            <i class="fas fa-calendar-check mr-1 text-[9px]"></i>Upcoming
-                        </span>
+                    <div class="bg-blue-50 border border-blue-200 border-l-4 border-l-blue-600 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
+                        This event is <strong class="text-blue-700">upcoming</strong>. Thank you for letting us know you're planning to attend — we look forward to seeing you there. Should your plans change, feel free to update or remove your RSVP anytime before the event starts.
+                    </div>
                     @endif
-                    @if($event->target_participants)
-                        @foreach(explode(',', $event->target_participants) as $part)
-                            <span class="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($part) }}</span>
-                        @endforeach
-                    @endif
-                </div>
+                @else
+                    <div class="bg-emerald-50 border border-emerald-200 border-l-4 border-l-emerald-600 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
+                        This event has officially <strong class="text-emerald-700">concluded</strong>. Thank you to everyone who took part and helped make it a memorable one — the moments and memories from this event will stay with us. We hope to see you again at the next gathering!
+                    </div>
+                @endif
 
                 <div class="border-t border-gray-100"></div>
 
-                <div class="flex flex-col gap-3">
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Venue</p>
-                            <p class="detail-side-value">{{ $event->venue ?: '—' }}</p>
-                            @if($event->venue_address)
-                                <p class="detail-side-sub">{{ $event->venue_address }}</p>
+                {{-- Top section: photo + event title/tags side-by-side --}}
+                <div class="grid grid-cols-1 {{ $hasPhoto ? 'lg:grid-cols-[320px_1fr]' : '' }} gap-5 items-start">
+                    @if($hasPhoto)
+                        <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
+                             class="w-full h-56 object-cover bg-white border border-gray-100 rounded-xl self-start"
+                             onerror="this.parentElement.style.display='none'">
+                    @endif
+
+                    <div class="flex flex-col gap-2.5 min-w-0">
+                        @if($isPhilcst)
+                            <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[11px]"></i> Official PHILCST Event</span>
+                        @endif
+
+                        <div>
+                            <p class="detail-side-label mb-1">Event Title</p>
+                            <h2 class="text-2xl font-bold leading-snug mb-1" style="color:#333333;">{{ $event->title }}</h2>
+                            @if($displaySrc)
+                            <p class="text-sm font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $displaySrc }}</p>
                             @endif
                         </div>
-                    </div>
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Date &amp; Time</p>
-                            <p class="detail-side-value">{{ $eventDate->format('M d, Y') }}</p>
-                            <p class="detail-side-sub">{{ $timeDisplay }}</p>
+
+                        <div class="flex flex-wrap gap-2 mt-1">
+                            @if($isCompleted)
+                                <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-green-200 bg-white text-green-700">
+                                    <i class="fas fa-circle-check mr-1.5 text-xs"></i>Completed
+                                </span>
+                            @else
+                                <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-blue-200 bg-white text-blue-700">
+                                    <i class="fas fa-calendar-check mr-1.5 text-xs"></i>Upcoming
+                                </span>
+                            @endif
+                            @if($event->target_participants)
+                                @foreach(explode(',', $event->target_participants) as $part)
+                                    <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($part) }}</span>
+                                @endforeach
+                            @endif
+                        </div>
+
+                        {{-- Venue / Date & Time / Open For — sit alongside the image/title instead of their own separate row below --}}
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3 mt-2.5 pt-2.5 border-t border-gray-100">
+                            <div class="detail-side-item">
+                                <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
+                                <div class="min-w-0">
+                                    <p class="detail-side-label">Venue</p>
+                                    <p class="detail-side-value">{{ $event->venue ?: '—' }}</p>
+                                    @if($event->venue_address)
+                                        <p class="detail-side-sub">{{ $event->venue_address }}</p>
+                                    @endif
+                                </div>
+                            </div>
+                            <div class="detail-side-item">
+                                <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
+                                <div class="min-w-0">
+                                    <p class="detail-side-label">Date &amp; Time</p>
+                                    <p class="detail-side-value">{{ $eventDate->format('M d, Y') }}</p>
+                                    <p class="detail-side-sub">{{ $timeDisplay }}</p>
+                                </div>
+                            </div>
+                            <div class="detail-side-item">
+                                <span class="detail-side-icon"><i class="fas fa-users"></i></span>
+                                <div class="min-w-0">
+                                    <p class="detail-side-label">Open For</p>
+                                    <p class="detail-side-value">{{ $event->target_participants ?: '—' }}</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-users"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Open For</p>
-                            <p class="detail-side-value">{{ $event->target_participants ?: '—' }}</p>
-                        </div>
-                    </div>
+                </div>
+
+                <div class="border-t border-gray-100"></div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-4">
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-clipboard-check"></i></span>
                         <div class="min-w-0">
@@ -1305,11 +1418,13 @@ select.filter-input {
                         <div class="min-w-0">
                             <p class="detail-side-label">Your RSVP</p>
                             <p class="detail-side-value {{ $rsvpColor }}">{{ $rsvpLabel }}</p>
-                            @if(!$isCompleted)
+                            @if(!$isCompleted && !$rsvpLocked)
                                 <button wire:click="openRsvpModal"
-                                        class="text-[13px] font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
+                                        class="text-sm font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
                                     {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
                                 </button>
+                            @elseif(!$isCompleted && $rsvpLocked)
+                                <p class="text-xs text-gray-400 mt-0.5">RSVP closed</p>
                             @endif
                         </div>
                     </div>
@@ -1322,81 +1437,77 @@ select.filter-input {
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div id="ev-detail-outer" class="flex-1 min-w-0 lg:min-h-0 lg:overflow-y-auto scroll-thin bg-gray-100 flex">
-            <div id="ev-detail-inner" class="max-w-[1100px] w-full mx-auto px-5 py-6 flex flex-col gap-4">
 
                 @if($hasDesc || $hasNotes || $hasContact)
-                <div class="philcst-post-card">
-                    <div class="px-5 py-4 flex flex-col gap-4">
+                <div class="border-t border-gray-100"></div>
 
-                        @if($hasDesc)
-                            @if($isPhilcst)
-                            <div>
-                                <p class="text-lg font-bold" style="color:#333333;">📢 {{ strtoupper($event->title) }}</p>
-                                <p class="text-[14px] mt-1 leading-relaxed" style="color:#333333;">
-                                    The Philippine College of Science and Technology invites you to join this event! ✨
-                                </p>
-                            </div>
-                          <div class="pre-wrap text-[16px] leading-relaxed overflow-y-auto scroll-thin" style="color:#000000;max-height:320px;">{{ trim($event->description) }}</div>
-                            <p class="text-[15px] font-semibold" style="color:#333333;">
+                {{-- ═══ Description / Notes / Contact Info ═══ --}}
+                <div class="grid grid-cols-1 {{ ($hasNotes || $hasContact) ? 'lg:grid-cols-2' : '' }} gap-5">
+
+                    @if($hasDesc)
+                    <div class="border border-gray-200 rounded-xl px-5 py-4">
+                        @if($isPhilcst)
+                            <p class="text-base font-bold" style="color:#333333;">📢 {{ strtoupper($event->title) }}</p>
+                            <p class="text-sm mt-1 mb-3 leading-relaxed" style="color:#333333;">
+                                The Philippine College of Science and Technology invites you to join this event! ✨
+                            </p>
+                            <div class="pre-wrap text-base leading-relaxed" style="color:#000000;">{{ trim($event->description) }}</div>
+                            <p class="text-sm font-semibold mt-3" style="color:#333333;">
                                 🗓️ {{ $eventDate->format('F d, Y') }} · {{ $timeDisplay }} &nbsp;•&nbsp; 📍 {{ $event->venue ?: 'TBA' }}
                             </p>
-                            @else
-                            <div>
-                                <p class="detail-side-label mb-1.5 flex items-center gap-1.5">
-                                    <i class="fas fa-align-left text-[#7a3f91] text-xs"></i>  <span class="text-black">About This Event</span>
-                                </p>
-                            </div>
-                           <div class="pre-wrap text-[16px] leading-relaxed overflow-y-auto scroll-thin" style="color:#000000;max-height:320px;">{{ $event->description }}</div>
-                            @endif
+                        @else
+                            <p class="detail-side-label mb-2.5 flex items-center gap-1.5">
+                                <i class="fas fa-align-left text-[#7a3f91] text-xs"></i> <span class="text-black">About This Event</span>
+                            </p>
+                            <div class="pre-wrap text-base leading-relaxed" style="color:#000000;">{{ $event->description }}</div>
                         @endif
-@if($hasNotes)
-                        <div style="padding-bottom:48px;">
-                            <div class="border-t border-gray-100" style="padding-top:24px;">
-<p class="detail-side-label flex items-center gap-1.5" style="margin-bottom:16px;">
-                                    <i class="fas fa-note-sticky text-[#7a3f91] text-xs"></i>  <span class="text-black">Additional Notes</span>
-                                </p>
-                                <div class="pre-wrap text-[16px] leading-relaxed overflow-y-auto scroll-thin" style="color:#000000;max-height:320px;">{{ $event->notes }}</div>
-                            </div>
+                    </div>
+                    @endif
+
+                    @if($hasNotes || $hasContact)
+                    <div class="flex flex-col gap-4">
+                        @if($hasNotes)
+                        <div class="border border-gray-200 rounded-xl px-5 py-4">
+                            <p class="detail-side-label flex items-center gap-1.5 mb-2.5">
+                                <i class="fas fa-note-sticky text-[#7a3f91] text-xs"></i> <span class="text-black">Additional Notes</span>
+                            </p>
+                            <div class="pre-wrap text-base leading-relaxed" style="color:#000000;">{{ $event->notes }}</div>
                         </div>
                         @endif
 
                         @if($hasContact)
-                        <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-4 py-3">
-                            <p class="text-base font-bold text-emerald-800 mb-2 flex items-center gap-1.5">
+                        <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-5 py-4">
+                            <p class="text-base font-bold text-emerald-800 mb-2.5 flex items-center gap-1.5">
                                 <i class="fas fa-address-card text-xs"></i> Contact Information
                             </p>
-                            <div class="flex flex-col gap-1.5">
+                            <div class="flex flex-col gap-2">
                                 @if($event->contact_person)
-                                    <p class="text-[16px] font-semibold flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-user text-[13px]" style="color:#999;"></i>{{ $event->contact_person }}
+                                    <p class="text-base font-semibold flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-user text-sm" style="color:#999;"></i>{{ $event->contact_person }}
                                     </p>
                                 @endif
                                 @if($event->contact_email)
-                                    <p class="text-[16px] flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-envelope text-[13px]" style="color:#999;"></i>{{ $event->contact_email }}
+                                    <p class="text-base flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-envelope text-sm" style="color:#999;"></i>{{ $event->contact_email }}
                                     </p>
                                 @endif
                                 @if($event->contact_phone)
-                                    <p class="text-[16px] flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-phone text-[13px]" style="color:#999;"></i>{{ $event->contact_phone }}
+                                    <p class="text-base flex items-center gap-2" style="color:#333333;">
+                                        <i class="fas fa-phone text-sm" style="color:#999;"></i>{{ $event->contact_phone }}
                                     </p>
                                 @endif
                             </div>
                         </div>
                         @endif
-
                     </div>
+                    @endif
+
                 </div>
                 @endif
 
-                <p class="text-center text-[13px]" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
+                <p class="text-center text-sm" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
             </div>
         </div>
-
     </div>
 
 </div>
@@ -1413,115 +1524,134 @@ select.filter-input {
 @if($showRsvpModal)
 @php $currentRsvp = $this->alumniRsvp; @endphp
 <div class="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-     @keydown.escape.window="$wire.closeRsvpModal()">
+     x-data='{ pending: null, confirming: false, saving: false, labels: {
+         CONFIRMED: { title: "Im Attending", sub: "Confirm your attendance", color: "emerald" },
+         TENTATIVE: { title: "Maybe", sub: "You might attend", color: "amber" },
+         DECLINED:  { title: "I Cant Attend", sub: "You wont be attending", color: "red" }
+     } }'
+     @keydown.escape.window="confirming ? (confirming=false, pending=null) : $wire.closeRsvpModal()">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden relative share-sheet">
         <div class="px-6 py-5 border-b border-white/10" style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
             <h2 class="text-lg font-semibold text-white flex items-center gap-2">
-                <i class="fas fa-calendar-plus text-white/80"></i> Confirm Your RSVP
+                <i class="fas fa-calendar-plus text-white/80"></i>
+                <span x-text="confirming ? 'Confirm Your Choice' : 'Your RSVP'"></span>
             </h2>
-            <p class="text-sm text-white/70 mt-0.5">Let us know if you're attending this event</p>
+            <p class="text-sm text-white/70 mt-0.5" x-show="!confirming">Let us know if you'll be joining this event</p>
+            <p class="text-sm text-white/70 mt-0.5" x-show="confirming" x-cloak>You can still change this before the event starts</p>
         </div>
-        <div class="px-6 py-5 space-y-3">
 
-            @if($currentRsvp)
-                {{-- Read-only indicators — the chosen response is highlighted,
-                     the other two are dimmed. Tapping Change on the sidebar
-                     re-opens this same modal so alumni can still update. --}}
-                <div class="rsvp-indicator-row {{ $currentRsvp->response === 'CONFIRMED' ? 'is-selected' : '' }}" style="{{ $currentRsvp->response === 'CONFIRMED' ? 'border-color:#7a3f91;background:#f5eef9;' : 'border-color:#e5e7eb;background:#fff;' }}">
-                    <span class="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                        <i class="fas fa-circle-check text-emerald-600 text-lg"></i>
-                    </span>
-                    <div class="flex-1 text-left">
-                        <p class="font-semibold text-emerald-700 text-sm">I'm Attending</p>
-                        <p class="text-xs text-emerald-600">Confirm your attendance</p>
-                    </div>
-                    @if($currentRsvp->response === 'CONFIRMED')<i class="fas fa-check-circle text-emerald-600"></i>@endif
-                </div>
-                <div class="rsvp-indicator-row {{ $currentRsvp->response === 'TENTATIVE' ? 'is-selected' : '' }}" style="{{ $currentRsvp->response === 'TENTATIVE' ? 'border-color:#7a3f91;background:#f5eef9;' : 'border-color:#e5e7eb;background:#fff;' }}">
-                    <span class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center flex-shrink-0">
-                        <i class="fas fa-circle-question text-amber-600 text-lg"></i>
-                    </span>
-                    <div class="flex-1 text-left">
-                        <p class="font-semibold text-amber-700 text-sm">Maybe</p>
-                        <p class="text-xs text-amber-600">You might attend</p>
-                    </div>
-                    @if($currentRsvp->response === 'TENTATIVE')<i class="fas fa-check-circle text-amber-600"></i>@endif
-                </div>
-                <div class="rsvp-indicator-row {{ $currentRsvp->response === 'DECLINED' ? 'is-selected' : '' }}" style="{{ $currentRsvp->response === 'DECLINED' ? 'border-color:#7a3f91;background:#f5eef9;' : 'border-color:#e5e7eb;background:#fff;' }}">
-                    <span class="w-9 h-9 rounded-xl bg-red-100 flex items-center justify-center flex-shrink-0">
-                        <i class="fas fa-circle-xmark text-red-600 text-lg"></i>
-                    </span>
-                    <div class="flex-1 text-left">
-                        <p class="font-semibold text-red-700 text-sm">I Can't Attend</p>
-                        <p class="text-xs text-red-600">You won't be attending</p>
-                    </div>
-                    @if($currentRsvp->response === 'DECLINED')<i class="fas fa-check-circle text-red-600"></i>@endif
-                </div>
+        {{-- ── STEP 1: choose a response ── --}}
+        <div class="px-6 py-5 space-y-2.5" x-show="!confirming">
 
-                <p class="text-xs text-center text-gray-400 pt-1">Tap a different option below to change your response.</p>
-
-                <div class="flex flex-col gap-2 pt-1">
-                    @if($currentRsvp->response !== 'CONFIRMED')
-                    <button type="button" wire:click="submitRsvp('CONFIRMED')" wire:loading.attr="disabled"
-                            class="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">
-                        Switch to I'm Attending
-                    </button>
-                    @endif
-                    @if($currentRsvp->response !== 'TENTATIVE')
-                    <button type="button" wire:click="submitRsvp('TENTATIVE')" wire:loading.attr="disabled"
-                            class="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-amber-200 text-amber-700 hover:bg-amber-50 transition cursor-pointer">
-                        Switch to Maybe
-                    </button>
-                    @endif
-                    @if($currentRsvp->response !== 'DECLINED')
-                    <button type="button" wire:click="submitRsvp('DECLINED')" wire:loading.attr="disabled"
-                            class="w-full px-3 py-2 rounded-lg text-xs font-semibold border border-red-200 text-red-700 hover:bg-red-50 transition cursor-pointer">
-                        Switch to I Can't Attend
-                    </button>
-                    @endif
+            <button type="button" @click="pending='CONFIRMED'; confirming=true"
+                    class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 cursor-pointer group
+                           {{ $currentRsvp?->response === 'CONFIRMED' ? 'border-emerald-400 bg-emerald-50' : 'border-emerald-200 hover:border-emerald-400 bg-white' }}">
+                <span class="w-9 h-9 rounded-xl bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center flex-shrink-0 transition">
+                    <i class="fas fa-circle-check text-emerald-600 text-lg"></i>
+                </span>
+                <div class="flex-1 text-left">
+                    <p class="font-semibold text-emerald-700 text-sm">I'm Attending</p>
+                    <p class="text-xs text-emerald-600">Confirm your attendance</p>
                 </div>
-            @else
-                {{-- No RSVP yet — normal clickable action buttons --}}
-                <button type="button" wire:click="submitRsvp('CONFIRMED')" wire:loading.attr="disabled"
-                        class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-emerald-200 hover:border-emerald-400 bg-white cursor-pointer group">
-                    <span class="w-9 h-9 rounded-xl bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center flex-shrink-0 transition">
-                        <i class="fas fa-circle-check text-emerald-600 text-lg"></i>
-                    </span>
-                    <div class="flex-1 text-left">
-                        <p class="font-semibold text-emerald-700 text-sm">I'm Attending</p>
-                        <p class="text-xs text-emerald-600">Confirm your attendance</p>
-                    </div>
+                @if($currentRsvp?->response === 'CONFIRMED')
+                    <i class="fas fa-check-circle text-emerald-600"></i>
+                @else
                     <i class="fas fa-chevron-right text-emerald-400 text-xs"></i>
-                </button>
-                <button type="button" wire:click="submitRsvp('TENTATIVE')" wire:loading.attr="disabled"
-                        class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-amber-200 hover:border-amber-400 bg-white cursor-pointer group">
-                    <span class="w-9 h-9 rounded-xl bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center flex-shrink-0 transition">
-                        <i class="fas fa-circle-question text-amber-600 text-lg"></i>
-                    </span>
-                    <div class="flex-1 text-left">
-                        <p class="font-semibold text-amber-700 text-sm">Maybe</p>
-                        <p class="text-xs text-amber-600">You might attend</p>
-                    </div>
-                    <i class="fas fa-chevron-right text-amber-400 text-xs"></i>
-                </button>
-                <button type="button" wire:click="submitRsvp('DECLINED')" wire:loading.attr="disabled"
-                        class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 border-red-200 hover:border-red-400 bg-white cursor-pointer group">
-                    <span class="w-9 h-9 rounded-xl bg-red-100 group-hover:bg-red-200 flex items-center justify-center flex-shrink-0 transition">
-                        <i class="fas fa-circle-xmark text-red-600 text-lg"></i>
-                    </span>
-                    <div class="flex-1 text-left">
-                        <p class="font-semibold text-red-700 text-sm">I Can't Attend</p>
-                        <p class="text-xs text-red-600">You won't be attending</p>
-                    </div>
-                    <i class="fas fa-chevron-right text-red-400 text-xs"></i>
-                </button>
-            @endif
+                @endif
+            </button>
 
+            <button type="button" @click="pending='TENTATIVE'; confirming=true"
+                    class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 cursor-pointer group
+                           {{ $currentRsvp?->response === 'TENTATIVE' ? 'border-amber-400 bg-amber-50' : 'border-amber-200 hover:border-amber-400 bg-white' }}">
+                <span class="w-9 h-9 rounded-xl bg-amber-100 group-hover:bg-amber-200 flex items-center justify-center flex-shrink-0 transition">
+                    <i class="fas fa-circle-question text-amber-600 text-lg"></i>
+                </span>
+                <div class="flex-1 text-left">
+                    <p class="font-semibold text-amber-700 text-sm">Maybe</p>
+                    <p class="text-xs text-amber-600">You might attend</p>
+                </div>
+                @if($currentRsvp?->response === 'TENTATIVE')
+                    <i class="fas fa-check-circle text-amber-600"></i>
+                @else
+                    <i class="fas fa-chevron-right text-amber-400 text-xs"></i>
+                @endif
+            </button>
+
+            <button type="button" @click="pending='DECLINED'; confirming=true"
+                    class="w-full px-4 py-3.5 rounded-xl border-2 transition flex items-center gap-3 cursor-pointer group
+                           {{ $currentRsvp?->response === 'DECLINED' ? 'border-red-400 bg-red-50' : 'border-red-200 hover:border-red-400 bg-white' }}">
+                <span class="w-9 h-9 rounded-xl bg-red-100 group-hover:bg-red-200 flex items-center justify-center flex-shrink-0 transition">
+                    <i class="fas fa-circle-xmark text-red-600 text-lg"></i>
+                </span>
+                <div class="flex-1 text-left">
+                    <p class="font-semibold text-red-700 text-sm">I Can't Attend</p>
+                    <p class="text-xs text-red-600">You won't be attending</p>
+                </div>
+                @if($currentRsvp?->response === 'DECLINED')
+                    <i class="fas fa-check-circle text-red-600"></i>
+                @else
+                    <i class="fas fa-chevron-right text-red-400 text-xs"></i>
+                @endif
+            </button>
+
+            <p class="text-xs text-center text-gray-400 pt-1">
+                <i class="fas fa-circle-info mr-1"></i>You can update your response as many times as you'd like, right up until the event begins.
+            </p>
         </div>
-        <div class="px-6 py-4 border-t border-gray-100 bg-gray-50">
-            <button wire:click="closeRsvpModal" type="button"
-                    class="w-full px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer text-gray-700">
-                Cancel
+
+        {{-- ── STEP 2: confirm the choice ── --}}
+        <div class="px-6 py-5" x-show="confirming" x-cloak>
+            <template x-if="pending">
+                <div class="flex flex-col items-center text-center gap-3 py-2">
+                    <span class="w-14 h-14 rounded-2xl flex items-center justify-center"
+                          :class="{
+                              'bg-emerald-100': labels[pending].color==='emerald',
+                              'bg-amber-100': labels[pending].color==='amber',
+                              'bg-red-100': labels[pending].color==='red'
+                          }">
+                        <i class="fas text-2xl"
+                           :class="{
+                               'fa-circle-check text-emerald-600': pending==='CONFIRMED',
+                               'fa-circle-question text-amber-600': pending==='TENTATIVE',
+                               'fa-circle-xmark text-red-600': pending==='DECLINED'
+                           }"></i>
+                    </span>
+                    <div>
+                        <p class="text-sm text-gray-500">You selected</p>
+                        <p class="text-lg font-bold" style="color:#333333;" x-text="labels[pending].title"></p>
+                    </div>
+                    <p class="text-sm text-gray-500 leading-relaxed">
+                        Confirm this response? You can change it again anytime before the event starts.
+                    </p>
+                </div>
+            </template>
+
+            <div class="flex items-center gap-2 mt-2">
+                <button type="button"
+                        :disabled="saving"
+                        @click="confirming=false; pending=null"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                    Back
+                </button>
+                <button type="button"
+                        :disabled="saving"
+                        @click="saving = true; $wire.submitRsvp(pending).then(() => { saving = false; confirming = false; pending = null; })"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:cursor-wait">
+                    <span x-show="!saving">Confirm</span>
+                    <span x-show="saving" x-cloak class="inline-flex items-center gap-1.5">
+                        <i class="fas fa-spinner fa-spin text-xs"></i> Saving…
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <div class="px-6 py-4 border-t border-gray-100 bg-gray-50" x-show="!confirming">
+            <button wire:click="closeRsvpModal" type="button" wire:loading.attr="disabled" wire:target="closeRsvpModal"
+                    class="w-full px-4 py-2.5 rounded-xl text-sm font-semibold border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer text-gray-700 flex items-center justify-center gap-1.5 disabled:opacity-70 disabled:cursor-wait">
+                <span wire:loading.remove wire:target="closeRsvpModal">Cancel</span>
+                <span wire:loading wire:target="closeRsvpModal" class="inline-flex items-center gap-1.5">
+                    <i class="fas fa-spinner fa-spin text-xs"></i> Closing…
+                </span>
             </button>
         </div>
     </div>
@@ -2018,6 +2148,15 @@ select.filter-input {
         function onCardClick(e) {
             if (e.target.closest('[data-ev-share]')) return;
             const card = e.currentTarget;
+            // If another card is already loading, ignore this click —
+            // prevents a second event from opening mid-request even in
+            // the brief window before Alpine's evBusy lock takes effect.
+            const alreadyLoading = document.querySelector('[data-ev-card].is-loading');
+            if (alreadyLoading && alreadyLoading !== card) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
             clearOtherEvCardSpinners(card);
             card.classList.add('is-loading');
             hide();
