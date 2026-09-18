@@ -365,6 +365,23 @@
         .coord-nav-link:not(.is-active):hover .coord-nav-icon {
             transform: scale(1.07);
         }
+
+        /* ── Lock the rest of the sidebar while one link is navigating ──
+           Only the link the user actually clicked (.is-navigating) stays
+           clickable/full-opacity; every other link is dimmed and its
+           clicks are blocked until the destination page lands
+           (livewire:navigated) or the navigation fails/times out. ── */
+        nav.coord-nav-locked .coord-nav-link:not(.is-navigating) {
+            pointer-events: none !important;
+            opacity: 0.45;
+            cursor: default !important;
+        }
+        nav.coord-nav-locked .coord-nav-link:not(.is-navigating):hover {
+            background: inherit;
+        }
+        .coord-nav-link.is-navigating {
+            cursor: wait;
+        }
         .coord-nav-link.is-active {
             background: #F3EBFA;
             border: 1px solid #E0CFEE;
@@ -789,6 +806,21 @@
     // that don't go through the hook above (defensive double-cover).
     window.addEventListener('livewire:navigate:failed', function () {
         window.__coordShowSessionExpired();
+    });
+
+    // ── Sidebar nav lock safety net ─────────────────────────────────
+    // navClickedRoute is normally cleared by the `livewire:navigated`
+    // handler on the sidebar root once the destination page lands. If a
+    // navigation instead fails outright (offline, aborted, etc.) that
+    // event never fires, which would leave every OTHER sidebar link
+    // permanently disabled. A page reload is already in progress in that
+    // case (see __coordShowSessionExpired above / navigate:failed), but
+    // clear the lock too so the sidebar is never left stuck if the reload
+    // is delayed or cancelled by the browser.
+    window.addEventListener('livewire:navigate:failed', function () {
+        if (document.body && document.body.__x) {
+            document.body.__x.$data.navClickedRoute = null;
+        }
     });
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -2058,7 +2090,8 @@
         </div>
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar"
+             :class="{ 'coord-nav-locked': navClickedRoute !== null }">
 
             <div class="coord-nav-section-row">
                 <p class="coord-section-label coord-collapsible-text">MENU</p>
@@ -2133,7 +2166,10 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="navClickedRoute = '{{ $link['route'] }}';"
+                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; }
+                           navClickedRoute = '{{ $link['route'] }}';
+                           var __r = navClickedRoute;
+                           setTimeout(() => { if (navClickedRoute === __r) navClickedRoute = null; }, 8000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="coord-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">

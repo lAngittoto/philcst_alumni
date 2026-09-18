@@ -1039,9 +1039,10 @@
                 item.read = true;
 
                 var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                // Await every PATCH so a caller that navigates right after
-                // markRead() (see the notif click handler below) is guaranteed
-                // the server has committed the read state first.
+                // Await the PATCHes so the server commits the read state.
+                // The notif click handler fires this without awaiting it —
+                // local read state is already applied above so the UI is
+                // correct immediately regardless of network latency.
                 await Promise.all(ids.map(function (id) {
                     return window.fetch('/alumni/notifications/' + id + '/read', {
                         method: 'PATCH',
@@ -2040,33 +2041,34 @@
                             if ($store.alumniNotifs._navigating) return;
                             $store.alumniNotifs._preClickRead = !!notif.read;
                             $store.alumniNotifs._navigating = true;
-                            $store.alumniNotifs.navigating   = true;
-                            $store.alumniNotifs.loadingId    = notif.id;
-                            $store.alumniNotifs.markRead(notif).then(() => {
-                                if (notif.link_route) {
-                                    const url = window.__alumniNotifTargetUrl(notif);
-                                    // Sequence: let the spinner actually show for a
-                                    // beat first, THEN close the panel, and only
-                                    // navigate once the panel's own close transition
-                                    // has finished — instead of firing the navigate
-                                    // immediately and letting the panel close in the
-                                    // background while the page is already loading.
-                                    setTimeout(() => {
-                                        $store.alumniNotifs.open = false;
-                                        setTimeout(() => {
-                                            window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
-                                        }, 80); // matches the panel's leave transition duration
-                                    }, 150); // spinner-visible beat before closing
-                                } else {
-                                    $store.alumniNotifs._navigating = false;
-                                    $store.alumniNotifs.navigating  = false;
-                                    $store.alumniNotifs.loadingId   = null;
-                                }
-                            }).catch(() => {
+                            $store.alumniNotifs.navigating  = true;
+                            $store.alumniNotifs.loadingId   = notif.id;
+
+                            // FIX (lag before navigate): the old code awaited markRead()
+                            // (a server PATCH) before navigating — so the spinner showed
+                            // during the network round-trip, then the panel was explicitly
+                            // closed (150ms + 80ms later), and only THEN did navigate fire.
+                            // The user saw: spinner → panel disappears → blank → page loads.
+                            //
+                            // Fix: fire markRead in the background without awaiting it.
+                            // Local read state is applied synchronously inside markRead
+                            // (before the fetch), so the badge/dot update instantly.
+                            // Navigate fires in the very next animation frame so the
+                            // panel stays OPEN with its spinner visible while Livewire
+                            // fetches the new page — livewire:navigated then closes it
+                            // cleanly, exactly as it was already designed to do.
+                            $store.alumniNotifs.markRead(notif).catch(() => {});
+
+                            if (notif.link_route) {
+                                const url = window.__alumniNotifTargetUrl(notif);
+                                requestAnimationFrame(() => {
+                                    window.Livewire ? Livewire.navigate(url) : (window.location.href = url);
+                                });
+                            } else {
                                 $store.alumniNotifs._navigating = false;
                                 $store.alumniNotifs.navigating  = false;
                                 $store.alumniNotifs.loadingId   = null;
-                            });
+                            }
                         ">
 
                         <div class="notif-item-loading-overlay"

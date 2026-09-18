@@ -489,6 +489,16 @@ new class extends Component {
 }
 .dash-card-clickable.is-loading .dash-card-spinner { display: flex; }
 .dash-card-clickable.is-loading { pointer-events: none; }
+
+/* ── Lock ALL stat/mini cards the instant ANY one of them is clicked ──
+   Only the clicked card shows its spinner + blur; the rest just become
+   inert (cursor + pointer-events off) so nothing else can be tapped
+   until the page finishes navigating. Prevents overlapping/conflicting
+   requests when the user taps a second card while the first is loading. */
+.org-dashboard-root.dash-nav-locked .dash-card-clickable {
+    pointer-events: none !important;
+    cursor: default !important;
+}
 </style>
 
 {{-- ── PAGE HEADER ── --}}
@@ -916,21 +926,40 @@ new class extends Component {
     // flash off immediately instead of staying on through the whole
     // transition. Plain click listeners + livewire:navigated don't have
     // that gap. Same pattern as the Alumni Dashboard, for consistency.
+    function getDashRoot() {
+        return document.querySelector('.org-dashboard-root');
+    }
+
     function initDashCardSpinners() {
         document.querySelectorAll('a.dash-card-clickable[href]').forEach(function (card) {
             if (card.__dashSpinnerBound) return;
             card.__dashSpinnerBound = true;
-            card.addEventListener('click', function () {
+            card.addEventListener('click', function (e) {
+                // Already locked (another card mid-navigation) → block this
+                // click entirely, no second request goes out.
+                var root = getDashRoot();
+                if (root && root.classList.contains('dash-nav-locked')) {
+                    e.preventDefault();
+                    return;
+                }
                 clearOtherDashCardSpinners(card);
                 card.classList.add('is-loading');
+                if (root) root.classList.add('dash-nav-locked');
             });
         });
         document.querySelectorAll('button.dash-card-nav-btn').forEach(function (card) {
             if (card.__dashSpinnerBound) return;
             card.__dashSpinnerBound = true;
-            card.addEventListener('click', function () {
+            card.addEventListener('click', function (e) {
+                var root = getDashRoot();
+                if (root && root.classList.contains('dash-nav-locked')) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    return;
+                }
                 clearOtherDashCardSpinners(card);
                 card.classList.add('is-loading');
+                if (root) root.classList.add('dash-nav-locked');
             });
         });
     }
@@ -945,10 +974,12 @@ new class extends Component {
         document.querySelectorAll('.dash-card-clickable.is-loading').forEach(function (el) {
             el.classList.remove('is-loading');
         });
+        var root = getDashRoot();
+        if (root) root.classList.remove('dash-nav-locked');
     }
 
     // Safety net: if navigation fails or the page is restored from bfcache,
-    // don't leave a card stuck spinning forever.
+    // don't leave every card stuck locked/spinning forever.
     window.addEventListener('pageshow', clearAllDashCardSpinners);
 
     // Bind card spinners right away so clicks right after page load feel

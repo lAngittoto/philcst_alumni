@@ -4,18 +4,22 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
-use Livewire\WithPagination;
 use App\Models\JobPosting;
 use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 new class extends Component {
-    use WithPagination;
 
-    protected string $paginationTheme = 'tailwind';
+    // Manual pagination (same pattern as upcoming-events.blade.php) —
+    // NOT Livewire's WithPagination trait, so $page is a plain public
+    // property with no #[Url] binding and the address bar never gets
+    // a ?page=N pushed onto it.
+    public int $page    = 1;
+    public int $perPage = 20;
 
     public string $search         = '';
     public string $filterType     = '';
@@ -154,16 +158,26 @@ new class extends Component {
         }
     }
 
-    public function updatingSearch()      { $this->resetPage(); }
-    public function updatingFilterType()  { $this->resetPage(); }
-    public function updatingFilterLevel() { $this->resetPage(); }
-    public function updatingFilterSort()  { $this->resetPage(); }
+    public function updatingSearch()      { $this->page = 1; }
+    public function updatingFilterType()  { $this->page = 1; }
+    public function updatingFilterLevel() { $this->page = 1; }
+    public function updatingFilterSort()  { $this->page = 1; }
 
     public function resetFilters(): void
     {
         $this->search = $this->filterType = $this->filterLevel = '';
         $this->filterSort = 'recent';
-        $this->resetPage();
+        $this->page = 1;
+    }
+
+    public function nextPage(): void
+    {
+        if ($this->page < $this->jobPostings->lastPage()) $this->page++;
+    }
+
+    public function previousPage(): void
+    {
+        if ($this->page > 1) $this->page--;
     }
 
     #[Computed]
@@ -213,7 +227,19 @@ new class extends Component {
         // top, matching what the organizer just did.
         $q->orderBy('updated_at', 'desc');
 
-        return $q->paginate(20);
+        // Manual pagination (mirrors upcoming-events.blade.php) instead of
+        // Livewire's WithPagination trait — keeps $page a plain property
+        // with no #[Url] binding, so no ?page=N ever hits the address bar.
+        $total = $q->count();
+        $items = $q->forPage($this->page, $this->perPage)->get();
+
+        return new LengthAwarePaginator(
+            $items,
+            $total,
+            $this->perPage,
+            $this->page,
+            ['path' => request()->url()]
+        );
     }
 
     public function viewJob(int $id): void
@@ -517,13 +543,19 @@ new class extends Component {
 <script>
 (function () {
     function jbStripJobQuery() {
-        if (new URLSearchParams(window.location.search).has('job')) {
+        var params = new URLSearchParams(window.location.search);
+        if (params.has('job') || params.has('page')) {
             window.history.replaceState(null, '', window.location.origin + window.location.pathname);
         }
     }
     document.addEventListener('livewire:navigated', jbStripJobQuery);
     document.addEventListener('DOMContentLoaded', jbStripJobQuery);
     if (document.readyState !== 'loading') jbStripJobQuery();
+    if (window.Livewire) {
+        window.Livewire.hook('commit', ({ succeed }) => {
+            succeed(() => jbStripJobQuery());
+        });
+    }
 })();
 </script>
 
@@ -1007,10 +1039,10 @@ select.filter-input {
              normally when there ARE many results) — pagination sits right
              under the cards instead of far below them. --}}
         <div class="bg-white p-4 relative overflow-y-auto transition-opacity duration-200 flex-1 min-h-0"
-             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterType,filterLevel,filterSort">
+             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page">
 
             <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
-                 wire:loading.flex wire:target="search,filterType,filterLevel,filterSort">
+                 wire:loading.flex wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
@@ -1138,22 +1170,26 @@ select.filter-input {
             <div class="flex items-center gap-1 flex-wrap">
                 <button wire:click="previousPage"
                         wire:loading.attr="disabled"
-                        wire:target="previousPage,nextPage,page"
+                        wire:loading.class="opacity-50 cursor-wait"
+                        wire:target="previousPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if($this->jobPostings->onFirstPage()) disabled @endif
                         aria-label="Previous">
-                    <span wire:loading.remove wire:target="previousPage"><i class="fas fa-chevron-left text-[9px]"></i></span>
-                    <span wire:loading wire:target="previousPage"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                    <i class="fas fa-chevron-left text-[9px]"></i>
                 </button>
 
                 @if($pgStart > 1)
                     <button wire:click="$set('page', 1)"
                             wire:loading.attr="disabled"
-                            wire:target="previousPage,nextPage,page"
+                            wire:loading.class="opacity-50 cursor-wait"
+                            wire:target="$set('page', 1)"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
+                        <span wire:loading.remove wire:target="$set('page', 1)">1</span>
+                        <span wire:loading wire:target="$set('page', 1)"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                    </button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
 
@@ -1164,9 +1200,13 @@ select.filter-input {
                     @else
                         <button wire:click="$set('page', {{ $p }})"
                                 wire:loading.attr="disabled"
-                                wire:target="previousPage,nextPage,page"
+                                wire:loading.class="opacity-50 cursor-wait"
+                                wire:target="$set('page', {{ $p }})"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
+                            <span wire:loading.remove wire:target="$set('page', {{ $p }})">{{ $p }}</span>
+                            <span wire:loading wire:target="$set('page', {{ $p }})"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                        </button>
                     @endif
                 @endfor
 
@@ -1174,21 +1214,25 @@ select.filter-input {
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                     <button wire:click="$set('page', {{ $lp }})"
                             wire:loading.attr="disabled"
-                            wire:target="previousPage,nextPage,page"
+                            wire:loading.class="opacity-50 cursor-wait"
+                            wire:target="$set('page', {{ $lp }})"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
+                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
+                        <span wire:loading.remove wire:target="$set('page', {{ $lp }})">{{ $lp }}</span>
+                        <span wire:loading wire:target="$set('page', {{ $lp }})"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                    </button>
                 @endif
 
                 <button wire:click="nextPage"
                         wire:loading.attr="disabled"
-                        wire:target="previousPage,nextPage,page"
+                        wire:loading.class="opacity-50 cursor-wait"
+                        wire:target="nextPage"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if(!$this->jobPostings->hasMorePages()) disabled @endif
                         aria-label="Next">
-                    <span wire:loading.remove wire:target="nextPage"><i class="fas fa-chevron-right text-[9px]"></i></span>
-                    <span wire:loading wire:target="nextPage"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                    <i class="fas fa-chevron-right text-[9px]"></i>
                 </button>
 
                 <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
