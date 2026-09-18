@@ -547,6 +547,11 @@ new class extends Component {
             pointer-events: none;
             cursor: default !important;
         }
+        /* Also freeze chart panels when any card/chart is navigating. */
+        body.dash-nav-busy .dash-chart-loading-wrap {
+            pointer-events: none;
+            cursor: default !important;
+        }
 
         /* ── Chart card loading overlay ──────────────────────────────
            Same dot-loader language again, and the same blur-the-
@@ -612,7 +617,7 @@ new class extends Component {
 
             {{-- Total Alumni --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=all"
-               class="dash-card-clickable relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -621,7 +626,7 @@ new class extends Component {
                              opacity-0 z-50 shadow-lg
                              before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                              before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
-                             [.relative:hover_&]:opacity-100">
+                             group-hover:opacity-100">
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View All Alumni Records
                 </span>
                 <div class="flex items-start justify-between mb-3">
@@ -642,7 +647,7 @@ new class extends Component {
 
             {{-- Profile Complete --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=complete"
-               class="dash-card-clickable relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -651,7 +656,7 @@ new class extends Component {
                              opacity-0 z-50 shadow-lg
                              before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                              before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
-                             [.relative:hover_&]:opacity-100">
+                             group-hover:opacity-100">
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Complete Profiles
                 </span>
                 <div class="flex items-start justify-between mb-3">
@@ -671,7 +676,7 @@ new class extends Component {
 
             {{-- Profile Pending --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=incomplete"
-               class="dash-card-clickable relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                       hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -680,7 +685,7 @@ new class extends Component {
                              opacity-0 z-50 shadow-lg
                              before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                              before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
-                             [.relative:hover_&]:opacity-100">
+                             group-hover:opacity-100">
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Pending Profiles
                 </span>
                 <div class="flex items-start justify-between mb-3">
@@ -701,7 +706,7 @@ new class extends Component {
             {{-- Total Programs --}}
             <div wire:click="openAlumniModal('courses')"
                  wire:loading.class="is-loading" wire:target="openAlumniModal('courses')"
-                 class="dash-card-clickable relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+                 class="dash-card-clickable group relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
                         hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985]">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -710,7 +715,7 @@ new class extends Component {
                              opacity-0 z-50 shadow-lg
                              before:content-[''] before:absolute before:top-full before:left-1/2 before:-translate-x-1/2
                              before:border-[5px] before:border-transparent before:border-t-[#1a1a1a]
-                             [.relative:hover_&]:opacity-100">
+                             group-hover:opacity-100">
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Active Programs
                 </span>
                 <div class="flex items-start justify-between mb-3">
@@ -924,15 +929,15 @@ new class extends Component {
             </div>
         </div>
 
-        {{-- ── Toolbar ── --}}
+        {{-- ── Toolbar (hidden for Active Programs — no filters/search needed there) ── --}}
+        @if($alumniModalFilter !== 'courses')
         <div class="px-6 lg:px-10 py-3 bg-white border-b border-gray-200 shrink-0 transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="alumniModalSearch,alumniModalFilter,alumniModalBatch,alumniModalCourseFilter">
             <div class="flex flex-wrap gap-2 items-center">
 
                 <span class="text-[10px] font-bold tracking-widest uppercase text-[#7A3F91] shrink-0 mr-1">FILTERS</span>
 
-                @if($alumniModalFilter !== 'courses')
-                    @foreach($visibleAlumniTabs as [$val, $lbl, $icon])
+                @foreach($visibleAlumniTabs as [$val, $lbl, $icon])
                     <button
                         @if($alumniTabsClickable) wire:click="$set('alumniModalFilter','{{ $val }}')" @endif
                         class="inline-flex items-center px-4 py-[7px] rounded-full text-xs font-semibold border transition-all duration-150
@@ -944,7 +949,6 @@ new class extends Component {
                         {{ $lbl }}
                     </button>
                     @endforeach
-                @endif
 
                 <div class="relative" wire:ignore
                      x-data="{ q:'', init(){ this.q = $wire.alumniModalSearch ?? ''; $wire.$watch('alumniModalSearch', v => { if(v!==this.q) this.q=v; }); } }">
@@ -953,13 +957,11 @@ new class extends Component {
                     </span>
                     <input type="text" x-model="q"
                            @input.debounce.300ms="$wire.set('alumniModalSearch', q)"
-                           placeholder="{{ $alumniModalFilter === 'courses' ? 'Search program, abbreviation, college…' : 'Search name, ID, program…' }}"
+                           placeholder="Search name, ID, program…"
                            class="pl-8 pr-3 py-[7px] border border-[#E0E0E0] rounded-full text-xs bg-white text-gray-900
                                   focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition-all w-56"
                            autocomplete="off">
                 </div>
-
-                @if($alumniModalFilter !== 'courses')
 
                 @if(!$alumniModalBatchLocked)
                 <div class="relative"
@@ -1041,10 +1043,9 @@ new class extends Component {
                 </button>
                 @endif
 
-                @endif
-
             </div>
         </div>
+        @endif
 
         {{-- Filtering progress bar --}}
         <div class="ar-filter-progress-track" wire:loading wire:target="alumniModalSearch,alumniModalFilter,alumniModalBatch,alumniModalCourseFilter">
@@ -1064,26 +1065,22 @@ new class extends Component {
                     <table class="w-full border-collapse table-fixed">
                         <thead class="sticky top-0 z-10 bg-[#f5f0fa]">
                             <tr class="border-b-2 border-[#E8E0F0]">
-                                <th class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[22%] sm:w-[18%]">Standard Abbreviation</th>
-                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[46%] sm:w-[52%]">Program</th>
-                                <th class="px-2 sm:px-5 py-2 sm:py-2.5 text-left text-[10px] sm:text-xs font-semibold text-[#111111] uppercase tracking-wider w-[32%] sm:w-[30%]">College</th>
+                                        <th class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2 sm:py-2.5 text-left text-xs sm:text-sm font-semibold text-[#111111] uppercase tracking-wider w-[58%]">Programs</th>
+                                <th class="px-2 sm:px-4 py-2 sm:py-2.5 text-left text-xs sm:text-sm font-semibold text-[#111111] uppercase tracking-wider w-[42%]">College</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100">
                             @forelse($this->alumniModalRecords as $course)
                             <tr class="bg-white transition-colors duration-100 hover:bg-[#F5F0FA]">
-                                <td class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2.5 sm:py-3 align-top">
-                                    <span class="text-[11px] sm:text-sm font-mono font-bold text-[#111111] break-words">{!! $this->highlight($course->code ?? '', $this->alumniModalSearch) !!}</span>
+                                <td class="pl-3 sm:pl-6 lg:pl-10 pr-2 py-2.5 align-middle">
+                                    <span class="text-sm sm:text-base font-semibold text-[#111111] break-words leading-snug">{!! $this->highlight($course->name ?? '', $this->alumniModalSearch) !!}</span>
                                 </td>
-                                <td class="px-2 sm:px-5 py-2.5 sm:py-3 align-top">
-                                    <p class="text-[11px] sm:text-sm font-semibold text-[#111111] break-words leading-snug">{!! $this->highlight($course->name ?? '', $this->alumniModalSearch) !!}</p>
-                                </td>
-                                <td class="px-2 sm:px-5 py-2.5 sm:py-3 align-top">
-                                    <span class="text-[11px] sm:text-sm text-[#333333] break-words leading-snug">{!! $course->college ? $this->highlight($course->college, $this->alumniModalSearch) : '—' !!}</span>
+                                <td class="px-2 sm:px-4 py-2.5 align-middle">
+                                    <span class="text-sm sm:text-base text-[#333333] break-words leading-snug">{!! $course->college ? $this->highlight($course->college, $this->alumniModalSearch) : '—' !!}</span>
                                 </td>
                             </tr>
                             @empty
-                            <tr><td colspan="3" class="py-20 text-center">
+                            <tr><td colspan="2" class="py-20 text-center">
                                 <div class="flex flex-col items-center gap-3">
                                     <div class="w-12 h-12 bg-[#f0e6f8] rounded-2xl flex items-center justify-center">
                                         <i class="fas fa-book text-xl" style="color:#c89de0;"></i>
@@ -1751,6 +1748,7 @@ new class extends Component {
                         if (batch === undefined || batch === null) return;
                         var baseRoute = getAlumniRoute();
                         if (!baseRoute) return;
+                        document.body.classList.add('dash-nav-busy');
                         showChartLoading('bar');
                         window.location.href = baseRoute + '?profile_filter=all&batch=' + parseInt(batch);
                     }
@@ -1943,6 +1941,7 @@ new class extends Component {
                     var filter    = PIE_FILTERS[idx];
                     var baseRoute = getAlumniRoute();
                     if (!baseRoute) return;
+                    document.body.classList.add('dash-nav-busy');
                     showChartLoading('pie');
                     window.location.href = baseRoute + '?employment_status=' + encodeURIComponent(filter);
                 },
@@ -2048,16 +2047,61 @@ new class extends Component {
 
         function hookLivewire() {
             if (!window.Livewire) return;
-            Livewire.hook('commit', function (payload) {
-                showChartLoading();
-                var succeed = payload.succeed || function (cb) { cb({}); };
-                if (typeof succeed === 'function') {
-                    succeed(function () {
-                        requestAnimationFrame(function () {
-                            initDashCharts();
-                            buildEmpPieChart();
-                            hideChartLoading();
+            Livewire.hook('commit', function ({ component, commit, succeed, fail, respond }) {
+                // Only spin the chart overlays for commits that can actually
+                // change chart data. Livewire 3's commit hook exposes calls
+                // as commit.calls = [{ path, method, params }, ...] — NOT
+                // payload.calls (that was the bug: the guard never matched,
+                // so every commit — including opening the "All Programs"
+                // modal — still flashed both charts). openAlumniModal /
+                // closeModal never touch empCounts or batch data, so a
+                // commit made up of only those calls should skip the charts.
+                var calls = (commit && commit.calls) || [];
+                var opensModalOnly = calls.length > 0 && calls.every(function (c) {
+                    var name = c && c.method;
+                    return name === 'openAlumniModal' || name === 'closeModal';
+                });
+
+                // The "All Programs" card (openAlumniModal) is a wire:click
+                // div, not an <a> — so it never goes through
+                // initDashCardSpinners, and body.dash-nav-busy (the class
+                // that freezes every OTHER card's pointer-events/cursor
+                // while one card is busy) never got set. That's why the
+                // other three cards stayed clickable with a normal cursor
+                // during its loading spinner. Mirror the same freeze here.
+                var opensCoursesModal = calls.some(function (c) {
+                    return c && c.method === 'openAlumniModal';
+                });
+                if (opensCoursesModal) {
+                    document.body.classList.add('dash-nav-busy');
+                }
+
+                if (opensModalOnly) {
+                    var onSucceedModal = succeed || function (cb) { cb({}); };
+                    onSucceedModal(function () {
+                        document.body.classList.remove('dash-nav-busy');
+                    });
+                    if (fail) {
+                        fail(function () {
+                            document.body.classList.remove('dash-nav-busy');
                         });
+                    }
+                    return;
+                }
+
+                showChartLoading();
+                var onSucceed = succeed || function (cb) { cb({}); };
+                onSucceed(function () {
+                    document.body.classList.remove('dash-nav-busy');
+                    requestAnimationFrame(function () {
+                        initDashCharts();
+                        buildEmpPieChart();
+                        hideChartLoading();
+                    });
+                });
+                if (fail) {
+                    fail(function () {
+                        document.body.classList.remove('dash-nav-busy');
                     });
                 }
             });

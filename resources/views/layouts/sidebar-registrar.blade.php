@@ -868,6 +868,7 @@
             _pollTimer: null,
             navigating: false,
             loadingId:  null,
+            clickingId: null,
             markingAll: false,
             deletingId: null,
             deleteToast: { show: false, message: '' },
@@ -1078,47 +1079,37 @@
             },
             toggle() { this.open = !this.open; },
             close()  {
-                // Don't let the panel be closed (outside click, etc.)
-                // while a notif click is still navigating/loading — it
-                // should only close once livewire:navigated fires.
-                if (this.navigating) return;
                 this.open = false;
             },
 
-            async markRead(item) {
-                this.navigating = true;
-                this.loadingId  = item.id;
-                var clearedByNav = false;
-                try {
-                    if (!item.read) {
-                        item.read = true;
-                        var ids  = item._ids || [item.id];
-                        var csrf = document.querySelector('meta[name="csrf-token"]').content;
-                        for (var i = 0; i < ids.length; i++) {
-                            try {
-                                await window.fetch('/registrar/notifications/' + ids[i] + '/read', {
-                                    method: 'PATCH',
-                                    headers: {
-                                        'X-CSRF-TOKEN':     csrf,
-                                        'X-Requested-With': 'XMLHttpRequest',
-                                    }
-                                });
-                            } catch (e) { /* ignore */ }
-                        }
-                    }
-                    clearedByNav = await this.goToTarget(item);
-                } finally {
-                    // If goToTarget actually kicked off a navigation, leave
-                    // `navigating` (and `loadingId`) on — cleared once the
-                    // destination page is truly ready (see livewire:navigated
-                    // listener below), so the overlay never drops early and
-                    // the panel never closes/navigates-looking before the
-                    // page is actually ready.
-                    if (!clearedByNav) {
-                        this.navigating = false;
-                        this.loadingId  = null;
-                    }
+            markRead(item) {
+                // ⚡ Close the panel IMMEDIATELY before navigation so it never
+                //    sits on top of the landing page blocking scroll/clicks.
+                //    We skip setting navigating=true / loadingId here since the
+                //    panel is gone — no spinner overlay is needed on a closed panel.
+                this.open = false;
+
+                // ⚡ Fire mark-as-read PATCHes in background — never block
+                //    navigation on these. If one fails, the 5-second poll
+                //    will re-deliver the unread state automatically.
+                if (!item.read) {
+                    item.read = true;
+                    var ids  = item._ids || [item.id];
+                    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+                    ids.forEach(function (id) {
+                        window.fetch('/registrar/notifications/' + id + '/read', {
+                            method: 'PATCH',
+                            headers: {
+                                'X-CSRF-TOKEN':     csrf,
+                                'X-Requested-With': 'XMLHttpRequest',
+                            }
+                        }).catch(function () { /* ignore */ });
+                    });
                 }
+
+                // Navigate immediately — panel is already closed so no
+                // spinner state is needed. navigating/loadingId stay false.
+                this.goToTarget(item);
             },
 
             // Navigate to wherever this notif points, carrying the affected
@@ -1131,68 +1122,86 @@
             // page's notif-scoped-view banner can say which notification
             // the narrowed table came from.
             //
-            // ⚠️ FIX: the in-memory `item` here can be STALE. This store
-            // only re-fetches on a 5s poll interval, so if a 2nd/3rd
-            // registration or import merged into this notif's DB row
-            // AFTER the last poll but BEFORE the user clicked it, the
-            // clicked item's alumni_ids would only contain the older,
-            // smaller set (e.g. just Fernandos, missing Loki) — causing
-            // the destination page to highlight/scope only 1 of the 2
-            // actual records. Re-fetch this specific notif's row fresh
-            // from the server right before navigating, so we always
-            // carry the true, fully-merged alumni_ids — not whatever
-            // snapshot happened to be sitting in the store.
-            async goToTarget(item) {
+            // ⚡ FIX (lag on notif click): previously we awaited a full
+            //    /registrar/notifications re-fetch BEFORE calling
+            //    Livewire.navigate() — so the user clicked a notif and
+            //    nothing happened for 300–800 ms while that HTTP round-trip
+            //    completed, then the page felt "stuck" requiring a mouse
+            //    wiggle or extra click to wake up. Fix: navigate
+            //    IMMEDIATELY using whatever alumni_ids are already in memory,
+            //    then fire the fresh-IDs fetch in the background. If it
+            //    comes back before the page finishes loading we patch the
+            //    URL via history.replaceState so the landing page's mount()
+            //    sees the fuller set; if it comes back after, it's a no-op.
+            //    Either way the user sees instant response on click.
+            //
+            // ⚠️ FIX: if the notif points to the SAME route the user is
+            //    already sitting on (e.g. clicking a notif while already
+            //    viewing Alumni Records), Livewire.navigate() only swaps
+            //    the query string of a component that's already mounted —
+            //    it does NOT re-run mount() on same-component SPA
+            //    transitions in every Livewire setup, so the new
+            //    ?highlight=/?scope_title= params silently never get
+            //    processed and the table stays unscoped. A full hard
+            //    navigation (window.location.href) always re-runs mount()
+            //    from scratch, so force that path specifically when
+            //    target === current location, and keep the fast SPA
+            //    navigate for the normal cross-page case.
+            goToTarget(item) {
                 var routeName = item.link_route;
                 if (!routeName || !window.__registrarRouteMap || !window.__registrarRouteMap[routeName]) return false;
 
                 var alumniIds = Array.isArray(item.alumni_ids) ? item.alumni_ids.filter(Boolean) : [];
 
-                var freshIds = await this._fetchFreshAlumniIds(item);
-                if (freshIds !== null) alumniIds = freshIds;
-
                 var base = window.__registrarRouteMap[routeName];
-                var url  = base;
-                if (alumniIds.length > 0) {
-                    url += (base.indexOf('?') === -1 ? '?' : '&') + 'highlight=' + alumniIds.join(',');
-                    if (alumniIds.length > 1 && item.title) {
-                        url += '&scope_title=' + encodeURIComponent(item.title);
+
+                function buildUrl(ids) {
+                    var url = base;
+                    if (ids.length > 0) {
+                        url += (base.indexOf('?') === -1 ? '?' : '&') + 'highlight=' + ids.join(',');
+                        if (ids.length > 1 && item.title) {
+                            url += '&scope_title=' + encodeURIComponent(item.title);
+                        }
                     }
+                    return url;
                 }
 
-                // ⚠️ FIX: don't close() here anymore. Closing the panel the
-                // instant the click happens made it look like the notif
-                // "did nothing" while the request/navigation was still in
-                // flight. The panel now stays open, showing the in-place
-                // spinner overlay on the clicked item, and only closes once
-                // the destination page has actually landed (SPA case: the
-                // livewire:navigated listener below; hard-nav case: the page
-                // unloads anyway so it doesn't matter).
-
-                // ⚠️ FIX: if the notif points to the SAME route the user is
-                // already sitting on (e.g. clicking a notif while already
-                // viewing Alumni Records), Livewire.navigate() only swaps
-                // the query string of a component that's already mounted —
-                // it does NOT re-run mount() on same-component SPA
-                // transitions in every Livewire setup, so the new
-                // ?highlight=/?scope_title= params silently never get
-                // processed and the table stays unscoped. A full hard
-                // navigation (window.location.href) always re-runs mount()
-                // from scratch, so force that path specifically when
-                // target === current location, and keep the fast SPA
-                // navigate for the normal cross-page case.
                 var isSameLocation = (function () {
                     try {
-                        var current = window.location.pathname + window.location.search;
-                        var targetPath = url.split('?')[0];
-                        return window.location.pathname === targetPath;
+                        return window.location.pathname === base.split('?')[0];
                     } catch (e) { return false; }
                 })();
 
+                // ── NAVIGATE IMMEDIATELY with in-memory IDs ──────────────
+                // No awaiting here — the user gets instant feedback on click.
+                var url = buildUrl(alumniIds);
+
                 if (isSameLocation) {
-                    window.location.href = url; // hard nav — page unloads, spinner naturally ends with it
+                    // Hard nav — always re-runs mount(); background refresh
+                    // can't patch the URL after an unload so skip it.
+                    window.location.href = url;
                 } else if (window.Livewire && typeof window.Livewire.navigate === 'function') {
                     window.Livewire.navigate(url); // SPA nav — spinner cleared by livewire:navigated listener
+
+                    // ── BACKGROUND: fetch fresher IDs and patch URL if richer ──
+                    // Fires AFTER navigation has already started. If the fetch
+                    // wins the race against the page load, replaceState makes
+                    // the new URL visible to the landing component's mount();
+                    // if it loses, it's a benign no-op since the page already
+                    // loaded with whatever IDs we had.
+                    this._fetchFreshAlumniIds(item).then(function (freshIds) {
+                        if (!freshIds || freshIds.length === 0) return;
+                        // Only bother if the fresh set is actually different
+                        var same = freshIds.length === alumniIds.length &&
+                            freshIds.every(function (id) { return alumniIds.indexOf(id) !== -1; });
+                        if (same) return;
+                        try {
+                            var patchedUrl = buildUrl(freshIds);
+                            if (window.history && typeof window.history.replaceState === 'function') {
+                                window.history.replaceState(null, '', patchedUrl);
+                            }
+                        } catch (e) { /* ignore */ }
+                    }).catch(function () { /* ignore */ });
                 } else {
                     window.location.href = url;
                 }
@@ -1372,8 +1381,9 @@
             // were also wiping it). The panel now only closes via explicit
             // user action: toggle(), the outside-click handler, or close()
             // itself (which still respects the in-flight-navigation guard).
-            s.navigating = false; // destination page has landed — drop the spinner now, not before
+            s.navigating = false; // safety net reset (markRead no longer sets this, but keep for any future use)
             s.loadingId  = null;
+            s.open       = false; // guarantee panel is closed on every navigation
             s.init();
         } else {
             Alpine.store('notifs', window.__makeNotifsStore());
@@ -1749,7 +1759,25 @@
     </aside>
 
     {{-- ══ MAIN CONTENT ═════════════════════════════════════════════════════ --}}
-    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 relative">
+
+        {{-- FIX: while a sidebar link is navigating (navClickedRoute !== null),
+             the bell button and the page content below were still fully
+             clickable — only the OTHER sidebar links got locked+dimmed via
+             .is-navigating-any. A stray click during that loading window
+             (e.g. one meant for the sidebar landing slightly late, or just
+             mashing the sidebar while it's mid-transition) could land on
+             the bell or on something in the old page instead. This overlay
+             sits above the header + page content (but is scoped inside
+             <main>, so it never covers the sidebar) and eats every click
+             for as long as a nav is in flight. --}}
+        <div x-show="navClickedRoute !== null"
+             x-cloak
+             class="absolute inset-0 z-40 cursor-wait"
+             style="background: transparent;"
+             @click.stop.prevent=""
+             aria-hidden="true">
+        </div>
 
         <header class="sticky top-0 flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
                        shrink-0 z-30">
@@ -1953,18 +1981,11 @@
                                : notif.icon === 'comment-dots' ? 'clr-chat'
                                : 'clr-default')
                             : '',
-                        ($store.notifs.navigating && $store.notifs.loadingId === notif.id) ? 'is-loading' : '',
                         ($store.notifs.deletingId === notif.id) ? 'is-loading' : ''
                     ]"
                     @click.stop="
                         $store.notifs.markRead(notif);
                     ">
-
-                    <template x-if="$store.notifs.navigating && $store.notifs.loadingId === notif.id">
-                        <div class="notif-item-loading-overlay">
-                            <i class="fas fa-spinner fa-spin notif-item-spinner"></i>
-                        </div>
-                    </template>
 
                     <template x-if="$store.notifs.deletingId === notif.id">
                         <div class="notif-item-loading-overlay">
