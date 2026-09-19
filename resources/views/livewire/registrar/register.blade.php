@@ -40,6 +40,7 @@ new class extends Component {
     public int    $importDuplicateCount = 0;
     public array  $importErrors         = [];
     public array  $importDuplicates     = [];
+    public array  $importSuccesses      = [];
 
     public function mount(): void
     {
@@ -345,6 +346,7 @@ public function closeImportModal(): void
         $this->importDuplicateCount = 0;
         $this->importErrors         = [];
         $this->importDuplicates     = [];
+        $this->importSuccesses      = [];
     }
 
     /**
@@ -431,6 +433,7 @@ public function closeImportModal(): void
         $this->importDuplicateCount = 0;
         $this->importErrors         = [];
         $this->importDuplicates     = [];
+        $this->importSuccesses      = [];
 
         try {
             if (!$this->importFile) throw new \Exception('No file selected.');
@@ -621,6 +624,12 @@ public function closeImportModal(): void
                         $this->importSuccessCount += count($alumniRows);
                         foreach ($alumniRows as $row) {
                             $insertedStudentIds[] = $row['student_id'];
+                            $this->importSuccesses[] = implode(' ', array_filter([
+                                $row['first_name'],
+                                $row['middle_initial'],
+                                $row['last_name'],
+                                $row['suffix'],
+                            ])) . ' · ' . $row['student_id'] . ' · ' . $row['course_code'] . ' ' . $row['batch'];
                         }
                     }
                     $this->importProgress = min(
@@ -1414,9 +1423,68 @@ public function closeImportModal(): void
             {{-- ── Form Column ── --}}
             <div class="w-full">
                 <div class="reg-card reg-panel">
-                    <form wire:submit="registerAlumni" class="p-5 sm:p-7 space-y-5 pb-7"
+                    <form wire:submit="registerAlumni" novalidate class="p-5 sm:p-7 space-y-5 pb-7"
                           x-data="{
-                              fieldStale(key) { return ($wire.fieldErrors || []).includes(key); },
+                              clientError(key) {
+                                  const nameRe = /^[a-zA-Z\s\-.']+$/;
+                                  switch (key) {
+                                      case 'firstName': {
+                                          const v = $wire.regFirstName.trim();
+                                          if (v === '') return '';
+                                          if (!nameRe.test(v)) return 'Letters, spaces, hyphens, or apostrophes only.';
+                                          return '';
+                                      }
+                                      case 'lastName': {
+                                          const v = $wire.regLastName.trim();
+                                          if (v === '') return '';
+                                          if (!nameRe.test(v)) return 'Letters, spaces, hyphens, or apostrophes only.';
+                                          return '';
+                                      }
+                                      case 'middleName': {
+                                          const v = $wire.regMiddleInitial.trim();
+                                          if (v === '') return '';
+                                          if (!/^[a-zA-Z]+$/.test(v)) return 'Letters only, no numbers or symbols.';
+                                          if (v.length < 2) return 'Must be a full word (e.g. Santos, not S).';
+                                          return '';
+                                      }
+                                      case 'suffix': {
+                                          const v = $wire.regSuffix.trim();
+                                          if (v === '') return '';
+                                          if (!/^[a-zA-Z.\s]+$/.test(v)) return 'Letters and periods only (e.g. Jr. Sr. III).';
+                                          return '';
+                                      }
+                                      case 'studentId': {
+                                          const v = $wire.regStudentId.trim();
+                                          if (v === '') return '';
+                                          if (!/^\d+$/.test(v)) return 'Numbers only.';
+                                          if (v.length < 8) return (8 - v.length) + ' more digit' + ((8 - v.length) === 1 ? '' : 's') + ' needed.';
+                                          if (v.length > 8) return 'Must be exactly 8 digits.';
+                                          return '';
+                                      }
+                                      case 'year': {
+                                          const v = $wire.regYear.trim();
+                                          if (v === '') return '';
+                                          if (!/^\d{4}$/.test(v)) return 'Must be exactly 4 digits.';
+                                          return '';
+                                      }
+                                      case 'email': {
+                                          const v = $wire.regEmail.trim();
+                                          if (v === '') return '';
+                                          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return 'Please enter a valid email address.';
+                                          if (!/^[^\s@]+@gmail\.com$/i.test(v)) return 'Only Gmail addresses are accepted (e.g. name@gmail.com).';
+                                          return '';
+                                      }
+                                      default: return '';
+                                  }
+                              },
+                              fieldStale(key) {
+                                  if (this.clientError(key) !== '') return true;
+                                  return ($wire.fieldErrors || []).includes(key);
+                              },
+                              fieldMessage(key, serverMsg) {
+                                  const c = this.clientError(key);
+                                  return c !== '' ? c : (serverMsg || '');
+                              },
                               isValidEmail(value) {
                                   return /^[^\s@]+@gmail\.com$/i.test(value.trim());
                               },
@@ -1427,7 +1495,9 @@ public function closeImportModal(): void
                                       && this.isValidEmail($wire.regEmail);
                               },
                               get isDisabled() {
-                                  return !!$wire.submitting || !this.allFilled() || ($wire.fieldErrors || []).length > 0;
+                                  const keys = ['firstName','lastName','middleName','suffix','studentId','year','email'];
+                                  const hasClientError = keys.some(k => this.clientError(k) !== '');
+                                  return !!$wire.submitting || !this.allFilled() || hasClientError || ($wire.fieldErrors || []).length > 0;
                               },
                               get tooltip() {
                                   if ($wire.regEmail.trim() !== '' && !this.isValidEmail($wire.regEmail)) {
@@ -1449,52 +1519,46 @@ public function closeImportModal(): void
                                 <div>
                                     <div class="fl-group">
                                         <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                        <input wire:model.live.debounce.400ms="regFirstName" type="text" placeholder=" "
+                                        <input wire:model.live.debounce.150ms="regFirstName" type="text" placeholder=" "
                                                :class="{ 'field-error': fieldStale('firstName') }"
                                                class="fl-input"
                                                maxlength="100" autocomplete="given-name">
                                         <label class="fl-label">First Name <span class="text-red-500">*</span></label>
                                     </div>
-                                    @if(isset($fieldMessages['firstName']))
-                                        <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
-                                            <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                            <span>{{ $fieldMessages['firstName'] }}</span>
-                                        </p>
-                                    @endif
+                                    <p x-show="fieldMessage('firstName', $wire.fieldMessages?.firstName ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span x-text="fieldMessage('firstName', $wire.fieldMessages?.firstName ?? '')"></span>
+                                </p>
                                 </div>
                                 <div>
                                     <div class="fl-group">
                                         <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                        <input wire:model.live.debounce.400ms="regLastName" type="text" placeholder=" "
+                                        <input wire:model.live.debounce.150ms="regLastName" type="text" placeholder=" "
                                                :class="{ 'field-error': fieldStale('lastName') }"
                                                class="fl-input"
                                                maxlength="100" autocomplete="family-name">
                                         <label class="fl-label">Last Name <span class="text-red-500">*</span></label>
                                     </div>
-                                    @if(isset($fieldMessages['lastName']))
-                                        <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
-                                            <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                            <span>{{ $fieldMessages['lastName'] }}</span>
-                                        </p>
-                                    @endif
+                                    <p x-show="fieldMessage('lastName', $wire.fieldMessages?.lastName ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span x-text="fieldMessage('lastName', $wire.fieldMessages?.lastName ?? '')"></span>
+                                </p>
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-3 mt-3">
                                 <div>
                                     <div class="fl-group">
                                         <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                        <input wire:model.live.debounce.400ms="regMiddleInitial" type="text" placeholder=" "
+                                        <input wire:model.live.debounce.150ms="regMiddleInitial" type="text" placeholder=" "
                                                :class="{ 'field-error': fieldStale('middleName') }"
                                                class="fl-input"
                                                maxlength="50">
                                         <label class="fl-label">Middle Name <span class="text-red-500">*</span></label>
                                     </div>
-                                    @if(isset($fieldMessages['middleName']))
-                                        <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
-                                            <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                            <span>{{ $fieldMessages['middleName'] }}</span>
-                                        </p>
-                                    @endif
+                                    <p x-show="fieldMessage('middleName', $wire.fieldMessages?.middleName ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span x-text="fieldMessage('middleName', $wire.fieldMessages?.middleName ?? '')"></span>
+                                </p>
                                 </div>
 
                                 {{-- Suffix dropdown --}}
@@ -1577,12 +1641,10 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
-                                @if(isset($fieldMessages['suffix']))
-                                    <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
-                                        <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                        <span>{{ $fieldMessages['suffix'] }}</span>
-                                    </p>
-                                @endif
+                                <p x-show="fieldMessage('suffix', $wire.fieldMessages?.suffix ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span x-text="fieldMessage('suffix', $wire.fieldMessages?.suffix ?? '')"></span>
+                                </p>
                                 </div>
                             </div>
                         </div>
@@ -1595,18 +1657,16 @@ public function closeImportModal(): void
                             </p>
                             <div class="fl-group">
                                 <span class="fl-icon"><i class="fas fa-id-card"></i></span>
-                                <input wire:model.live.debounce.400ms="regStudentId" type="text" placeholder=" "
+                                <input wire:model.live.debounce.150ms="regStudentId" type="text" placeholder=" "
                                        :class="{ 'field-error': fieldStale('studentId') }"
                                        class="fl-input font-mono"
                                        maxlength="8" inputmode="numeric" autocomplete="off">
                                 <label class="fl-label">Student ID <span class="text-red-500">*</span></label>
                             </div>
-                            @if(isset($fieldMessages['studentId']))
-                                <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                            <p x-show="fieldMessage('studentId', $wire.fieldMessages?.studentId ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span>{{ $fieldMessages['studentId'] }}</span>
+                                    <span x-text="fieldMessage('studentId', $wire.fieldMessages?.studentId ?? '')"></span>
                                 </p>
-                            @endif
                         </div>
 
                         {{-- Program Code + Batch --}}
@@ -1713,12 +1773,10 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
-                                @if(isset($fieldMessages['course']))
-                                    <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
-                                        <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                        <span>{{ $fieldMessages['course'] }}</span>
-                                    </p>
-                                @endif
+                                <p x-show="($wire.fieldMessages?.course ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span x-text="$wire.fieldMessages?.course ?? ''"></span>
+                                </p>
                                 </div>
 
                                 {{-- Batch Year picker — capped at 2030 until the calendar actually
@@ -1808,12 +1866,10 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
-                                @if(isset($fieldMessages['year']))
-                                    <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
-                                        <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                        <span>{{ $fieldMessages['year'] }}</span>
-                                    </p>
-                                @endif
+                                <p x-show="fieldMessage('year', $wire.fieldMessages?.year ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                    <span x-text="fieldMessage('year', $wire.fieldMessages?.year ?? '')"></span>
+                                </p>
                                 </div>
 
                             </div>
@@ -1826,18 +1882,18 @@ public function closeImportModal(): void
                             </p>
                             <div class="fl-group">
                                 <span class="fl-icon"><i class="fas fa-envelope"></i></span>
-                                <input wire:model.live.debounce.400ms="regEmail" type="email" placeholder=" "
+                                <input wire:model.live.debounce.150ms="regEmail" type="email" placeholder=" "
                                        :class="{ 'field-error': fieldStale('email') }"
                                        class="fl-input"
                                        maxlength="255" autocomplete="email">
                                 <label class="fl-label">Email Address <span class="text-red-500">*</span></label>
                             </div>
-                            @if(isset($fieldMessages['email']))
-                                <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
-                                    <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span>{{ $fieldMessages['email'] }}</span>
-                                </p>
-                            @endif
+                            <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1"
+                               x-show="fieldMessage('email', $wire.fieldMessages?.email ?? '') !== ''"
+                               style="display:none;">
+                                <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
+                                <span x-text="fieldMessage('email', $wire.fieldMessages?.email ?? '')"></span>
+                            </p>
                         </div>
 
                         {{-- Buttons --}}
@@ -2132,6 +2188,24 @@ public function closeImportModal(): void
                 </div>
                 @endforeach
             </div>
+
+            @if($hasNew && count($importSuccesses) > 0)
+            <div class="border border-emerald-200 rounded-xl overflow-hidden shrink-0">
+                <div class="px-4 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2">
+                    <i class="fas fa-circle-check text-emerald-500"></i>
+                    <p class="font-bold text-emerald-900 text-base">Imported Records</p>
+                    <span class="ml-auto text-sm bg-emerald-100 text-emerald-700 px-2.5 py-0.5 rounded-full font-bold">{{ count($importSuccesses) }}</span>
+                </div>
+                <ul class="import-result-list divide-y divide-emerald-50" style="max-height:160px;">
+                    @foreach($importSuccesses as $s)
+                    <li class="px-4 py-2.5 text-sm text-emerald-800 flex items-start gap-2">
+                        <i class="fas fa-user-check text-emerald-400 mt-0.5 shrink-0 text-xs"></i>
+                        <span>{{ $s }}</span>
+                    </li>
+                    @endforeach
+                </ul>
+            </div>
+            @endif
 
             @if($hasErrors)
             <div class="border border-red-200 rounded-xl overflow-hidden shrink-0">

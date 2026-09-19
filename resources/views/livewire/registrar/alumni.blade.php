@@ -1880,7 +1880,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
              their own row. Keeps every wire:click/x-data binding as-is —
              layout/grouping only, no behavior changes. --}}
         <div class="ar-filter-bar px-3 sm:px-4 py-3 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2.5 shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
-             wire:loading.class="opacity-60" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
+             wire:loading.class="opacity-60 pointer-events-none cursor-wait" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
 
             {{-- Row 1: Search (primary action) + Profile status pills --}}
             <div class="flex flex-wrap items-center gap-2">
@@ -1936,20 +1936,22 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                  Status / Program Code and vice versa. --}}
             <div class="ar-dropdown"
                  x-data="{
-                    rangeMode: {{ ($alumniBatchFrom !== '' && $alumniBatchTo !== '' && $alumniBatchFrom !== $alumniBatchTo) ? 'true' : 'false' }},
-                    rangeFrom: '{{ $alumniBatchFrom }}',
-                    rangeTo: '{{ $alumniBatchTo }}',
+                    rangeMode: ($wire.alumniBatchFrom !== '' && $wire.alumniBatchTo !== '' && $wire.alumniBatchFrom !== $wire.alumniBatchTo),
+                    rangeFrom: '',
+                    rangeTo: '',
                     get open(){ return $store.arFilters.isOpen('batch'); },
                     toggle(){ $store.arFilters.toggle('batch'); },
                     close(){ $store.arFilters.close('batch'); },
-                    selectYear(val){ $wire.setSingleBatchYear(val); this.close(); },
-                    clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
-                    startRange(){ this.rangeFrom=$wire.alumniBatchFrom||''; this.rangeTo=$wire.alumniBatchTo||''; this.rangeMode=true; },
-                    pickFrom(val){ this.rangeFrom=val; },
-                    pickTo(val){ this.rangeTo=val; },
-                    applyRange(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.close(); } }
+                    selectYear(val){ $wire.setSingleBatchYear(val); this.rangeMode=false; this.close(); },
+                    clearYear(){ this.rangeFrom=''; this.rangeTo=''; this.rangeMode=false; $wire.clearFilterBatch(); this.close(); },
+                    startRange(){ this.rangeFrom=''; this.rangeTo=''; this.rangeMode=true; },
+                    backToList(){ this.rangeFrom=''; this.rangeTo=''; this.rangeMode=false; },
+                    pickFrom(val){ if (this.rangeTo === val) return; this.rangeFrom = (this.rangeFrom===val ? '' : val); },
+                    pickTo(val){ if (this.rangeFrom === val) return; this.rangeTo = (this.rangeTo===val ? '' : val); },
+                    get rangeComplete(){ return this.rangeFrom!=='' && this.rangeTo!==''; },
+                    applyRange(){ if(this.rangeComplete){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.rangeMode=false; this.close(); } }
                  }"
-                 @click.outside="close()" wire:key="batch-dropdown">
+                 @click.outside="close()" wire:key="batch-dropdown" wire:ignore.self>
                 <button type="button" @click.stop="toggle()"
                         :class="{ 'has-value': $wire.alumniBatchFrom!=='' && $wire.alumniBatchTo!=='', 'open':open }"
                         class="ar-dropdown-trigger">
@@ -1972,91 +1974,68 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                 <div x-show="open"
                      x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
                      x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                     class="ar-dropdown-menu" style="display:none;min-width:190px;" @click.stop>
+                     class="ar-dropdown-menu" style="display:none;min-width:190px;max-height:none;overflow-y:visible;" @click.stop>
 
-                    {{-- Default view: plain year list. "Add Range" is
-                         pinned to the BOTTOM (sticky), same treatment as
-                         the Clear/Apply footer in All Programs / All
-                         Employment Status — otherwise it gets pushed out
-                         of view by a long year list and requires
-                         scrolling all the way down to find it. --}}
-                    <template x-if="!rangeMode">
-                        <div>
+                    {{-- List view (default) --}}
+                    <div x-show="!rangeMode" style="display:none;">
+                        <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                             <button type="button" @click.stop="clearYear()" :class="{'active':$wire.alumniBatchFrom==='' && $wire.alumniBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
                             @foreach($this->batches as $b)
                             <button type="button" @click.stop="selectYear('{{ $b }}')" :class="{'active': $wire.alumniBatchFrom==='{{ $b }}' && $wire.alumniBatchTo==='{{ $b }}'}" class="ar-dropdown-item">{{ $b }}</button>
                             @endforeach
-                            <div class="ar-dropdown-footer">
-                                <button type="button" @click.stop="startRange()"
-                                        class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
-                                    <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
-                                </button>
-                            </div>
                         </div>
-                    </template>
+                        <div class="h-px bg-[#E8E0F0] my-1"></div>
+                        <button type="button" @click.stop="startRange()"
+                                class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
+                            <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
+                        </button>
+                    </div>
 
-                    {{-- Range view: opt-in, shown right away once "Add
-                         Range" is clicked. From/To are two flat scrollable
-                         lists side by side (NOT a popover nested inside
-                         this already-scrollable menu — a nested
-                         position:absolute dropdown gets clipped by the
-                         parent's own overflow-y:auto, which is exactly
-                         what caused the un-scrollable/cut-off picker
-                         before). No placeholder "Any" row — an unselected
-                         side is simply blank until picked. Held in LOCAL
-                         Alpine state only — nothing is sent to the server
-                         while just one side is picked. The moment both
-                         sides have a value, applyRangeIfComplete() fires
-                         ONE Livewire call (setBatchRange) that applies
-                         the whole range at once. --}}
-                    <template x-if="rangeMode">
-                        <div class="p-2" style="width:220px;">
-                            {{-- Live preview of the pending From/To pick —
-                                 updates instantly as each side is tapped,
-                                 BEFORE "Apply" is clicked. Purely local
-                                 Alpine state (rangeFrom/rangeTo), no
-                                 Livewire round-trip. --}}
-                            <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
-                                <template x-if="rangeFrom !== '' || rangeTo !== ''">
-                                    <span>
-                                        <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
-                                        <span style="color:#B9A8CB;"> → </span>
-                                        <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
-                                    </span>
-                                </template>
+                    {{-- Range view --}}
+                    <div x-show="rangeMode" class="p-2" style="display:none;width:220px;">
+                        <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
+                            <span x-show="rangeFrom !== '' && rangeTo !== '' && rangeFrom !== rangeTo" style="display:none;">
+                                <span x-text="rangeFrom"></span>
+                                <span style="color:#B9A8CB;"> → </span>
+                                <span x-text="rangeTo"></span>
+                            </span>
+                            <span x-show="(rangeFrom !== '' || rangeTo !== '') && !(rangeFrom !== '' && rangeTo !== '' && rangeFrom !== rangeTo)" style="display:none;">
+                                <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
+                                <span style="color:#B9A8CB;"> → </span>
+                                <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
+                            </span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                @foreach($this->batches as $b)
+                                <button type="button" @click.stop="pickFrom('{{ $b }}')"
+                                        :disabled="rangeTo==='{{ $b }}'"
+                                        :class="{'active':rangeFrom==='{{ $b }}', 'ar-range-item-disabled':rangeTo==='{{ $b }}'}"
+                                        class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
+                                @endforeach
                             </div>
-                            <div class="flex items-start gap-2">
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                    @foreach($this->batches as $b)
-                                    <button type="button" @click.stop="if(rangeTo!=='{{ $b }}') pickFrom('{{ $b }}')"
-                                            :disabled="rangeTo==='{{ $b }}'"
-                                            :class="{'active':rangeFrom==='{{ $b }}', 'disabled':rangeTo==='{{ $b }}'}"
-                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
-                                    @endforeach
-                                </div>
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                    @foreach($this->batches as $b)
-                                    <button type="button" @click.stop="if(rangeFrom!=='{{ $b }}') pickTo('{{ $b }}')"
-                                            :disabled="rangeFrom==='{{ $b }}'"
-                                            :class="{'active':rangeTo==='{{ $b }}', 'disabled':rangeFrom==='{{ $b }}'}"
-                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
-                                    @endforeach
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-2 mt-3 ar-dropdown-footer">
-                                <button type="button" @click.stop="rangeMode=false"
-                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                    Back to List
-                                </button>
-                                <button type="button" @click.stop="applyRange()"
-                                        :disabled="rangeFrom==='' || rangeTo===''"
-                                        class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
-                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'text-[#7A3F91] border-[#E8E0F0] hover:bg-[#F5F0FA]'">
-                                    Apply
-                                </button>
+                            <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                @foreach($this->batches as $b)
+                                <button type="button" @click.stop="pickTo('{{ $b }}')"
+                                        :disabled="rangeFrom==='{{ $b }}'"
+                                        :class="{'active':rangeTo==='{{ $b }}', 'ar-range-item-disabled':rangeFrom==='{{ $b }}'}"
+                                        class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $b }}</button>
+                                @endforeach
                             </div>
                         </div>
-                    </template>
+                        <div class="flex items-center gap-2 mt-3">
+                            <button type="button" @click.stop="backToList()"
+                                    class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                Back to List
+                            </button>
+                            <button type="button" @click.stop="applyRange()"
+                                    :disabled="!rangeComplete"
+                                    :class="rangeComplete ? 'text-white bg-[#7A3F91] hover:bg-[#6a3580] cursor-pointer' : 'text-[#B9A9C4] bg-[#F3EDF7] cursor-not-allowed'"
+                                    class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                Apply
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -2331,7 +2310,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
 
             <div id="alumni-scroll" @scroll.passive="showTop=$event.target.scrollTop>200"
                  class="h-full overflow-y-auto transition-opacity duration-200"
-                 wire:loading.class="opacity-40" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
+                 wire:loading.class="opacity-40 pointer-events-none cursor-wait" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse table-fixed hidden md:table">
@@ -2538,7 +2517,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                  ever being squeezed/overlapped by the "Showing…" text
                  above it now that the layout stacks earlier (560px). --}}
             <div class="flex items-center gap-1.5 flex-wrap shrink-0 min-h-[26px]"
-                 wire:loading.class="opacity-60 pointer-events-none" wire:target="goToAlumniPage,previousAlumniPage,nextAlumniPage">
+                 wire:loading.class="opacity-60 pointer-events-none cursor-wait" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
                 @if($this->alumniRecords->onFirstPage())
                     <button disabled class="ar-pg-btn ar-pg-nav"><i class="fas fa-chevron-left text-xs"></i></button>
                 @else

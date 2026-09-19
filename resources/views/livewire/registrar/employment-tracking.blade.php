@@ -1850,8 +1850,8 @@ new class extends Component {
                  x-data="{
                     get open(){ return $store.empFilters.isOpen('batch'); },
                     rangeMode: {{ ($filterBatchFrom !== '' && $filterBatchTo !== '' && $filterBatchFrom !== $filterBatchTo) ? 'true' : 'false' }},
-                    rangeFrom: '{{ $filterBatchFrom }}',
-                    rangeTo: '{{ $filterBatchTo }}',
+                    rangeFrom: '{{ ($filterBatchFrom !== $filterBatchTo) ? $filterBatchFrom : '' }}',
+                    rangeTo: '{{ ($filterBatchFrom !== $filterBatchTo) ? $filterBatchTo : '' }}',
                     toggle(){ $store.empFilters.toggle('batch'); },
                     close(){ $store.empFilters.close('batch'); },
                     selectYear(val){
@@ -1859,7 +1859,8 @@ new class extends Component {
                         this.close();
                     },
                     clearYear(){ this.rangeFrom=''; this.rangeTo=''; $wire.clearFilterBatch(); this.close(); },
-                    startRange(){ this.rangeFrom=$wire.filterBatchFrom||''; this.rangeTo=$wire.filterBatchTo||''; this.rangeMode=true; },
+                    startRange(){ this.rangeFrom=''; this.rangeTo=''; this.rangeMode=true; },
+                    backToList(){ this.rangeFrom=''; this.rangeTo=''; this.rangeMode=false; },
                     pickFrom(val){ if (this.rangeTo === val) return; this.rangeFrom = (this.rangeFrom===val ? '' : val); },
                     pickTo(val){ if (this.rangeFrom === val) return; this.rangeTo = (this.rangeTo===val ? '' : val); },
                     get rangeComplete(){ return this.rangeFrom!=='' && this.rangeTo!==''; },
@@ -1900,21 +1901,20 @@ new class extends Component {
                          row at the very bottom of the dropdown — so it's
                          always reachable without scrolling down past the
                          years to find it. --}}
-                    <template x-if="!rangeMode">
-                        <div>
-                            <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
-                                <button type="button" @click.stop="clearYear()" :class="{'active':$wire.filterBatchFrom==='' && $wire.filterBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
-                                @foreach($this->batchYears as $year)
-                                <button type="button" @click.stop="selectYear('{{ $year }}')" :class="{'active': $wire.filterBatchFrom==='{{ $year }}' && $wire.filterBatchTo==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
-                                @endforeach
-                            </div>
-                            <div class="h-px bg-[#E8E0F0] my-1"></div>
-                            <button type="button" @click.stop="startRange()"
-                                    class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
-                                <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
-                            </button>
+                    {{-- List view (default) --}}
+                    <div x-show="!rangeMode" style="display:none;">
+                        <div class="ar-year-scroll" style="max-height:180px;overflow-y:auto;">
+                            <button type="button" @click.stop="clearYear()" :class="{'active':$wire.filterBatchFrom==='' && $wire.filterBatchTo===''}" class="ar-dropdown-item">All Batch Years</button>
+                            @foreach($this->batchYears as $year)
+                            <button type="button" @click.stop="selectYear('{{ $year }}')" :class="{'active': $wire.filterBatchFrom==='{{ $year }}' && $wire.filterBatchTo==='{{ $year }}'}" class="ar-dropdown-item">{{ $year }}</button>
+                            @endforeach
                         </div>
-                    </template>
+                        <div class="h-px bg-[#E8E0F0] my-1"></div>
+                        <button type="button" @click.stop="startRange()"
+                                class="ar-dropdown-item flex items-center gap-1.5 font-semibold" style="color:#7A3F91;">
+                            <i class="fas fa-plus" style="font-size:10px;"></i> Add Range
+                        </button>
+                    </div>
 
                     {{-- Range view: opt-in, shown right away once "Add Range"
                          is clicked (no extra click/reopen needed — same
@@ -1928,49 +1928,45 @@ new class extends Component {
                          that applies the whole range at once and closes the
                          dropdown. normalizeBatchRange() on the server
                          auto-swaps From/To if From ends up later than To. --}}
-                    <template x-if="rangeMode">
-                        <div class="p-2" style="width:220px;">
-                            <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
-                                <template x-if="rangeFrom !== '' || rangeTo !== ''">
-                                    <span>
-                                        <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
-                                        <span style="color:#B9A8CB;"> → </span>
-                                        <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
-                                    </span>
-                                </template>
+                    <div x-show="rangeMode" class="p-2" style="display:none;width:220px;">
+                        <div class="text-center mb-2" style="font-size:.75rem;font-weight:700;color:#7A3F91;min-height:16px;">
+                            <span x-show="rangeFrom !== '' || rangeTo !== ''" style="display:none;">
+                                <span x-text="rangeFrom !== '' ? rangeFrom : '—'"></span>
+                                <span style="color:#B9A8CB;"> → </span>
+                                <span x-text="rangeTo !== '' ? rangeTo : '—'"></span>
+                            </span>
+                        </div>
+                        <div class="flex items-start gap-2">
+                            <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                @foreach($this->batchYears as $year)
+                                <button type="button" @click.stop="pickFrom('{{ $year }}')"
+                                        :disabled="rangeTo==='{{ $year }}'"
+                                        :class="{'active':rangeFrom==='{{ $year }}', 'ar-range-item-disabled':rangeTo==='{{ $year }}'}"
+                                        class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
+                                @endforeach
                             </div>
-                            <div class="flex items-start gap-2">
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                    @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickFrom('{{ $year }}')"
-                                            :disabled="rangeTo==='{{ $year }}'"
-                                            :class="{'active':rangeFrom==='{{ $year }}', 'ar-range-item-disabled':rangeTo==='{{ $year }}'}"
-                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
-                                    @endforeach
-                                </div>
-                                <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                    @foreach($this->batchYears as $year)
-                                    <button type="button" @click.stop="pickTo('{{ $year }}')"
-                                            :disabled="rangeFrom==='{{ $year }}'"
-                                            :class="{'active':rangeTo==='{{ $year }}', 'ar-range-item-disabled':rangeFrom==='{{ $year }}'}"
-                                            class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
-                                    @endforeach
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-2 mt-3">
-                                <button type="button" @click.stop="rangeMode=false"
-                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                    Back to List
-                                </button>
-                                <button type="button" @click.stop="applyRange()"
-                                        :disabled="!rangeComplete"
-                                        :class="rangeComplete ? 'text-white bg-[#7A3F91] hover:bg-[#6a3580] cursor-pointer' : 'text-[#B9A9C4] bg-[#F3EDF7] cursor-not-allowed'"
-                                        class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
-                                    Apply
-                                </button>
+                            <div class="flex-1 min-w-0 border border-[#E8E0F0] rounded-lg overflow-y-auto" style="max-height:150px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                @foreach($this->batchYears as $year)
+                                <button type="button" @click.stop="pickTo('{{ $year }}')"
+                                        :disabled="rangeFrom==='{{ $year }}'"
+                                        :class="{'active':rangeTo==='{{ $year }}', 'ar-range-item-disabled':rangeFrom==='{{ $year }}'}"
+                                        class="ar-dropdown-item ar-range-item" style="border-radius:0;">{{ $year }}</button>
+                                @endforeach
                             </div>
                         </div>
-                    </template>
+                        <div class="flex items-center gap-2 mt-3">
+                            <button type="button" @click.stop="rangeMode=false"
+                                    class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                Back to List
+                            </button>
+                            <button type="button" @click.stop="applyRange()"
+                                    :disabled="!rangeComplete"
+                                    :class="rangeComplete ? 'text-white bg-[#7A3F91] hover:bg-[#6a3580] cursor-pointer' : 'text-[#B9A9C4] bg-[#F3EDF7] cursor-not-allowed'"
+                                    class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                Apply
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
