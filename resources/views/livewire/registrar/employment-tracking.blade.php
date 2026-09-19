@@ -63,6 +63,7 @@ new class extends Component {
     public string $modalBatchFrom = '';
     public string $modalBatchTo   = '';
     public string $modalSearch  = '';
+    public string $modalStatus  = '';
     public int    $modalPage    = 1;
     public int    $modalPageSize = 100;
 
@@ -360,6 +361,13 @@ new class extends Component {
      * modalBatchFrom and clears the legacy single modalBatch value.
      * Mirrors setSingleBatchYear() on the dashboard (no range mode here).
      */
+    public function setModalStatus(string $status): void
+    {
+        $this->modalStatus = $status;
+        $this->modalPage   = 1;
+        unset($this->modalRecords);
+    }
+
     public function setSingleModalBatchYear(string $year): void
     {
         $this->modalBatchFrom = $year;
@@ -870,6 +878,10 @@ new class extends Component {
 
         $this->applyModalBatchAndCourse($q);
 
+        if ($this->modalStatus !== '' && $this->modalFilter === '') {
+            $q->where('et.employment_status', $this->modalStatus);
+        }
+
         if ($this->modalSearch !== '') {
             $term = '%' . $this->modalSearch . '%';
             $q->where(function ($s) use ($term) {
@@ -912,7 +924,14 @@ new class extends Component {
             default               => $hasBatchScope
                                         ? ltrim(($this->modalBatchFrom !== ''
                                             ? 'Batch ' . $this->modalBatchFrom
-                                            : 'Batch ' . $this->modalBatch) . ' — Employment Records' . $courseSuffix)
+                                            : 'Batch ' . $this->modalBatch)
+                                            . ($this->modalStatus !== '' ? ' — ' . match($this->modalStatus) {
+                                                'employed'      => 'Employed',
+                                                'self_employed' => 'Self-Employed',
+                                                'unemployed'    => 'Unemployed',
+                                                default         => ''
+                                            } : '')
+                                            . ' — Employment Records' . $courseSuffix)
                                         : (count($this->modalCourse) > 0
                                             ? $this->modalCourse[0] . ' — All Employment Records'
                                             : 'All Employment Records'),
@@ -977,7 +996,7 @@ new class extends Component {
         return count($parts) ? implode(' · ', $parts) : 'All alumni records (no filters applied)';
     }
 
-    public function openModal(string $filter = '', ?int $batch = null, string $course = ''): void
+    public function openModal(string $filter = '', ?int $batch = null, string $course = '', string $status = ''): void
     {
         $allowedFilters = [
             '', 'employed', 'employed_all', 'self_employed', 'unemployed',
@@ -986,6 +1005,9 @@ new class extends Component {
         ];
         if (!in_array($filter, $allowedFilters, true)) $filter = '';
 
+        $allowedStatuses = ['', 'employed', 'self_employed', 'unemployed'];
+        if (!in_array($status, $allowedStatuses, true)) $status = '';
+
         $this->modalFilter    = $filter;
         $this->modalBatch     = $batch !== null ? (int)$batch : null;
         $this->modalBatchFrom = '';
@@ -993,6 +1015,7 @@ new class extends Component {
         $course = strip_tags($course);
         $this->modalCourse    = $course !== '' ? [$course] : [];
         $this->modalSearch    = '';
+        $this->modalStatus    = $status;
         $this->modalPage      = 1;
         $this->activeModal    = 'detail';
         unset($this->modalRecords);
@@ -1006,6 +1029,7 @@ new class extends Component {
         $this->modalBatchFrom = '';
         $this->modalBatchTo   = '';
         $this->modalCourse    = [];
+        $this->modalStatus    = '';
         $this->modalSearch    = '';
         $this->modalPage      = 1;
         unset($this->modalRecords);
@@ -1023,6 +1047,7 @@ new class extends Component {
         $this->modalBatchFrom = '';
         $this->modalBatchTo   = '';
         $this->modalCourse    = [];
+        $this->modalStatus    = '';
         $this->modalPage      = 1;
         unset($this->modalRecords);
     }
@@ -1071,7 +1096,8 @@ new class extends Component {
 };
 ?>
 
-<div @open-emp-modal.window="$wire.openModal($event.detail.filter, $event.detail.batch ?? null, $event.detail.course ?? '')" class="emp-dashboard-root">
+<div @open-emp-modal.window="$wire.openModal($event.detail.filter, $event.detail.batch ?? null, $event.detail.course ?? '', $event.detail.status ?? '')"
+     class="emp-dashboard-root {{ (count($filterCourse) > 0 || $filterBatchFrom !== '' || $filterBatchTo !== '') ? 'emp-filter-on' : '' }}">
 
 {{-- ══ FLASH TOAST — mirrors Alumni Records' toast, shows the "Generating
      your PDF/Excel/print view… this only takes a moment" info message
@@ -1200,6 +1226,49 @@ new class extends Component {
         transition: opacity .15s ease, filter .15s ease;
     }
     .emp-clickable { transition: opacity .15s ease, filter .15s ease; }
+
+    /* Lock View All button while any stat card / chart is loading */
+    .emp-dashboard-root.emp-busy [data-viewall-btn] {
+        pointer-events: none !important;
+        cursor: default !important;
+        opacity: 0.35 !important;
+    }
+
+    /* ── Filter-active lock — when any Program or Batch filter is set,
+       ALL clickable widgets (stat cards, View Local/Abroad, donut, batch bar,
+       top programs, View All button) are made inert. The registrar is in
+       "scoped view" mode; modals/nav that open from unfiltered state would
+       show wrong context. Cleared by Blade on every Livewire re-render the
+       moment filters are cleared. ── */
+    .emp-dashboard-root.emp-filter-on .emp-clickable,
+    .emp-dashboard-root.emp-filter-on .stat-card,
+    .emp-dashboard-root.emp-filter-on a.stat-card,
+    .emp-dashboard-root.emp-filter-on [wire\:click],
+    .emp-dashboard-root.emp-filter-on .chart-clickable {
+        pointer-events: none !important;
+        cursor: default !important;
+        user-select: none;
+    }
+    .emp-dashboard-root.emp-filter-on .stat-card:hover,
+    .emp-dashboard-root.emp-filter-on .emp-clickable:hover {
+        box-shadow: none !important;
+        border-color: #E8E0F0 !important;
+        opacity: 1 !important;
+        filter: none !important;
+    }
+    /* View Local / View Abroad buttons inside the work location card */
+    .emp-dashboard-root.emp-filter-on button[onclick*="empOpenModal"] {
+        pointer-events: none !important;
+        cursor: default !important;
+        opacity: 0.45 !important;
+    }
+    /* View All button */
+    .emp-dashboard-root.emp-filter-on .ar-report-btn-viewall,
+    .emp-dashboard-root.emp-filter-on [data-viewall-btn] {
+        pointer-events: none !important;
+        cursor: default !important;
+        opacity: 0.35 !important;
+    }
 
     /* Stat cards used their own is-loading/busy pairing before; keep it
        working as an alias of the dashboard-wide lock above. */
@@ -1784,7 +1853,7 @@ new class extends Component {
                     <div class="ar-report-menu-message">
                         <span class="lbl"><i class="fas fa-circle-info mr-1"></i>Report will include</span>
                         <span class="txt" x-text="summary"></span>
-                        <span class="cnt" x-text="count + ' matching record(s)'"></span>
+
                     </div>
 
                     <button type="button" @click="$store.empReport.doExport('pdf', $wire)"
@@ -2345,7 +2414,7 @@ new class extends Component {
              completely distinct elements and always swap them cleanly. ── --}}
         <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-sm hover:shadow-md hover:border-[#c4b5fd]
                     transition-all flex flex-col overflow-hidden group/topprog"
-             x-data="{ viewAll:false }">
+             x-data="{ viewAll:false, hasFilter: {{ (count($filterCourse) > 0 || $filterBatchFrom !== '' || $filterBatchTo !== '') ? 'true' : 'false' }} }">
             <div class="px-3.5 py-2 border-b border-[#E8E0F0] bg-[#F9F7FC] flex items-center justify-between gap-2 shrink-0">
                 <div class="flex items-center gap-2 min-w-0">
                     <span class="w-2 h-2 rounded-full bg-amber-400 shrink-0"></span>
@@ -2362,7 +2431,9 @@ new class extends Component {
                         </span>
                     </div>
                 </div>
-                <button type="button" @click="viewAll=true"
+                <button type="button"
+                        @click="if(!hasFilter && !$el.closest('.emp-dashboard-root').classList.contains('emp-busy')) viewAll=true"
+                        data-viewall-btn
                         class="text-xs font-bold shrink-0 px-2 py-1 rounded-lg border border-transparent
                                hover:bg-white hover:border-[#E8E0F0] transition-all duration-150"
                         style="color:#7A3F91;">
@@ -2465,7 +2536,7 @@ new class extends Component {
                  unchanged, from `sm:` up. Only the outer wrapper and card
                  sizing classes change here — internal content/list markup
                  is untouched. ── --}}
-            <div x-show="viewAll"
+            <div x-show="viewAll && !hasFilter"
                  x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
                  x-transition:leave="transition ease-in duration-100" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
                  class="fixed inset-0 z-[9998] flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -2493,22 +2564,22 @@ new class extends Component {
                     </div>
                     <div class="flex-1 overflow-y-auto divide-y divide-gray-100" style="scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                         <template x-if="list.length === 0">
-                            <p class="text-sm text-[#333333] text-center py-10">No program data available for this scope.</p>
+                            <p class="text-base text-[#333333] text-center py-10">No program data available for this scope.</p>
                         </template>
                         <template x-for="p in list" :key="p.code">
-                            <div class="flex items-center gap-3 px-5 py-3 hover:bg-[#F5F0FA] transition-colors">
-                                <div class="w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0"
+                            <div class="flex items-center gap-4 px-5 py-4 hover:bg-[#F5F0FA] transition-colors">
+                                <div class="w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0"
                                      :style="badgeStyle(p.rank)">
                                     <span x-show="p.rank > 3" x-text="'#'+p.rank"></span>
-                                    <span x-show="p.rank <= 3" x-text="medal(p.rank)" style="font-size:1rem;line-height:1;"></span>
+                                    <span x-show="p.rank <= 3" x-text="medal(p.rank)" style="font-size:1.25rem;line-height:1;"></span>
                                 </div>
-                                <div class="flex-1 min-w-0">
-                                    <p class="text-sm font-bold text-[#111111]" x-text="p.code"></p>
-                                    <p class="text-xs text-[#333333] mt-0.5">
+                                <div class="flex-1 min-w-0 flex items-center justify-between gap-3">
+                                    <span class="text-base font-bold text-[#111111] shrink-0" x-text="p.code"></span>
+                                    <span class="flex items-center gap-2 text-base">
                                         <span class="font-semibold" :style="p.working>0 ? 'color:#059669;' : 'color:#9CA3AF;'" x-text="p.working + ' working'"></span>
-                                        <span class="text-[#999999]"> · </span>
-                                        <span x-text="p.total + ' total alumni'"></span>
-                                    </p>
+                                        <span class="text-[#CCCCCC]">·</span>
+                                        <span class="text-[#555555]" x-text="p.total + ' total alumni'"></span>
+                                    </span>
                                 </div>
                             </div>
                         </template>
@@ -2777,7 +2848,7 @@ new class extends Component {
          used elsewhere, and highlights matches in blue (mark.ar-hl) like
          Alumni Records. Wraps instead of scrolling if space is tight. ── --}}
     <div class="emp-modal-filter-bar px-4 sm:px-6 lg:px-10 py-2.5 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2 shrink-0"
-         wire:loading.class="opacity-60 pointer-events-none" wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,clearModalFilters,modalPage">
+         wire:loading.class="opacity-60 pointer-events-none" wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,setModalStatus,clearModalFilters,modalPage">
 
         {{-- Row 1: Search + result count --}}
         <div class="flex items-center gap-2 flex-wrap">
@@ -2891,11 +2962,48 @@ new class extends Component {
                 </div>
             </div>
 
+            @if($modalFilter === '')
+            {{-- Employment Status dropdown — only shown in the All/Submitted modal,
+                 not in pre-filtered modals (employed, unemployed, relevance, etc.) --}}
+            <div class="ar-dropdown shrink-0"
+                 x-data="{
+                    get open(){ return $store.empFilters.isOpen('modal-status'); },
+                    toggle(){ $store.empFilters.toggle('modal-status'); },
+                    close(){ $store.empFilters.close('modal-status'); },
+                    selectStatus(val){ $wire.setModalStatus(val); this.close(); },
+                    clearStatus(){ $wire.setModalStatus(''); this.close(); },
+                 }"
+                 @click.outside="close()" wire:key="emp-modal-status-dropdown">
+                <button type="button" @click.stop="toggle()"
+                        :class="{ 'has-value': $wire.modalStatus !== '', 'open': open }"
+                        class="ar-dropdown-trigger">
+                    <i class="fas fa-briefcase" style="font-size:11px;opacity:.7;"></i>
+                    <span>
+                        @if($modalStatus === 'employed') Employed
+                        @elseif($modalStatus === 'self_employed') Self-Employed
+                        @elseif($modalStatus === 'unemployed') Unemployed
+                        @else All Employment Status
+                        @endif
+                    </span>
+                    <i class="fas fa-chevron-down ar-chevron"></i>
+                </button>
+                <div x-show="open"
+                     x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                     class="ar-dropdown-menu" style="display:none;min-width:200px;" @click.stop>
+                    <button type="button" @click.stop="clearStatus()" :class="{'active': $wire.modalStatus===''}" class="ar-dropdown-item">All Employment Status</button>
+                    <button type="button" @click.stop="selectStatus('employed')" :class="{'active': $wire.modalStatus==='employed'}" class="ar-dropdown-item">Employed</button>
+                    <button type="button" @click.stop="selectStatus('self_employed')" :class="{'active': $wire.modalStatus==='self_employed'}" class="ar-dropdown-item">Self-Employed</button>
+                    <button type="button" @click.stop="selectStatus('unemployed')" :class="{'active': $wire.modalStatus==='unemployed'}" class="ar-dropdown-item">Unemployed</button>
+                </div>
+            </div>
+            @endif
+
             {{-- Reset — docked to the right (sm:ml-auto), disabled when no
                  batch/program filter is currently active (nothing to reset). --}}
             <button wire:click="clearModalFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="clearModalFilters"
                     type="button"
-                    @if(!($modalBatchFrom !== '' || $modalBatch !== null || count($modalCourse) > 0)) disabled @endif
+                    @if(!($modalBatchFrom !== '' || $modalBatch !== null || count($modalCourse) > 0 || ($modalStatus !== '' && $modalFilter === ''))) disabled @endif
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 shrink-0 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto">
                 <span wire:loading wire:target="clearModalFilters">
                     <i class="fas fa-spinner animate-spin text-sm" style="color:#7A3F91;"></i>
@@ -2921,10 +3029,10 @@ new class extends Component {
          just the bare solid-purple spinner floating on top now, clearly
          visible against the dimmed table underneath. --}}
     <div class="modal-table-wrap relative flex-1 overflow-y-auto overflow-x-auto min-h-0"
-         wire:loading.class="opacity-40 pointer-events-none" wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,clearModalFilters,modalPage" style="transition:opacity .2s ease;">
+         wire:loading.class="opacity-40 pointer-events-none" wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,setModalStatus,clearModalFilters,modalPage" style="transition:opacity .2s ease;">
 
         <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
-             wire:loading wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,clearModalFilters,modalPage">
+             wire:loading wire:target="modalSearch,setSingleModalBatchYear,clearModalBatchYear,setModalBatchRange,toggleModalCourse,clearModalCourse,selectAllModalCourse,applyModalCourse,setModalStatus,clearModalFilters,modalPage">
             <div class="flex items-center justify-center" style="margin-top:16px;">
                 <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
             </div>
@@ -3726,10 +3834,14 @@ new class extends Component {
                 onClick: function(event, elements) {
                     if (event && event.native) event.native.stopPropagation();
                     if (!elements || !elements.length) return;
-                    var batch = slice.labels[elements[0].index];
+                    var idx   = elements[0].index;
+                    var dsIdx = elements[0].datasetIndex; // 0=Employed,1=Self-Employed,2=Unemployed
+                    var batch = slice.labels[idx];
                     if (batch === undefined || batch === null) return;
+                    var statusMap = ['employed','self_employed','unemployed'];
+                    var status = statusMap[dsIdx] || '';
                     markEmpBusy(document.getElementById('emp-batch-card'));
-                    window.dispatchEvent(new CustomEvent('open-emp-modal',{detail:{filter:'',batch:parseInt(batch),course:''}}));
+                    window.dispatchEvent(new CustomEvent('open-emp-modal',{detail:{filter:'',batch:parseInt(batch),course:'',status:status}}));
                 },
             },
         });

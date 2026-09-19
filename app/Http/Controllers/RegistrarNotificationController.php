@@ -101,8 +101,22 @@ class RegistrarNotificationController extends Controller
 
                 // ✅ Refresh BOTH created_at and updated_at so the displayed
                 //    timestamp always reflects the most recent update.
-                $existing->timestamps = false; // disable auto-touch so we set manually
-                $existing->update([
+                //
+                // ⚠️  Use forceFill() + save() instead of update() here.
+                //    update() calls fill() internally, which respects the
+                //    model's mass-assignment guards — and Eloquent silently
+                //    skips timestamp columns (created_at / updated_at) when
+                //    they are not explicitly listed in $fillable, even if
+                //    you pass them in the array. The result: created_at stays
+                //    frozen at the very first occurrence's time forever, so
+                //    the panel always shows the wrong (original) timestamp
+                //    and the "newest first" sort breaks because all deduped
+                //    rows appear to have the same age.
+                //    forceFill() bypasses every guard and writes ALL
+                //    attributes directly, so created_at is guaranteed to be
+                //    updated to $now on every dedup merge.
+                $existing->timestamps = false; // prevent auto-touch; we set both manually below
+                $existing->forceFill([
                     'message'    => $newMessage,
                     'read'       => false,
                     'count'      => $mergedCount,
@@ -110,9 +124,9 @@ class RegistrarNotificationController extends Controller
                     'link_route' => $data['link_route'] ?? $existing->link_route,
                     'link_label' => $data['link_label'] ?? $existing->link_label,
                     'alumni_ids' => $mergedIds,
-                    'created_at' => $now, // ✅ this is what the JS panel reads for display
+                    'created_at' => $now, // ✅ JS panel sorts + displays by this field
                     'updated_at' => $now,
-                ]);
+                ])->save();
 
                 return response()->json($existing->fresh(), 200);
             }

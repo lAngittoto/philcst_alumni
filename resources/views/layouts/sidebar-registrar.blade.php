@@ -488,23 +488,26 @@
             padding: 14px 18px 17px;
             cursor: pointer;
             border-bottom: 2px solid #B8B8B8;
-            transition: background .12s ease;
+            transition: background .25s ease, border-left-color .25s ease, opacity .25s ease;
         }
         .notif-item:last-child { border-bottom: none; }
         .notif-item:hover { background: #FAF7FC; }
 
-        /* Unread = pure white + left accent bar. Read = light gray fill,
-           no accent bar — so the two states are unmistakably different
-           at a glance instead of blending together. */
         .notif-item.is-unread {
             background: #FFFFFF;
             border-left: 4px solid #7A3F91;
         }
         .notif-item.is-read {
-            background: #FFFFFF;
+            background: #F9F9F9;
             border-left: 4px solid transparent;
+            opacity: 0.85;
+            animation: notif-read-fade .35s ease forwards;
         }
-        .notif-item.is-read:hover { background: #F7F7F7; }
+        @keyframes notif-read-fade {
+            from { background: #EDE4F5; opacity: 1; }
+            to   { background: #F9F9F9; opacity: 0.85; }
+        }
+        .notif-item.is-read:hover { background: #F0F0F0; opacity: 1; }
 
         .notif-icon-wrap {
             width: 38px;
@@ -919,7 +922,12 @@
                         return !isEmpEvent && !isProfileEvent;
                     })
                     .sort(function (a, b) {
-                        return new Date(b.created_at) - new Date(a.created_at);
+                        // Backend updates created_at to now() on every dedup,
+                        // so created_at is always the true "last activity" time.
+                        // Use it as primary sort; fall back to id for same-second ties.
+                        var timeDiff = new Date(b.created_at) - new Date(a.created_at);
+                        if (timeDiff !== 0) return timeDiff;
+                        return Number(b.id) - Number(a.id);
                     })
                     .forEach(function (n) {
                         var rawDedup = n.dedup_key || '';
@@ -979,12 +987,6 @@
 
                         if (map.has(groupKey)) {
                             var g = map.get(groupKey);
-                            // Use the backend's own count/alumni_ids when this
-                            // row already represents a merged backend group
-                            // (count > 1 or 2+ alumni_ids) rather than blindly
-                            // adding 1 — otherwise a backend-merged row gets
-                            // double-counted on top of the frontend's own
-                            // grouping pass.
                             var nCount = Number(n.count) || 1;
                             g.count = Math.max(g.count, g._ids.length + nCount);
                             if (!n.read) g.read = false;
@@ -993,9 +995,6 @@
                                 g.alumni_ids = (g.alumni_ids || []).concat(nAlumniIds)
                                     .filter(function (v, i, arr) { return arr.indexOf(v) === i; });
                             }
-                            // Track each name together with when it happened
-                            // so we can always tell who's most recent, not
-                            // just who was first seen while grouping.
                             if (nName) {
                                 var existing = g._nameEntries.filter(function (e) { return e.name === nName; })[0];
                                 if (existing) {
@@ -1008,6 +1007,11 @@
                             }
                             if (nTimestamp && new Date(nTimestamp) > new Date(g.created_at)) {
                                 g.created_at = nTimestamp;
+                            }
+                            // _latestAt = most recent created_at across all rows
+                            // in this group (backend refreshes created_at on dedup)
+                            if (!g._latestAt || new Date(nTimestamp) > new Date(g._latestAt)) {
+                                g._latestAt = nTimestamp;
                             }
                             // Oldest -> newest, so the most recently
                             // registered alumnus is always named last —
@@ -1047,6 +1051,8 @@
                             map.set(groupKey, Object.assign({}, n, {
                                 count:       Number(n.count) || 1,
                                 _ids:        [n.id],
+                                _latestAt:   nTimestamp || n.created_at,
+                                _latestId:   n.id,
                                 _roomName:   n._roomName || '',
                                 _names:      nName ? [nName] : [],
                                 _nameEntries: nName ? [{ name: nName, at: nTimestamp || n.created_at }] : [],
@@ -1070,7 +1076,12 @@
                 // "Bulk Import Complete" — instead of jumping back to the
                 // top where the newest activity belongs.
                 return Array.from(map.values()).sort(function (a, b) {
-                    return new Date(b.created_at) - new Date(a.created_at);
+                    if (a.read !== b.read) return a.read ? 1 : -1;
+                    var aTime = a._latestAt || a.created_at;
+                    var bTime = b._latestAt || b.created_at;
+                    var timeDiff = new Date(bTime) - new Date(aTime);
+                    if (timeDiff !== 0) return timeDiff;
+                    return Number(b.id) - Number(a.id);
                 });
             },
 
@@ -1083,17 +1094,18 @@
             },
 
             markRead(item) {
-                // ⚡ Close the panel IMMEDIATELY before navigation so it never
-                //    sits on top of the landing page blocking scroll/clicks.
-                //    We skip setting navigating=true / loadingId here since the
-                //    panel is gone — no spinner overlay is needed on a closed panel.
-                this.open = false;
-
-                // ⚡ Fire mark-as-read PATCHes in background — never block
-                //    navigation on these. If one fails, the 5-second poll
-                //    will re-deliver the unread state automatically.
+                // Mark read visually and re-sort immediately
                 if (!item.read) {
                     item.read = true;
+                    this.items = this.items.slice().sort(function (a, b) {
+                        if (a.read !== b.read) return a.read ? 1 : -1;
+                        var aTime = a._latestAt || a.created_at;
+                        var bTime = b._latestAt || b.created_at;
+                        var timeDiff = new Date(bTime) - new Date(aTime);
+                        if (timeDiff !== 0) return timeDiff;
+                        return Number(b.id) - Number(a.id);
+                    });
+
                     var ids  = item._ids || [item.id];
                     var csrf = document.querySelector('meta[name="csrf-token"]').content;
                     ids.forEach(function (id) {
@@ -1107,8 +1119,8 @@
                     });
                 }
 
-                // Navigate immediately — panel is already closed so no
-                // spinner state is needed. navigating/loadingId stay false.
+                // Navigate immediately after marking read
+                this.open = false;
                 this.goToTarget(item);
             },
 
@@ -1148,8 +1160,8 @@
             //    target === current location, and keep the fast SPA
             //    navigate for the normal cross-page case.
             goToTarget(item) {
-                var routeName = item.link_route;
-                if (!routeName || !window.__registrarRouteMap || !window.__registrarRouteMap[routeName]) return false;
+                var routeName = item.link_route || 'registrar.alumni';
+                if (!window.__registrarRouteMap || !window.__registrarRouteMap[routeName]) return false;
 
                 var alumniIds = Array.isArray(item.alumni_ids) ? item.alumni_ids.filter(Boolean) : [];
 
@@ -2033,8 +2045,8 @@
                         <div class="notif-time-row">
                             <span style="display:flex; align-items:center; gap:5px;">
                                 <i class="fas fa-clock"></i>
-                                <span x-text="notif.created_at
-                                    ? new Date(notif.created_at).toLocaleString('en-PH', {
+                                <span x-text="(notif._latestAt || notif.created_at)
+                                    ? new Date(notif._latestAt || notif.created_at).toLocaleString('en-PH', {
                                         month: 'short', day: 'numeric', year: 'numeric',
                                         hour: '2-digit', minute: '2-digit'
                                       })
@@ -2062,7 +2074,7 @@
     {{-- Panel Footer --}}
     <div id="notif-footer-hint" style="background:#FFFFFF; border-top:0.5px solid #E0D8ED; padding:12px 18px; text-align:center; flex-shrink:0;">
         <p style="font-size:13px; color:#555555; font-weight:500; letter-spacing:0.01em;">
-            Select a notification to view details and mark as read.
+            Select a notification to mark as read. Click again to view details.
         </p>
     </div>
 </div>
