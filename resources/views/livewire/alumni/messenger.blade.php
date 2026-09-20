@@ -1666,6 +1666,11 @@ new class extends \Livewire\Volt\Component {
         .msgr-reactions-popup {
             width: 100%;
             max-width: 320px;
+            /* Truly fixed — popup never grows or shrinks regardless of
+               how many reactors there are. List scrolls inside. */
+            height: 420px;
+            display: flex;
+            flex-direction: column;
             background: #ffffff;
             border-radius: 1.1rem;
             box-shadow: 0 20px 50px rgba(58,27,77,.35);
@@ -1673,13 +1678,9 @@ new class extends \Livewire\Volt\Component {
             animation: msgrModalIn .16s ease-out;
         }
         .msgr-reactions-popup-list {
-            /* Fixed height (not max-height) — box stays the same size
-               whether there's 1 reactor or 20; it just scrolls internally
-               once content overflows, instead of shrinking to fit like
-               before. Raised from 230 to 360 so more reactors fit before
-               scrolling kicks in. */
-            height: 360px;
-            max-height: 60vh;
+            /* Takes all remaining space after header + summary strip;
+               scrollbar appears once reactors overflow. */
+            flex: 1 1 0;
             overflow-y: auto;
             scrollbar-width: thin;
             scrollbar-color: #c9aee0 #f5f0fa;
@@ -2377,7 +2378,7 @@ new class extends \Livewire\Volt\Component {
                                         @endphp
                                         @if($ppCaption)
                                         <div class="text-sm leading-relaxed break-words px-3.5 py-2 rounded-2xl mb-1
-                                                    {{ $msg['is_mine'] ? 'text-white bg-[#7a3f91] rounded-br-none' : ($msg['is_coordinator'] ? 'text-white bg-[#7a3f91] rounded-bl-none' : 'bg-white border border-[#E8E0F0] text-[#333333] rounded-bl-none') }}">
+                                                    {{ $msg['is_mine'] ? 'text-white bg-[#7a3f91] rounded-br-none' : ($msg['is_coordinator'] ? 'text-white bg-[#7a3f91] rounded-bl-none' : 'bg-[#EFEFEF] border border-[#E0E0E0] text-[#333333] rounded-bl-none') }}">
                                             {!! $ppCaption !!}
                                         </div>
                                         @endif
@@ -2465,7 +2466,7 @@ new class extends \Livewire\Volt\Component {
                                                        ? 'text-white rounded-br-none bg-[#7a3f91]'
                                                        : ($msg['is_coordinator']
                                                            ? 'text-white rounded-bl-none bg-[#7a3f91]'
-                                                           : 'bg-white border border-[#E8E0F0] text-[#333333] rounded-bl-none') }}
+                                                           : 'bg-[#EFEFEF] border border-[#E0E0E0] text-[#333333] rounded-bl-none') }}
                                                    {{ $toolbarOpen ? 'ring-2 ring-[#7a3f91]/25' : '' }}">
                                             {!! $formatted !!}
                                             @if($msg['edited'])
@@ -2593,17 +2594,22 @@ new class extends \Livewire\Volt\Component {
                                     </div>
 
                                     @if(! empty($msg['reactions']) && ! $msg['is_deleted'])
-                                    <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
-                                        @foreach($msg['reactions'] as $rk => $cnt)
-                                        @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢', default=>'👍' }; @endphp
+                                    @php
+                                        $emojiMap2 = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'];
+                                        $rxSorted  = collect($msg['reactions'])->sortByDesc(fn($c) => $c);
+                                        $top3      = $rxSorted->take(3);
+                                        $totalRx   = $rxSorted->sum();
+                                        $emojiStr  = $top3->keys()->map(fn($k) => $emojiMap2[$k] ?? '👍')->implode('');
+                                        $iReacted  = ! empty($msg['my_reaction']);
+                                    @endphp
+                                    <div class="flex mt-1 {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
                                         <button wire:click.stop="openReactionsPopup({{ $msg['id'] }})"
-                                                class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all duration-150 cursor-pointer
-                                                       {{ $msg['my_reaction'] === $rk
+                                                class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border transition-all duration-150 cursor-pointer
+                                                       {{ $iReacted
                                                            ? 'bg-[#f3eef8] border-[#c4a8d4] text-[#7a3f91] font-semibold ring-1 ring-[#7a3f91]/30'
                                                            : 'bg-white border-[#E8E0F0] text-[#555555] hover:border-[#d9c9e8] hover:bg-[#fdf9ff]' }}">
-                                            {{ $emoji }}<span class="font-semibold ml-0.5">{{ $cnt }}</span>
+                                            <span class="text-base leading-none">{{ $emojiStr }}</span><span class="text-xs font-semibold">{{ $totalRx }}</span>
                                         </button>
-                                        @endforeach
                                     </div>
                                     @endif
 

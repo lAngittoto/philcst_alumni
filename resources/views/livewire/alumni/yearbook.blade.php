@@ -118,7 +118,12 @@ new class extends Component {
     public function alumniRecords()
     {
         $q = Alumni::query()
-            ->select(['id', 'name', 'student_id', 'email', 'course_code', 'course_name', 'batch', 'profile_photo', 'status', 'created_at']);
+            ->select(['id', 'name', 'student_id', 'email', 'course_code', 'course_name', 'batch', 'profile_photo', 'status', 'created_at',
+                      'profile_completed',
+                      'date_of_birth', 'address_street', 'address_barangay', 'address_municipality', 'address_province',
+                      'father_last_name', 'father_given_name', 'father_middle_name',
+                      'mother_last_name', 'mother_given_name', 'mother_middle_name',
+                      'motto']);
 
         // ── PRIVACY: locked to same batch only ──
         if ($this->myBatch !== '') {
@@ -264,6 +269,64 @@ new class extends Component {
         }
     }
 
+    public function saveMotto(string $motto): void
+    {
+        if (! $this->myAlumniId) return;
+
+        $motto = trim($motto);
+
+        if (mb_strlen($motto) > 300) {
+            $this->dispatch('flash-message', type: 'error', message: 'Motto must be 300 characters or less.');
+            return;
+        }
+
+        try {
+            Alumni::where('id', $this->myAlumniId)->update(['motto' => $motto ?: null]);
+            $this->dispatch('yb-motto-saved', motto: $motto);
+            $this->dispatch('flash-message', type: 'success', message: 'Motto saved successfully.');
+        } catch (\Exception $e) {
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to save motto.');
+        }
+    }
+
+    public function formatAlumniNameYearbook(string $fullName): string
+    {
+        $parts = array_values(array_filter(explode(' ', trim($fullName)), fn ($p) => $p !== ''));
+
+        if (count($parts) === 0) return '';
+        if (count($parts) === 1) return $parts[0];
+
+        $suffixes   = ['jr', 'sr', 'ii', 'iii', 'iv', 'v'];
+        $suffix     = '';
+        $lastToken  = strtolower(rtrim(end($parts), '.'));
+        if (in_array($lastToken, $suffixes, true)) {
+            $suffix = array_pop($parts);
+        }
+
+        $count = count($parts);
+
+        if ($count === 1) {
+            return $parts[0] . ($suffix !== '' ? ' ' . $suffix : '');
+        }
+
+        $lastName   = $parts[$count - 1];
+        $firstName  = $parts[0];
+        $middleInitials = '';
+
+        for ($i = 1; $i < $count - 1; $i++) {
+            $middleInitials .= strtoupper($parts[$i][0]) . '. ';
+        }
+
+        $middleInitials = rtrim($middleInitials);
+
+        // "Last, First M. [Suffix]"
+        $formatted = $lastName . ', ' . $firstName;
+        if ($middleInitials !== '') $formatted .= ' ' . $middleInitials;
+        if ($suffix !== '')        $formatted .= ' ' . $suffix;
+
+        return $formatted;
+    }
+
     public function formatAlumniName(string $fullName): string
     {
         $parts = array_values(array_filter(explode(' ', trim($fullName)), fn ($p) => $p !== ''));
@@ -326,6 +389,12 @@ new class extends Component {
             const bottomSafe = 8;
             const avail = window.innerHeight - rect.top - bottomSafe;
             this.$el.style.setProperty('--yb-avail-h', avail + 'px');
+        },
+        recalcHeight() {
+            // Small delay lets the browser finish resizing its chrome
+            // (address bar show/hide) before we sample innerHeight.
+            setTimeout(() => this.setAvailHeight(), 80);
+            setTimeout(() => this.setAvailHeight(), 300);
         },
         profileOpen: false,
         profileData: null,
@@ -523,8 +592,17 @@ new class extends Component {
      }"
      x-init="
         setAvailHeight();
-        window.addEventListener('resize', () => setAvailHeight());
-        window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
+        window.addEventListener('resize', () => recalcHeight());
+        window.addEventListener('orientationchange', () => recalcHeight());
+        // Recalc after every Livewire response (pagination, filter, etc.)
+        // so --yb-avail-h re-samples innerHeight after the browser chrome
+        // (address bar) has settled back into its post-scroll position.
+        document.addEventListener('livewire:navigated', () => recalcHeight());
+        if (typeof Livewire !== 'undefined') {
+            Livewire.hook('commit', ({ component, commit, respond, succeed, fail }) => {
+                succeed(({ snapshot, effect }) => { recalcHeight(); });
+            });
+        }
         $wire.on('yb-photo-saved', (e) => {
             const url = Array.isArray(e) ? e[0]?.url : e?.url;
             savingPhoto = false;
@@ -538,7 +616,6 @@ new class extends Component {
             if ($refs.ybPhotoInput) $refs.ybPhotoInput.value = '';
         });
      ">
-
 
 <style>
 /* ── Block text selection/copy across the whole page ──────
@@ -558,14 +635,139 @@ new class extends Component {
 }
 
 /* ── Base ──────────────────────────────────────────────── */
-.yb-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
-.yb-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
+.yb-card {
+    transition: border-color .15s ease, box-shadow .15s ease;
+    position: relative;
+    width: 100%;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    height: 420px; /* fixed card height */
+}
+.yb-card:hover {
+    box-shadow: 0 6px 22px rgba(0,0,0,.12);
+}
+
+/* ── Photo — top of card ─────────────────────────────────── */
+.yb-card-photo-wrap {
+    width: 100%;
+    flex-shrink: 0;
+    overflow: hidden;            /* clip to card edges — fixes cut-off circle */
+    position: relative;
+    background: #7A3F91;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 22px 0 18px;
+    min-height: 190px;
+}
+.yb-card-photo {
+    width: 130px;
+    height: 130px;
+    object-fit: cover;
+    object-position: top center;
+    display: block;
+    border-radius: 50%;
+    border: 4px solid rgba(255,255,255,.9);
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    flex-shrink: 0;
+}
+/* Purple border accent for "my card" — hidden, single ring for all */
+.yb-card-photo-me-ring {
+    display: none;
+}
+
+/* ── Right column wrapper — kept for HTML compat ─────────── */
+.yb-card-right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── Purple name ribbon ───────────────────────────────────── */
+.yb-card-name-band {
+    background: #7A3F91;
+    padding: 8px 36px 8px 13px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.yb-card-name-band::before {
+    content: '';
+    position: absolute;
+    top: -10%; bottom: -10%;
+    right: 22px;
+    width: 18px;
+    background: rgba(255,255,255,.20);
+    transform: skewX(-14deg);
+    pointer-events: none;
+}
+.yb-card-name-band::after {
+    content: '';
+    position: absolute;
+    top: -10%; bottom: -10%;
+    right: 9px;
+    width: 8px;
+    background: rgba(255,255,255,.10);
+    transform: skewX(-14deg);
+    pointer-events: none;
+}
+.yb-card-name {
+    font-size: 15px; font-weight: 800;
+    color: #FFFFFF; line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: .01em;
+    position: relative; z-index: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.yb-card-name-me { /* no overrides needed, same as above */ }
+
+/* ── Card info body — white ───────────────────────────────── */
+.yb-card-text {
+    padding: 10px 13px 12px;
+    flex: 1;
+    display: flex; flex-direction: column; gap: 3px;
+    background: #fff;
+    overflow: hidden;
+}
+.yb-card-line {
+    font-size: 14px; color: #1a1a1a; line-height: 1.4; font-weight: 600;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.yb-card-dash {
+    display: block;
+    width: 20px; height: 2px;
+    background: #C8B8D8;
+    border-radius: 2px;
+    margin: 3px 0;
+}
+.yb-card-motto {
+    font-size: 13px; font-weight: 700;
+    color: #5A1A8A; margin-top: 4px; padding-top: 0;
+}
+.yb-card-motto-text {
+    font-size: 13px; font-style: italic; font-weight: 600;
+    color: #1a1a1a; line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 
 .yb-section-badge {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 14px; border-radius: 9999px;
-    font-size: 12px; font-weight: 700; letter-spacing: .02em;
-    background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
+    padding: 4px 14px 4px 12px; border-radius: 6px;
+    font-size: 15px; font-weight: 700; letter-spacing: .02em;
+    background: rgba(122,63,145,.07); color: #7A3F91;
+    border: none; border-left: 4px solid #7A3F91;
 }
 .yb-chip {
     display: inline-flex; align-items: center; gap: 5px;
@@ -646,10 +848,15 @@ new class extends Component {
 /* ── Main block ─────────────────────────────────────────── */
 .yb-table-block {
     display: flex; flex-direction: column;
-    border-radius: 1rem; overflow: hidden;
+    border-radius: 1rem;
     border: 1px solid #E8E0F0;
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
     flex: 1; min-height: 0;
+    position: relative;
+    align-self: stretch;
+    /* overflow:hidden removed — it breaks position:sticky on the pagination bar.
+       Border-radius clipping is handled by rounding the first and last children. */
+    overflow: clip;
 }
 .yb-filter-bar {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
@@ -725,21 +932,26 @@ new class extends Component {
 
 /* ── "My card" highlight ─────────────────────────────────── */
 .yb-card-me {
-    border-color: #7A3F91 !important;
+    border-color: #C49FD8 !important;
     border-width: 2px !important;
     animation: ybMeGlowPulse 2.2s ease-in-out infinite;
 }
 .yb-card-me:hover {
     animation: none;
-    box-shadow: 0 0 0 6px rgba(122,63,145,.35), 0 10px 28px rgba(122,63,145,.32) !important;
+    box-shadow: 0 0 0 6px rgba(196,159,216,.30), 0 10px 28px rgba(122,63,145,.40) !important;
 }
 @keyframes ybMeGlowPulse {
     0%, 100% {
-        box-shadow: 0 0 0 3px rgba(122,63,145,.18), 0 6px 16px rgba(122,63,145,.14);
+        box-shadow: 0 0 0 3px rgba(196,159,216,.20), 0 6px 18px rgba(90,26,138,.28);
     }
     50% {
-        box-shadow: 0 0 0 7px rgba(122,63,145,.32), 0 10px 26px rgba(122,63,145,.30);
+        box-shadow: 0 0 0 7px rgba(196,159,216,.35), 0 10px 28px rgba(90,26,138,.38);
     }
+}
+
+/* ── Default card shadow on white cards ─────────────────── */
+.yb-card:not(.yb-card-me) {
+    box-shadow: 0 3px 12px rgba(90,26,138,.18);
 }
 
 /* ── Root height ─────────────────────────────────────────
@@ -802,17 +1014,28 @@ new class extends Component {
     .yb-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
     .yb-pagination-bar p { font-size: 11px; }
 
+    /* On mobile, pin the pagination bar to the bottom of the viewport
+       so it can never be pushed off-screen by browser chrome changes
+       (address bar appearing/disappearing after paginate round-trips). */
     .yb-pagination-bar {
+        position: fixed !important;
+        bottom: 0; left: 0; right: 0;
         padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
+        z-index: 200;
+        border-radius: 0;
+    }
+    /* Add bottom padding to the scroll area so content isn't hidden
+       behind the fixed bar. 48px = bar min-height. */
+    #yb-scroll {
+        padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
     }
 }
 
 /* ── Scroll area background ───────────────────────────────────
-   Plain white behind the alumni cards — floating bubble effect
-   removed per request. ────────────────────────────────────────── */
+   Light purple tint behind the alumni cards. ─────────────────── */
 .yb-bubble-bg {
     position: relative;
-    background-color: #FFFFFF;
+    background-color: #ffffff;
 }
 
 /* ── Card click affordance ─────────────────────────────────
@@ -820,16 +1043,13 @@ new class extends Component {
    the profile modal — other alumni cards in the yearbook have
    no click handler at all and use the default cursor. ─────── */
 .yb-card-clickable { cursor: pointer; }
-.yb-card-clickable:hover { transform: translateY(-2px); }
 .yb-card-clickable:active { transform: translateY(0); }
 
-/* ── "View Profile" tooltip — own card only, hover-triggered,
-   matches the dark-pill .tip pattern used elsewhere in the app
-   (event cards' Share/RSVP tooltips) ────────────────────────── */
+/* ── "View Profile" tooltip — own card only ─────────────── */
 .yb-card-tip {
     position: absolute; top: -8px; left: 50%;
     transform: translate(-50%, -100%);
-    background: #111827; color: #fff;
+    background: #7a3f91; color: #fff;
     font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
     padding: 4px 10px; border-radius: 6px; white-space: nowrap;
     pointer-events: none; opacity: 0; transition: opacity .15s;
@@ -838,9 +1058,10 @@ new class extends Component {
 .yb-card-tip::after {
     content: ''; position: absolute; top: 100%; left: 50%;
     transform: translateX(-50%);
-    border: 4px solid transparent; border-top-color: #111827;
+    border: 4px solid transparent; border-top-color: #7a3f91;
 }
-.yb-card-clickable:hover .yb-card-tip { opacity: 1; }
+/* Trigger from outer wrapper so tooltip escapes overflow-hidden */
+.yb-card-clickable-wrap:hover .yb-card-tip { opacity: 1; }
 
 /* ── Profile / yearbook-page modal ──────────────────────── */
 .yb-modal-overlay {
@@ -852,7 +1073,7 @@ new class extends Component {
 }
 .yb-modal-card {
     position: relative;
-    width: 100%; max-width: 420px;
+    width: 100%; max-width: 600px;
     background: #fff;
     border-radius: 22px;
     overflow: hidden;
@@ -889,8 +1110,8 @@ new class extends Component {
 .yb-modal-close:hover { background: rgba(255,255,255,.4); }
 .yb-modal-header {
     position: relative;
-    background: linear-gradient(135deg, #7A3F91 0%, #9C5FB8 100%);
-    padding: 40px 20px 66px;
+    background: #7A3F91;
+    padding: 40px 20px 76px;
     text-align: center;
     flex-shrink: 0;
 }
@@ -912,7 +1133,7 @@ new class extends Component {
 .yb-modal-photo-ring {
     position: relative;
     margin: 0 auto;
-    width: 148px; height: 148px; border-radius: 9999px;
+    width: 180px; height: 180px; border-radius: 9999px;
     background: #fff; padding: 5px;
     box-shadow: 0 8px 22px rgba(60,20,80,.3);
     z-index: 2;
@@ -947,9 +1168,7 @@ new class extends Component {
 .yb-modal-photo-uploading {
     position: absolute; inset: 0;
     border-radius: 9999px;
-    background: linear-gradient(90deg,rgba(122,63,145,.25) 25%,rgba(122,63,145,.45) 50%,rgba(122,63,145,.25) 75%);
-    background-size: 200% 100%;
-    animation: ybShimmer 1.2s infinite linear;
+    background: rgba(122,63,145,.55);
     display: flex; align-items: center; justify-content: center;
 }
 @keyframes ybShimmer {
@@ -1004,38 +1223,40 @@ new class extends Component {
 }
 .yb-modal-face-error i { margin-top: 1px; flex-shrink: 0; }
 .yb-modal-body {
-    padding: 20px 24px 24px;
-    text-align: center;
+    padding: 100px 24px 24px;
+    text-align: left;
     overflow-y: auto;
 }
 .yb-modal-info-stack {
-    margin-top: 18px;
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
-}
-.yb-modal-program {
-    font-size: 14px; font-weight: 800; color: #333333;
-    line-height: 1.3;
-}
-.yb-modal-batch-pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 5px 16px; border-radius: 9999px;
-    font-size: 12.5px; font-weight: 700;
-    background: #F3E8FF; color: #7A3F91;
-    border: 1.5px solid #D8B4FE;
-}
-.yb-modal-note {
     margin-top: 14px;
-    border-radius: 14px;
-    padding: 16px 18px;
-    background: linear-gradient(135deg, #F8F0FF 0%, #F3E8FF 100%);
+    display: flex; flex-direction: column; gap: 10px;
+}
+.yb-modal-info-row {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 15px; color: #333333; line-height: 1.45;
+}
+.yb-modal-info-label {
+    font-weight: 700; color: #7A3F91; white-space: nowrap; min-width: 20px;
+    flex-shrink: 0; padding-top: 1px;
+}
+.yb-modal-info-value {
+    color: #333333;
+}
+.yb-modal-motto {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #F3E8FF;
     border: 1.5px solid #E4CBFA;
 }
-.yb-modal-note-title {
-    font-size: 13px; font-weight: 800; color: #7A3F91;
-    letter-spacing: .02em; margin-bottom: 4px;
+.yb-modal-motto-label {
+    display: block;
+    font-size: 10px; font-weight: 800; color: #7A3F91;
+    letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px;
 }
-.yb-modal-note-text {
-    font-size: 13.5px; line-height: 1.55; color: #4A2E58;
+.yb-modal-motto-text {
+    font-size: 15px; line-height: 1.55; color: #4A2E58;
+    font-style: italic;
 }
 .yb-modal-private-tag {
     margin-top: 12px;
@@ -1061,9 +1282,9 @@ new class extends Component {
                     <i class="fas fa-book-open text-white text-lg"></i>
                 </div>
                 <div>
-                    <h1 class="yb-mobile-title text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Alumni Yearbook</h1>
+                    <h1 class="yb-mobile-title text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Digital Alumni Yearbook</h1>
                     <p class="yb-mobile-subtitle text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
-                        A digital collection of PhilCST graduates
+                        GRADUATES {{ $myBatch !== '' ? $myBatch : '' }}
                     </p>
                 </div>
             </div>
@@ -1074,7 +1295,7 @@ new class extends Component {
                 <div class="yb-batch-banner" aria-label="Batch {{ $myBatch }}">
                     <span class="yb-batch-banner-label">
                         <i class="fas fa-graduation-cap mr-1.5" style="font-size:9px;"></i>
-                        Batch
+                        The Pillars
                     </span>
                     <span class="yb-batch-banner-year">{{ $myBatch }}</span>
                 </div>
@@ -1126,16 +1347,6 @@ new class extends Component {
                     init() {
                         this.q = $wire.search ?? '';
                         $wire.$watch('search', v => { if (v !== this.q) this.q = v; });
-                        // Keep the shared lock in sync even if $search
-                        // changes from outside this input (e.g. the
-                        // Reset button clearing it server-side).
-                        this.$watch('q', v => {
-                            if (v !== '') {
-                                this.activeFilter = 'search';
-                            } else if (this.activeFilter === 'search') {
-                                this.activeFilter = null;
-                            }
-                        });
                     }
                  }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-xs"
@@ -1145,16 +1356,15 @@ new class extends Component {
                        @input.debounce.300ms="$wire.set('search', q)"
                        placeholder="Search…"
                        class="yb-search-input"
-                       :class="{ 'yb-search-input-active': q !== '', 'opacity-50 cursor-not-allowed': activeFilter === 'course' || courseBusy }"
-                       :disabled="activeFilter === 'course' || courseBusy"
+                       :class="{ 'yb-search-input-active': q !== '' }"
                        autocomplete="off" spellcheck="false">
             </div>
 
             <div class="relative" x-data="{ open: false }" @click.outside="open = false">
                 <button type="button"
-                        @click="if (activeFilter === 'search' || courseBusy) return; open = !open"
-                        :class="{ 'active': $wire.course !== '', 'opacity-50 cursor-not-allowed': activeFilter === 'search' || courseBusy }"
-                        :disabled="activeFilter === 'search' || courseBusy"
+                        @click="if (courseBusy) return; open = !open"
+                        :class="{ 'active': $wire.course !== '', 'opacity-50 cursor-not-allowed': courseBusy }"
+                        :disabled="courseBusy"
                         class="yb-dd-btn">
                     @if($course !== '')
                         <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
@@ -1178,10 +1388,7 @@ new class extends Component {
                                 if (courseBusy) return;
                                 open = false;
                                 courseBusy = true;
-                                $wire.clearCourse().then(() => {
-                                    activeFilter = null;
-                                    courseBusy = false;
-                                });
+                                $wire.clearCourse().then(() => { courseBusy = false; });
                             "
                             class="yb-dd-item">All Programs</button>
                     @forelse($this->courses as $c)
@@ -1192,10 +1399,7 @@ new class extends Component {
                                 if (courseBusy) return;
                                 open = false;
                                 courseBusy = true;
-                                $wire.setCourse('{{ $c->code }}').then(() => {
-                                    activeFilter = 'course';
-                                    courseBusy = false;
-                                });
+                                $wire.setCourse('{{ $c->code }}').then(() => { courseBusy = false; });
                             "
                             class="yb-dd-item">{{ $c->name }}</button>
                     @empty
@@ -1228,21 +1432,26 @@ new class extends Component {
 
         </div>
 
+        {{-- LOADING SPINNER — centered inside the table block only --}}
+        <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
+             wire:loading.flex wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
+            <i class="fas fa-spinner fa-spin" style="font-size:36px;color:#7a3f91;"></i>
+        </div>
+
         {{-- SCROLLABLE CARDS AREA --}}
         <div class="flex-1 min-h-0 relative yb-bubble-bg"
              x-data="{ showTop: false }">
 
             <div id="yb-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 transition-opacity duration-200"
+                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 pb-6 transition-opacity duration-200"
                  style="z-index: 1;"
                  wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
 
-                <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
-                     wire:loading.flex wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
-                    <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
-                </div>
+                {{-- Spinner is placed inside the scroll area HTML-wise but rendered
+                     via fixed positioning so it always sits dead-center in the
+                     viewport regardless of scroll position or parent transforms. --}}
 
                 @if($this->alumniRecords->count() > 0)
                     <div class="yb-grid-wrap space-y-2"
@@ -1256,54 +1465,140 @@ new class extends Component {
                                     <div class="flex-1 h-px" style="background:#D8B4FE;"></div>
                                 </div>
 
-                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                                     @foreach($group as $alumni)
-                                        @php $isMe = ($myAlumniId > 0 && $alumni->id === $myAlumniId); @endphp
+                                        @php
+                                            $isMe = ($myAlumniId > 0 && $alumni->id === $myAlumniId);
+                                            // Birthday
+                                            $ybDob = !empty($alumni->date_of_birth)
+                                                ? \Carbon\Carbon::parse($alumni->date_of_birth)->format('F j, Y')
+                                                : null;
+                                            // Address — join non-empty parts
+                                            $ybAddr = implode(', ', array_filter([
+                                                $alumni->address_street ?? '',
+                                                $alumni->address_barangay ?? '',
+                                                $alumni->address_municipality ?? '',
+                                                $alumni->address_province ?? '',
+                                            ]));
+                                            // Parent — Mr. & Mrs. format (same as card)
+                                            $fLast  = trim($alumni->father_last_name  ?? '');
+                                            $fFirst = trim($alumni->father_given_name ?? '');
+                                            $fMid   = trim($alumni->father_middle_name ?? '');
+                                            $mFirst = trim($alumni->mother_given_name ?? '');
+                                            $mLast  = trim($alumni->mother_last_name  ?? '');
+
+                                            if ($fFirst && $fLast) {
+                                                $fMidI = $fMid ? strtoupper(mb_substr($fMid,0,1)).'.' : '';
+                                                $ybParentName  = ($mFirst ? 'Mr. & Mrs. ' : 'Mr. ') . $fFirst . ($fMidI ? ' '.$fMidI : '') . ' ' . $fLast;
+                                                $ybParentLabel = 'Parents';
+                                            } elseif ($mFirst && $mLast) {
+                                                $ybParentName  = 'Mrs. ' . $mFirst . ' ' . $mLast;
+                                                $ybParentLabel = 'Parents';
+                                            } else {
+                                                $ybParentName  = null;
+                                                $ybParentLabel = null;
+                                            }
+                                        @endphp
+                                        {{-- Outer wrapper: relative so tooltip can escape overflow-hidden card --}}
+                                        <div class="relative {{ $isMe ? 'yb-card-clickable-wrap' : '' }}">
                                         <div wire:key="alumni-{{ $alumni->id }}"
-                                             class="yb-card {{ $isMe ? 'yb-card-me yb-card-clickable' : '' }} bg-white rounded-2xl overflow-hidden border flex flex-col items-center shadow-sm"
-                                             style="border-color:#E8E0F0;"
+                                             class="yb-card {{ $isMe ? 'yb-card-me yb-card-clickable' : '' }} rounded-xl overflow-hidden border flex flex-col"
+                                             style="border-color: #E2D6F0;"
                                              @if($isMe)
                                              @click="openProfile({
-                                                name: @js($this->formatAlumniName($alumni->name)),
+                                                name: @js($this->formatAlumniNameYearbook($alumni->name)),
                                                 course: @js($alumni->course_name),
                                                 batch: @js((string) $alumni->batch),
                                                 photo: @js($this->getPhotoUrl($alumni->profile_photo)),
+                                                birthday: @js($ybDob),
+                                                address: @js($ybAddr ?: null),
+                                                parentName: @js($ybParentName),
+                                                parentLabel: @js($ybParentLabel),
+                                                motto: @js($alumni->motto ?: null),
                                                 isMe: true
                                              })"
                                              @endif>
 
-                                            {{-- Purple header strip --}}
-                                            <div class="w-full h-[88px] shrink-0 relative bg-[#7A3F91]">
-                                                <div class="absolute left-1/2 -translate-x-1/2 -bottom-[39px] z-10 w-[78px] h-[78px]">
-                                                    <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
-                                                         alt="{{ $alumni->name }}"
-                                                         @if($isMe) data-yb-my-photo @endif
-                                                         class="w-full h-full rounded-full object-cover block"
-                                                         style="border:{{ $isMe ? '3px solid #7A3F91' : '3px solid #fff' }}; box-shadow:{{ $isMe ? '0 0 0 3px #fff, 0 0 0 5px #7A3F91, 0 3px 12px rgba(122,63,145,.3)' : '0 2px 10px rgba(0,0,0,.12)' }}; background:#f0e6f8;"
-                                                         loading="lazy" decoding="async"
-                                                         onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
-                                                </div>
+                                            {{-- Portrait photo — LEFT side --}}
+                                            <div class="yb-card-photo-wrap">
+                                                <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
+                                                     alt="{{ $alumni->name }}"
+                                                     @if($isMe) data-yb-my-photo @endif
+                                                     class="yb-card-photo"
+                                                     loading="lazy" decoding="async"
+                                                     onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
+                                                @if($isMe)
+                                                <div class="yb-card-photo-me-ring"></div>
+                                                @endif
                                             </div>
 
-                                            {{-- Card body --}}
-                                            <div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
-                                                <p class="text-sm font-semibold leading-snug mb-2 break-words w-full uppercase"
-                                                   style="color:#111111;">
-                                                    {{ $this->formatAlumniName($alumni->name) }}
-                                                </p>
-                                                <p class="text-sm font-bold uppercase leading-snug mb-2.5"
-                                                   style="color:#333333; letter-spacing:0.02em;">
-                                                    {{ $alumni->course_name }}
-                                                </p>
-                                                <span class="inline-flex items-center gap-1 px-2.5 py-[3px] rounded-full text-xs font-bold"
-                                                      style="background:#F3E8FF; color:#7A3F91; border:1.5px solid #D8B4FE;">
-                                                    Class of {{ $alumni->batch }}
-                                                </span>
-                                            </div>
-                                            @if($isMe)
-                                            <span class="yb-card-tip">View Profile</span>
-                                            @endif
-                                        </div>
+                                            {{-- RIGHT column: name ribbon + info --}}
+                                            <div class="yb-card-right">
+
+                                                {{-- Purple name ribbon --}}
+                                                <div class="yb-card-name-band">
+                                                    <p class="yb-card-name {{ $isMe ? 'yb-card-name-me' : '' }}">{{ $this->formatAlumniNameYearbook($alumni->name) }}</p>
+                                                </div>
+
+                                                {{-- Info body (white) --}}
+                                                <div class="yb-card-text">
+
+                                                    @php
+                                                        $cardAddr = implode(', ', array_filter([
+                                                            $alumni->address_street ?? '',
+                                                            $alumni->address_barangay ?? '',
+                                                            $alumni->address_municipality ?? '',
+                                                            $alumni->address_province ?? '',
+                                                        ]));
+
+                                                        $fLast  = trim($alumni->father_last_name  ?? '');
+                                                        $mLast  = trim($alumni->mother_last_name  ?? '');
+                                                        $fFirst = trim($alumni->father_given_name ?? '');
+                                                        $mFirst = trim($alumni->mother_given_name ?? '');
+                                                        $fMid   = trim($alumni->father_middle_name ?? '');
+
+                                                        if ($fFirst && $fLast) {
+                                                            $fMiddleI = $fMid ? strtoupper(mb_substr($fMid,0,1)).'.' : '';
+                                                            $cardParents = ($mFirst ? 'Mr. & Mrs. ' : 'Mr. ') . $fFirst . ($fMiddleI ? ' '.$fMiddleI : '') . ' ' . $fLast;
+                                                        } elseif ($mFirst && $mLast) {
+                                                            $cardParents = 'Mrs. ' . $mFirst . ' ' . $mLast;
+                                                        } else {
+                                                            $cardParents = null;
+                                                        }
+
+                                                        $filledCount = (int)(!empty($alumni->date_of_birth))
+                                                                     + (int)(!empty($cardAddr))
+                                                                     + (int)(!empty($cardParents));
+                                                        $dashCount   = max(0, 3 - $filledCount);
+                                                    @endphp
+
+                                                    @if(!empty($alumni->date_of_birth))
+                                                    <p class="yb-card-line">{{ \Carbon\Carbon::parse($alumni->date_of_birth)->format('F j, Y') }}</p>
+                                                    @endif
+
+                                                    @if(!empty($cardAddr))
+                                                    <p class="yb-card-line">{{ ucwords(mb_strtolower($cardAddr)) }}</p>
+                                                    @endif
+
+                                                    @if($cardParents)
+                                                    <p class="yb-card-line">{{ ucwords(mb_strtolower($cardParents)) }}</p>
+                                                    @endif
+
+                                                    @if(!empty($alumni->motto))
+                                                    <p class="yb-card-motto">Motto:
+                                                        <span class="yb-card-motto-text">"{{ $alumni->motto }}"</span>
+                                                    </p>
+                                                    @endif
+
+                                                </div>
+
+                                            </div>{{-- /yb-card-right --}}
+
+                                        </div>{{-- /yb-card --}}
+                                        @if($isMe)
+                                        <span class="yb-card-tip">View Profile</span>
+                                        @endif
+                                        </div>{{-- /outer wrapper --}}
                                     @endforeach
                                 </div>
                             </div>
@@ -1316,14 +1611,7 @@ new class extends Component {
                         </div>
                         <p class="font-semibold text-base" style="color:#333333;">No alumni found.</p>
                         <p class="text-sm mt-1" style="color:#555555;">Try adjusting your filters.</p>
-                        @if($search || $course)
-                        <button wire:click="resetFilters"
-                                @click="activeFilter = null"
-                                class="mt-4 px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer"
-                                style="background-color:#7a3f91;">
-                            <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
-                        </button>
-                        @endif
+
                     </div>
                 @endif
 
@@ -1401,6 +1689,7 @@ new class extends Component {
     </div>{{-- /yb-table-block --}}
 
     {{-- DIGITAL YEARBOOK PROFILE MODAL --}}
+    <div>
     <template x-if="profileOpen && profileData">
         <div class="yb-modal-overlay"
              x-show="profileOpen"
@@ -1491,11 +1780,9 @@ new class extends Component {
                 </div>
 
                 <div class="yb-modal-body">
-                    <p class="text-lg font-semibold uppercase leading-snug" style="color:#333333;" x-text="profileData.name"></p>
+                    <p class="font-bold uppercase leading-snug text-center" style="color:#333333;font-size:1.25rem;" x-text="profileData.name"></p>
 
-                    {{-- Face-check rejection message — only ever relevant on
-                         the viewer's own card, since that's the only place
-                         the file input exists. --}}
+                    {{-- Face-check rejection message --}}
                     <template x-if="profileData.isMe && faceError">
                         <p class="yb-modal-face-error">
                             <i class="fas fa-triangle-exclamation"></i>
@@ -1503,38 +1790,129 @@ new class extends Component {
                         </p>
                     </template>
 
-                    {{-- Digital yearbook info: program on top, batch centered below —
-                         no field labels, so this reads like a yearbook caption
-                         rather than a form. --}}
+                    {{-- Yearbook info rows --}}
                     <div class="yb-modal-info-stack">
-                        <p class="yb-modal-program" x-text="profileData.course"></p>
-                        <span class="yb-modal-batch-pill">
-                            <i class="fas fa-calendar-check" style="font-size:10px;"></i>
-                            <span x-text="'Batch ' + profileData.batch"></span>
-                        </span>
+
+                        {{-- Birthday --}}
+                        <template x-if="profileData.birthday">
+                            <div class="yb-modal-info-row">
+                                <span class="yb-modal-info-label"><i class="fas fa-cake-candles"></i></span>
+                                <span class="yb-modal-info-value" x-text="profileData.birthday"></span>
+                            </div>
+                        </template>
+
+                        {{-- Address --}}
+                        <template x-if="profileData.address">
+                            <div class="yb-modal-info-row">
+                                <span class="yb-modal-info-label"><i class="fas fa-location-dot"></i></span>
+                                <span class="yb-modal-info-value" x-text="profileData.address"></span>
+                            </div>
+                        </template>
+
+                        {{-- Parent --}}
+                        <template x-if="profileData.parentName">
+                            <div class="yb-modal-info-row">
+                                <span class="yb-modal-info-label"><i class="fas fa-users"></i></span>
+                                <span class="yb-modal-info-value" x-text="profileData.parentName"></span>
+                            </div>
+                        </template>
+
+                        {{-- Motto: read-only for others --}}
+                        <template x-if="!profileData.isMe && profileData.motto">
+                            <div class="yb-modal-motto">
+                                <span class="yb-modal-motto-label">MOTTO:</span>
+                                <span class="yb-modal-motto-text" x-text="'&quot;' + profileData.motto + '&quot;'"></span>
+                            </div>
+                        </template>
+
                     </div>
 
-                    {{-- "We / Our" congratulatory note --}}
-                    <div class="yb-modal-note">
-                        <p class="yb-modal-note-title">
-                            <i class="fas fa-heart mr-1"></i> A Note From PhilCST
-                        </p>
-                        <p class="yb-modal-note-text">
-                            We are so proud of you. From your first day on campus to walking the stage,
-                            <span x-text="profileData.name"></span> — this achievement is <em>ours</em> to celebrate too.
-                            Congratulations, Alumni! 🎓
-                        </p>
-                    </div>
+                    {{-- Editable motto — own card only (always rendered, toggled via x-show) --}}
+                    <div x-show="profileData && profileData.isMe"
+                         x-data="{
+                            mottoVal: '',
+                            saving: false,
+                            get isDirty() { return this.mottoVal !== ((profileData && profileData.motto) || ''); },
+                            get displayText() {
+                                return this.mottoVal.trim() ? '\u201c' + this.mottoVal.trim() + '\u201d' : '';
+                            },
+                            syncFromProfile() {
+                                this.mottoVal = (profileData && profileData.motto) || '';
+                            },
+                            async doSave() {
+                                if (this.saving) return;
+                                this.saving = true;
+                                await $wire.saveMotto(this.mottoVal.trim());
+                                this.saving = false;
+                            },
+                            cancel() {
+                                this.mottoVal = (profileData && profileData.motto) || '';
+                            }
+                         }"
+                         x-init="
+                            syncFromProfile();
+                            $watch('profileData', () => syncFromProfile());
+                            $wire.$on('yb-motto-saved', (e) => {
+                                const val = Array.isArray(e) ? e[0]?.motto : e?.motto;
+                                if (profileData) profileData.motto = val || '';
+                                mottoVal = val || '';
+                            });
+                         "
+                         style="margin-top:12px;">
 
-                    {{-- Privacy notice: only shows on the viewer's own card --}}
-                    <template x-if="profileData.isMe">
-                        <span class="yb-modal-private-tag">
-                            <i class="fas fa-lock"></i> Only you can see this note
+                        <div style="background:#F3E8FF;border:1.5px solid #E4CBFA;border-radius:10px;padding:12px 14px;">
+                            <span style="display:block;font-size:10px;font-weight:800;color:#7A3F91;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;">
+                                <i class="fas fa-quote-left" style="font-size:9px;margin-right:3px;"></i>MOTTO
+                            </span>
+
+                            <p x-show="mottoVal.trim() !== ''"
+                               style="margin-bottom:8px;font-style:italic;color:#4A2E58;font-size:15px;line-height:1.55;"
+                               x-text="displayText"></p>
+
+                            <p x-show="mottoVal.trim() === ''"
+                               style="margin-bottom:8px;font-size:13px;color:#B9A8CB;font-style:italic;">
+                                No motto yet — add yours below.
+                            </p>
+
+                            <textarea
+                                x-model="mottoVal"
+                                @keydown.enter.prevent="if (!saving) doSave()"
+                                placeholder="Type your motto here…"
+                                rows="2"
+                                maxlength="300"
+                                :disabled="saving"
+                                style="width:100%;resize:none;border:1px solid #D8B4FE;border-radius:8px;padding:8px 10px;font-size:14px;color:#333;background:#fff;outline:none;font-family:inherit;line-height:1.5;transition:border-color .15s;"
+                                onfocus="this.style.borderColor='#7A3F91'"
+                                onblur="this.style.borderColor='#D8B4FE'"></textarea>
+
+                            <div style="display:flex;align-items:center;justify-content:flex-end;margin-top:8px;gap:6px;">
+                                    <button type="button"
+                                            x-show="isDirty"
+                                            @click="cancel()"
+                                            :disabled="saving"
+                                            style="font-size:12px;font-weight:600;padding:5px 14px;border-radius:7px;border:1px solid #D8B4FE;background:#fff;color:#7A3F91;cursor:pointer;">
+                                        Cancel
+                                    </button>
+                                    <button type="button"
+                                            x-show="isDirty"
+                                            @click="doSave()"
+                                            :disabled="saving"
+                                            :style="saving ? 'opacity:.6;cursor:not-allowed;' : ''"
+                                            style="font-size:12px;font-weight:700;padding:5px 16px;border-radius:7px;border:none;background:#7A3F91;color:#fff;cursor:pointer;">
+                                        <i class="fas fa-spinner fa-spin" x-show="saving" style="font-size:10px;margin-right:3px;"></i>
+                                        <span x-text="saving ? 'Saving…' : 'Save'"></span>
+                                    </button>
+                            </div>
+                        </div>
+
+                        <span class="yb-modal-private-tag" style="margin-top:10px;display:inline-flex;">
+                            <i class="fas fa-lock"></i> Only you can see this
                         </span>
-                    </template>
+                    </div>
                 </div>
             </div>
         </div>
     </template>
+    </div>{{-- /modal wrapper --}}
 
 </div>{{-- /main layout --}}

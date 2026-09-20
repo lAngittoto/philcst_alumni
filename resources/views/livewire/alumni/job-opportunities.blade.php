@@ -254,7 +254,8 @@ new class extends Component {
         $this->viewingJobId = null;
 
         if ($this->deepLinkedJob) {
-            $this->resetPage();
+            $this->page        = 1;
+            $this->filterType  = '';   // clear __job_history set by deep-link
             $this->deepLinkedJob = false;
         }
     }
@@ -1069,12 +1070,16 @@ select.filter-input option {
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 @foreach($this->jobPostings as $job)
                 @php
-                    $dl       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-                    $today    = now('Asia/Manila')->startOfDay();
-                    $daysLeft = (int) $today->diffInDays($dl->copy()->startOfDay(), false);
-                    $isExpired = $daysLeft < 0;
+                    $isExpired = false;
+                    $daysLeft  = null;
+                    if ($job->deadline) {
+                        $dl       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                        $today    = now('Asia/Manila')->startOfDay();
+                        $daysLeft = (int) $today->diffInDays($dl->copy()->startOfDay(), false);
+                        $isExpired = $daysLeft < 0;
+                    }
 
-                    $descPreview = $job->description ? Str::limit(strip_tags($job->description), 90) : null;
+                    $descPreview  = $job->description ? Str::limit(strip_tags($job->description), 90) : null;
                     $cardImageUrl = $this::jobImageUrl($job->job_image ?? null);
                 @endphp
 

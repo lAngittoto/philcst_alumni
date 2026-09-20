@@ -998,6 +998,10 @@
             },
 
             get unread() {
+                // _unreadOverride is set immediately on notif click (before
+                // markRead/navigate) so the badge decrements the instant the
+                // user taps, without waiting for the server PATCH or navigation.
+                if (typeof this._unreadOverride === 'number') return this._unreadOverride;
                 return this.items.filter(function (n) { return !n.read; }).length;
             },
 
@@ -1286,6 +1290,7 @@
         s.navigating   = false;
         s.loadingId    = null;
         s._navigating  = false;
+        s._unreadOverride = undefined; // let the getter recompute from fresh items
 
         // FIX (glitch: panel/badge flashing open again after landing):
         // s.init() calls _fetch(), which reassigns s.items. That
@@ -1802,6 +1807,15 @@
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
 
+        {{-- Navigation blocker — prevents clicking anything in the main content
+             area while a sidebar link is loading. Invisible overlay, pointer-events
+             only, so layout is completely unaffected. --}}
+        <div x-show="navClickedRoute !== null"
+             x-cloak
+             class="fixed inset-0 z-[900] cursor-wait"
+             style="background:transparent;pointer-events:all;"
+             @click.prevent @contextmenu.prevent></div>
+
         {{-- Top bar — visible on ALL screen sizes. Hamburger only shows on mobile (lg:hidden).
              Bell always sits on the right, icon-only. --}}
         <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
@@ -2043,6 +2057,13 @@
                             $store.alumniNotifs._navigating = true;
                             $store.alumniNotifs.navigating  = true;
                             $store.alumniNotifs.loadingId   = notif.id;
+
+                            // Decrement badge immediately — don't wait for
+                            // markRead() or livewire:navigated.
+                            if (!notif.read) {
+                                const cur = $store.alumniNotifs.items.filter(n => !n.read).length;
+                                $store.alumniNotifs._unreadOverride = Math.max(0, cur - 1);
+                            }
 
                             // FIX (lag before navigate): the old code awaited markRead()
                             // (a server PATCH) before navigating — so the spinner showed
