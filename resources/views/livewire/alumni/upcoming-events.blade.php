@@ -433,6 +433,7 @@ new class extends Component {
         $this->shareOrganizer    = $type === 'ADMIN' ? 'PHILCST Admin' : ($event->organizer?->name ?? 'Organizer');
         $this->shareIsCompleted  = $isCompleted;
         $this->showShareModal    = true;
+        $this->dispatch('share-modal-opened');
     }
 
     public function closeShareModal(): void
@@ -558,6 +559,15 @@ select.filter-input {
     appearance: none;
 }
 
+/* Search input always shows text cursor; select always shows default.
+   These beat any .ev-body-busy * override so they stay correct
+   whether or not a card load is in flight. */
+input.filter-input,
+input.filter-input:hover,
+input.filter-input:focus { cursor: text !important; }
+select.filter-input,
+select.filter-input:hover { cursor: default !important; }
+
 @keyframes detailIn { from { opacity: 0; } to { opacity: 1; } }
 .detail-page { animation: detailIn .18s cubic-bezier(.4,0,.2,1) both; }
 
@@ -674,6 +684,23 @@ select.filter-input {
 .ev-body-busy [data-ev-card].is-loading {
     pointer-events: none !important;
     cursor: default !important;
+}
+
+/* ── Share button spinner ────────────────────────────────────────────
+   Uses fa-spinner fa-spin — same as the close/rsvp buttons. */
+
+/* ── Lock OTHER cards while one is loading (same pattern as dashboard) ──
+   The clicked card gets .is-loading; every other card gets .is-blocked:
+   clicks swallowed, cursor drops to not-allowed, card dims slightly. */
+[data-ev-card].is-blocked {
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    opacity: 0.55;
+    filter: grayscale(25%);
+}
+[data-ev-card].is-blocked:hover {
+    box-shadow: none !important;
+    border-color: #e5e7eb !important;
 }
 
 .card-share-btn {
@@ -960,19 +987,7 @@ select.filter-input {
     </div>
 
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
-         x-data="{ evBusy: false }"
-         x-init="
-            Livewire.hook('commit', ({ component, commit, succeed, fail }) => {
-                const targets = ['search','filterStatus','previousPage','nextPage','page','viewEvent','resetFilters'];
-                const hit = (commit.calls || []).some(c => targets.includes(c.method))
-                    || Object.keys(commit.updates || {}).some(k => targets.includes(k));
-                if (!hit) return;
-                evBusy = true;
-                succeed(() => { evBusy = false; });
-                fail(() => { evBusy = false; });
-            });
-         "
-         :class="{ 'ev-body-busy': evBusy }">
+         id="ev-content-block">
 
         <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
 
@@ -989,19 +1004,33 @@ select.filter-input {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            <select wire:model.live="filterStatus"
-                    class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                           hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
-                <option value="">All Events</option>
-                <option value="upcoming">Upcoming</option>
-                <option value="completed">Completed</option>
-            </select>
+            <div wire:ignore
+                 x-data="{
+                     fs: 'upcoming',
+                     init() {
+                         this.fs = $wire.filterStatus ?? 'upcoming';
+                         $wire.$watch('filterStatus', v => { if (v !== this.fs) this.fs = v; });
+                     },
+                     onChange(val) {
+                         this.fs = val;
+                         $wire.set('filterStatus', val);
+                     }
+                 }">
+                <select x-model="fs" @change="onChange($event.target.value)"
+                        class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                               hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
+                    <option value="">All Events</option>
+                    <option value="upcoming">Upcoming</option>
+                    <option value="completed">Completed</option>
+                </select>
+            </div>
 
             @php $hasActiveFilters = $search !== '' || $filterStatus !== 'upcoming'; @endphp
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    data-ev-reset
                     @disabled(!$hasActiveFilters)
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold
                            border transition active:scale-95
@@ -1019,13 +1048,18 @@ select.filter-input {
 
         </div>
 
-        <div class="bg-white p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
-             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus,previousPage,nextPage,page">
+        {{-- ── Loading overlay: fixed to viewport so it stays centered
+                regardless of scroll position. Left offset accounts for
+                the sidebar (~284px) so the spinner sits in the content
+                area, not behind the nav. ──── --}}
+        <div class="hidden fixed z-[9999] items-center justify-center pointer-events-none"
+             style="top:0;bottom:0;left:284px;right:0;"
+             wire:loading.flex wire:target="search,filterStatus,previousPage,nextPage,page,resetFilters">
+            <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+        </div>
 
-            <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
-                 wire:loading.flex wire:target="search,filterStatus,previousPage,nextPage,page">
-                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
-            </div>
+        <div class="bg-white p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
+             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus,previousPage,nextPage,page,resetFilters">
 
             @if($this->pagedEvents->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -1113,12 +1147,16 @@ select.filter-input {
                                     wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
                                     wire:loading.attr="disabled"
                                     wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
-                                    class="card-share-btn">
-                                <span wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')">
+                                    class="card-share-btn"
+                                    x-data="{spinning:false}"
+                                    @click.stop="spinning=true"
+                                    x-on:share-modal-opened.window="spinning=false"
+                                    x-on:flash-message.window="spinning=false">
+                                <span x-show="!spinning">
                                     <i class="fas fa-share-nodes text-[11px]"></i>
                                 </span>
-                                <span wire:loading wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')">
-                                    <i class="fas fa-spinner fa-spin text-[11px]"></i>
+                                <span x-show="spinning" x-cloak>
+                                    <i class="fas fa-spinner fa-spin text-[11px]" style="color:#1d4ed8;"></i>
                                 </span>
                                 <span class="tip">Share</span>
                             </button>
@@ -1355,6 +1393,7 @@ select.filter-input {
                             @endif
                         </div>
 
+                        {{-- Status + course tags — right below title --}}
                         <div class="flex flex-wrap gap-2 mt-1">
                             @if($isCompleted)
                                 <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-green-200 bg-white text-green-700">
@@ -1365,14 +1404,18 @@ select.filter-input {
                                     <i class="fas fa-calendar-check mr-1.5 text-xs"></i>Upcoming
                                 </span>
                             @endif
-                            @if($event->target_participants)
+                            @if($event->target_participants && !str_starts_with($event->target_participants, 'All Colleges'))
                                 @foreach(explode(',', $event->target_participants) as $part)
-                                    <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($part) }}</span>
+                                    @foreach(explode(' · ', $part) as $sub)
+                                        @if(trim($sub) !== '')
+                                            <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($sub) }}</span>
+                                        @endif
+                                    @endforeach
                                 @endforeach
                             @endif
                         </div>
 
-                        {{-- Venue / Date & Time / Open For — sit alongside the image/title instead of their own separate row below --}}
+                        {{-- Venue / Date & Time / Open For --}}
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3 mt-2.5 pt-2.5 border-t border-gray-100">
                             <div class="detail-side-item">
                                 <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
@@ -1396,44 +1439,44 @@ select.filter-input {
                                 <span class="detail-side-icon"><i class="fas fa-users"></i></span>
                                 <div class="min-w-0">
                                     <p class="detail-side-label">Open For</p>
-                                    <p class="detail-side-value">{{ $event->target_participants ?: '—' }}</p>
+                                    <p class="detail-side-value">{{ $event->target_participants ? str_replace('·', ' · ', $event->target_participants) : '—' }}</p>
                                 </div>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <div class="border-t border-gray-100"></div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-4">
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-clipboard-check"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Responses</p>
-                            <p class="detail-side-value text-emerald-600">{{ $event->confirmed_count }} Attending</p>
-                            <p class="detail-side-sub">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</p>
-                        </div>
-                    </div>
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-calendar-check"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Your RSVP</p>
-                            <p class="detail-side-value {{ $rsvpColor }}">{{ $rsvpLabel }}</p>
-                            @if(!$isCompleted && !$rsvpLocked)
-                                <button wire:click="openRsvpModal"
-                                        class="text-sm font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
-                                    {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
-                                </button>
-                            @elseif(!$isCompleted && $rsvpLocked)
-                                <p class="text-xs text-gray-400 mt-0.5">RSVP closed</p>
-                            @endif
-                        </div>
-                    </div>
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Posted</p>
-                            <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
-                            <p class="detail-side-sub">{{ $createdPH->diffForHumans() }}</p>
+                        {{-- Responses / Your RSVP / Posted — aligned below Venue/Date/OpenFor --}}
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3 pt-2.5 border-t border-gray-100">
+                            <div class="detail-side-item">
+                                <span class="detail-side-icon"><i class="fas fa-clipboard-check"></i></span>
+                                <div class="min-w-0">
+                                    <p class="detail-side-label">Responses</p>
+                                    <p class="detail-side-value text-emerald-600">{{ $event->confirmed_count }} Attending</p>
+                                    <p class="detail-side-sub">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</p>
+                                </div>
+                            </div>
+                            <div class="detail-side-item">
+                                <span class="detail-side-icon"><i class="fas fa-calendar-check"></i></span>
+                                <div class="min-w-0">
+                                    <p class="detail-side-label">Your RSVP</p>
+                                    <p class="detail-side-value {{ $rsvpColor }}">{{ $rsvpLabel }}</p>
+                                    @if(!$isCompleted && !$rsvpLocked)
+                                        <button wire:click="openRsvpModal"
+                                                class="text-sm font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
+                                            {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
+                                        </button>
+                                    @elseif(!$isCompleted && $rsvpLocked)
+                                        <p class="text-xs text-gray-400 mt-0.5">RSVP closed</p>
+                                    @endif
+                                </div>
+                            </div>
+                            <div class="detail-side-item">
+                                <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
+                                <div class="min-w-0">
+                                    <p class="detail-side-label">Posted</p>
+                                    <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
+                                    <p class="detail-side-sub">{{ $createdPH->diffForHumans() }}</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1594,7 +1637,7 @@ select.filter-input {
                 @endif
             </button>
 
-            <p class="text-xs text-center text-gray-400 pt-1">
+            <p class="text-xs text-center pt-1" style="color:#333333;">
                 <i class="fas fa-circle-info mr-1"></i>You can update your response as many times as you'd like, right up until the event begins.
             </p>
         </div>
@@ -2109,6 +2152,11 @@ select.filter-input {
             mouseY = e.clientY;
             label.style.left = (mouseX + 16) + 'px';
             label.style.top  = (mouseY + 14) + 'px';
+            // Hide label if the pointer drifted off the active card
+            // (e.g. moved into the filter bar) without triggering mouseleave.
+            if (activeCard && !activeCard.contains(e.target)) {
+                hide();
+            }
         }
 
         function onCardEnter(e) {
@@ -2133,32 +2181,46 @@ select.filter-input {
         //    page nav to key off, it opens the detail view via a
         //    Livewire commit, so the spinner is cleared on that
         //    commit's succeed/fail instead of livewire:navigated. ────
+        function lockEvCards(clicked) {
+            document.querySelectorAll('[data-ev-card]').forEach(el => {
+                if (el === clicked) {
+                    el.classList.remove('is-blocked');
+                    el.classList.add('is-loading');
+                } else {
+                    el.classList.remove('is-loading');
+                    el.classList.add('is-blocked');
+                }
+            });
+        }
+
         function clearOtherEvCardSpinners(except) {
-            document.querySelectorAll('[data-ev-card].is-loading').forEach(el => {
+            document.querySelectorAll('[data-ev-card]').forEach(el => {
                 if (el !== except) el.classList.remove('is-loading');
             });
         }
 
         function clearAllEvCardSpinners() {
-            document.querySelectorAll('[data-ev-card].is-loading').forEach(el => {
-                el.classList.remove('is-loading');
+            document.querySelectorAll('[data-ev-card]').forEach(el => {
+                el.classList.remove('is-loading', 'is-blocked');
             });
         }
 
         function onCardClick(e) {
             if (e.target.closest('[data-ev-share]')) return;
             const card = e.currentTarget;
-            // If another card is already loading, ignore this click —
-            // prevents a second event from opening mid-request even in
-            // the brief window before Alpine's evBusy lock takes effect.
+            // If another card is already loading or blocked, swallow the click.
+            if (card.classList.contains('is-blocked')) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
             const alreadyLoading = document.querySelector('[data-ev-card].is-loading');
             if (alreadyLoading && alreadyLoading !== card) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 return;
             }
-            clearOtherEvCardSpinners(card);
-            card.classList.add('is-loading');
+            lockEvCards(card);
             hide();
         }
 

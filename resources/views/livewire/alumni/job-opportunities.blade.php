@@ -675,23 +675,48 @@ select.filter-input {
 }
 
 /* ── Global "one loading at a time" lock ──────────────────────────
-   Applied to the cards grid + filter bar while a card is opening OR
-   a filter/search request is in flight, so the alumni can't click
-   another card, change a filter, or trigger pagination mid-request. */
-.jb-body-busy {
+   Copied from .dash-card-clickable/.is-blocked pattern in dashboard.
+   When a card or filter triggers a request:
+     • the clicked card → .is-loading (spinner shows, blurred content)
+     • every other card → .is-blocked (dimmed, no pointer, no hover)
+     • filter inputs / selects / pagination → .jb-el-blocked
+   Cleared on commit succeed/fail and on livewire:navigated. ── */
+
+/* Other cards while one is loading */
+[data-jb-card].is-blocked {
     pointer-events: none !important;
     cursor: default !important;
-}
-.jb-body-busy * {
-    cursor: default !important;
-}
-.jb-body-busy [data-jb-card]:not(.is-loading) {
     opacity: 0.55;
-    cursor: default !important;
+    filter: grayscale(25%);
 }
-.jb-body-busy [data-jb-card].is-loading {
+[data-jb-card].is-blocked:hover {
+    border-color: inherit !important;
+    box-shadow: none !important;
+}
+
+/* Filter inputs, selects, pagination buttons while any request is in flight */
+.jb-el-blocked {
     pointer-events: none !important;
     cursor: default !important;
+    opacity: 0.55;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+/* ── Filter bar selects + inputs: default pointer, no text selection on click ── */
+.filter-input {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.filter-input[type="text"],
+input.filter-input {
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+}
+select.filter-input option {
+    cursor: pointer;
 }
 
 .card-share-btn {
@@ -802,7 +827,7 @@ select.filter-input {
     padding: 5px 12px; border-radius: 999px;
 }
 .philcst-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.philcst-checklist li { display: flex; align-items: flex-start; gap: 10px; font-size: 16px; line-height: 1.6; color: #333333; }
+.philcst-checklist li { display: flex; align-items: flex-start; gap: 10px; font-size: clamp(12px, 1vw, 15px); line-height: 1.6; color: #333333; }
 .philcst-checklist li .chk {
     flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
     background: #f5eef9; color: #7a3f91;
@@ -949,28 +974,15 @@ select.filter-input {
         </div>
     </div>
 
-    {{-- ══ CONTENT BLOCK ══ ── wrapped so ONE global "busy" flag blocks
-         every other click (filters, cards, pagination) while a search,
-         filter, sort, page-change, or "View Details" request is in
-         flight — prevents opening a second job or changing filters
-         mid-request. ── --}}
+    {{-- ══ CONTENT BLOCK ══ ── ONE request at a time: JS lockJbAll()
+         adds .is-blocked to every other card, filter, and pagination
+         button the instant a card or filter fires. Cleared on commit
+         succeed/fail and livewire:navigated. ── --}}
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
-         x-data="{ jbBusy: false }"
-         x-init="
-            Livewire.hook('commit', ({ component, commit, succeed, fail }) => {
-                const targets = ['search','filterType','filterLevel','filterSort','previousPage','nextPage','page','viewJob','resetFilters'];
-                const hit = (commit.calls || []).some(c => targets.includes(c.method))
-                    || Object.keys(commit.updates || {}).some(k => targets.includes(k));
-                if (!hit) return;
-                jbBusy = true;
-                succeed(() => { jbBusy = false; });
-                fail(() => { jbBusy = false; });
-            });
-         "
-         :class="{ 'jb-body-busy': jbBusy }">
+         id="jb-content-block">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
+        <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0 select-none">
 
             <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
 
@@ -982,6 +994,7 @@ select.filter-input {
                        placeholder="Search…"
                        class="filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                               hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                       style="cursor:text;user-select:text;-webkit-user-select:text;"
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
@@ -1012,6 +1025,7 @@ select.filter-input {
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
+                    data-jb-reset
                     @disabled(!$hasActiveFilters)
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold
                            border transition active:scale-95
@@ -1024,7 +1038,7 @@ select.filter-input {
                 <span wire:loading wire:target="resetFilters">
                     <i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i>
                 </span>
-                <span class="hidden sm:inline">Reset</span>
+                <span class="hidden sm:inline" style="user-select:none;-webkit-user-select:none;">Reset</span>
             </button>
 
         </div>
@@ -1038,13 +1052,18 @@ select.filter-input {
              content and caps out with a max-height (so it still scrolls
              normally when there ARE many results) — pagination sits right
              under the cards instead of far below them. --}}
-        <div class="bg-white p-4 relative overflow-y-auto transition-opacity duration-200 flex-1 min-h-0"
-             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page">
+        {{-- ── Loading overlay: fixed to viewport so it stays centered
+                regardless of scroll position. Left offset accounts for
+                the sidebar (~284px) so the spinner sits in the content
+                area, not behind the nav. ──── --}}
+        <div class="hidden fixed z-[9999] items-center justify-center pointer-events-none"
+             style="top:0;bottom:0;left:284px;right:0;"
+             wire:loading.flex wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page,resetFilters">
+            <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+        </div>
 
-            <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
-                 wire:loading.flex wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page">
-                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
-            </div>
+        <div class="bg-white p-4 relative overflow-y-auto transition-opacity duration-200 flex-1 min-h-0"
+             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page,resetFilters">
 
             @if($this->jobPostings->count() > 0)
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -1136,12 +1155,7 @@ select.filter-input {
                         @else Check back soon — new opportunities will be posted here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>. @endif
                     </p>
                 </div>
-                @if($search || $filterType || $filterLevel)
-                <button wire:click="resetFilters"
-                        class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                    Clear Filters
-                </button>
-                @endif
+
             </div>
             @endif
         </div>
@@ -1158,7 +1172,7 @@ select.filter-input {
             $pgEnd   = min($lp, $cp + 2);
         @endphp
         <div class="flex items-center justify-between gap-2 flex-wrap px-5 py-2.5 min-h-[48px] mt-auto
-                    bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0"
+                    bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0 select-none"
              style="padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px));">
 
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
@@ -1354,8 +1368,8 @@ select.filter-input {
 
                 <div class="border-t border-gray-100"></div>
 
-                {{-- Meta info row 1: Employer / Location / Salary / Deadline / Posted, side by side --}}
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {{-- Meta info row 1: Employer / Location / Salary / Deadline (Posted moved to footer) --}}
+                <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-building"></i></span>
                         <div class="min-w-0">
@@ -1391,20 +1405,12 @@ select.filter-input {
                             </p>
                         </div>
                     </div>
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Posted</p>
-                            <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
-                            <p class="text-xs mt-0.5" style="color:#666;">{{ $createdPH->diffForHumans() }}</p>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="border-t border-gray-100"></div>
 
-                {{-- Meta info row 2: Source / Employment Type / Experience Level, labeled like row 1 --}}
-                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {{-- Meta info row 2: Employer Type / Employment Type / Experience Level / Posted --}}
+                <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     @if($displayType)
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-tag"></i></span>
@@ -1428,6 +1434,14 @@ select.filter-input {
                             <p class="detail-side-value">{{ $job->experience_level }}</p>
                         </div>
                     </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-label">Posted</p>
+                            <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
+                            <p class="text-xs mt-0.5" style="color:#666;">{{ $createdPH->diffForHumans() }}</p>
+                        </div>
+                    </div>
                 </div>
 
                 @if($isUrgent)
@@ -1444,15 +1458,15 @@ select.filter-input {
                 {{-- ═══ Job Description / Qualifications / How to Apply ═══ --}}
                 <div class="grid grid-cols-1 {{ ($hasQual || $hasInstr) ? 'lg:grid-cols-2' : '' }} gap-5">
                     <div class="border border-gray-200 rounded-xl px-5 py-4">
-                        <p class="text-base font-bold mb-2.5" style="color:#333333;">📄 Job Description:</p>
-                        <div class="pre-wrap text-base leading-relaxed" style="color:#333333;">{{ trim($job->description) }}</div>
+                        <p class="font-bold mb-2.5" style="color:#333333;font-size:clamp(13px,1.1vw,17px);">📄 Job Description:</p>
+                        <div class="pre-wrap leading-relaxed" style="color:#333333;font-size:clamp(12px,1vw,15px);">{{ trim($job->description) }}</div>
                     </div>
 
                     @if($hasQual || $hasInstr)
                     <div class="flex flex-col gap-4">
                         @if($hasQual)
                         <div class="border border-gray-200 rounded-xl px-5 py-4">
-                            <p class="text-base font-bold mb-2.5" style="color:#333333;">📌 Requirements &amp; Qualifications:</p>
+                            <p class="font-bold mb-2.5" style="color:#333333;font-size:clamp(13px,1.1vw,17px);">📌 Requirements &amp; Qualifications:</p>
                             <ul class="philcst-checklist">
                                 @foreach($qualLines as $line)
                                     <li><span class="chk"><i class="fas fa-check"></i></span><span>{{ $line }}</span></li>
@@ -1463,7 +1477,7 @@ select.filter-input {
 
                         @if($hasInstr)
                         <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-5 py-4">
-                            <p class="text-base font-bold text-emerald-800 mb-2.5">📝 How to Apply:</p>
+                            <p class="font-bold text-emerald-800 mb-2.5" style="font-size:clamp(13px,1.1vw,17px);">📝 How to Apply:</p>
                             <ul class="philcst-checklist">
                                 @foreach($instrLines as $line)
                                     <li><span class="chk" style="background:#d1fae5;color:#047857;"><i class="fas fa-arrow-right"></i></span><span>{{ $line }}</span></li>
@@ -1475,7 +1489,6 @@ select.filter-input {
                     @endif
                 </div>
 
-                <p class="text-center text-sm" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
             </div>
         </div>
     </div>
@@ -1966,154 +1979,269 @@ select.filter-input {
      MultipleRootElementsDetectedException. --}}
 <script>
 (function () {
+    'use strict';
+
+    // ─── HELPERS ─────────────────────────────────────────────────────────
     function isTouchOrSmall() {
         return window.matchMedia('(max-width: 767px)').matches ||
-               (window.matchMedia('(pointer: coarse)').matches);
+               window.matchMedia('(pointer: coarse)').matches;
     }
 
-    function init() {
+    // ─── CURSOR LABEL (desktop "View Details" follower) ──────────────────
+    var activeCard = null;
+
+    function initCursorLabel() {
         const label = document.getElementById('jb-cursor-label');
-        if (!label) return;
-
-        if (isTouchOrSmall()) return;
-
-        let activeCard = null;
-        let mouseX = 0;
-        let mouseY = 0;
+        if (!label || isTouchOrSmall()) return;
 
         function show() {
             if (isTouchOrSmall()) return;
+            // Hide while any card/filter is locked
+            if (document.querySelector('[data-jb-card].is-blocked, [data-jb-card].is-loading')) return;
             label.style.opacity    = '1';
             label.style.visibility = 'visible';
         }
-
         function hide() {
             label.style.opacity    = '0';
             label.style.visibility = 'hidden';
         }
-
         function onMouseMove(e) {
-            mouseX = e.clientX;
-            mouseY = e.clientY;
-            label.style.left = (mouseX + 16) + 'px';
-            label.style.top  = (mouseY + 14) + 'px';
+            label.style.left = (e.clientX + 16) + 'px';
+            label.style.top  = (e.clientY + 14) + 'px';
         }
-
         function onCardEnter(e) {
             if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
             activeCard = e.currentTarget;
             document.addEventListener('mousemove', onMouseMove);
             show();
         }
-
         function onCardLeave(e) {
             if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
             activeCard = null;
             hide();
             document.removeEventListener('mousemove', onMouseMove);
         }
-
         function onShareEnter() { hide(); }
         function onShareLeave() { if (activeCard) show(); }
 
-        // ── Card click spinner (mirrors .dash-card-clickable on the
-        //    Alumni Dashboard) — this card has no page nav to key off,
-        //    it opens the detail view via a Livewire commit, so the
-        //    spinner is cleared on that commit's succeed/fail instead
-        //    of livewire:navigated. ──────────────────────────────────
-        function clearOtherJbCardSpinners(except) {
-            document.querySelectorAll('[data-jb-card].is-loading').forEach(el => {
-                if (el !== except) el.classList.remove('is-loading');
-            });
-        }
+        document.querySelectorAll('[data-jb-card]').forEach(card => {
+            if (card._jbLabelBound) return;
+            card._jbLabelBound = true;
+            card.addEventListener('mouseenter', onCardEnter);
+            card.addEventListener('mouseleave', onCardLeave);
+            const shareBtn = card.querySelector('[data-jb-share]');
+            if (shareBtn) {
+                shareBtn.addEventListener('mouseenter', onShareEnter);
+                shareBtn.addEventListener('mouseleave', onShareLeave);
+            }
+        });
 
-        function clearAllJbCardSpinners() {
-            document.querySelectorAll('[data-jb-card].is-loading').forEach(el => {
+        // Hide label during any Livewire update
+        document.addEventListener('livewire:update', () => { hide(); activeCard = null; });
+    }
+
+    // ─── LOCK / UNLOCK (dashboard .is-blocked pattern) ───────────────────
+    // lockJbAll(clickedCard):
+    //   • clickedCard → .is-loading (spinner visible, content blurred)
+    //   • every other card → .is-blocked (dimmed, no pointer, no hover)
+    //   • all filter inputs, selects, pagination buttons → .jb-el-blocked
+    // clearAll(): removes all lock classes everywhere.
+
+    function lockJbAll(clickedCard) {
+        // Cards
+        document.querySelectorAll('[data-jb-card]').forEach(el => {
+            if (el === clickedCard) {
+                el.classList.remove('is-blocked');
+                el.classList.add('is-loading');
+            } else {
                 el.classList.remove('is-loading');
-            });
-        }
+                el.classList.add('is-blocked');
+            }
+        });
+        // Filter inputs, selects, pagination buttons
+        document.querySelectorAll(
+            '#jb-content-block .filter-input, ' +
+            '#jb-content-block select, ' +
+            '#jb-content-block button[wire\\:click], ' +
+            '#jb-content-block button[wire\\:click\\.prevent]'
+        ).forEach(el => el.classList.add('jb-el-blocked'));
+    }
 
-        function onCardClick(e) {
-            if (e.target.closest('[data-jb-share]')) return;
-            const card = e.currentTarget;
-            // If another card is already loading, ignore this click —
-            // prevents a second job from opening mid-request even in the
-            // brief window before Alpine's jbBusy lock takes effect.
-            const alreadyLoading = document.querySelector('[data-jb-card].is-loading');
-            if (alreadyLoading && alreadyLoading !== card) {
+    function lockJbFilters() {
+        // Called when a filter/search/sort/pagination fires (no specific card)
+        document.querySelectorAll('[data-jb-card]').forEach(el => {
+            el.classList.remove('is-loading');
+            el.classList.add('is-blocked');
+        });
+        document.querySelectorAll(
+            '#jb-content-block .filter-input, ' +
+            '#jb-content-block select, ' +
+            '#jb-content-block button[wire\\:click], ' +
+            '#jb-content-block button[wire\\:click\\.prevent]'
+        ).forEach(el => el.classList.add('jb-el-blocked'));
+    }
+
+    function clearAll() {
+        document.querySelectorAll('[data-jb-card]').forEach(el => {
+            el.classList.remove('is-loading', 'is-blocked');
+        });
+        document.querySelectorAll('.jb-el-blocked').forEach(el => {
+            el.classList.remove('jb-el-blocked');
+        });
+    }
+
+    // ─── CARD CLICK BINDING ───────────────────────────────────────────────
+    function bindCardClicks() {
+        document.querySelectorAll('[data-jb-card]').forEach(card => {
+            if (card._jbClickBound) return;
+            card._jbClickBound = true;
+            card.addEventListener('click', function (e) {
+                // Ignore if clicking the share button inside the card
+                if (e.target.closest('[data-jb-share]')) return;
+                // If already blocked, swallow the click
+                if (card.classList.contains('is-blocked')) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    return;
+                }
+                // If another card is already loading, swallow
+                if (document.querySelector('[data-jb-card].is-loading')) {
+                    e.preventDefault();
+                    e.stopImmediatePropagation();
+                    return;
+                }
+                lockJbAll(card);
+            });
+        });
+    }
+
+    // ─── FILTER / SELECT / PAGINATION CHANGE & CLICK ─────────────────────
+    // Selects fire 'change'; pagination/reset fire 'click' (capture).
+    //
+    // FIX (freeze bug): listeners are stored in module-level refs so
+    // removeEventListener can replace them cleanly. The old code used
+    // block._jbFilterBound as a one-way guard but then reset it to false
+    // in queueRebind() and called bindFilterElements() again — meaning a
+    // SECOND anonymous listener was added after every Livewire morph.
+    //
+    // With two capture listeners on the block, clicking Reset would:
+    //   • Listener 1: nothing locked yet → lockJbFilters() → reset button
+    //                 gets .jb-el-blocked
+    //   • Listener 2: sees .jb-el-blocked on btn → stopImmediatePropagation()
+    //                 → Livewire never receives the click → no commit fires
+    //                 → clearAll() never runs → permanent freeze.
+    //
+    // Fix: store the two function refs (_jbChangeFn / _jbClickCaptureFn)
+    // and removeEventListener the old ones before re-adding, so only ONE
+    // listener ever exists at a time regardless of how many morphs happen.
+    // bindFilterElements() is also removed from queueRebind() — event
+    // delegation on #jb-content-block survives morph (the element itself
+    // is morphed in-place, not replaced), so rebinding on every morph was
+    // never necessary for filter elements, only for per-card listeners.
+    var _jbChangeFn = null;
+    var _jbClickCaptureFn = null;
+
+    function bindFilterElements() {
+        const block = document.getElementById('jb-content-block');
+        if (!block) return;
+
+        // Always remove old listeners first — safe even on first call
+        // when refs are null (removeEventListener is a no-op for null).
+        if (_jbChangeFn)       block.removeEventListener('change', _jbChangeFn);
+        if (_jbClickCaptureFn) block.removeEventListener('click',  _jbClickCaptureFn, true);
+
+        // Select change (filterType, filterLevel)
+        _jbChangeFn = function (e) {
+            if (!e.target.matches('select')) return;
+            if (document.querySelector('[data-jb-card].is-blocked, .jb-el-blocked')) return;
+            lockJbFilters();
+        };
+
+        // Buttons with wire:click (pagination, resetFilters) — capture phase
+        // so this runs BEFORE Livewire's own handler and can block it.
+        //
+        // FIX (reset freeze): the reset button ([data-jb-reset]) must never
+        // be blocked by lockJbFilters() — if it gets .jb-el-blocked before
+        // Livewire receives the click, the commit never fires and clearAll()
+        // never runs, freezing the UI permanently. Skip it entirely here;
+        // Livewire's own wire:loading handling on the button is enough.
+        _jbClickCaptureFn = function (e) {
+            const btn = e.target.closest('button[wire\\:click], button[wire\\:click\\.prevent]');
+            if (!btn) return;
+            // Reset button — never lock it; let Livewire handle it freely.
+            if (btn.hasAttribute('data-jb-reset')) return;
+            // Already locked — block the click so Livewire can't double-fire.
+            if (btn.classList.contains('jb-el-blocked')) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
                 return;
             }
-            clearOtherJbCardSpinners(card);
-            card.classList.add('is-loading');
-            hide();
-        }
+            if (document.querySelector('[data-jb-card].is-blocked, .jb-el-blocked')) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
+            lockJbFilters();
+        };
 
-        // Safety net: don't leave a card stuck spinning if something
-        // goes wrong or the page is restored from bfcache.
-        window.addEventListener('pageshow', clearAllJbCardSpinners);
+        block.addEventListener('change', _jbChangeFn);
+        block.addEventListener('click',  _jbClickCaptureFn, true);
+    }
 
-        function attachListeners() {
-            document.querySelectorAll('[data-jb-card]').forEach(card => {
-                if (card._jbBound) return;
-                card._jbBound = true;
-
-                card.addEventListener('mouseenter', onCardEnter);
-                card.addEventListener('mouseleave', onCardLeave);
-                card.addEventListener('click', onCardClick);
-
-                const shareBtn = card.querySelector('[data-jb-share]');
-                if (shareBtn) {
-                    shareBtn.addEventListener('mouseenter', onShareEnter);
-                    shareBtn.addEventListener('mouseleave', onShareLeave);
-                }
+    // ─── LIVEWIRE COMMIT HOOK — clear on succeed/fail ────────────────────
+    function initLivewireHook() {
+        if (!window.Livewire) return;
+        try {
+            window.Livewire.hook('commit', ({ succeed, fail }) => {
+                succeed(() => clearAll());
+                fail(() => clearAll());
             });
-        }
+        } catch (e) {}
+    }
 
-        attachListeners();
-
-        // ─────────────────────────────────────────────────────────────────
-        // Rebind pass is coalesced into a single rAF tick per settle.
-        //
-        // livewire:navigated, morph.updated (fires per morphed element —
-        // can be several times for one commit), and commit's succeed
-        // callback used to each independently re-run rebind work. Firing
-        // that 2-3x back-to-back for the SAME navigation is what produced
-        // the visible double-open/flash ("kidyam") when a "View Post" link
-        // deep-links straight into the job detail view: the details panel
-        // would paint, then visibly re-settle a beat later. One coalesced
-        // call per settle = one smooth paint.
-        // ─────────────────────────────────────────────────────────────────
-        var jbRebindQueued = false;
-        function queueRebind() {
-            if (jbRebindQueued) return;
-            jbRebindQueued = true;
-            requestAnimationFrame(() => {
-                jbRebindQueued = false;
-                document.querySelectorAll('[data-jb-card]').forEach(c => { c._jbBound = false; });
-                attachListeners();
+    // ─── REBIND (coalesced per rAF tick, avoids double-paint) ────────────
+    // Only rebinds per-card listeners and the cursor label — both need
+    // refreshing after morph because new card DOM nodes appear. Filter
+    // element listeners are intentionally NOT rebind here: they use event
+    // delegation on #jb-content-block which survives morph in-place, so
+    // rebinding them on every morph was what caused the listener
+    // accumulation that froze the reset button.
+    var jbRebindQueued = false;
+    function queueRebind() {
+        if (jbRebindQueued) return;
+        jbRebindQueued = true;
+        requestAnimationFrame(() => {
+            jbRebindQueued = false;
+            // Reset per-card binding flags so new/morphed cards get listeners.
+            document.querySelectorAll('[data-jb-card]').forEach(c => {
+                c._jbClickBound = false;
+                c._jbLabelBound = false;
             });
-        }
+            bindCardClicks();
+            initCursorLabel();
+            // bindFilterElements intentionally omitted — see comment above.
+        });
+    }
 
-        document.addEventListener('livewire:navigated', queueRebind);
-        document.addEventListener('livewire:navigated', clearAllJbCardSpinners);
+    // ─── INIT ─────────────────────────────────────────────────────────────
+    function init() {
+        bindCardClicks();
+        initCursorLabel();
+        bindFilterElements(); // bound once; event delegation survives morph
+        initLivewireHook();
 
         if (window.Livewire) {
             window.Livewire.hook('morph.updated', () => queueRebind());
-            try {
-                window.Livewire.hook('commit', ({ succeed, fail }) => {
-                    succeed(() => clearAllJbCardSpinners());
-                    fail(() => clearAllJbCardSpinners());
-                    queueRebind();
-                });
-            } catch(e) {}
         }
-
-        document.addEventListener('livewire:update', () => {
-            hide();
-            activeCard = null;
+        document.addEventListener('livewire:navigated', () => {
+            // Full SPA navigation: new DOM, so rebind everything including
+            // filter elements (bindFilterElements removes old refs first).
+            clearAll();
+            bindFilterElements();
+            queueRebind();
         });
+        // Safety net: bfcache restore
+        window.addEventListener('pageshow', clearAll);
     }
 
     if (document.readyState === 'loading') {

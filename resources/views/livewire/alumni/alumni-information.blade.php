@@ -320,7 +320,7 @@ new class extends Component {
 
         try {
             $this->validate([
-                'email'                 => 'required|email:filter|max:255|unique:alumni,email,' . $this->alumniId,
+                'email'                 => ['required', 'max:255', 'unique:alumni,email,' . $this->alumniId, 'regex:/^[a-zA-Z0-9._%+\-]+@gmail\.com$/i'],
                 'gender'               => 'required|string|in:Male,Female',
                 'date_of_birth'        => 'required|date|before:today',
                 'father_last_name'     => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
@@ -339,7 +339,7 @@ new class extends Component {
                 'contact_number'       => 'required|string|max:20|regex:/^[0-9\-\+\s]+$/',
             ], [
                 'email.required'                => 'Email address is required.',
-                'email.email'                   => 'Please enter a valid email address.',
+                'email.regex'                   => 'Only Gmail addresses are accepted (e.g. yourname@gmail.com).',
                 'email.unique'                  => 'This email is already used by another account.',
                 'gender.required'               => 'Please select your sex/gender.',
                 'date_of_birth.required'        => 'Birth date is required.',
@@ -368,8 +368,8 @@ new class extends Component {
                 'contact_number.regex'          => 'Contact number must contain digits only.',
             ]);
         } catch (ValidationException $e) {
-            $first = collect($e->errors())->flatten()->first();
-            $this->dispatch('show-toast', type: 'error', message: $first ?: 'Please check the highlighted fields.');
+            $this->dispatch('profile-save-failed');
+            $this->dispatch('show-toast', type: 'error', message: 'Your profile could not be saved. Please review the highlighted fields and correct any errors before trying again.');
             throw $e;
         }
 
@@ -789,17 +789,13 @@ new class extends Component {
             if ($this->employment_status === 'self_employed' && $this->employment_type === 'internship') {
                 $this->employment_type = '';
             }
-            // Employed and Self-Employed use two DIFFERENT Occupation/Role
-            // option lists (job titles vs. business/owner roles). A title
-            // picked under one status may not exist in the other's list, so
-            // clear the selection whenever the alumnus switches between the
-            // two — forces a fresh, correct pick instead of silently
-            // carrying over a mismatched value.
-            if (in_array($this->job_title, $this->currentJobOptions, true) === false) {
-                $this->job_title = '';
-                $this->custom_job_title = '';
-                $this->course_relevance = '';
-            }
+            // Always reset company/business name, job title, custom job title,
+            // and course relevance on every status switch (Employed ↔ Self-Employed)
+            // so the user starts fresh — no stale values carried over.
+            $this->company_name     = '';
+            $this->job_title        = '';
+            $this->custom_job_title = '';
+            $this->course_relevance = '';
         }
         $this->resetValidation();
     }
@@ -969,8 +965,8 @@ new class extends Component {
         try {
             $this->validate($rules, $msgs);
         } catch (ValidationException $e) {
-            $first = collect($e->errors())->flatten()->first();
-            $this->dispatch('show-toast', type: 'error', message: $first ?: 'Please check the highlighted fields.');
+            $this->dispatch('profile-save-failed');
+            $this->dispatch('show-toast', type: 'error', message: 'Your profile could not be saved. Please review the highlighted fields and correct any errors before trying again.');
             throw $e;
         }
 
@@ -1054,15 +1050,15 @@ new class extends Component {
 <style>
 .ai-tooltip {
     position: absolute; top: calc(100% + 8px); right: 0;
-    background: #111827; color: #fff; font-size: 10px; font-weight: 700;
-    letter-spacing: .05em; padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    background: #111827; color: #fff; font-size: 13px; font-weight: 700;
+    letter-spacing: .03em; padding: 6px 13px; border-radius: 8px; white-space: nowrap;
     pointer-events: none; opacity: 0; transform: translateY(-4px);
     transition: opacity .15s ease, transform .15s ease; z-index: 200;
-    box-shadow: 0 2px 8px rgba(0,0,0,.18);
+    box-shadow: 0 4px 12px rgba(0,0,0,.22);
 }
 .ai-tooltip::after {
     content: ''; position: absolute; bottom: 100%; right: 10px;
-    border: 4px solid transparent; border-bottom-color: #111827;
+    border: 5px solid transparent; border-bottom-color: #111827;
 }
 .group:hover .ai-tooltip { opacity: 1; transform: translateY(0); }
 
@@ -1350,6 +1346,7 @@ input[type="date"].field-input:disabled {
     padding: 6px 11px; border-radius: 999px; border: 1.5px solid #e5e7eb;
     transition: border-color .15s, background .15s;
     white-space: nowrap;
+    user-select: none; -webkit-user-select: none;
 }
 .emp-radio-tile:hover { border-color: #c9b3d6; }
 .emp-radio-tile input:checked ~ span { color: #5e2f72; font-weight: 700; }
@@ -1573,6 +1570,7 @@ function phAddress(initial) {
 <div class="flex flex-col flex-1 gap-3 px-4 sm:px-6 lg:px-10 pt-3 sm:pt-4 pb-3 max-w-screen-2xl mx-auto w-full min-h-0"
      x-data="{ showProfileConfirm: false, showEmpConfirm: false }"
      x-on:profile-updated.window="showProfileConfirm = false"
+     x-on:profile-save-failed.window="showProfileConfirm = false"
      x-on:employment-updated.window="showEmpConfirm = false">
 
     {{-- ── PAGE HEADER ── --}}
@@ -1789,11 +1787,16 @@ function phAddress(initial) {
                                     <p class="text-[10px] font-semibold text-[#333333] flex items-center gap-1" x-show="loading">
                                         <i class="fas fa-circle-notch fa-spin"></i> Loading location list…
                                     </p>
-                                    <button type="button" x-show="loadFailed" @click="retryLoad()"
-                                            class="text-[10px] font-semibold text-amber-600 flex items-center gap-1 hover:text-amber-700">
-                                        <i class="fas fa-triangle-exclamation"></i>
-                                        Location list unavailable. Click to retry.
-                                    </button>
+                                    <div x-show="loadFailed" class="flex items-center gap-2">
+                                        <span class="text-[10px] font-semibold text-amber-600 flex items-center gap-1">
+                                            <i class="fas fa-triangle-exclamation"></i>
+                                            List unavailable — switched to manual input.
+                                        </span>
+                                        <button type="button" @click="retryLoad()"
+                                                class="text-[10px] font-semibold text-blue-500 underline hover:text-blue-700 cursor-pointer">
+                                            Retry
+                                        </button>
+                                    </div>
                                     <div class="addr-toggle" x-show="!loading">
                                         <button type="button" @click="setMode('dropdown')" class="addr-toggle-opt" :class="mode === 'dropdown' ? 'is-active' : ''">List</button>
                                         <button type="button" @click="setMode('manual')" class="addr-toggle-opt" :class="mode === 'manual' ? 'is-active' : ''">Type</button>
@@ -2019,7 +2022,7 @@ function phAddress(initial) {
                             <div class="ai-card-header-title"><i class="fas fa-briefcase" style="color:#7A3F91 !important;"></i><p>Employment</p></div>
                             <span class="flex items-center gap-2">
                                 @if($currentRecord && ($currentRecord['submitted_at'] ?? ''))
-                                    <span class="text-[10px] font-semibold text-gray-400">Last updated {{ $currentRecord['submitted_at'] }}</span>
+                                    <span class="text-[13px] font-semibold" style="color:#333333;">Last updated {{ $currentRecord['submitted_at'] }}</span>
                                 @endif
                                 @if($hasEmploymentRecord && !$this->canEditEmployment)
                                     <span class="text-[10px] font-semibold text-[#333333] flex items-center gap-1">
@@ -2281,7 +2284,7 @@ function phAddress(initial) {
                                 <div class="mt-2 space-y-2">
                                     <div>
                                         <label class="emp-label-sm">Please Specify <span class="text-red-500">*</span></label>
-                                        <input wire:model.live="custom_job_title" type="text" maxlength="255"
+                                        <input wire:model.live.debounce.600ms="custom_job_title" type="text" maxlength="255"
                                                class="emp-input-sm {{ $errors->has('custom_job_title') ? 'field-error' : '' }}">
                                         @error('custom_job_title') <p class="text-[12.5px] text-red-500 mt-1">{{ $message }}</p> @enderror
                                     </div>
