@@ -859,6 +859,32 @@ new class extends Component {
     .ae-report-menu-item.ae-no-results:disabled:hover {
         background: inherit; border-color: transparent;
     }
+/* ── Filter bar lock while a filter request is loading ──
+   Livewire sets data-ae-busy on the bar (wire:loading.attr) only while a
+   search/filter/reset request is in flight. Everything in it becomes
+   unclickable with a plain default cursor, so a second filter can't fire
+   mid-request and overlap the first. The search box being typed in keeps
+   working so typing isn't interrupted. */
+.ae-filter-bar-noselect[data-ae-busy],
+.ae-filter-bar-noselect[data-ae-busy] * { cursor: default !important; }
+.ae-filter-bar-noselect[data-ae-busy] { pointer-events: none; }
+.ae-filter-bar-noselect[data-ae-busy] input[type="text"]:focus { pointer-events: auto; cursor: text !important; }
+
+/* ── Row loading indicator + lock ──
+   The clicked row (desktop <tr> or mobile card) gets .ae-row-busy: light gray
+   background, faded/blurred content, three bouncing dots in the center. While
+   any row is loading, no other row can be clicked (default cursor). */
+.ae-row-busy { position: relative; background: #f3f3f6 !important; }
+tr.ae-row-busy > td > *:not(.ae-row-spinner),
+div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; transition: opacity .15s; }
+.ae-row-spinner { display: none; position: absolute; inset: 0; z-index: 5; align-items: center; justify-content: center; gap: 6px; pointer-events: none; }
+.ae-row-spinner span { width: 8px; height: 8px; border-radius: 9999px; background: #7a3f91; animation: ae-dot-bounce 1s ease-in-out infinite; }
+.ae-row-spinner span:nth-child(2) { animation-delay: .15s; }
+.ae-row-spinner span:nth-child(3) { animation-delay: .3s; }
+@keyframes ae-dot-bounce { 0%,80%,100% { transform: translateY(0); opacity: .45; } 40% { transform: translateY(-5px); opacity: 1; } }
+.ae-table-noselect:has(.ae-row-busy),
+.ae-table-noselect:has(.ae-row-busy) * { cursor: default !important; }
+.ae-table-noselect:has(.ae-row-busy) [data-ae-row] { pointer-events: none; }
 </style>
 
 {{-- FLASH TOAST --}}
@@ -1260,7 +1286,7 @@ new class extends Component {
             <div class="ae-filter-bar-noselect bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
                  style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
                  onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;"
-                 wire:loading.class="opacity-60"
+                 wire:loading.class="opacity-60" wire:loading.attr="data-ae-busy"
                  wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,applyFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,applyFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
 
                 <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
@@ -1765,11 +1791,12 @@ new class extends Component {
                             <tr class="bg-white cursor-pointer transition-colors duration-150 hover:bg-[#f5f0fa]"
                                 wire:click="viewDetail({{ $row->id }})"
                                 wire:key="ae-row-{{ $row->id }}"
-                                wire:loading.class="opacity-60"
+                                wire:loading.class="ae-row-busy"
                                 wire:target="viewDetail({{ $row->id }})"
                                 data-ae-row>
 
                                 <td class="px-4 py-3.5">
+                                    <div class="ae-row-spinner" wire:loading.flex wire:target="viewDetail({{ $row->id }})"><span></span><span></span><span></span></div>
                                     <div class="flex items-center gap-3">
                                         <img src="{{ $photoUrl }}"
                                              alt="{{ $row->full_name }}"
@@ -1807,7 +1834,7 @@ new class extends Component {
                                 </td>
 
                                 <td class="px-4 py-3.5 text-sm font-semibold hidden @[660px]:table-cell text-[#333333]">
-                                    {{ $row->batch ?? '—' }}
+                                    <span>{{ $row->batch ?? '—' }}</span>
                                 </td>
 
                                 <td class="px-4 py-3.5 hidden @[860px]:table-cell">
@@ -1881,9 +1908,11 @@ new class extends Component {
                         <div class="cursor-pointer select-none bg-white border-b border-[#F5F5F5] px-3.5 py-3 flex items-center gap-2.5 transition-colors duration-100 active:bg-[#f5f0fa]"
                              wire:click="viewDetail({{ $row->id }})"
                              wire:key="ae-mrow-{{ $row->id }}"
-                             wire:loading.class="opacity-60"
+                             wire:loading.class="ae-row-busy"
                              wire:target="viewDetail({{ $row->id }})"
                              data-ae-row>
+
+                            <div class="ae-row-spinner" wire:loading.flex wire:target="viewDetail({{ $row->id }})"><span></span><span></span><span></span></div>
 
                             <img src="{{ $photoUrl }}"
                                  alt="{{ $row->full_name }}"
@@ -1943,12 +1972,7 @@ new class extends Component {
                             @endif
                         </p>
                     </div>
-                    @if($search || $filterStatuses || $filterBatchFrom || $filterBatchTo || $filterCourses)
-                        <button wire:click="clearFilters"
-                                class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91]">
-                            <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
-                        </button>
-                    @endif
+
                 </div>
                 @endif
             </div>
@@ -2115,7 +2139,7 @@ new class extends Component {
                 </p>
             </div>
 
-            <div>
+            <div class="border border-[#E8E0F0] rounded-2xl p-4 bg-white">
                 <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
                 <div class="grid grid-cols-3 gap-2 mb-2">
                     @foreach([
@@ -2135,7 +2159,7 @@ new class extends Component {
                 </div>
             </div>
 
-            <div class="border-t border-[#E8E0F0] pt-4">
+            <div class="border border-[#E8E0F0] rounded-2xl p-4 bg-white">
                 <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-3">Employment Information</p>
                 <div class="flex items-center gap-2 mb-4 flex-wrap">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-semibold {{ $statusCls }}">
@@ -2152,9 +2176,9 @@ new class extends Component {
                 @if($isEmp)
                     <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
                         @foreach([
-                            ['Company',    $md['company_name']  ?? '—'],
-                            ['Job Title',  $md['job_title']     ?? '—'],
-                            ['Type',       $empTypeMap[$md['employment_type'] ?? ''] ?? '—'],
+                            ['Employer',         $md['company_name']  ?? '—'],
+                            ['Job Title',        $md['job_title']     ?? '—'],
+                            ['Employment Type',  $empTypeMap[$md['employment_type'] ?? ''] ?? '—'],
                             ['Location',   ucfirst($md['work_location'] ?? '—')],
                         ] as [$lbl, $val])
                             <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">

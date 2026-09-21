@@ -94,6 +94,11 @@ new class extends Component {
             ->select([
                 'id', 'first_name', 'middle_initial', 'last_name', 'suffix',
                 'student_id', 'email', 'course_code', 'batch', 'profile_photo',
+                'date_of_birth',
+                'address_street', 'address_barangay', 'address_municipality', 'address_province',
+                'father_last_name', 'father_given_name', 'father_middle_name',
+                'mother_last_name', 'mother_given_name', 'mother_middle_name',
+                'motto',
             ]);
 
         if ($this->search) {
@@ -345,8 +350,133 @@ new class extends Component {
 }
 
 /* ── Base ──────────────────────────────────────────────── */
-.yb-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
-.yb-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
+.yb-card {
+    transition: border-color .15s ease, box-shadow .15s ease;
+    position: relative;
+    width: 100%;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    height: 420px;
+    min-height: 420px;
+    max-height: 420px;
+    align-self: stretch;
+}
+.yb-card:hover {
+    box-shadow: 0 6px 22px rgba(0,0,0,.12);
+}
+.yb-card:not(.yb-card-me) {
+    box-shadow: 0 3px 12px rgba(90,26,138,.18);
+}
+
+/* ── Photo — top of card ─────────────────────────────────── */
+.yb-card-photo-wrap {
+    width: 100%;
+    flex-shrink: 0;
+    overflow: hidden;
+    position: relative;
+    background: #7A3F91;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 22px 0 18px;
+    min-height: 190px;
+}
+.yb-card-photo {
+    width: 130px;
+    height: 130px;
+    object-fit: cover;
+    object-position: top center;
+    display: block;
+    border-radius: 50%;
+    border: 4px solid rgba(255,255,255,.9);
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    flex-shrink: 0;
+}
+
+/* ── Right column wrapper ─────────────────────────────────── */
+.yb-card-right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── Purple name ribbon ───────────────────────────────────── */
+.yb-card-name-band {
+    background: #7A3F91;
+    padding: 8px 36px 8px 13px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.yb-card-name-band::before {
+    content: '';
+    position: absolute;
+    top: -10%; bottom: -10%;
+    right: 22px;
+    width: 18px;
+    background: rgba(255,255,255,.20);
+    transform: skewX(-14deg);
+    pointer-events: none;
+}
+.yb-card-name-band::after {
+    content: '';
+    position: absolute;
+    top: -10%; bottom: -10%;
+    right: 9px;
+    width: 8px;
+    background: rgba(255,255,255,.10);
+    transform: skewX(-14deg);
+    pointer-events: none;
+}
+.yb-card-name {
+    font-size: 15px; font-weight: 800;
+    color: #FFFFFF; line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: .01em;
+    position: relative; z-index: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ── Card info body ───────────────────────────────────────── */
+.yb-card-text {
+    padding: 10px 13px 12px;
+    flex: 1;
+    display: flex; flex-direction: column; gap: 3px;
+    background: #fff;
+    overflow: hidden;
+}
+.yb-card-line {
+    font-size: 14px; color: #1a1a1a; line-height: 1.4; font-weight: 600;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.yb-card-dash {
+    display: block;
+    width: 20px; height: 2px;
+    background: #C8B8D8;
+    border-radius: 2px;
+    margin: 3px 0;
+}
+.yb-card-motto {
+    font-size: 13px; font-weight: 700;
+    color: #5A1A8A; margin-top: 4px; padding-top: 0;
+}
+.yb-card-motto-text {
+    font-size: 13px; font-style: italic; font-weight: 600;
+    color: #1a1a1a; line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 
 .yb-section-badge {
     display: inline-flex; align-items: center; gap: 6px;
@@ -476,6 +606,33 @@ new class extends Component {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
     padding: 0.6rem 0.875rem; flex-shrink: 0;
     position: relative; z-index: 50; overflow: visible;
+    pointer-events: all !important;
+    cursor: default !important;
+}
+
+/* ── Keep filter controls always interactive during Livewire loading ──
+   Livewire sets cursor:wait on <body> during requests, which bleeds into
+   all children. These rules lock the filter bar, dropdowns, search input,
+   and reset button to their normal state so the user can keep changing
+   filters mid-flight without any blocked clicks or wrong cursor. ── */
+.yb-filter-bar *,
+.yb-dd-btn,
+.yb-dd-panel,
+.yb-dd-item,
+.yb-search-input {
+    pointer-events: all !important;
+}
+.yb-dd-btn        { cursor: pointer !important; }
+.yb-dd-item       { cursor: pointer !important; }
+.yb-search-input  { cursor: text !important; }
+
+/* ── Disabled dropdown button during Livewire loading ──
+   Overrides the pointer-events:all above so disabled buttons
+   are truly non-interactive and show default cursor. ── */
+.yb-dd-btn:disabled {
+    pointer-events: none !important;
+    cursor: default !important;
+    opacity: 0.5;
 }
 .yb-pagination-bar {
     flex-shrink: 0;
@@ -593,7 +750,16 @@ new class extends Component {
     <div class="yb-table-block">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="yb-filter-bar flex flex-wrap gap-2 items-center">
+        {{-- openDd tracks which dropdown is currently open ('batch'|'course'|'').
+             When one is open, the other button gets pointer-events:none + cursor:default
+             so only one dropdown can be interacted with at a time. --}}
+        <div class="yb-filter-bar flex flex-wrap gap-2 items-center"
+             x-data="{
+                openDd: '',
+                init() {
+                    document.addEventListener('livewire:request', () => { this.openDd = ''; });
+                }
+             }">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">
@@ -615,14 +781,17 @@ new class extends Component {
             </div>
 
             {{-- Batch dropdown ── --}}
-            <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+            <div class="relative" @click.outside="if(openDd==='batch') openDd=''">
                 <button type="button"
-                        @click="open = !open"
+                        @click="openDd = openDd === 'batch' ? '' : 'batch'"
                         :class="{ 'active': $wire.batch !== '' }"
+                        :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                        wire:loading.attr="disabled"
+                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
                         class="yb-dd-btn">
                     <span x-text="$wire.batch !== '' ? 'Batch ' + $wire.batch : 'All Batches'"></span>
                 </button>
-                <div x-show="open"
+                <div x-show="openDd === 'batch'"
                      x-transition:enter="transition ease-out duration-100"
                      x-transition:enter-start="opacity-0 scale-95"
                      x-transition:enter-end="opacity-100 scale-100"
@@ -632,12 +801,12 @@ new class extends Component {
                      class="yb-dd-panel"
                      style="display:none;">
                     <button type="button"
-                            @click="$wire.set('batch', ''); open = false"
+                            @click="$wire.set('batch', ''); openDd = ''"
                             :class="{ 'sel': $wire.batch === '' }"
                             class="yb-dd-item">All Batches</button>
                     @foreach($this->batches as $b)
                     <button type="button"
-                            @click="$wire.set('batch', '{{ $b }}'); open = false"
+                            @click="$wire.set('batch', '{{ $b }}'); openDd = ''"
                             :class="{ 'sel': $wire.batch === '{{ $b }}' }"
                             class="yb-dd-item">{{ $b }}</button>
                     @endforeach
@@ -645,10 +814,13 @@ new class extends Component {
             </div>
 
             {{-- Program dropdown ── --}}
-            <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+            <div class="relative" @click.outside="if(openDd==='course') openDd=''">
                 <button type="button"
-                        @click="open = !open"
+                        @click="openDd = openDd === 'course' ? '' : 'course'"
                         :class="{ 'active': $wire.course !== '' }"
+                        :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                        wire:loading.attr="disabled"
+                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
                         class="yb-dd-btn">
                     @if($course !== '')
                         <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
@@ -656,7 +828,7 @@ new class extends Component {
                         <span>All Programs</span>
                     @endif
                 </button>
-                <div x-show="open"
+                <div x-show="openDd === 'course'"
                      x-transition:enter="transition ease-out duration-100"
                      x-transition:enter-start="opacity-0 scale-95"
                      x-transition:enter-end="opacity-100 scale-100"
@@ -666,12 +838,12 @@ new class extends Component {
                      class="yb-dd-panel"
                      style="display:none; min-width:220px;">
                     <button type="button"
-                            @click="$wire.set('course', ''); open = false"
+                            @click="$wire.set('course', ''); openDd = ''"
                             :class="{ 'sel': $wire.course === '' }"
                             class="yb-dd-item">All Programs</button>
                     @foreach($this->courses as $c)
                     <button type="button"
-                            @click="$wire.set('course', '{{ $c->code }}'); open = false"
+                            @click="$wire.set('course', '{{ $c->code }}'); openDd = ''"
                             :class="{ 'sel': $wire.course === '{{ $c->code }}' }"
                             class="yb-dd-item">{{ $c->name }}</button>
                     @endforeach
@@ -708,10 +880,11 @@ new class extends Component {
         <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
              x-data="{ showTop: false }">
 
-            {{-- Centered loading spinner — big icon over the table itself,
-                 same pattern as the alumni-facing yearbook, instead of a
-                 small spinner tucked in the filter bar. --}}
+            {{-- Loading overlay — covers the entire card area during any wire request.
+                 pointer-events is intentionally NOT none so all clicks/hovers are
+                 blocked while loading is in progress, cursor shows default. --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 style="cursor:default;"
                  wire:loading.flex wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
@@ -727,7 +900,7 @@ new class extends Component {
                      wire:key="results-{{ md5($search . '|' . $batch . '|' . $course . '|' . $page) }}">
                     @foreach($this->currentPageGroups as $group)
                     <div wire:key="group-{{ $group['courseCode'] }}">
-                        {{-- Section header — per COURSE/PROGRAM (unchanged) --}}
+                        {{-- Section header — per COURSE/PROGRAM --}}
                         <div class="flex items-center flex-wrap gap-2 pt-2 pb-2 px-1">
                             <span class="yb-section-badge {{ $group['isMyCollege'] ? 'yb-section-badge-mine' : '' }}">
                                 {{ $group['courseName'] }}
@@ -738,42 +911,91 @@ new class extends Component {
                             </span>
                         </div>
 
-                        {{-- Card grid — within this course group, sorted by
-                             batch descending (latest year first), then A-Z
-                             (last name, then first name) within same batch --}}
-                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                        {{-- Card grid — capped at 5 cols, equal-height rows --}}
+                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
                             @foreach($group['members'] as $alumni)
-                            <div wire:key="alum-{{ $alumni->id }}"
-                                 class="yb-card relative bg-white rounded-2xl overflow-hidden border flex flex-col items-center shadow-sm cursor-default"
-                                 style="border-color:#E8E0F0;">
+                            @php
+                                $cardName = $this->formatAlumniName(
+                                    $alumni->first_name,
+                                    $alumni->middle_initial ?? null,
+                                    $alumni->last_name,
+                                    $alumni->suffix ?? null
+                                );
 
-                                {{-- Purple header strip --}}
-                                <div class="w-full h-[88px] shrink-0 relative" style="background:#7A3F91;">
-                                    <div class="absolute left-1/2 -translate-x-1/2 -bottom-[39px] z-10 w-[78px] h-[78px]">
-                                        <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
-                                             alt="{{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}"
-                                             class="w-full h-full rounded-full object-cover block"
-                                             style="border:3px solid #fff; box-shadow:0 2px 10px rgba(0,0,0,.12); background:#f0e6f8;"
-                                             loading="lazy" decoding="async"
-                                             onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
+                                // Birthday
+                                $cardDob = !empty($alumni->date_of_birth)
+                                    ? \Carbon\Carbon::parse($alumni->date_of_birth)->format('F j, Y')
+                                    : null;
+
+                                // Address
+                                $cardAddr = implode(', ', array_filter([
+                                    $alumni->address_street      ?? '',
+                                    $alumni->address_barangay    ?? '',
+                                    $alumni->address_municipality ?? '',
+                                    $alumni->address_province    ?? '',
+                                ]));
+
+                                // Parents
+                                $fLast  = trim($alumni->father_last_name  ?? '');
+                                $fFirst = trim($alumni->father_given_name ?? '');
+                                $fMid   = trim($alumni->father_middle_name ?? '');
+                                $mFirst = trim($alumni->mother_given_name ?? '');
+                                $mLast  = trim($alumni->mother_last_name  ?? '');
+
+                                if ($fFirst && $fLast) {
+                                    $fMidI      = $fMid ? strtoupper(mb_substr($fMid,0,1)).'.' : '';
+                                    $cardParents = ($mFirst ? 'Mr. & Mrs. ' : 'Mr. ') . $fFirst . ($fMidI ? ' '.$fMidI : '') . ' ' . $fLast;
+                                } elseif ($mFirst && $mLast) {
+                                    $cardParents = 'Mrs. ' . $mFirst . ' ' . $mLast;
+                                } else {
+                                    $cardParents = null;
+                                }
+                            @endphp
+                            <div wire:key="alum-{{ $alumni->id }}"
+                                 class="yb-card rounded-xl overflow-hidden border cursor-default"
+                                 style="border-color: #E2D6F0;">
+
+                                {{-- Portrait photo — top purple section --}}
+                                <div class="yb-card-photo-wrap">
+                                    <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
+                                         alt="{{ $cardName }}"
+                                         class="yb-card-photo"
+                                         loading="lazy" decoding="async"
+                                         onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
+                                </div>
+
+                                {{-- Name ribbon + info body --}}
+                                <div class="yb-card-right">
+
+                                    {{-- Purple name ribbon --}}
+                                    <div class="yb-card-name-band">
+                                        <p class="yb-card-name">{!! $this->highlightSearch($cardName) !!}</p>
+                                    </div>
+
+                                    {{-- Info body (white) — plain text, no icons --}}
+                                    <div class="yb-card-text">
+
+                                        @if($cardDob)
+                                        <p class="yb-card-line">{{ $cardDob }}</p>
+                                        @endif
+
+                                        @if($cardAddr)
+                                        <p class="yb-card-line">{{ ucwords(mb_strtolower($cardAddr)) }}</p>
+                                        @endif
+
+                                        @if($cardParents)
+                                        <p class="yb-card-line">{{ ucwords(mb_strtolower($cardParents)) }}</p>
+                                        @endif
+
+                                        @if(!empty($alumni->motto))
+                                        <p class="yb-card-motto">Motto:
+                                            <span class="yb-card-motto-text">"{{ $alumni->motto }}"</span>
+                                        </p>
+                                        @endif
+
                                     </div>
                                 </div>
 
-                                {{-- Card body --}}
-                                <div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
-                                    <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
-                                       style="color:#111111;">
-                                        {!! $this->highlightSearch($this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null)) !!}
-                                    </p>
-                                    <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
-                                       style="color:#111111; letter-spacing:0.02em;">
-                                        {{ $group['courseName'] }}
-                                    </p>
-                                    <span class="yb-batch-badge">
-                                        <i class="fas fa-graduation-cap" style="font-size:9px;"></i>
-                                        Class of {{ $alumni->batch ?? '—' }}
-                                    </span>
-                                </div>
                             </div>
                             @endforeach
                         </div>
@@ -788,13 +1010,6 @@ new class extends Component {
                     </div>
                     <p class="font-semibold text-base" style="color:#333333;">No alumni found.</p>
                     <p class="text-sm mt-1" style="color:#555555;">Try adjusting your search or filters.</p>
-                    @if($search || $batch || $course)
-                    <button wire:click="resetFilters"
-                            class="mt-4 px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer"
-                            style="background-color:#7a3f91;">
-                        <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
-                    </button>
-                    @endif
                 </div>
                 @endif
 

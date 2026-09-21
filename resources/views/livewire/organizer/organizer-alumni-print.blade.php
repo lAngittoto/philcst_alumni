@@ -83,7 +83,7 @@
     thead th {
         background: #F5F0FA;
         color: #333333;
-        font-size: 9.5px;
+        font-size: 12px;
         text-transform: uppercase;
         letter-spacing: .03em;
         text-align: left;
@@ -94,7 +94,7 @@
     tbody td {
         padding: 5px 7px;
         border-bottom: 1px solid #E5E5E5;
-        font-size: 10.5px;
+        font-size: 12px;
         vertical-align: top;
         background: #ffffff;
         overflow: hidden;
@@ -217,13 +217,12 @@
     <table class="rp-table">
         <thead>
             <tr>
-                <th style="width:26%;">Name</th>
-                <th style="width:10%;">Program Code</th>
-                <th style="width:7%;">Batch</th>
-                <th style="width:14%;">Employment Status</th>
-                <th style="width:18%;">Company</th>
-                <th style="width:15%;">Job Title</th>
-                <th style="width:10%;">Location</th>
+                <th style="width:30%;">Name</th>
+                <th style="width:12%;">Program</th>
+                <th style="width:9%;">Batch</th>
+                <th style="width:18%;">Employment Status</th>
+                <th style="width:20%;">Job Title</th>
+                <th style="width:11%;">Location</th>
             </tr>
         </thead>
         <tbody>
@@ -235,7 +234,6 @@
                 <td>
                     <span class="rp-badge {{ $statusClass($item) }}">{{ $statusLabel($item) }}</span>
                 </td>
-                <td>{{ $item->company_name ?? '—' }}</td>
                 <td>{{ $item->job_title ?? '—' }}</td>
                 <td>{{ $item->work_location ? ucfirst($item->work_location) : '—' }}</td>
             </tr>

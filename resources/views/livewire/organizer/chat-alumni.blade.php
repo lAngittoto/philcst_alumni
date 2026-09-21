@@ -2972,6 +2972,7 @@ new class extends Component {
 
         #org-chat-body-wrap { position: relative; }
         #msg-list { position: relative; z-index: 1; background: transparent; }
+
     </style>
 
     @php
@@ -3383,7 +3384,7 @@ new class extends Component {
                                     $avatarGrad = 'background:#6b2490;';
                                 } else {
                                     $bubbleBg  = '';
-                                    $bubbleCls = 'bg-white border border-[#ddd3e8] text-[#333333] rounded-bl-none';
+                                    $bubbleCls = 'bg-[#f3f4f6] border border-[#ddd3e8] text-[#333333] rounded-bl-none';
                                     $avatarGrad = 'background:#6b2490;';
                                 }
                                 $senderPhotoSrc = $msg['sender_photo'] ?: $defaultAv;
@@ -3438,7 +3439,7 @@ new class extends Component {
 
                                     @if($msg['reply_to'] && ! ($msg['is_deleted'] ?? false))
                                     <div wire:click.stop="jumpToMessage({{ $msg['reply_to']['id'] }})"
-                                         class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug cursor-pointer transition hover:brightness-95 active:scale-[0.98] {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-white border-[#ddd3e8] text-[#666666]' }}">
+                                         class="text-sm rounded-lg px-2.5 py-1.5 mb-1 max-w-full border-l-[3px] leading-snug cursor-pointer transition hover:brightness-95 active:scale-[0.98] {{ $msg['is_mine'] ? 'bg-purple-200/60 border-white/70 text-purple-900' : 'bg-[#e9eaec] border-[#ddd3e8] text-[#666666]' }}">
                                         <span class="font-semibold block truncate text-xs">{{ $msg['reply_to']['name'] }}</span>
                                         <span class="truncate block text-xs">{{ Str::limit($msg['reply_to']['body'], 70) }}</span>
                                     </div>
@@ -3642,17 +3643,24 @@ new class extends Component {
 
                                     </div>
 
-                                    {{-- Reaction counts --}}
+                                    {{-- Reaction counts — top 3 emojis + total in one pill --}}
                                     @if(! empty($msg['reactions']))
-                                    <div class="flex gap-1 mt-1 flex-wrap {{ $msg['is_mine']?'justify-end':'justify-start' }}">
-                                        @foreach($msg['reactions'] as $rk=>$cnt)
-                                        @php $emoji=match($rk){'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎',default=>'👍'}; @endphp
+                                    @php
+                                        $rxnEmojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'];
+                                        $rxnSorted   = collect($msg['reactions'])->sortDesc();
+                                        $rxnTop3     = $rxnSorted->take(3);
+                                        $rxnTotal    = $rxnSorted->sum();
+                                        $rxnIsMine   = ! empty($msg['my_reaction']);
+                                    @endphp
+                                    <div class="flex gap-1 mt-1 {{ $msg['is_mine']?'justify-end':'justify-start' }}">
                                         <button wire:click.stop="openReactionsPopup({{ $msg['id'] }})"
-                                                class="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.5 rounded-full border transition-all cursor-pointer
-                                                       {{ $msg['my_reaction']===$rk?'bg-[#f2e8f9] border-[#c49bdb] text-[#6b2490] font-semibold':'bg-white border-[#ddd3e8] text-[#666666] hover:border-[#c49bdb]' }}">
-                                            {{ $emoji }}<span class="font-semibold ml-0.5">{{ $cnt }}</span>
+                                                class="inline-flex items-center gap-0.5 text-xs px-2 py-0.5 rounded-full border transition-all cursor-pointer select-none
+                                                       {{ $rxnIsMine ? 'bg-[#f2e8f9] border-[#c49bdb] text-[#6b2490] font-semibold' : 'bg-white border-[#ddd3e8] text-[#666666] hover:border-[#c49bdb]' }}">
+                                            @foreach($rxnTop3 as $rk=>$cnt)
+                                                <span class="leading-none">{{ $rxnEmojiMap[$rk] ?? '👍' }}</span>
+                                            @endforeach
+                                            <span class="font-semibold ml-0.5">{{ $rxnTotal }}</span>
                                         </button>
-                                        @endforeach
                                     </div>
                                     @endif
 
@@ -3766,7 +3774,7 @@ new class extends Component {
                          @chat-scroll-bottom-force.window="hasText = false">
                         <div class="flex-1 relative">
                             <textarea id="chat-input"
-                                wire:model.live.debounce.200ms="body"
+                                wire:model.defer="body"
                                 wire:keyup.debounce.800ms="pingTyping"
                                 placeholder="{{ $editingId ? 'Edit your message…' : 'Message '.($isStaffRoom ? 'Coordinators/Director' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? $this->displayCourseLabel($room['course_code'] ?? '').' All Batches GC' : ('Batch '.$room['batch'].' · '.$this->displayCourseLabel($room['course_code'] ?? ''))))).'… (@ to mention)' }}"
                                 rows="1"
@@ -3778,7 +3786,7 @@ new class extends Component {
                                         this._mTimer = setTimeout(() => {
                                             if (/@(\w*)$/.test(el.value)) { $wire.checkMentions(el.value); }
                                             else if ($wire.showMentions) { $wire.closeMentions(); }
-                                        }, 180);
+                                        }, 80);
                                     }
                                 }"
                                 @input="checkMention($el)"
@@ -4142,33 +4150,62 @@ new class extends Component {
         $allReactors   = collect($reactionsPopupData)->flatMap(fn($g) => $g)->values();
         $totalReactors = $allReactors->count();
         $emojiMap      = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'];
+        // per-emoji counts for the tab row
+        $rxnCounts = [];
+        foreach ($reactionsPopupData as $rk => $group) {
+            $rxnCounts[$rk] = count($group);
+        }
     @endphp
-    <div class="org-modal-backdrop" x-data="{ open: true }" x-show="open" x-cloak
+    <div class="org-modal-backdrop" x-data="{ open: true, activeTab: 'all' }" x-show="open" x-cloak
          wire:click="closeReactionsPopup"
          @click="open = false">
-        <div class="org-modal-card" style="max-width:340px;" wire:click.stop @click.stop>
-            <div class="flex items-center justify-between px-4 py-3">
-                <p class="text-xs font-bold text-[#333333] uppercase tracking-wide flex items-center gap-1.5">
-                    <i class="fa-solid fa-face-smile text-[#6b2490]"></i>{{ $totalReactors }} Reacted
+        <div class="org-modal-card" style="max-width:360px;" wire:click.stop @click.stop>
+
+            {{-- Header --}}
+            <div class="flex items-center justify-between px-4 pt-4 pb-2">
+                <p class="text-sm font-bold text-[#1a1a1a] flex items-center gap-1.5">
+                    <span class="text-base">😊</span> {{ $totalReactors }} REACTED
                 </p>
                 <button wire:click="closeReactionsPopup"
                         @click="open = false"
-                        class="w-5 h-5 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer">
-                    <i class="fa-solid fa-xmark text-xs"></i>
+                        class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer">
+                    <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
             </div>
+
+            {{-- Emoji tab filters --}}
+            <div class="flex items-center gap-1 px-3 pb-2 border-b border-[#eee]">
+                @foreach($rxnCounts as $rk => $cnt)
+                <button @click.stop="activeTab = '{{ $rk }}'"
+                        :class="activeTab === '{{ $rk }}' ? 'bg-[#f2e8f9] text-[#6b2490] border-[#c49bdb] font-semibold' : 'bg-white text-[#666666] border-[#e5e5e5] hover:border-[#c49bdb]'"
+                        class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer select-none">
+                    <span>{{ $emojiMap[$rk] ?? '👍' }}</span>
+                    <span>{{ $cnt }}</span>
+                </button>
+                @endforeach
+            </div>
+
+            {{-- Reactor list — filtered by active tab --}}
             <div class="org-reactions-popup-list">
-                @foreach($allReactors as $reactor)
-                <div class="flex items-center gap-2.5 px-4 py-2">
-                    <div class="w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
-                        <img src="{{ $reactor['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                @foreach($reactionsPopupData as $rk => $group)
+                    @foreach($group as $reactor)
+                    <div class="flex items-center gap-2.5 px-4 py-2.5"
+                         x-show="activeTab === 'all' || activeTab === '{{ $rk }}'">
+                        <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
+                            <img src="{{ $reactor['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-semibold text-[#1a1a1a] truncate">
+                                {{ $reactor['name'] }}
+                                @if($reactor['is_me'])<span class="text-[#6b2490]"> (You)</span>@endif
+                            </p>
+                            <p class="text-xs font-medium {{ $reactor['type']==='director'?'text-violet-700':'text-[#6b2490]' }}">
+                                {{ ucfirst($reactor['type']) }}
+                            </p>
+                        </div>
+                        <span class="text-xl flex-shrink-0">{{ $emojiMap[$rk] ?? '👍' }}</span>
                     </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="text-sm font-semibold text-[#1a1a1a] truncate">{{ $reactor['name'] }}@if($reactor['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
-                        <p class="text-xs font-medium {{ $reactor['type']==='director'?'text-violet-700':'text-[#6b2490]' }}">{{ ucfirst($reactor['type']) }}</p>
-                    </div>
-                    <span class="text-xl flex-shrink-0">{{ $emojiMap[$reactor['reaction']]??'👍' }}</span>
-                </div>
+                    @endforeach
                 @endforeach
             </div>
         </div>

@@ -148,11 +148,15 @@
            A safety-net timeout (see openNotif()/_goToTarget() in the JS
            below) guarantees this never gets stuck indefinitely even if
            a navigation event is missed. ── */
+        .notif-item > *:not(.notif-item-loading-overlay) {
+            transition: filter 0.15s ease, opacity 0.15s ease;
+        }
         .notif-item.is-loading > *:not(.notif-item-loading-overlay) {
             filter: blur(4px);
             opacity: 0.5;
             pointer-events: none;
             user-select: none;
+            transition: filter 0.15s ease, opacity 0.15s ease;
         }
         .notif-item-loading-overlay {
             position: absolute;
@@ -2266,6 +2270,17 @@
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 min-h-0">
 
+        {{-- Navigation blocker — invisible fixed overlay that sits on top of the
+             entire main content area while a sidebar link is loading (spinner
+             visible). Pointer-events:all captures every click so nothing in the
+             page responds during the transition. cursor-wait signals to the user
+             that a navigation is already in progress. --}}
+        <div x-show="navClickedRoute !== null"
+             x-cloak
+             class="fixed inset-0 z-[900] cursor-wait"
+             style="background:transparent;pointer-events:all;"
+             @click.prevent @contextmenu.prevent></div>
+
         <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
                        shrink-0 z-30">
             <button @click="open = !open"
@@ -2478,7 +2493,13 @@
                     </div>
 
                     <template x-if="$store.coordNotifs.navigating && $store.coordNotifs.loadingId === notif.id">
-                        <div class="notif-item-loading-overlay">
+                        <div class="notif-item-loading-overlay"
+                             x-transition:enter="transition ease-out duration-150"
+                             x-transition:enter-start="opacity-0"
+                             x-transition:enter-end="opacity-100"
+                             x-transition:leave="transition ease-in duration-100"
+                             x-transition:leave-start="opacity-100"
+                             x-transition:leave-end="opacity-0">
                             <i class="fas fa-spinner fa-spin notif-item-spinner"></i>
                         </div>
                     </template>
