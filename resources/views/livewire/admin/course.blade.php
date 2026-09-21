@@ -8,21 +8,23 @@ use App\Models\AuditLog;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Request;
-use Carbon\Carbon;
 
 new class extends Component {
 
-    public array  $coursesList = [];
-    public string $courseCode  = '';
-    public string $courseName  = '';
-    public ?int   $editingId   = null;
-    public bool   $saving      = false;
-    public string $alertMsg    = '';
-    public string $alertType   = '';
-    public string $codeError   = '';
-    public string $nameError   = '';
-    public string $origCode    = '';
-    public string $origName    = '';
+    public array  $coursesList      = [];
+    public string $courseCode       = '';
+    public string $courseName       = '';
+    public ?int   $editingId        = null;
+    public bool   $saving           = false;
+    public string $alertMsg         = '';
+    public string $alertType        = '';
+    public string $codeError        = '';
+    public string $nameError        = '';
+    public string $origCode         = '';
+    public string $origName         = '';
+    // Tracks the last added/updated course so it floats to the top of the list.
+    // Null on initial mount (alphabetical), set after each save.
+    public ?int   $lastModifiedId   = null;
 
     public function mount(): void
     {
@@ -47,19 +49,15 @@ new class extends Component {
 
     private function loadCourses(): void
     {
-        $this->coursesList = Course::orderBy('code')->get()->toArray();
-    }
+        $all = Course::orderBy('code')->get();
 
-    public function recentUpdateLabel(?string $updatedAt): ?string
-    {
-        if (!$updatedAt) {
-            return null;
+        if ($this->lastModifiedId) {
+            $top  = $all->firstWhere('id', $this->lastModifiedId);
+            $rest = $all->reject(fn ($c) => $c->id === $this->lastModifiedId);
+            $this->coursesList = ($top ? collect([$top])->concat($rest) : $all)->toArray();
+        } else {
+            $this->coursesList = $all->toArray();
         }
-        $updated = Carbon::parse($updatedAt, 'UTC');
-        if ($updated->diffInHours(Carbon::now('UTC')) >= 24) {
-            return null;
-        }
-        return $updated->timezone('Asia/Manila')->format('h:i A');
     }
 
     private function setAlert(string $type, string $msg): void
@@ -257,6 +255,7 @@ new class extends Component {
                 );
             }
 
+            $this->lastModifiedId = $course->id;
             $this->loadCourses();
             $this->resetFormAfterSave();
 
@@ -556,21 +555,11 @@ new class extends Component {
                             </div>
                         </div>
 
-                        {{-- Editing / Updated badge --}}
-                        @php $recentUpdate = $this->recentUpdateLabel($c['updated_at'] ?? null); @endphp
+                        {{-- Editing badge --}}
                         @if($editingId === $c['id'])
                         <div class="ml-3 shrink-0">
                             <span class="text-xs font-semibold text-[#7A3F91] bg-[#ede9fe] px-2.5 py-1 rounded-lg">
                                 Editing
-                            </span>
-                        </div>
-                        @elseif($recentUpdate)
-                        <div class="ml-3 shrink-0 flex flex-col items-end gap-0.5">
-                            <span class="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
-                                Updated
-                            </span>
-                            <span class="text-[10px] text-[#333333] font-bold">
-                                {{ $recentUpdate }}
                             </span>
                         </div>
                         @endif

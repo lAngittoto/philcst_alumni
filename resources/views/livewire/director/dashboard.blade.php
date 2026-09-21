@@ -260,6 +260,19 @@ new class extends Component {
     class="px-3 sm:px-5 lg:px-6 pt-4 pb-6 max-w-screen-2xl mx-auto w-full"
 >
 
+{{-- ── Navigation blocker ────────────────────────────────────────────
+     Invisible fixed overlay placed over the entire page while a stat /
+     mini-card is navigating (spinner active). Blocks ALL clicks and
+     shows cursor:default everywhere so the user cannot accidentally
+     start a second navigation mid-flight. Sits below the coordinator
+     modal (z-[9999]) so the modal itself stays interactive when open.
+     Cleared by clearAllDirCardSpinners() once livewire:navigated fires. ── --}}
+<div id="dir-nav-blocker"
+     style="display:none; position:fixed; inset:0; z-index:800;
+            background:transparent; pointer-events:all; cursor:default;"
+     onclick="return false;"
+     oncontextmenu="return false;"></div>
+
 <style>
 /* ── Disable text selection/copy across the whole dashboard ──
    Covers stat numbers, labels, table rows, chips, account info,
@@ -358,6 +371,21 @@ new class extends Component {
 }
 .dir-card-clickable.is-loading {
     pointer-events: none;
+}
+
+/* ── Block all other cards while one is navigating ──
+   When .dir-nav-active is on the root, every nav button
+   that is NOT the loading one gets default cursor + no hover
+   lift/shadow, so it's clear only one action is in flight. ── */
+#dir-dashboard-root.dir-nav-active .dir-card-nav-btn:not(.is-loading) {
+    pointer-events: none !important;
+    cursor: default !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+#dir-dashboard-root.dir-nav-active .dir-card-nav-btn:not(.is-loading):hover {
+    transform: none !important;
+    box-shadow: none !important;
 }
 
 /* ── Main grid ── */
@@ -706,7 +734,7 @@ new class extends Component {
                                  border border-amber-200 bg-amber-50 text-[0.7rem] sm:text-[0.75rem]">Pending</span>
                 </div>
                 <p class="dir-stat-num text-amber-600 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ number_format($pendingEvents) }}</p>
-                <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Pending Review</p>
+                <p class="text-[#111111] font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Pending Events</p>
                 @if($pendingEvents > 0)
                     <p class="text-amber-600 font-semibold mt-1 flex items-center gap-1 text-[0.85rem]">
                         <i class="fas fa-circle-exclamation text-xs"></i> Needs attention
@@ -941,6 +969,23 @@ new class extends Component {
     // through the whole transition. Plain click listeners + livewire:navigated
     // don't have that gap. Same pattern as the Alumni Dashboard, ported here
     // with dir- prefixed classes for consistency.
+    function getDirRoot()    { return document.getElementById('dir-dashboard-root'); }
+    function getDirBlocker() { return document.getElementById('dir-nav-blocker'); }
+
+    function lockDirNav() {
+        var root    = getDirRoot();
+        var blocker = getDirBlocker();
+        if (root)    root.classList.add('dir-nav-active');
+        if (blocker) blocker.style.display = 'block';
+    }
+
+    function unlockDirNav() {
+        var root    = getDirRoot();
+        var blocker = getDirBlocker();
+        if (root)    root.classList.remove('dir-nav-active');
+        if (blocker) blocker.style.display = 'none';
+    }
+
     function initDirCardSpinners() {
         document.querySelectorAll('button.dir-card-nav-btn').forEach(function (card) {
             if (card.__dirSpinnerBound) return;
@@ -948,6 +993,11 @@ new class extends Component {
             card.addEventListener('click', function () {
                 clearOtherDirCardSpinners(card);
                 card.classList.add('is-loading');
+                // Show the transparent full-page blocker so the user cannot
+                // accidentally click another card mid-navigation.  The cursor
+                // is already cursor:default on the blocker itself; dir-nav-active
+                // on the root resets every other nav button's hover state too.
+                lockDirNav();
             });
         });
     }
@@ -962,10 +1012,11 @@ new class extends Component {
         document.querySelectorAll('.dir-card-clickable.is-loading').forEach(function (el) {
             el.classList.remove('is-loading');
         });
+        unlockDirNav();
     }
 
     // Safety net: if navigation fails or the page is restored from bfcache,
-    // don't leave a card stuck spinning forever.
+    // don't leave a card stuck spinning / the page locked forever.
     window.addEventListener('pageshow', clearAllDirCardSpinners);
 
     // Bind card spinners right away so clicks right after page load feel

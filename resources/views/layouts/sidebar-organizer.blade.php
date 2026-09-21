@@ -2144,7 +2144,7 @@
                     [
                         'route'   => 'organizer.alumni/employment',
                         'icon'    => 'chart-line',
-                        'label'   => 'Employment Tracking',
+                        'label'   => 'Alumni Tracking',
                         'pattern' => 'coordinator/alumni/employment*',
                         'color'   => 'clr-employment',
                     ],

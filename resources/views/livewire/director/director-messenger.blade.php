@@ -639,7 +639,12 @@ new class extends Component {
             $msgRxns = $rxns->get($m->id, collect());
             $rxnGrps = $msgRxns->groupBy('reaction')->map(fn ($g) => $g->count())->toArray();
 
+            // Director reacts with reactor_type='director'; some legacy rows
+            // may have stored it as 'organizer' — check both so the pill
+            // always highlights correctly for the current user.
             $myRxn = $msgRxns->first(
+                fn ($r) => $r->reactor_type === 'director' && (int) $r->reactor_id === $self->directorId
+            ) ?? $msgRxns->first(
                 fn ($r) => $r->reactor_type === 'organizer' && (int) $r->reactor_id === $self->directorId
             );
 
@@ -1042,15 +1047,31 @@ new class extends Component {
 
         $data = [];
         foreach ($rows as $r) {
-            if ($r->reactor_type === 'organizer') {
-                $dir = DB::table('director')
-                    ->where('id', $r->reactor_id)
-                    ->whereNull('deleted_at')
-                    ->first(['first_name', 'last_name', 'profile_photo']);
-
-                if ($dir) {
-                    $name  = trim(($dir->first_name ?? '') . ' ' . ($dir->last_name ?? ''));
-                    $photo = $this->resolvePhotoUrl($dir->profile_photo ?? null);
+            if ($r->reactor_type === 'director') {
+                // Stored by coordinator-side: reactor_type='director', reactor_id=director.id or user_id.
+                $p = DB::table('director')->whereNull('deleted_at')
+                        ->where('id', $r->reactor_id)
+                        ->first(['first_name', 'last_name', 'profile_photo'])
+                    ?? DB::table('director')->whereNull('deleted_at')
+                        ->where('user_id', $r->reactor_id)
+                        ->first(['first_name', 'last_name', 'profile_photo']);
+                $name  = $p ? trim(($p->first_name ?? '') . ' ' . ($p->last_name ?? '')) : 'Unknown';
+                $photo = $p ? $this->resolvePhotoUrl($p->profile_photo ?? null) : null;
+                $type  = 'director';
+                $isMe  = (int) $r->reactor_id === $this->directorId;
+            } elseif ($r->reactor_type === 'organizer') {
+                // Director-side inserts reactor_type='organizer' with reactor_id=director.id.
+                // Coordinator-side also uses reactor_type='organizer' with reactor_id=organizer.id.
+                // Try director table first (id then user_id), then fall back to organizer.
+                $p = DB::table('director')->whereNull('deleted_at')
+                        ->where('id', $r->reactor_id)
+                        ->first(['first_name', 'last_name', 'profile_photo'])
+                    ?? DB::table('director')->whereNull('deleted_at')
+                        ->where('user_id', $r->reactor_id)
+                        ->first(['first_name', 'last_name', 'profile_photo']);
+                if ($p) {
+                    $name  = trim(($p->first_name ?? '') . ' ' . ($p->last_name ?? ''));
+                    $photo = $this->resolvePhotoUrl($p->profile_photo ?? null);
                     $type  = 'director';
                 } else {
                     $coord = DB::table('organizer')
@@ -1062,7 +1083,12 @@ new class extends Component {
                     $photo = $coord ? $this->resolvePhotoUrl($coord->profile_photo ?? null) : null;
                     $type  = 'coordinator';
                 }
-            } else {
+                // is_me: only true if this was actually the director reacting
+                // (director records end up here when reactor_type='organizer'
+                // is stored on the director side). Coordinator reactions are
+                // never "me" from the director's perspective.
+                $isMe = ($type === 'director') && (int) $r->reactor_id === $this->directorId;
+            } elseif ($r->reactor_type === 'alumni') {
                 $al    = DB::table('alumni')
                     ->where('id', $r->reactor_id)
                     ->first(['first_name', 'last_name', 'profile_photo']);
@@ -1071,14 +1097,17 @@ new class extends Component {
                     : 'Unknown';
                 $photo = $al ? $this->resolvePhotoUrl($al->profile_photo ?? null) : null;
                 $type  = 'alumni';
+                $isMe  = false;
+            } else {
+                continue;
             }
 
             $data[] = [
                 'name'     => $name,
-                'photo'    => $photo,
+                'photo'    => $photo ?? $this->resolvePhotoUrl(null),
                 'reaction' => $r->reaction,
                 'type'     => $type,
-                'is_me'    => $r->reactor_type === 'organizer' && (int) $r->reactor_id === $this->directorId,
+                'is_me'    => $isMe,
             ];
         }
 
@@ -1907,81 +1936,48 @@ new class extends Component {
 
                                 </div>{{-- /bubble+action-bar anchor --}}
 
-                                {{-- ── View Reactions Popup — true centered modal, matching
-                                     other messenger apps' "who reacted" dialog. Fixed overlay
-                                     so it always appears centered on screen instead of
-                                     growing inline below the toolbar. ── --}}
-                                @if($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData))
-                                <div class="fixed inset-0 z-[100] flex items-center justify-center p-4"
-                                     style="background:rgba(0,0,0,.35);"
-                                     wire:click="closeReactionsPopup">
-                                    <div id="reactions-popup-{{ $msg['id'] }}"
-                                         class="bg-white border border-[#E8E0F0] rounded-2xl shadow-2xl w-full max-w-xs overflow-hidden"
-                                         @click.stop>
-                                        <div class="flex items-center justify-between px-3.5 py-2.5 border-b border-[#E8E0F0] bg-[#fafafa]">
-                                            <p class="text-xs font-semibold text-[#333333] uppercase tracking-widest">
-                                                <i class="fa-solid fa-face-smile text-[#7a3f91] mr-1.5"></i>Reactions
-                                                @php $totalReactors = collect($reactionsPopupData)->sum(fn($g) => count($g)); @endphp
-                                                <span class="ml-1 text-[#7a3f91]">({{ $totalReactors }})</span>
-                                            </p>
-                                            <button wire:click="closeReactionsPopup"
-                                                    class="w-6 h-6 flex items-center justify-center rounded-full text-[#999999]
-                                                           hover:text-[#333333] hover:bg-[#f5f5f5] transition">
-                                                <i class="fa-solid fa-xmark text-xs"></i>
-                                            </button>
-                                        </div>
-                                        <div class="h-72 overflow-y-auto">
-                                            @php $emojiMap = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','haha'=>'😂','sad'=>'😢']; @endphp
-                                            @foreach($reactionsPopupData as $rKey => $rGroup)
-                                                @foreach($rGroup as $reactor)
-                                                <div class="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-[#f0eaf7] last:border-0">
-                                                    <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden
-                                                                flex items-center justify-center text-sm font-semibold text-white"
-                                                         style="background:#7a3f91;">
-                                                        @if($reactor['photo'] ?? null)
-                                                            <img src="{{ $reactor['photo'] }}"
-                                                                 class="w-full h-full object-cover"
-                                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-                                                                 alt="">
-                                                            <span style="display:none">{{ strtoupper(substr($reactor['name'], 0, 1)) }}</span>
-                                                        @else
-                                                            {{ strtoupper(substr($reactor['name'], 0, 1)) }}
-                                                        @endif
-                                                    </div>
-                                                    <div class="flex-1 min-w-0">
-                                                        <p class="text-sm font-semibold text-[#333333] truncate">
-                                                            {{ $reactor['name'] }}
-                                                            @if($reactor['is_me'])
-                                                                <span class="text-[#7a3f91] font-semibold">(You)</span>
-                                                            @endif
-                                                        </p>
-                                                        <p class="text-xs font-medium text-purple-600">
-                                                            {{ ucfirst($reactor['type']) }}
-                                                        </p>
-                                                    </div>
-                                                    <span class="text-xl leading-none pointer-events-none flex-shrink-0">{{ $emojiMap[$rKey] ?? '👍' }}</span>
-                                                </div>
-                                                @endforeach
-                                            @endforeach
-                                        </div>
-                                    </div>
-                                </div>
-                                @endif
-
-                                {{-- Reaction pills --}}
+                                {{-- Reaction pills — avatar stack + emoji + total count
+                                     Matches Image 2 from chat-alumni: avatars of reactors
+                                     stacked on the left, emoji pills with count on the right. --}}
                                 @if(! empty($msg['reactions']) && !$msg['deleted'])
-                                <div class="flex gap-1 mt-0.5 flex-wrap {{ $msg['is_mine'] ? 'justify-end' : 'justify-start' }}">
+                                @php
+                                    // Collect up to 3 distinct reactor photos for the avatar stack
+                                    $pillReactorPhotos = [];
+                                    if ($reactionsPopupMsgId === $msg['id'] && ! empty($reactionsPopupData)) {
+                                        foreach ($reactionsPopupData as $_rg) {
+                                            foreach ($_rg as $_rx) {
+                                                if (count($pillReactorPhotos) >= 3) break 2;
+                                                $pillReactorPhotos[] = $_rx['photo'] ?? null;
+                                            }
+                                        }
+                                    }
+                                    $pillTotal = array_sum($msg['reactions']);
+                                @endphp
+                                <button wire:click="openReactionsPopup({{ $msg['id'] }})"
+                                        class="inline-flex items-center gap-1.5 mt-0.5 px-2 py-1 rounded-full border transition-all cursor-pointer
+                                               {{ $msg['my_reaction']
+                                                    ? 'bg-[#f3eef8] border-[#d9c9e8]'
+                                                    : 'bg-white border-[#E8E0F0] hover:border-[#d9c9e8]' }}">
+                                    {{-- Stacked avatars --}}
+                                    @if(! empty($pillReactorPhotos))
+                                    <div class="flex -space-x-1.5 flex-shrink-0">
+                                        @foreach($pillReactorPhotos as $pPhoto)
+                                        <div class="w-5 h-5 rounded-full overflow-hidden border-2 border-white bg-[#7a3f91] flex items-center justify-center text-[8px] font-bold text-white flex-shrink-0">
+                                            <img src="{{ $pPhoto ?? '' }}" class="w-full h-full object-cover"
+                                                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" alt="">
+                                            <span style="display:none" class="w-full h-full flex items-center justify-center">?</span>
+                                        </div>
+                                        @endforeach
+                                    </div>
+                                    @endif
+                                    {{-- Emoji pills --}}
                                     @foreach($msg['reactions'] as $rk => $cnt)
                                     @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','haha'=>'😂','sad'=>'😢',default=>'👍' }; @endphp
-                                    <button wire:click="openReactionsPopup({{ $msg['id'] }})"
-                                            class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border transition-all
-                                                   {{ $msg['my_reaction'] === $rk
-                                                        ? 'bg-[#f3eef8] border-[#d9c9e8] text-[#7a3f91] font-semibold'
-                                                        : 'bg-white border-[#E8E0F0] text-[#666666] hover:border-[#d9c9e8]' }}">
-                                        <span class="text-base leading-none">{{ $emoji }}</span><span class="font-semibold">{{ $cnt }}</span>
-                                    </button>
+                                    <span class="text-base leading-none">{{ $emoji }}</span>
                                     @endforeach
-                                </div>
+                                    {{-- Total count --}}
+                                    <span class="text-xs font-semibold {{ $msg['my_reaction'] ? 'text-[#7a3f91]' : 'text-[#666666]' }}">{{ $pillTotal }}</span>
+                                </button>
                                 @endif
 
                                 {{-- Timestamp --}}
@@ -2479,6 +2475,82 @@ new class extends Component {
             <p class="text-xs text-[#999999] mt-2 max-w-xs leading-relaxed">
                 The staff channel is being initialized. Please refresh the page.
             </p>
+        </div>
+    </div>
+    @endif
+
+    {{-- ══ Reactions popup modal ══════════════════════════════════════════
+         Full-screen centered overlay — single instance outside the message
+         loop so it never gets clipped by a bubble's overflow context.
+         Mirrors the chat-alumni implementation exactly. ══ --}}
+    @if($reactionsPopupMsgId && ! empty($reactionsPopupData))
+    @php
+        $dmEmojiMap      = ['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','haha'=>'😂','sad'=>'😢'];
+        $dmTotalReactors = collect($reactionsPopupData)->sum(fn($g) => count($g));
+        $dmRxnCounts     = [];
+        foreach ($reactionsPopupData as $rk => $rg) { $dmRxnCounts[$rk] = count($rg); }
+    @endphp
+    <div class="fixed inset-0 z-[400] flex items-center justify-center p-4"
+         style="background:rgba(26,15,34,.45); backdrop-filter:blur(2px);"
+         wire:click="closeReactionsPopup"
+         x-data="{ dmTab: 'all' }">
+        <div class="bg-white border border-[#E8E0F0] rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col"
+             style="height:360px;"
+             wire:click.stop @click.stop>
+
+            {{-- Header --}}
+            <div class="flex items-center justify-between px-4 pt-4 pb-2 flex-shrink-0">
+                <p class="text-sm font-bold text-[#1a1a1a] flex items-center gap-1.5">
+                    <span class="text-base">😊</span> {{ $dmTotalReactors }} REACTED
+                </p>
+                <button wire:click="closeReactionsPopup"
+                        @click="dmTab = 'all'"
+                        class="w-7 h-7 flex items-center justify-center rounded-full text-[#999999] hover:text-[#333333] hover:bg-[#f5f5f5] transition cursor-pointer">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            {{-- Emoji tab filters --}}
+            <div class="flex items-center gap-1 px-3 pb-2 border-b border-[#eee] flex-shrink-0">
+                @foreach($dmRxnCounts as $rk => $cnt)
+                <button @click.stop="dmTab = '{{ $rk }}'"
+                        :class="dmTab === '{{ $rk }}' ? 'bg-[#f3eef8] text-[#7a3f91] border-[#c49bdb] font-semibold' : 'bg-white text-[#666666] border-[#e5e5e5] hover:border-[#c49bdb]'"
+                        class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-all cursor-pointer select-none">
+                    <span>{{ $dmEmojiMap[$rk] ?? '👍' }}</span>
+                    <span>{{ $cnt }}</span>
+                </button>
+                @endforeach
+            </div>
+
+            {{-- Reactor list filtered by active tab — fills remaining height, scrolls when full --}}
+            <div class="flex-1 overflow-y-auto min-h-0">
+                @foreach($reactionsPopupData as $rKey => $rGroup)
+                    @foreach($rGroup as $reactor)
+                    <div class="flex items-center gap-2.5 px-4 py-2.5 border-b border-[#f0eaf7] last:border-0"
+                         x-show="dmTab === 'all' || dmTab === '{{ $rKey }}'">
+                        <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white"
+                             style="background:#7a3f91;">
+                            <img src="{{ $reactor['photo'] ?? '' }}" class="w-full h-full object-cover"
+                                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" alt="">
+                            <span style="display:none" class="w-full h-full flex items-center justify-center">
+                                {{ strtoupper(substr($reactor['name'], 0, 1)) }}
+                            </span>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-semibold text-[#1a1a1a] truncate">
+                                {{ $reactor['name'] }}
+                                @if($reactor['is_me'])<span class="text-[#7a3f91]"> (You)</span>@endif
+                            </p>
+                            <p class="text-xs font-medium {{ $reactor['type']==='director' ? 'text-violet-700' : 'text-[#7a3f91]' }}">
+                                {{ ucfirst($reactor['type']) }}
+                            </p>
+                        </div>
+                        <span class="text-xl flex-shrink-0">{{ $dmEmojiMap[$rKey] ?? '👍' }}</span>
+                    </div>
+                    @endforeach
+                @endforeach
+            </div>
+
         </div>
     </div>
     @endif

@@ -105,6 +105,7 @@ new class extends Component {
     public array  $editErrors                      = [];
     public bool   $editAllColleges                 = false;
     public string $editCurrentImage                = '';
+    public string $editOrgCategory                  = ''; // 'philcst' | 'partner' | 'custom'
 
     public bool   $showConfirmModal = false;
     public ?int   $confirmJobId     = null;
@@ -1304,6 +1305,17 @@ new class extends Component {
         $this->editRemoveImage             = false;
         $this->editErrors                  = [];
 
+        // Detect which org category this job belongs to so the 3-button
+        // selector pre-selects the right one when the edit modal opens.
+        $storedType = strtoupper($job->company_type ?? '');
+        if (str_contains($storedType, 'PHILCST')) {
+            $this->editOrgCategory = 'philcst';
+        } elseif ($this->jobOptions->get('company_type', collect())->pluck('label')->contains($job->company_type)) {
+            $this->editOrgCategory = 'partner';
+        } else {
+            $this->editOrgCategory = 'custom';
+        }
+
         // Auto-check "All Colleges" if every college is already targeted
         $allCollegeNames        = collect($this->collegesWithDepts)->pluck('name')->toArray();
         $this->editAllColleges  = !empty($allCollegeNames) && empty(array_diff($allCollegeNames, $this->editTargetColleges));
@@ -1341,6 +1353,14 @@ new class extends Component {
 
         $this->editErrors = [];
         $errors = [];
+
+        // If the PHILCST category is selected, auto-fill name/type/location
+        // from the stored PHILCST option (mirrors what Post Job does).
+        if ($this->editOrgCategory === 'philcst' && $this->philcstName) {
+            $this->editCompany     = $this->philcstName;
+            $this->editCompanyType = $this->philcstName;
+            if ($this->philcstLocation) $this->editLocation = $this->philcstLocation;
+        }
 
         $title                   = $this->sanitize($this->editJobTitle);
         $company                 = $this->sanitize($this->editCompany);
@@ -1506,6 +1526,7 @@ new class extends Component {
         $this->editCurrentImage = '';
         $this->editJobImage     = null;
         $this->editRemoveImage  = false;
+        $this->editOrgCategory  = '';
     }
 
     public function confirmToggle(int $id): void
@@ -2186,9 +2207,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 {{-- Hover tooltip (row "View Details") --}}
 <div id="eo-hover-tip"
      class="fixed bg-[#1a1a1a] text-white text-[11px] font-semibold tracking-[.05em] px-3 py-1.5 rounded-[7px] whitespace-nowrap pointer-events-none opacity-0 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)] transition-opacity duration-150"
-     style="transform:translate(12px,-110%);">
+     style="transform:translate(12px,18px);">
     <i class="fas fa-eye mr-1.5"></i>View Details
-    <span class="absolute top-full left-3.5 border-[5px] border-transparent border-t-[#1a1a1a]"></span>
+    <span class="absolute bottom-full left-3.5 border-[5px] border-transparent border-b-[#1a1a1a]"></span>
 </div>
 
 {{-- NEW: global fixed/overlay tooltip for the "Update deadline to activate"
@@ -2305,31 +2326,35 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
 
             <select wire:model.live="filterStatus"
+                    wire:loading.attr="disabled"
                     class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4]">
-                <option value="">All Statuses</option>
+                <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
             </select>
 
             <select wire:model.live="filterType"
+                    wire:loading.attr="disabled"
                     class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
-                <option value="">All Types</option>
+                <option value="" {{ $filterType ? 'disabled' : '' }}>All Types</option>
                 @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
                     <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                 @endforeach
             </select>
 
             <select wire:model.live="filterCollege"
+                    wire:loading.attr="disabled"
                     class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
-                <option value="">All Colleges</option>
+                <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
                 @foreach($this->collegesWithDepts as $college)
                     <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
                 @endforeach
             </select>
 
             <select wire:model.live="filterPostedBy"
+                    wire:loading.attr="disabled"
                     class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
-                <option value="">All Posted By</option>
+                <option value="" {{ $filterPostedBy ? 'disabled' : '' }}>All Posted By</option>
                 <option value="director">You Posted</option>
                 <option value="coordinator">Posted by Coordinator</option>
             </select>
@@ -2411,22 +2436,25 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
             {{-- Mobile-only selects --}}
             <select wire:model.live="filterType"
+                    wire:loading.attr="disabled"
                     class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
-                <option value="">All Types</option>
+                <option value="" {{ $filterType ? 'disabled' : '' }}>All Types</option>
                 @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
                     <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                 @endforeach
             </select>
             <select wire:model.live="filterCollege"
+                    wire:loading.attr="disabled"
                     class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
-                <option value="">All Colleges</option>
+                <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
                 @foreach($this->collegesWithDepts as $college)
                     <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
                 @endforeach
             </select>
             <select wire:model.live="filterPostedBy"
+                    wire:loading.attr="disabled"
                     class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
-                <option value="">All Posted By</option>
+                <option value="" {{ $filterPostedBy ? 'disabled' : '' }}>All Posted By</option>
                 <option value="director">You Posted</option>
                 <option value="coordinator">Posted by Coordinator</option>
             </select>
@@ -2440,13 +2468,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                  same pattern as the alumni-facing yearbook, instead of only
                  the thin progress bar in the filter strip. --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort,resetFilters,previousPage,nextPage,gotoPage,viewJob">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             <div id="dm-table-scroll"
                  class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort,resetFilters,previousPage,nextPage,gotoPage,viewJob">
 
             @if($this->jobPostings->count() > 0)
 
@@ -2479,7 +2507,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             $canShare         = $isActive && !$isDeadlinePassed;
                             $isDirectorJob    = is_null($job->organizer_id);
                         @endphp
-                        <tr class="transition-colors duration-100 cursor-pointer select-none {{ $isOrgDel ? 'is-org-del bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60 active:bg-red-100/60' : 'bg-white hover:bg-[#F0F0F0] active:bg-[#F0F0F0]' }}"
+                        <tr class="transition-colors duration-100 cursor-pointer select-none {{ $isOrgDel ? 'is-org-del bg-red-50/60 opacity-80 hover:opacity-100 hover:bg-red-100/60 active:bg-red-100/60' : 'bg-white hover:bg-[#f5f0fa] active:bg-[#f5f0fa]' }}"
+                            wire:loading.class.remove="{{ $isOrgDel ? 'hover:opacity-100 hover:bg-red-100/60' : 'hover:bg-[#f5f0fa]' }}" wire:loading.class="!bg-purple-50 opacity-60 cursor-wait" wire:target="viewJob({{ $job->id }})"
                             wire:click="viewJob({{ $job->id }})"
                             wire:key="job-row-{{ $job->id }}"
                             data-eo-row>
@@ -2531,7 +2560,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center justify-end gap-1.5" @click.stop>
                                     @if($isOrgDel)
-                                        <div class="relative inline-flex" data-eo-action data-tip="Actions">
+                                        <div class="relative inline-flex" data-eo-action data-tip="Restore">
                                             <button wire:click.stop="confirmRestore({{ $job->id }})" type="button"
                                                     wire:loading.attr="disabled" wire:target="confirmRestore({{ $job->id }})"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
@@ -2545,7 +2574,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         @endphp
 
                                         {{-- Share --}}
-                                        <div class="relative inline-flex" data-eo-action data-tip="Actions">
+                                        <div class="relative inline-flex" data-eo-action data-tip="{{ $canShare ? 'Share Job' : 'Only active jobs can be shared' }}">
                                             <button type="button"
                                                     @if($canShare) wire:click.stop="openShareJobModal({{ $job->id }})" @endif
                                                     wire:loading.attr="disabled" wire:target="openShareJobModal({{ $job->id }})"
@@ -2559,7 +2588,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                         @if($isDirectorJob)
                                             @if($isActive || !$isDeadlinePassed)
                                                 {{-- Activate / Deactivate — single button, icon/color/tooltip swap on $isActive --}}
-                                                <div class="relative inline-flex" data-eo-action data-tip="Actions">
+                                                <div class="relative inline-flex" data-eo-action data-tip="{{ $isActive ? 'Deactivate Job' : 'Activate Job' }}">
                                                     <button type="button"
                                                             @if($canToggleRow) wire:click.stop="confirmToggle({{ $job->id }})" @endif
                                                             wire:loading.attr="disabled" wire:target="confirmToggle({{ $job->id }})"
@@ -2572,7 +2601,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                             @else
                                                 {{-- Uses the global fixed/JS-driven #eo-deadline-tip overlay so it can
                                                      never get clipped by the table's overflow-y-auto ancestor. --}}
-                                                <div class="activate-disabled-wrap" data-eo-action data-tip="Actions">
+                                                <div class="activate-disabled-wrap" data-eo-action data-tip="Update deadline to activate">
                                                     <span class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs bg-emerald-50/60 text-emerald-400 border border-emerald-100 cursor-not-allowed">
                                                         <i class="fas fa-circle-play"></i>
                                                     </span>
@@ -2596,7 +2625,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         $organizerName    = $job->organizer?->name ?? null;
                         $isDirectorJob    = is_null($job->organizer_id);
                     @endphp
-                    <div class="job-mrow" wire:key="job-mrow-{{ $job->id }}" wire:click="viewJob({{ $job->id }})">
+                    <div class="job-mrow"
+                         wire:loading.class="opacity-60 cursor-wait" wire:target="viewJob({{ $job->id }})"
+                         wire:key="job-mrow-{{ $job->id }}" wire:click="viewJob({{ $job->id }})">
                         <div class="flex-1 min-w-0">
                             <p class="font-semibold text-sm truncate {{ $isOrgDel ? 'line-through text-red-400' : 'text-gray-900' }}">
                                 {!! $isOrgDel ? e($job->job_title) : $this->highlight($job->job_title, $search) !!}
@@ -2641,12 +2672,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
                     </p>
                 </div>
-                @if($search || $filterStatus || $filterType || $filterCollege)
-                    <button wire:click="resetFilters"
-                            class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                        <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
-                    </button>
-                @endif
+
             </div>
             @endif
 
@@ -3491,45 +3517,125 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         <div class="mobile-scroll-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto scroll-c bg-white job-view-info-pane">
             <div class="p-3 space-y-3">
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                {{-- ── EMPLOYER / ORGANIZATION — same 3-button selector as Post Job ── --}}
+                <div class="bg-white border-[1.5px] {{ (isset($editErrors['editCompany']) || isset($editErrors['editCompanyType'])) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
-                        Organization Details
+                        <i class="fas fa-building text-[9px] text-[#555555]"></i> Employer
+                        <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
-                    <div class="p-3 space-y-2.5">
-                        @php $editIsPhilcst = str_contains(strtoupper($editCompanyType ?? ''), 'PHILCST'); @endphp
+                    <div class="p-3.5 space-y-2">
 
-                        <div>
-                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company Type <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display">{{ $editCompanyType ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <select wire:model.live="editCompanyType"
-                                        class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#333333] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 tw-select-arrow {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
-                                    <option value="">Select Organization</option>
-                                    @foreach($this->jobOptions->get('company_type', collect()) as $opt)
-                                        <option value="{{ $opt->label }}" @selected($editCompanyType === $opt->label)>{{ $opt->label }}</option>
-                                    @endforeach
-                                </select>
-                                @if(isset($editErrors['editCompanyType']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
+                        {{-- VIEW mode: show plain labels --}}
+                        <div x-show="!editMode" class="space-y-2.5">
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Employer Type</label>
+                                <div class="view-field-display">{{ $editCompanyType ?: '—' }}</div>
+                            </div>
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Employer Name</label>
+                                <div class="view-field-display">{{ $editCompany ?: '—' }}</div>
+                            </div>
+                            <div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Location</label>
+                                <div class="view-field-display">{{ $editLocation ?: '—' }}</div>
                             </div>
                         </div>
-                        <div>
-                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company Name <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display">{{ $editCompany ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <input wire:model.defer="editCompany" type="text" maxlength="150" @if($editIsPhilcst) readonly @endif
-                                       class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
-                                @if(isset($editErrors['editCompany']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
+
+                        {{-- EDIT mode: 3-button category selector --}}
+                        <div x-show="editMode" x-cloak class="space-y-2">
+
+                            {{-- Category Buttons --}}
+                            <div class="grid grid-cols-1 gap-1.5">
+                                @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Employer','Known partner organization','fa-handshake'],['custom','Other / Custom','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
+                                <button type="button" wire:click="$set('editOrgCategory','{{ $val }}')"
+                                        class="px-2.5 py-2 border-2 rounded-xl bg-white cursor-pointer transition text-left font-semibold flex items-center gap-2.5 text-sm
+                                               {{ $editOrgCategory===$val ? 'border-[#7a3f91] text-white shadow-md' : 'border-gray-200 hover:border-[#7a3f91] hover:bg-purple-50 text-[#333333]' }}"
+                                        style="{{ $editOrgCategory===$val ? 'background:linear-gradient(135deg,#7a3f91,#6a3580);' : '' }}">
+                                    <i class="fas {{ $ico }} text-base flex-shrink-0"></i>
+                                    <div>
+                                        <span class="block">{{ $label }}</span>
+                                        <span class="block font-normal opacity-70 text-xs">{{ $sub }}</span>
+                                    </div>
+                                </button>
+                                @endforeach
                             </div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Location <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
-                            <div x-show="!editMode" class="view-field-display">{{ $editLocation ?: '—' }}</div>
-                            <div x-show="editMode" x-cloak>
-                                <input wire:model="editLocation" type="text" maxlength="120" @if($editIsPhilcst) readonly @endif
-                                       class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.95rem] bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} {{ $editIsPhilcst ? 'bg-gray-100 cursor-not-allowed text-[#999999]' : '' }}">
-                                @if(isset($editErrors['editLocation']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
+                            @if(isset($editErrors['editCompanyType']))<p class="text-red-600 flex items-center gap-1 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
+
+                            {{-- PHILCST: auto-fill, read-only preview --}}
+                            @if($editOrgCategory === 'philcst' && $philcstName)
+                            <div class="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-xl px-2.5 py-2">
+                                <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-white shadow-sm" style="background:linear-gradient(135deg,#7a3f91,#6a3580);">
+                                    <i class="fas fa-school text-xs"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-semibold text-[#4c1d95] truncate text-sm">{{ $philcstName }}</div>
+                                    @if($philcstLocation)<div class="text-[#7c3aed] truncate mt-0.5 text-[0.65rem]"><i class="fas fa-location-dot mr-1"></i>{{ $philcstLocation }}</div>@endif
+                                </div>
+                                <span class="inline-flex items-center gap-1 font-semibold text-purple-700 bg-white border border-purple-200 px-1.5 py-0.5 rounded-full shrink-0 text-[0.6rem]">
+                                    <i class="fas fa-lock text-[8px]"></i> Auto
+                                </span>
                             </div>
-                        </div>
+                            @endif
+
+                            {{-- Partner: name + type inputs --}}
+                            @if($editOrgCategory === 'partner')
+                            <div wire:ignore x-data="{pName:@js($editCompany),pType:@js($editCompanyType),loc:@js($editLocation),syncN(v){$wire.set('editCompany',v)},syncT(v){$wire.set('editCompanyType',v)},syncL(v){$wire.set('editLocation',v)}}">
+                                <div class="space-y-2">
+                                    <div>
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
+                                        <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
+                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                        @if(isset($editErrors['editCompany']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
+                                    </div>
+                                    <div>
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
+                                        <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Government, Private" maxlength="100"
+                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                        @if(isset($editErrors['editCompanyType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
+                                    </div>
+                                    <div>
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
+                                        <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
+                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                        @if(isset($editErrors['editLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
+                                    </div>
+                                </div>
+                            </div>
+                            @endif
+
+                            {{-- Custom: free-text name + type --}}
+                            @if($editOrgCategory === 'custom')
+                            <div wire:ignore x-data="{cName:@js($editCompany),cType:@js($editCompanyType),loc:@js($editLocation),syncN(v){$wire.set('editCompany',v)},syncT(v){$wire.set('editCompanyType',v)},syncL(v){$wire.set('editLocation',v)}}">
+                                <div class="space-y-2">
+                                    <div>
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
+                                        <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
+                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                        @if(isset($editErrors['editCompany']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
+                                    </div>
+                                    <div>
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
+                                        <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
+                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                        @if(isset($editErrors['editCompanyType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
+                                    </div>
+                                    <div>
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
+                                        <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
+                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                        @if(isset($editErrors['editLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
+                                    </div>
+                                </div>
+                            </div>
+                            @endif
+
+                            @if(!$editOrgCategory)
+                            <div class="text-center py-3 text-[#777777]">
+                                <p class="text-xs">Select a category above to continue.</p>
+                            </div>
+                            @endif
+
+                        </div>{{-- /editMode --}}
                     </div>
                 </div>
 
@@ -3592,8 +3698,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
 
         {{-- MIDDLE: Job Info + Textareas --}}
-        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
-            <div class="mobile-scroll-inner flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
+        <div class="mobile-scroll-col flex-1 min-w-0 min-h-0 overflow-y-auto scroll-c border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
+            <div class="mobile-scroll-inner flex flex-col p-3 gap-3">
 
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
@@ -3674,7 +3780,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col flex-1" style="min-height:220px;">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex flex-col" style="min-height:220px;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91] flex-shrink-0">
                         Description <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
@@ -4489,38 +4595,66 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 </div>
 @endif
 
-{{-- ══ CLEAN-URL SCRIPT (strip ?job=46 and ?page=N from address bar) ══ --}}
+{{-- ══ CLEAN-URL SCRIPT (strip ?job=N and ?page=N from address bar) ══ --}}
 <script>
     (function () {
-        // Pure client-side: just rewrites the address bar in place so the
-        // URL shows /director/job/management instead of ?job=46 or
-        // ?page=2 — no navigation, no reload, so it never touches the View
-        // Job modal that the server already opened on this page load via
-        // viewJob().
-        function stripCleanParams() {
-            var params = new URLSearchParams(window.location.search);
-            if (params.has('job') || params.has('page')) {
-                var cleanUrl = window.location.origin + window.location.pathname;
-                window.history.replaceState({}, '', cleanUrl);
+        var STRIP = ['page', 'job'];
+
+        // ── Intercept history.pushState (used by Livewire's WithPagination)
+        //    and wipe the unwanted params BEFORE they land in the history
+        //    stack. This is the only reliable approach: the replaceState-after-
+        //    commit strategy has a race condition because Livewire pushes the
+        //    URL synchronously during its morph pass, before the 'succeed'
+        //    callback fires, so the address bar briefly (or permanently) shows
+        //    ?page=2 even when the succeed handler later cleans it.
+        var _origPush = history.pushState.bind(history);
+        history.pushState = function (state, title, url) {
+            if (url) {
+                try {
+                    var u = new URL(url, location.origin);
+                    var changed = false;
+                    STRIP.forEach(function (k) {
+                        if (u.searchParams.has(k)) { u.searchParams.delete(k); changed = true; }
+                    });
+                    if (changed) {
+                        url = u.pathname + (u.search && u.search !== '?' ? u.search : '') + (u.hash || '');
+                    }
+                } catch (e) {}
             }
-        }
+            return _origPush(state, title, url);
+        };
 
-        // Run once on initial load (covers a fresh visit with ?job=46).
-        stripCleanParams();
+        // ── Also intercept replaceState for completeness (Livewire sometimes
+        //    uses replaceState on the initial page mount).
+        var _origReplace = history.replaceState.bind(history);
+        history.replaceState = function (state, title, url) {
+            if (url) {
+                try {
+                    var u = new URL(url, location.origin);
+                    var changed = false;
+                    STRIP.forEach(function (k) {
+                        if (u.searchParams.has(k)) { u.searchParams.delete(k); changed = true; }
+                    });
+                    if (changed) {
+                        url = u.pathname + (u.search && u.search !== '?' ? u.search : '') + (u.hash || '');
+                    }
+                } catch (e) {}
+            }
+            return _origReplace(state, title, url);
+        };
 
-        // Also re-run after every Livewire update — pagination clicks push
-        // "?page=N" into the URL via Livewire's own history.pushState call,
-        // which happens AFTER this script's initial run and doesn't trigger
-        // a full page load, so the one-shot check above never sees it. This
-        // hook fires after each commit (including page-link clicks), so the
-        // URL gets cleaned every time, not just on first paint.
-        document.addEventListener('livewire:init', function () {
-            Livewire.hook('commit', function ({ succeed }) {
-                succeed(function () {
-                    stripCleanParams();
-                });
-            });
-        });
+        // ── One-shot clean on initial load (covers hard-refresh on ?job=N
+        //    or a direct link with ?page=2 — the intercepts above only run for
+        //    future state changes, not for the URL the page was loaded with).
+        (function stripCurrent() {
+            var params = new URLSearchParams(location.search);
+            var dirty = STRIP.some(function (k) { return params.has(k); });
+            if (dirty) {
+                STRIP.forEach(function (k) { params.delete(k); });
+                var qs = params.toString();
+                history.replaceState({}, '', location.pathname + (qs ? '?' + qs : '') + location.hash);
+            }
+        })();
     })();
 </script>
 

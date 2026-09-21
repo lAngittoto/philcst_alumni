@@ -455,7 +455,7 @@ select.adm-select-arrow {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
-    cursor: pointer;
+    cursor: default;
 }
 
 /* ── Stat card ── */
@@ -654,7 +654,8 @@ select.adm-select-arrow {
     <div class="adm-table-card rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+        <div data-adm-filter
+             class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterSort,filterCollege">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
@@ -755,13 +756,13 @@ select.adm-select-arrow {
 
             {{-- Centered loading spinner — mirrors Manage Event (Director)'s table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             @if($this->events->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
@@ -842,7 +843,7 @@ select.adm-select-arrow {
                                     @if($isApproved || $isCompleted)
                                         <span class="adm-share-tip-wrap">
                                             <button wire:click.stop="openShareModal({{ $event->id }})"
-                                                    wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }}),viewEvent({{ $event->id }})"
                                                     data-adm-action
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
                                                            bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
@@ -872,27 +873,31 @@ select.adm-select-arrow {
                         $eventDate   = $event->event_date->setTimezone('Asia/Manila');
                         $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
                     @endphp
-                    <div class="adm-mrow" wire:click="viewEvent({{ $event->id }})" wire:key="adm-event-mrow-{{ $event->id }}">
+                    <div class="adm-mrow"
+                         wire:click="viewEvent({{ $event->id }})"
+                         wire:key="adm-event-mrow-{{ $event->id }}">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-start justify-between gap-2">
                                 <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($event->title, $search) !!}</p>
-                                @if($isCompleted)
-                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-green-200 bg-green-50 text-green-700 whitespace-nowrap flex-shrink-0">
-                                        <i class="fas fa-flag-checkered text-[8px] mr-1"></i>Completed
-                                    </span>
-                                @elseif($isApproved)
-                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap flex-shrink-0">
-                                        <i class="fas fa-circle-check text-[8px] mr-1"></i>Approved
-                                    </span>
-                                @elseif($isPending)
-                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap flex-shrink-0">
-                                        <i class="fas fa-hourglass-half text-[8px] mr-1"></i>Pending
-                                    </span>
-                                @else
-                                    <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 whitespace-nowrap flex-shrink-0">
-                                        <i class="fas fa-circle-xmark text-[8px] mr-1"></i>Rejected
-                                    </span>
-                                @endif
+                                <span class="flex-shrink-0">
+                                    @if($isCompleted)
+                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
+                                            <i class="fas fa-flag-checkered text-[8px] mr-1"></i>Completed
+                                        </span>
+                                    @elseif($isApproved)
+                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
+                                            <i class="fas fa-circle-check text-[8px] mr-1"></i>Approved
+                                        </span>
+                                    @elseif($isPending)
+                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
+                                            <i class="fas fa-hourglass-half text-[8px] mr-1"></i>Pending
+                                        </span>
+                                    @else
+                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 whitespace-nowrap">
+                                            <i class="fas fa-circle-xmark text-[8px] mr-1"></i>Rejected
+                                        </span>
+                                    @endif
+                                </span>
                             </div>
                             <p class="text-xs mt-1 text-[#666666]">
                                 {{ $eventDate->format('M d, Y · g:i A') }}
@@ -903,7 +908,7 @@ select.adm-select-arrow {
                                 </p>
                                 @if($isApproved || $isCompleted)
                                     <button wire:click.stop="openShareModal({{ $event->id }})"
-                                            wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
+                                            wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }}),viewEvent({{ $event->id }})"
                                             aria-label="Share"
                                             class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer flex-shrink-0
                                                    bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
@@ -1040,13 +1045,125 @@ select.adm-select-arrow {
     $hasPhoto    = !empty($ev->photo_url);
 
     $vStatusLabel = $isCompleted ? 'Completed' : ($isApproved ? 'Approved' : ($isPending ? 'Pending' : 'Rejected'));
-    $vStatusColor = $isCompleted ? 'text-green-600' : ($isApproved ? 'text-emerald-600' : ($isPending ? 'text-amber-600' : 'text-red-600'));
+    $vStatusBg    = $isCompleted ? 'bg-green-100 text-green-700 border-green-300'
+                  : ($isApproved  ? 'bg-emerald-100 text-emerald-700 border-emerald-300'
+                  : ($isPending   ? 'bg-amber-100 text-amber-700 border-amber-300'
+                  :                 'bg-red-100 text-red-700 border-red-300'));
+    $vStatusDot   = $isCompleted ? 'bg-green-500'
+                  : ($isApproved  ? 'bg-emerald-500'
+                  : ($isPending   ? 'bg-amber-500'
+                  :                 'bg-red-500'));
     $vOrgName     = $ev->organizer?->name ?? null;
     $vOrgDept     = $ev->organizer?->department ?? null;
 @endphp
 
-{{-- Outer wrapper: light gray overall bg --}}
-<div class="fixed inset-0 flex flex-col overflow-hidden adm-fs-in" style="background:#f2f2f2;z-index:9995;"
+<style>
+/* ── View Details Redesign ── */
+.vd-info-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 1rem 1.1rem;
+    background: #ffffff;
+    border: 1px solid #e8e0f0;
+    border-radius: 1rem;
+    min-width: 0;
+    min-height: 108px;
+    justify-content: flex-start;
+    transition: box-shadow .15s ease;
+}
+.vd-info-cell:hover {
+    box-shadow: 0 2px 12px rgba(122,63,145,.10);
+}
+.vd-info-cell .vd-cell-icon {
+    font-size: 18px;
+    color: #7a3f91;
+    margin-bottom: 6px;
+}
+.vd-info-cell .vd-cell-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .09em;
+    color: #7a3f91;
+    margin-bottom: 2px;
+}
+.vd-info-cell .vd-cell-value {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111111;
+    line-height: 1.45;
+    white-space: normal;
+    word-break: break-word;
+}
+.vd-info-cell .vd-cell-sub {
+    font-size: 0.8125rem;
+    color: #555555;
+    font-weight: 400;
+    line-height: 1.4;
+    white-space: normal;
+    word-break: break-word;
+    margin-top: 1px;
+}
+.vd-section-hd {
+    font-size: 0.875rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #7a3f91;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 0.625rem;
+}
+.vd-section-hd::after {
+    content: '';
+    flex: 1;
+    height: 1.5px;
+    background: #e8e0f0;
+    border-radius: 99px;
+}
+.vd-body-text {
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.8;
+    color: #333333;
+    white-space: pre-wrap;
+}
+.vd-rsvp-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px 3px 7px;
+    border-radius: 999px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    border: 1.5px solid;
+}
+.vd-contact-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 1rem;
+    color: #333333;
+    font-weight: 500;
+}
+.vd-contact-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: #f5eef9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #7a3f91;
+}
+</style>
+
+{{-- Outer wrapper --}}
+<div class="fixed inset-0 flex flex-col overflow-hidden adm-fs-in" style="background:#f5f5f7;z-index:9995;"
      @keydown.escape.window="$wire.closeViewModal()">
 
     {{-- Purple header bar --}}
@@ -1087,150 +1204,194 @@ select.adm-select-arrow {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden adm-scroll">
+    {{-- Scrollable main content --}}
+    <div class="flex-1 min-h-0 overflow-y-auto adm-scroll" style="background:#f5f5f7;">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 py-5 flex flex-col gap-5">
 
-        {{-- LEFT PANEL — white bg, vw-field cards --}}
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#e0e0e0] overflow-visible lg:overflow-y-auto adm-scroll" style="background:#ffffff;">
+            {{-- ── TOP CARD: photo + title + chips + info grid ── --}}
+            <div class="bg-white rounded-2xl border border-[#e8e0f0] shadow-sm overflow-hidden">
+                <div class="flex flex-col sm:flex-row gap-0">
 
-            {{-- Photo / gradient placeholder --}}
-            @if($hasPhoto)
-            <div class="mx-4 mt-4 mb-0 flex-shrink-0 rounded-xl overflow-hidden" style="height:150px;">
-                <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}"
-                     class="w-full h-full object-cover">
-            </div>
-            @else
-            <div class="mx-4 mt-4 mb-0 flex-shrink-0 rounded-xl overflow-hidden flex items-center justify-center" style="height:150px; background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <i class="fas fa-calendar-days text-white/20 text-5xl"></i>
-            </div>
-            @endif
-
-            {{-- Status + organizer chip row --}}
-            <div class="px-4 pt-3 pb-1 flex-shrink-0 flex items-center justify-between">
-                <span class="text-sm font-bold {{ $vStatusColor }}">{{ $vStatusLabel }}</span>
-                @if($vOrgName)
-                    <span class="vw-chip">{{ $vOrgName }}</span>
-                @else
-                    <span class="vw-chip">Alumni Director</span>
-                @endif
-            </div>
-
-            <div class="flex flex-col gap-2.5 px-4 pb-4 pt-2">
-
-                <div class="vw-field">
-                    <p class="vw-label">Date &amp; Time</p>
-                    <p class="vw-value">{{ $eventDatePH->format('F d, Y') }}</p>
-                    <p class="vw-subvalue">{{ $timeDisplay }}</p>
-                </div>
-
-                @if($ev->venue)
-                <div class="vw-field">
-                    <p class="vw-label">Venue</p>
-                    <p class="vw-value">{{ $ev->venue }}</p>
-                    @if($ev->venue_address)<p class="vw-subvalue">{{ $ev->venue_address }}</p>@endif
-                </div>
-                @endif
-
-                @if($ev->target_participants)
-                <div class="vw-field">
-                    <p class="vw-label">Open For</p>
-                    <p class="vw-value">{{ $ev->target_participants }}</p>
-                </div>
-                @endif
-
-                <div class="vw-field">
-                    <p class="vw-label">{{ $vOrgName ? 'Coordinator' : 'Posted By' }}</p>
-                    @if($vOrgName)
-                        <p class="vw-value">{{ $vOrgName }}</p>
-                        @if($vOrgDept)<p class="vw-subvalue">{{ $vOrgDept }}</p>@endif
-                    @else
-                        <p class="vw-value">Alumni Director</p>
-                    @endif
-                </div>
-
-                @if($ev->contact_person || $ev->contact_email || $ev->contact_phone)
-                <div class="vw-field">
-                    <p class="vw-label">Contact</p>
-                    @if($ev->contact_person)<p class="vw-value">{{ $ev->contact_person }}</p>@endif
-                    @if($ev->contact_email)<p class="vw-subvalue">{{ $ev->contact_email }}</p>@endif
-                    @if($ev->contact_phone)<p class="vw-subvalue">{{ $ev->contact_phone }}</p>@endif
-                </div>
-                @endif
-
-                <div class="vw-field">
-                    <p class="vw-label">Review Status</p>
-                    @if($isCompleted)
-                        <p class="vw-value text-green-600">Completed</p>
-                        <p class="vw-subvalue">This event has already taken place.</p>
-                    @elseif($isApproved)
-                        <p class="vw-value text-emerald-600">Approved — Now Live</p>
-                        @if($ev->reviewed_at)<p class="vw-subvalue">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y · g:i A') }}</p>@endif
-                        @if($ev->review_remarks)<p class="vw-subvalue italic mt-1">"{{ $ev->review_remarks }}"</p>@endif
-                    @elseif($isPending)
-                        <p class="vw-value text-amber-600">Awaiting Review</p>
-                        <p class="vw-subvalue">Pending approval from the Director.</p>
-                    @else
-                        <p class="vw-value text-red-600">Rejected</p>
-                        @if($ev->review_remarks)<p class="vw-subvalue"><strong>Reason:</strong> {{ $ev->review_remarks }}</p>@endif
-                    @endif
-                </div>
-
-            </div>
-        </div>
-
-        {{-- RIGHT PANEL — light gray bg (#f2f2f2) --}}
-        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden" style="background:#f2f2f2;">
-
-            {{-- RSVP summary — white bg for contrast --}}
-            <div class="flex-shrink-0 px-5 py-3 border-b border-[#e0e0e0]" style="background:#ffffff;">
-                @if($totalRsvp > 0)
-                    <div class="flex items-center gap-2 flex-wrap">
-                        <div class="flex flex-col items-center px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-xl min-w-[64px]">
-                            <span class="text-lg font-bold text-emerald-700">{{ $ev->confirmed_count }}</span>
-                            <span class="text-[10px] font-bold text-emerald-600 uppercase tracking-wide">Confirmed</span>
-                        </div>
-                        <div class="flex flex-col items-center px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl min-w-[64px]">
-                            <span class="text-lg font-bold text-amber-700">{{ $ev->tentative_count }}</span>
-                            <span class="text-[10px] font-bold text-amber-600 uppercase tracking-wide">Maybe</span>
-                        </div>
-                        <div class="flex flex-col items-center px-3 py-1.5 bg-red-50 border border-red-200 rounded-xl min-w-[64px]">
-                            <span class="text-lg font-bold text-red-700">{{ $ev->declined_count }}</span>
-                            <span class="text-[10px] font-bold text-red-600 uppercase tracking-wide">Declined</span>
-                        </div>
-                        <span class="text-xs font-semibold text-[#111111] ml-1">
-                            {{ $totalRsvp }} total response{{ $totalRsvp !== 1 ? 's' : '' }}
-                        </span>
+                    {{-- Photo --}}
+                    <div class="w-full sm:w-[42%] flex-shrink-0" style="min-height:280px;">
+                        @if($hasPhoto)
+                            <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}"
+                                 class="w-full h-[240px] sm:h-full object-cover" style="min-height:280px;">
+                        @else
+                            <div class="w-full h-[240px] sm:h-full flex items-center justify-center"
+                                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72); min-height:280px;">
+                                <i class="fas fa-calendar-days text-white/20 text-5xl"></i>
+                            </div>
+                        @endif
                     </div>
-                @else
-                    <p class="text-xs font-semibold text-[#111111]">No responses yet.</p>
-                @endif
-            </div>
 
-            {{-- Scrollable body sections --}}
-            <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto adm-scroll px-5 py-5 flex flex-col gap-5" style="background:#f2f2f2;">
+                    {{-- Right: title + chips + grid --}}
+                    <div class="flex-1 min-w-0 px-6 pt-5 pb-5 flex flex-col gap-3">
 
+                        {{-- "EVENT TITLE" micro-label --}}
+                        <p class="text-[10px] font-800 uppercase tracking-[.1em] text-[#7a3f91] font-extrabold">Event Title</p>
+
+                        {{-- Title --}}
+                        <h2 class="text-2xl sm:text-3xl font-bold text-[#111111] leading-tight -mt-2">{{ $ev->title }}</h2>
+
+                        {{-- Status chips row --}}
+                        <div class="flex flex-wrap items-center gap-2 -mt-1">
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border {{ $vStatusBg }}">
+                                <span class="w-1.5 h-1.5 rounded-full {{ $vStatusDot }}"></span>
+                                {{ $vStatusLabel }}
+                            </span>
+                            @if($vOrgDept)
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                                    <i class="fas fa-building-columns text-[9px]"></i>
+                                    {{ $vOrgDept }}
+                                </span>
+                            @endif
+                            @if($ev->target_participants)
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                    <i class="fas fa-users text-[9px]"></i>
+                                    {{ $ev->target_participants }}
+                                </span>
+                            @endif
+                        </div>
+
+        {{-- Info grid: 6 columns single row --}}
+                        <div class="grid grid-cols-3 gap-3 mt-1 items-stretch">
+
+                            {{-- VENUE --}}
+                            <div class="vd-info-cell">
+                                <span class="vd-cell-icon"><i class="fas fa-location-dot"></i></span>
+                                <span class="vd-cell-label">Venue</span>
+                                <span class="vd-cell-value" title="{{ $ev->venue ?? '—' }}">{{ $ev->venue ?? '—' }}</span>
+                                @if($ev->venue_address)
+                                    <span class="vd-cell-sub" title="{{ $ev->venue_address }}">{{ $ev->venue_address }}</span>
+                                @endif
+                            </div>
+
+                            {{-- DATE & TIME --}}
+                            <div class="vd-info-cell">
+                                <span class="vd-cell-icon"><i class="fas fa-calendar-day"></i></span>
+                                <span class="vd-cell-label">Date &amp; Time</span>
+                                <span class="vd-cell-value">{{ $eventDatePH->format('M d, Y') }}</span>
+                                <span class="vd-cell-sub">{{ $timeDisplay }}</span>
+                            </div>
+
+                            {{-- OPEN FOR --}}
+                            <div class="vd-info-cell">
+                                <span class="vd-cell-icon"><i class="fas fa-user-group"></i></span>
+                                <span class="vd-cell-label">Open For</span>
+                                <span class="vd-cell-value" title="{{ $ev->target_participants ?? '—' }}">{{ $ev->target_participants ?? '—' }}</span>
+                            </div>
+
+                            {{-- RESPONSES --}}
+                            <div class="vd-info-cell">
+                                <span class="vd-cell-icon"><i class="fas fa-reply-all"></i></span>
+                                <span class="vd-cell-label">Responses</span>
+                                @if($totalRsvp > 0)
+                                    <span class="vd-cell-value">{{ $ev->confirmed_count }} Attending</span>
+                                    <span class="vd-cell-sub">{{ $ev->tentative_count }} Maybe · {{ $ev->declined_count }} No</span>
+                                @else
+                                    <span class="vd-cell-value">0 Attending</span>
+                                    <span class="vd-cell-sub">0 Maybe · 0 No</span>
+                                @endif
+                            </div>
+
+                            {{-- YOUR RSVP / REVIEW --}}
+                            <div class="vd-info-cell">
+                                <span class="vd-cell-icon"><i class="fas fa-clipboard-check"></i></span>
+                                <span class="vd-cell-label">Review Status</span>
+                                @if($isCompleted)
+                                    <span class="vd-cell-value" style="color:#16a34a;">Completed</span>
+                                @elseif($isApproved)
+                                    <span class="vd-cell-value" style="color:#059669;">Approved</span>
+                                    @if($ev->reviewed_at)<span class="vd-cell-sub">{{ $ev->reviewed_at->setTimezone('Asia/Manila')->format('M d, Y') }}</span>@endif
+                                @elseif($isPending)
+                                    <span class="vd-cell-value" style="color:#d97706;">Awaiting Review</span>
+                                    <span class="vd-cell-sub">Pending approval</span>
+                                @else
+                                    <span class="vd-cell-value" style="color:#dc2626;">Rejected</span>
+                                    @if($ev->review_remarks)<span class="vd-cell-sub" title="{{ $ev->review_remarks }}">{{ Str::limit($ev->review_remarks, 30) }}</span>@endif
+                                @endif
+                            </div>
+
+                            {{-- POSTED --}}
+                            <div class="vd-info-cell">
+                                <span class="vd-cell-icon"><i class="fas fa-clock-rotate-left"></i></span>
+                                <span class="vd-cell-label">Posted</span>
+                                <span class="vd-cell-value">{{ $createdPH->format('M d, Y') }}</span>
+                                <span class="vd-cell-sub">{{ $createdPH->diffForHumans() }}</span>
+                            </div>
+
+                        </div>{{-- /grid --}}
+                    </div>{{-- /right --}}
+                </div>
+            </div>{{-- /top card --}}
+
+            {{-- ── BOTTOM: About + Notes/Contact side by side ── --}}
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+
+                {{-- ABOUT THIS EVENT --}}
                 @if($ev->description)
-                <div>
-                    <p class="vw-section-title">About This Event</p>
-                    <div class="vw-body-box">{{ trim($ev->description) }}</div>
+                <div class="bg-white rounded-2xl border border-[#e8e0f0] shadow-sm px-5 py-4">
+                    <p class="vd-section-hd"><i class="fas fa-circle-info"></i> About This Event</p>
+                    <p class="vd-body-text">{{ trim($ev->description) }}</p>
                 </div>
                 @endif
 
-                @if($ev->notes)
-                <div>
-                    <p class="vw-section-title">Additional Notes</p>
-                    <div class="vw-body-box">{{ trim($ev->notes) }}</div>
-                </div>
-                @endif
+                {{-- NOTES + CONTACT stacked --}}
+                <div class="flex flex-col gap-4">
 
-                @if(!$ev->description && !$ev->notes)
-                <div class="flex-1 flex items-center justify-center py-10">
-                    <p class="text-sm font-bold text-[#111111]">No additional details provided.</p>
-                </div>
-                @endif
+                    {{-- ADDITIONAL NOTES --}}
+                    @if($ev->notes)
+                    <div class="bg-white rounded-2xl border border-[#e8e0f0] shadow-sm px-5 py-4">
+                        <p class="vd-section-hd"><i class="fas fa-note-sticky"></i> Additional Notes</p>
+                        <p class="vd-body-text">{{ trim($ev->notes) }}</p>
+                    </div>
+                    @endif
 
-            </div>
+                    {{-- CONTACT INFORMATION --}}
+                    @if($ev->contact_person || $ev->contact_email || $ev->contact_phone)
+                    <div class="bg-white rounded-2xl border border-[#e8e0f0] shadow-sm px-5 py-4">
+                        <p class="vd-section-hd"><i class="fas fa-address-card"></i> Contact Information</p>
+                        <div class="flex flex-col gap-2">
+                            @if($ev->contact_person)
+                            <div class="vd-contact-row">
+                                <div class="vd-contact-icon"><i class="fas fa-user"></i></div>
+                                <span>{{ $ev->contact_person }}</span>
+                            </div>
+                            @endif
+                            @if($ev->contact_email)
+                            <div class="vd-contact-row">
+                                <div class="vd-contact-icon"><i class="fas fa-envelope"></i></div>
+                                <span>{{ $ev->contact_email }}</span>
+                            </div>
+                            @endif
+                            @if($ev->contact_phone)
+                            <div class="vd-contact-row">
+                                <div class="vd-contact-icon"><i class="fas fa-phone"></i></div>
+                                <span>{{ $ev->contact_phone }}</span>
+                            </div>
+                            @endif
+                        </div>
+                    </div>
+                    @endif
+
+                    {{-- No description or notes fallback --}}
+                    @if(!$ev->description && !$ev->notes && !$ev->contact_person && !$ev->contact_email && !$ev->contact_phone)
+                    <div class="bg-white rounded-2xl border border-[#e8e0f0] shadow-sm px-5 py-8 flex items-center justify-center">
+                        <p class="text-sm font-semibold text-[#888888]">No additional details provided.</p>
+                    </div>
+                    @endif
+
+                </div>
+            </div>{{-- /bottom grid --}}
+
+            {{-- ── POSTED BY footer row ── --}}
+            <p class="text-center text-xs text-[#999999] pb-2">
+                Posted {{ $createdPH->format('M d, Y') }} at {{ $createdPH->format('g:i A') }}
+                @if($vOrgName) · by <span class="font-semibold text-[#555]">{{ $vOrgName }}</span>@endif
+            </p>
+
         </div>
-
     </div>
 </div>
 @endif
@@ -1269,7 +1430,7 @@ select.adm-select-arrow {
 .adm-share-sheet { animation: admPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
 .adm-share-modal-wrapper {
-    max-height: 70vh;
+    max-height: 88vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1310,7 +1471,7 @@ select.adm-select-arrow {
 .adm-share-photo-preview {
     position: relative;
     width: 100%;
-    aspect-ratio: 16 / 9;
+    max-height: 190px;
     border-radius: 0.75rem;
     overflow: hidden;
     border: 1px solid #E5E7EB;
@@ -1318,7 +1479,7 @@ select.adm-select-arrow {
     flex-shrink: 0;
 }
 .adm-share-photo-preview img {
-    width: 100%; height: 100%; object-fit: contain; display: block;
+    width: 100%; height: 190px; object-fit: cover; display: block;
 }
 .adm-share-photo-preview .dl-badge {
     position: absolute; bottom: 8px; right: 8px;
@@ -1504,7 +1665,7 @@ select.adm-select-arrow {
 
         <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto adm-scroll">
+            <div class="flex-1 min-w-0 px-5 py-3 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-2.5 overflow-y-auto adm-scroll">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0 text-[#111111]">Post Preview</p>
 
                 @if($shareEventPhotoUrl)
@@ -1518,15 +1679,15 @@ select.adm-select-arrow {
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto adm-scroll" style="max-height: 180px;">
-                    <div class="px-4 py-3">
+                <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto adm-scroll" style="max-height: 130px;">
+                    <div class="px-4 py-2.5">
                         <p class="whitespace-pre-wrap leading-relaxed text-[#111111]" style="font-size:clamp(11px,1vw,13px);">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
                 </div>
             </div>
 
-            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto adm-scroll">
+            <div class="w-full md:w-[260px] flex-shrink-0 px-5 py-3 flex flex-col gap-2 overflow-y-auto adm-scroll">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-[#111111]">Share via</p>
 
                 <template x-if="nativeShareSupported">
@@ -1674,8 +1835,13 @@ select.adm-select-arrow {
 
             row.addEventListener('mousemove', function (e) {
                 if (!tip) return;
-                var actionWrap = e.target.closest('[data-adm-action]');
-                if (actionWrap) {
+                // Hide tip when over action buttons, filter bar, or any select/input
+                if (
+                    e.target.closest('[data-adm-action]') ||
+                    e.target.closest('[data-adm-filter]') ||
+                    e.target.closest('select') ||
+                    e.target.closest('input')
+                ) {
                     tip.style.opacity = '0';
                     return;
                 }

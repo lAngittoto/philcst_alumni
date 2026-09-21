@@ -84,6 +84,10 @@
             opacity: 0.5;
             pointer-events: none;
             user-select: none;
+            transition: filter 0.15s ease, opacity 0.15s ease;
+        }
+        .dir-notif-item > *:not(.dir-notif-item-loading-overlay) {
+            transition: filter 0.15s ease, opacity 0.15s ease;
         }
         .dir-notif-item-loading-overlay {
             position: absolute;
@@ -1517,23 +1521,46 @@
     });
 
     document.addEventListener('livewire:navigated', function () {
-        setTimeout(function () {
-            if (window.__dirLoggingOut) return;
-            if (!window.Alpine || typeof Alpine.store !== 'function') return;
-            var s = Alpine.store('dirNotifs');
-            if (s) {
-                if (s._pollTimer) clearInterval(s._pollTimer);
-                s._pollTimer = null;
-                s.open = false;
-                s.navigating = false; // destination page has landed — drop the spinner now, not before
-                s.loadingId  = null;
-                s.init();
-            } else {
-                Alpine.store('dirNotifs', window.__makeDirNotifsStore());
-                var ns = Alpine.store('dirNotifs');
-                if (ns) ns.init();
-            }
-        }, 150);
+        if (window.__dirLoggingOut) return;
+
+        if (!window.Alpine || typeof Alpine.store !== 'function') {
+            // Alpine not ready yet — retry until it is (same fix as alumni sidebar).
+            var tries = 0;
+            var retry = setInterval(function () {
+                tries++;
+                if (window.Alpine && typeof Alpine.store === 'function') {
+                    clearInterval(retry);
+                    window.__bootDirNotifsStore();
+                } else if (tries >= 20) {
+                    clearInterval(retry);
+                }
+            }, 50);
+            return;
+        }
+
+        var s = Alpine.store('dirNotifs');
+        if (!s) {
+            window.__bootDirNotifsStore();
+            return;
+        }
+
+        if (s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
+
+        // Reposition the panel if it's still open at this point (morph may
+        // have reset its inline top/left back to the template fallback).
+        if (s.open) positionDirPanel();
+
+        // Drop the item spinner FIRST — safe to clear before morph settles.
+        s.navigating = false;
+        s.loadingId  = null;
+
+        // Wait one rAF for Livewire's morph to settle, THEN close the panel
+        // so x-transition:leave gets a clean frame to animate from.
+        // Same sequence as the alumni sidebar for smooth, glitch-free close.
+        requestAnimationFrame(function () {
+            s.open = false;
+            s.init();
+        });
     });
 
     ;(function () {
@@ -1728,7 +1755,7 @@
     @click="$store.dirNotifs && $store.dirNotifs.open && $store.dirNotifs.close()"
     @close-sidebar.window="sidebarHiddenByModal = true; open = false;"
     @open-sidebar.window="sidebarHiddenByModal = false;"
-    @@livewire:navigated.window="navClickedRoute = null">
+    @@livewire:navigated.window="navClickedRoute = null; open = false;">
 
 <div class="dir-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
@@ -1942,6 +1969,17 @@
 
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 min-h-0">
+
+        {{-- Navigation blocker — prevents clicking anything (main content,
+             other nav links) while a sidebar link navigation is in flight.
+             Invisible overlay, pointer-events only, so layout is completely
+             unaffected. z-[900] sits above the sidebar (z-[60]) and the
+             mobile overlay (z-50), but below the notif panel (z-9999). --}}
+        <div x-show="navClickedRoute !== null"
+             x-cloak
+             class="fixed inset-0 z-[900] cursor-wait"
+             style="background:transparent;pointer-events:all;"
+             @click.prevent @contextmenu.prevent></div>
 
         <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
                        shrink-0 z-30">
@@ -2158,11 +2196,17 @@
                     ondragstart="return false;"
                     @click.stop="$store.dirNotifs.handleNotifClick(notif)">
 
-                    <template x-if="$store.dirNotifs.navigating && $store.dirNotifs.loadingId === notif.id">
-                        <div class="dir-notif-item-loading-overlay">
-                            <i class="fas fa-spinner fa-spin dir-notif-item-spinner"></i>
-                        </div>
-                    </template>
+                    <div class="dir-notif-item-loading-overlay"
+                         x-show="$store.dirNotifs.navigating && $store.dirNotifs.loadingId === notif.id"
+                         x-transition:enter="transition ease-out duration-150"
+                         x-transition:enter-start="opacity-0"
+                         x-transition:enter-end="opacity-100"
+                         x-transition:leave="transition ease-in duration-100"
+                         x-transition:leave-start="opacity-100"
+                         x-transition:leave-end="opacity-0"
+                         x-cloak>
+                        <i class="fas fa-spinner fa-spin dir-notif-item-spinner"></i>
+                    </div>
 
                     {{-- Icon — colored per notif type --}}
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 mt-0.5"

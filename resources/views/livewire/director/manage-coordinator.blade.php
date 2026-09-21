@@ -988,6 +988,22 @@ new class extends Component {
         transition: color .12s, background .12s;
     }
     .suffix-compact-clear:hover { color: #dc2626; background: #fef2f2; }
+
+    /* ── Filter-bar interaction blocker ─────────────────────────────────
+       Absolutely-positioned transparent overlay rendered inside the filter
+       bar while any filter / pagination Livewire request is in flight.
+       Sits above every control (z-index: 20) so the user cannot fire a
+       second filter request mid-flight (race / double-update).
+       cursor: default so the pointer gives no "clickable" cue.
+       Same pattern as the nav-blocker on the Director Dashboard. ── */
+    .coord-filter-blocker {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        pointer-events: all;
+        cursor: default;
+        background: rgba(245, 245, 245, 0.55);
+    }
 </style>
 
 {{-- ══ MOUSE-FOLLOWING CURSOR LABEL ══ --}}
@@ -1087,7 +1103,14 @@ new class extends Component {
     <div class="coord-table-card flex-1 min-h-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- FILTER BAR — fixed, never scrolls --}}
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
+        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0 relative">
+
+            {{-- Filter-bar blocker: hides all controls during Livewire loading --}}
+            <div class="coord-filter-blocker"
+                 wire:loading
+                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1),viewProfile">
+            </div>
+
             <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
 
             <div class="relative flex-1 min-w-[160px] max-w-xs"
@@ -1145,7 +1168,7 @@ new class extends Component {
                  so flipping pages gets the same clear loading feedback
                  as filtering. --}}
             <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
-                 wire:loading wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1)">
+                 wire:loading wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1),viewProfile">
                 <div class="flex items-center justify-center" style="margin-top:16px;">
                     <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
                 </div>
@@ -1155,7 +1178,7 @@ new class extends Component {
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
                  class="coord-scroll-area flex-1 transition-opacity duration-200"
                  wire:loading.class="opacity-40 pointer-events-none"
-                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1)">
+                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1),viewProfile">
 
                 @if($this->coordinatorRecords->count() > 0)
                 {{-- ── DESKTOP / TABLET: table view ── --}}
@@ -1321,14 +1344,7 @@ new class extends Component {
                             @else Register a new coordinator to get started. @endif
                         </p>
                     </div>
-                    @if($coordCollege || $coordSearch || $coordStatus)
-                    <button wire:click="resetCoordFilters"
-                            wire:loading.attr="disabled" wire:target="resetCoordFilters"
-                            class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-60 disabled:pointer-events-none inline-flex items-center gap-1.5">
-                        <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="resetCoordFilters"></i>
-                        Clear Filters
-                    </button>
-                    @endif
+
                 </div>
                 @endif
 
@@ -1478,7 +1494,7 @@ new class extends Component {
 
                     <div id="reg-section-personal" class="bg-white rounded-2xl border border-gray-200 shadow-sm scroll-mt-4">
                         <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50 rounded-t-2xl">
-                            <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Personal Information</h3>
+                            <h3 class="text-xs font-semibold text-[#333333] uppercase tracking-wider">Personal Information</h3>
                         </div>
                         <div class="p-6">
                             <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -1489,38 +1505,40 @@ new class extends Component {
                                             <img src="{{ $coordPhoto->temporaryUrl() }}" class="w-20 h-20 rounded-xl mx-auto mb-2 object-cover shadow-md">
                                             <p class="text-xs text-emerald-600 font-semibold">Selected</p>
                                         @else
-                                            <svg class="w-8 h-8 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
-                                            </svg>
-                                            <p class="text-sm text-gray-700 font-semibold">Profile Photo</p>
-                                            <p class="text-xs text-gray-400 mt-0.5">JPG, PNG, WebP · 5 MB</p>
+                                            <div class="w-24 h-24 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-gray-100 border-2 border-gray-200">
+                                                <svg class="w-14 h-14 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                                                </svg>
+                                            </div>
+                                            <p class="text-sm text-[#333333] font-semibold">Profile Photo</p>
+                                            <p class="text-xs text-[#333333] mt-0.5">JPG, PNG, WebP · 5 MB</p>
                                         @endif
                                         <input type="file" id="coordPhotoInput" wire:model="coordPhoto" accept="image/jpeg,image/png,image/webp" class="hidden">
                                     </div>
-                                    <p class="text-xs text-gray-400 text-center">Optional — leave blank for default</p>
+                                    <p class="text-xs text-[#333333] text-center">Optional — leave blank for default</p>
                                 </div>
 
                                 <div class="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                                     <div class="sm:col-span-1 xl:col-span-2">
-                                        <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">First Name <span class="text-red-500">*</span></label>
+                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">First Name <span class="text-red-500">*</span></label>
                                         <input wire:model.defer="coordFirstName" type="text" placeholder="e.g. Juan"
                                                class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordFirstName') border-red-400 @enderror">
                                         @error('coordFirstName')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
-                                        <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Last Name <span class="text-red-500">*</span></label>
+                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Last Name <span class="text-red-500">*</span></label>
                                         <input wire:model.defer="coordLastName" type="text" placeholder="e.g. dela Cruz"
                                                class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordLastName') border-red-400 @enderror">
                                         @error('coordLastName')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
-                                        <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Middle Name <span class="text-red-500">*</span></label>
+                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Middle Name <span class="text-red-500">*</span></label>
                                         <input wire:model.defer="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
                                                class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordMiddleInitial') border-red-400 @enderror">
                                         @error('coordMiddleInitial')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
-                                        <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Suffix</label>
+                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Suffix</label>
                                         <div class="suffix-compact-wrap w-full"
                                              x-data="{
                                                  open: false,
@@ -1574,23 +1592,23 @@ new class extends Component {
 
                     <div id="reg-section-account" class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden scroll-mt-4">
                         <div class="px-6 py-3.5 border-b border-gray-100 bg-gray-50">
-                            <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wider">Account Credentials</h3>
+                            <h3 class="text-xs font-semibold text-[#333333] uppercase tracking-wider">Account Credentials</h3>
                         </div>
                         <div class="p-6">
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
                                 <div>
-                                    <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Teacher ID <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Teacher ID <span class="text-red-500">*</span></label>
                                     <input wire:model.defer="coordTeacherId" type="text" placeholder="e.g. 20240001" maxlength="8"
                                            inputmode="numeric" pattern="\d{8}" oninput="this.value=this.value.replace(/\D/g,'')"
                                            class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 font-mono focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordTeacherId') border-red-400 @enderror">
-                                    <p class="text-xs text-gray-400 mt-1">Must be exactly 8 digits</p>
+                                    <p class="text-xs text-[#333333] mt-1">Must be exactly 8 digits</p>
                                     @error('coordTeacherId')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
                                 </div>
                                 <div>
-                                    <label class="block text-xs font-semibold text-gray-700 uppercase tracking-wide mb-1.5">Email Address <span class="text-red-500">*</span></label>
+                                    <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Email Address <span class="text-red-500">*</span></label>
                                     <input wire:model.defer="coordEmail" type="email" placeholder="coordinator@example.com"
                                            class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordEmail') border-red-400 @enderror">
-                                    <p class="text-xs text-gray-400 mt-1">Login credentials will be sent here</p>
+                                    <p class="text-xs text-[#333333] mt-1">Login credentials will be sent here</p>
                                     @error('coordEmail')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
                                 </div>
                             </div>

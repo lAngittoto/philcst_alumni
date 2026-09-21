@@ -290,6 +290,18 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Lookup a director row by id OR user_id — the director-side chat stores
+    // Auth::id() (= user_id) as sender_id/reactor_id in some paths, while
+    // the coordinator-side stores director.id. This helper tries both so
+    // the name never falls back to "Unknown".
+    // ─────────────────────────────────────────────────────────────────────
+    private function resolveDirectorRow(int $idOrUserId, array $columns = ['first_name','last_name','profile_photo']): ?object
+    {
+        return DB::table('director')->whereNull('deleted_at')->where('id', $idOrUserId)->first($columns)
+            ?? DB::table('director')->whereNull('deleted_at')->where('user_id', $idOrUserId)->first($columns);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Job/event image resolver — mirrors director/director-messenger.blade.php
     // ─────────────────────────────────────────────────────────────────────
     private function resolvePostImage(?string $path): ?string
@@ -923,8 +935,8 @@ new class extends Component {
                 $firstName  = DB::table('alumni')->where('id', $latest->sender_id)->value('first_name');
                 $senderName = $firstName ?? 'Alumni';
             } elseif ($latest->sender_type === 'director') {
-                $firstName  = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
-                $senderName = ($firstName ?? 'Director') . ' (Director)';
+                $dRow       = $this->resolveDirectorRow((int)$latest->sender_id, ['first_name']);
+                $senderName = (($dRow->first_name ?? null) ?? 'Director') . ' (Director)';
             } else {
                 $firstName  = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
                 $senderName = ($firstName ?? 'Coordinator') . ' (Coordinator)';
@@ -1122,8 +1134,8 @@ new class extends Component {
                 $latestTs   = Carbon::parse($latest->created_at);
                 $latestTime = $latestTs->setTimezone('Asia/Manila')->format('h:i A');
                 if ($latest->sender_type === 'director') {
-                    $name         = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
-                    $latestSender = $name ?? 'Director';
+                    $dRow         = $self->resolveDirectorRow((int)$latest->sender_id, ['first_name']);
+                    $latestSender = ($dRow->first_name ?? null) ?? 'Director';
                 } else {
                     $name         = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
                     $latestSender = $name ?? 'Coordinator';
@@ -1222,8 +1234,8 @@ new class extends Component {
                     $a            = DB::table('alumni')->where('id', $latest->sender_id)->value('first_name');
                     $latestSender = $a ?? 'Alumni';
                 } elseif ($latest->sender_type === 'director') {
-                    $d            = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
-                    $latestSender = ($d ?? 'Director') . ' (Director)';
+                    $dRow         = $self->resolveDirectorRow((int)$latest->sender_id, ['first_name']);
+                    $latestSender = (($dRow->first_name ?? null) ?? 'Director') . ' (Director)';
                 } else {
                     $o            = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
                     $latestSender = $o ?? 'Coordinator';
@@ -1358,8 +1370,8 @@ new class extends Component {
                     $a            = DB::table('alumni')->where('id', $latest->sender_id)->value('first_name');
                     $latestSender = $a ?? 'Alumni';
                 } elseif ($latest->sender_type === 'director') {
-                    $d            = DB::table('director')->where('id', $latest->sender_id)->value('first_name');
-                    $latestSender = $d ?? 'Director';
+                    $dRow         = $self->resolveDirectorRow((int)$latest->sender_id, ['first_name']);
+                    $latestSender = ($dRow->first_name ?? null) ?? 'Director';
                 } else {
                     $o            = DB::table('organizer')->where('id', $latest->sender_id)->value('first_name');
                     $latestSender = $o ?? 'Coordinator';
@@ -1836,7 +1848,8 @@ new class extends Component {
                     $name = DB::table('alumni')->where('id', $row->sender_id)->value('first_name');
                     if ($name) $names[] = $name;
                 } elseif ($row->sender_type === 'director') {
-                    $name = DB::table('director')->where('id', $row->sender_id)->value('first_name');
+                    $dRow = $this->resolveDirectorRow((int)$row->sender_id, ['first_name']);
+                    $name = $dRow->first_name ?? null;
                     if ($name) $names[] = $name . ' (Director)';
                 } else {
                     $name = DB::table('organizer')->where('id', $row->sender_id)->value('first_name');
@@ -1878,7 +1891,18 @@ new class extends Component {
 
         $aMap = DB::table('alumni')->whereIn('id', $aIds)->get(['id','first_name','last_name','profile_photo','course_code','batch'])->keyBy(fn($a)=>(int)$a->id);
         $oMap = DB::table('organizer')->whereIn('id', $oIds)->get(['id','first_name','last_name','profile_photo'])->keyBy(fn($o)=>(int)$o->id);
-        $dMap = DB::table('director')->whereIn('id', $dIds)->get(['id','first_name','last_name','profile_photo'])->keyBy(fn($d)=>(int)$d->id);
+        // Match by director.id first; also index by user_id so messages that
+        // stored user_id as sender_id (director-side insert) still resolve correctly.
+        $dRows = DB::table('director')->whereNull('deleted_at')
+            ->where(fn($q) => $q->whereIn('id', $dIds)->orWhereIn('user_id', $dIds))
+            ->get(['id','user_id','first_name','last_name','profile_photo']);
+        $dMap = collect();
+        foreach ($dRows as $d) {
+            $dMap->put((int)$d->id, $d);
+            if ($d->user_id && ! $dMap->has((int)$d->user_id)) {
+                $dMap->put((int)$d->user_id, $d);
+            }
+        }
 
         $msgIds  = collect($rows)->pluck('id');
         $rxns    = DB::table('chat_reactions')->whereIn('message_id', $msgIds)->get()->groupBy('message_id');
@@ -2212,22 +2236,37 @@ new class extends Component {
         $data = [];
         foreach ($rows as $r) {
             if ($r->reactor_type === 'organizer') {
+                // First check if the reactor_id actually belongs to a coordinator
+                // (the organizer table). If not found, fall back to director lookup —
+                // this handles legacy rows where a director's react was stored as
+                // reactor_type='organizer' instead of 'director'.
                 $p = DB::table('organizer')->where('id',$r->reactor_id)->first(['first_name','last_name','profile_photo']);
-                $name = $p ? trim(($p->first_name??'').' '.($p->last_name??'')) : 'Unknown';
-                $photo = $p ? $this->resolvePhotoUrl($p->profile_photo??null) : null;
-                $type = 'coordinator';
+                if ($p) {
+                    $name  = trim(($p->first_name??'').' '.($p->last_name??''));
+                    $photo = $this->resolvePhotoUrl($p->profile_photo??null);
+                    $type  = 'coordinator';
+                } else {
+                    // Not a coordinator — try director table (id or user_id)
+                    $p = $this->resolveDirectorRow((int)$r->reactor_id);
+                    $name  = $p ? trim(($p->first_name??'').' '.($p->last_name??'')) : 'Unknown';
+                    $photo = $p ? $this->resolvePhotoUrl($p->profile_photo??null) : null;
+                    $type  = $p ? 'director' : 'coordinator';
+                }
+                $isMe = (int)$r->reactor_id === $this->coordinatorId;
             } elseif ($r->reactor_type === 'director') {
-                $p = DB::table('director')->where('id',$r->reactor_id)->first(['first_name','last_name','profile_photo']);
-                $name = $p ? trim(($p->first_name??'').' '.($p->last_name??'')) : 'Unknown';
+                $p = $this->resolveDirectorRow((int)$r->reactor_id);
+                $name  = $p ? trim(($p->first_name??'').' '.($p->last_name??'')) : 'Unknown';
                 $photo = $p ? $this->resolvePhotoUrl($p->profile_photo??null) : null;
-                $type = 'director';
+                $type  = 'director';
+                $isMe  = false; // current user is a coordinator, never a director
             } else {
                 $p = DB::table('alumni')->where('id',$r->reactor_id)->first(['first_name','last_name','profile_photo']);
-                $name = $p ? trim(($p->first_name??'').' '.($p->last_name??'')) : 'Unknown';
+                $name  = $p ? trim(($p->first_name??'').' '.($p->last_name??'')) : 'Unknown';
                 $photo = $p ? $this->resolvePhotoUrl($p->profile_photo??null) : null;
-                $type = 'alumni';
+                $type  = 'alumni';
+                $isMe  = false;
             }
-            $data[] = ['name'=>$name,'photo'=>$photo,'reaction'=>$r->reaction,'type'=>$type,'is_me'=>$r->reactor_type==='organizer'&&(int)$r->reactor_id===$this->coordinatorId];
+            $data[] = ['name'=>$name,'photo'=>$photo,'reaction'=>$r->reaction,'type'=>$type,'is_me'=>$isMe];
         }
         $this->reactionsPopupData = collect($data)->groupBy('reaction')->toArray();
     }
@@ -2423,7 +2462,14 @@ new class extends Component {
         $dIds = collect($rows)->where('sender_type','director')->pluck('sender_id')->unique();
         $aMap = DB::table('alumni')->whereIn('id',$aIds)->get(['id','first_name','last_name'])->keyBy(fn($a)=>(int)$a->id);
         $oMap = DB::table('organizer')->whereIn('id',$oIds)->get(['id','first_name','last_name'])->keyBy(fn($o)=>(int)$o->id);
-        $dMap = DB::table('director')->whereIn('id',$dIds)->get(['id','first_name','last_name'])->keyBy(fn($d)=>(int)$d->id);
+        $dRowsPin = DB::table('director')->whereNull('deleted_at')
+            ->where(fn($q) => $q->whereIn('id', $dIds)->orWhereIn('user_id', $dIds))
+            ->get(['id','user_id','first_name','last_name']);
+        $dMap = collect();
+        foreach ($dRowsPin as $d) {
+            $dMap->put((int)$d->id, $d);
+            if ($d->user_id && ! $dMap->has((int)$d->user_id)) $dMap->put((int)$d->user_id, $d);
+        }
 
         $self = $this;
 
