@@ -255,39 +255,12 @@ new class extends Component {
     {
         $this->coordinatorErrors      = [];
         $this->coordinatorSuccess     = '';
+        $this->resetErrorBag();
         $this->registeringCoordinator = true;
 
         try {
-            $firstName = trim($this->coordFirstName);
-            $lastName  = trim($this->coordLastName);
-            $mid       = trim($this->coordMiddleInitial);
-            $suffix    = trim($this->coordSuffix);
-            $college   = trim($this->coordCollegeSelect);
-
-            if (!$this->validateName($firstName)) throw new \Exception('First name may only contain letters, spaces, hyphens, or apostrophes.');
-            if (!$this->validateName($lastName))  throw new \Exception('Last name may only contain letters, spaces, hyphens, or apostrophes.');
-
-            if ($mid !== '') {
-                if (!preg_match('/^[a-zA-Z]+$/', $mid)) throw new \Exception('Middle name must contain letters only.');
-                if (strlen($mid) < 2) throw new \Exception('Middle name must be a full word (e.g. Santos, not S).');
-            }
-
-            if ($suffix !== '' && !in_array($suffix, $this->validSuffixes, true)) {
-                $examples = implode(', ', array_slice($this->validSuffixes, 0, 8));
-                throw new \Exception("Invalid suffix \"{$suffix}\". Accepted values: {$examples}, etc.");
-            }
-
-            if ($this->coordinatorFullNameExists($firstName, $mid, $lastName, $suffix))
-                throw new \Exception('A coordinator with that full name already exists.');
-
-            if (!$college) throw new \Exception('Please select a college.');
-
-            $occupied = $this->occupiedColleges();
-            if (isset($occupied[$college]))
-                throw new \Exception("College \"{$college}\" already has an active coordinator ({$occupied[$college]}). Deactivate them first.");
-
-            $this->coordDept = $college;
-
+            // Base Laravel validation first — this is what makes every
+            // @error('coordXxx') directive in the form light up in red.
             $this->validate([
                 'coordFirstName'     => ['required', 'string', 'max:100'],
                 'coordLastName'      => ['required', 'string', 'max:100'],
@@ -298,13 +271,56 @@ new class extends Component {
                 'coordCollegeSelect' => ['required', 'string'],
                 'coordPhoto'         => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
             ], [
+                'coordFirstName.required'     => 'First name is required.',
+                'coordLastName.required'      => 'Last name is required.',
+                'coordMiddleInitial.required' => 'Middle name is required.',
+                'coordMiddleInitial.regex'    => 'Middle name must contain letters only.',
+                'coordMiddleInitial.min'      => 'Middle name must be a full word (e.g. Santos, not S).',
+                'coordTeacherId.required'     => 'Teacher ID is required.',
                 'coordTeacherId.unique'       => 'This Teacher ID is already registered.',
                 'coordTeacherId.regex'        => 'Teacher ID must be exactly 8 digits (e.g. 20240001).',
+                'coordEmail.required'         => 'Email address is required.',
                 'coordEmail.unique'           => 'This email address is already taken.',
                 'coordCollegeSelect.required' => 'Please select a college.',
-                'coordMiddleInitial.required' => 'Middle name is required.',
                 'coordPhoto.max'              => 'Profile photo must not exceed 5 MB.',
             ]);
+
+            $firstName = trim($this->coordFirstName);
+            $lastName  = trim($this->coordLastName);
+            $mid       = trim($this->coordMiddleInitial);
+            $suffix    = trim($this->coordSuffix);
+            $college   = trim($this->coordCollegeSelect);
+
+            // Extra business-rule checks that plain Laravel rules can't express.
+            // Each one is attached to its own field via addError() so it shows
+            // up as the same red-box / red-message style as the rules above,
+            // instead of only appearing in the generic banner.
+            if (!$this->validateName($firstName)) {
+                $this->addError('coordFirstName', 'First name may only contain letters, spaces, hyphens, or apostrophes.');
+            }
+            if (!$this->validateName($lastName)) {
+                $this->addError('coordLastName', 'Last name may only contain letters, spaces, hyphens, or apostrophes.');
+            }
+            if ($suffix !== '' && !in_array($suffix, $this->validSuffixes, true)) {
+                $examples = implode(', ', array_slice($this->validSuffixes, 0, 8));
+                $this->addError('coordSuffix', "Invalid suffix \"{$suffix}\". Accepted values: {$examples}, etc.");
+            }
+            if ($this->coordinatorFullNameExists($firstName, $mid, $lastName, $suffix)) {
+                $this->addError('coordFirstName', 'A coordinator with that full name already exists.');
+            }
+            if ($college) {
+                $occupied = $this->occupiedColleges();
+                if (isset($occupied[$college])) {
+                    $this->addError('coordCollegeSelect', "College \"{$college}\" already has an active coordinator ({$occupied[$college]}). Deactivate them first.");
+                }
+            }
+
+            if ($this->getErrorBag()->isNotEmpty()) {
+                $this->registeringCoordinator = false;
+                return;
+            }
+
+            $this->coordDept = $college;
 
             $fullName  = $this->buildFullName($firstName, $mid, $lastName, $suffix);
             $paddedId  = str_pad($this->coordTeacherId, 8, '0', STR_PAD_LEFT);
@@ -350,6 +366,7 @@ new class extends Component {
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             $this->coordinatorErrors = $e->errors();
+            throw $e; // let Livewire populate $errors so @error() still fires per field
         } catch (\Exception $e) {
             Log::error('Coordinator register: ' . $e->getMessage());
             $this->coordinatorErrors = ['general' => [$e->getMessage()]];
@@ -955,6 +972,8 @@ new class extends Component {
     .suffix-compact-trigger.open,
     .suffix-compact-trigger.has-value { border-color: #7a3f91; }
     .suffix-compact-trigger.open { box-shadow: 0 0 0 3px rgba(122,63,145,.12); }
+    .suffix-compact-trigger.field-error { border-color: #fca5a5; background: #fef2f2; }
+    .suffix-compact-trigger.field-error .sfx-placeholder { color: #b91c1c; }
     .suffix-compact-trigger .sfx-placeholder { color: #333333; font-weight: 400; font-style: italic; font-size: 0.95rem; }
     .suffix-compact-trigger .sfx-chevron { font-size: 0.65rem; opacity: .55; transition: transform .18s; margin-left: auto; }
     .suffix-compact-trigger.open .sfx-chevron { transform: rotate(180deg); }
@@ -1003,6 +1022,11 @@ new class extends Component {
         pointer-events: all;
         cursor: default;
         background: rgba(245, 245, 245, 0.55);
+    }
+    .coord-reg-input:focus {
+        border-color: #7a3f91 !important;
+        box-shadow: 0 0 0 3px rgba(122,63,145,.18) !important;
+        outline: none !important;
     }
 </style>
 
@@ -1465,16 +1489,16 @@ new class extends Component {
                 </div>
                 @endif
 
-                @if(count($coordinatorErrors) > 0)
-                <div class="p-4 rounded-2xl bg-red-50 border border-red-200 shadow-sm">
-                    <p class="font-semibold text-sm text-red-900 mb-2">Please fix the following:</p>
-                    <ul class="text-sm space-y-1 text-red-800">
-                        @foreach($coordinatorErrors as $ms)
-                            @foreach($ms as $m)
+                @if(count($coordinatorErrors) > 0 && isset($coordinatorErrors['general']))
+                <div class="flex items-start gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 shadow-sm">
+                    <i class="fas fa-circle-exclamation text-red-500 mt-0.5 shrink-0"></i>
+                    <div>
+                        <ul class="text-sm space-y-1 text-red-800">
+                            @foreach($coordinatorErrors['general'] as $m)
                             <li class="flex items-start gap-2"><span class="mt-0.5 shrink-0">•</span>{{ $m }}</li>
                             @endforeach
-                        @endforeach
-                    </ul>
+                        </ul>
+                    </div>
                 </div>
                 @endif
 
@@ -1499,7 +1523,7 @@ new class extends Component {
                         <div class="p-6">
                             <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
                                 <div class="lg:col-span-1 flex flex-col items-center gap-3">
-                                    <div class="border-2 border-dashed border-gray-300 rounded-2xl p-5 text-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition w-full"
+                                    <div class="border-2 border-dashed border-purple-400 rounded-2xl p-5 text-center cursor-pointer hover:border-purple-600 hover:bg-purple-50 transition w-full"
                                          onclick="document.getElementById('coordPhotoInput').click()">
                                         @if($coordPhoto)
                                             <img src="{{ $coordPhoto->temporaryUrl() }}" class="w-20 h-20 rounded-xl mx-auto mb-2 object-cover shadow-md">
@@ -1522,20 +1546,20 @@ new class extends Component {
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">First Name <span class="text-red-500">*</span></label>
                                         <input wire:model.defer="coordFirstName" type="text" placeholder="e.g. Juan"
-                                               class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordFirstName') border-red-400 @enderror">
-                                        @error('coordFirstName')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
+                                               class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordFirstName') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
+                                        @error('coordFirstName')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Last Name <span class="text-red-500">*</span></label>
                                         <input wire:model.defer="coordLastName" type="text" placeholder="e.g. dela Cruz"
-                                               class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordLastName') border-red-400 @enderror">
-                                        @error('coordLastName')<p class="text-xs text-red-500 mt-1">{{ $message }}</p>@enderror
+                                               class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordLastName') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
+                                        @error('coordLastName')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Middle Name <span class="text-red-500">*</span></label>
                                         <input wire:model.defer="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
-                                               class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordMiddleInitial') border-red-400 @enderror">
-                                        @error('coordMiddleInitial')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
+                                               class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordMiddleInitial') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
+                                        @error('coordMiddleInitial')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Suffix</label>
@@ -1583,7 +1607,7 @@ new class extends Component {
                                                 </div>
                                             </template>
                                         </div>
-                                        @error('coordSuffix')<p class="text-xs text-red-500 mt-1.5">{{ $message }}</p>@enderror
+                                        @error('coordSuffix')<p class="text-xs text-red-600 font-medium mt-1.5 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                 </div>
                             </div>
@@ -1600,16 +1624,22 @@ new class extends Component {
                                     <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Teacher ID <span class="text-red-500">*</span></label>
                                     <input wire:model.defer="coordTeacherId" type="text" placeholder="e.g. 20240001" maxlength="8"
                                            inputmode="numeric" pattern="\d{8}" oninput="this.value=this.value.replace(/\D/g,'')"
-                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 font-mono focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordTeacherId') border-red-400 @enderror">
-                                    <p class="text-xs text-[#333333] mt-1">Must be exactly 8 digits</p>
-                                    @error('coordTeacherId')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
+                                           class="w-full px-3.5 py-3 border rounded-xl text-sm font-mono focus:outline-none coord-reg-input transition @error('coordTeacherId') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
+                                    @error('coordTeacherId')
+                                        <p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>
+                                    @else
+                                        <p class="text-xs text-[#333333] mt-1">Must be exactly 8 digits</p>
+                                    @enderror
                                 </div>
                                 <div>
                                     <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Email Address <span class="text-red-500">*</span></label>
                                     <input wire:model.defer="coordEmail" type="email" placeholder="coordinator@example.com"
-                                           class="w-full px-3.5 py-3 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition @error('coordEmail') border-red-400 @enderror">
-                                    <p class="text-xs text-[#333333] mt-1">Login credentials will be sent here</p>
-                                    @error('coordEmail')<p class="text-xs text-red-500 mt-0.5">{{ $message }}</p>@enderror
+                                           class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordEmail') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
+                                    @error('coordEmail')
+                                        <p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>
+                                    @else
+                                        <p class="text-xs text-[#333333] mt-1">Login credentials will be sent here</p>
+                                    @enderror
                                 </div>
                             </div>
                         </div>
@@ -1643,7 +1673,7 @@ new class extends Component {
                                         <div class="flex-1">
                                             <label style="color:#333333;" class="block text-sm font-semibold uppercase tracking-wide mb-1.5">Select College <span class="text-red-500">*</span></label>
                                             <select wire:model.live="coordCollegeSelect"
-                                                    class="w-full px-3.5 py-3 pr-8 border border-gray-300 rounded-xl text-sm bg-white text-gray-900 focus:outline-none focus:border-gray-500 focus:ring-2 focus:ring-gray-200 transition appearance-none bg-no-repeat cursor-pointer @error('coordCollegeSelect') border-red-400 @enderror"
+                                                    class="w-full px-3.5 py-3 pr-8 border rounded-xl text-sm focus:outline-none coord-reg-input transition appearance-none bg-no-repeat cursor-pointer @error('coordCollegeSelect') border-red-300 bg-red-50 text-red-900 @else border-gray-300 bg-white text-gray-900 @enderror"
                                                     style="background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E\");background-position:right 0.5rem center;background-size:1.1em;">
                                                 <option value="">Select College</option>
                                                 @foreach($this->orgDepartmentsGrouped->keys() as $cN)
@@ -1654,7 +1684,7 @@ new class extends Component {
                                                 @endforeach
                                             </select>
                                             @error('coordCollegeSelect')
-                                                <p class="text-xs text-red-500 mt-1">{{ $message }}</p>
+                                                <p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>
                                             @enderror
                                         </div>
                                         <div class="flex-1 min-w-0">
@@ -1690,7 +1720,7 @@ new class extends Component {
                             Reset
                         </button>
                         <button type="submit" wire:loading.attr="disabled" wire:target="registerCoordinator"
-                                :disabled="!canSubmit"
+                                
                                 class="flex-1 px-6 py-3.5 rounded-xl text-sm font-semibold bg-[#7a3f91] hover:bg-[#5e2f72] text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-40 disabled:pointer-events-none disabled:hover:bg-[#7a3f91]">
                             <span wire:loading wire:target="registerCoordinator" class="inline-flex items-center gap-2">
                                 <i class="fas fa-spinner animate-spin"></i>
@@ -1770,6 +1800,7 @@ new class extends Component {
     border-radius: 0.75rem;
     min-width: 80px;
 }
+
 </style>
 
     {{-- Top bar — purple gradient, glassmorphism X --}}

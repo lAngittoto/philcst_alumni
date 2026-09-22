@@ -70,6 +70,11 @@ new class extends Component {
             ->select([
                 'id', 'first_name', 'middle_initial', 'last_name', 'suffix',
                 'student_id', 'email', 'course_code', 'batch', 'profile_photo',
+                'date_of_birth',
+                'address_street', 'address_barangay', 'address_municipality', 'address_province',
+                'father_last_name', 'father_given_name', 'father_middle_name',
+                'mother_last_name', 'mother_given_name', 'mother_middle_name',
+                'motto',
             ]);
 
         if ($this->search) {
@@ -86,7 +91,6 @@ new class extends Component {
         if ($this->batch  !== '') $q->where('batch',       $this->batch);
         if ($this->course !== '') $q->where('course_code', $this->course);
 
-        // Sort: latest batch first, then A-Z by last name inside each group
         $all = $q->orderByDesc('batch')
                  ->orderBy('last_name')
                  ->orderBy('first_name')
@@ -101,7 +105,13 @@ new class extends Component {
                     'courseCode' => $code,
                     'courseName' => $name,
                     'sortKey'    => $this->courseSortKey($name),
-                    'members'    => $members,
+                    'members'    => $members
+                        ->sortBy('first_name')
+                        ->sortBy('last_name')
+                        ->sortByDesc(function ($m) {
+                            return is_numeric($m->batch) ? (int) $m->batch : -PHP_INT_MAX;
+                        })
+                        ->values(),
                 ];
             })
             ->sortBy('sortKey')
@@ -123,75 +133,53 @@ new class extends Component {
     }
 
     #[Computed]
-    public function pages(): array
+    public function flatRows(): array
     {
-        $pages   = [];
-        $current = [];
-        $count   = 0;
-
+        $rows = [];
         foreach ($this->groupedAlumni as $group) {
-            $members = $group['members']->values();
-            $offset  = 0;
-            $total   = $members->count();
-
-            while ($offset < $total) {
-                $remaining = self::PER_PAGE - $count;
-                $take      = min($remaining, $total - $offset);
-
-                $current[] = [
-                    'courseCode' => $group['courseCode'],
-                    'courseName' => $group['courseName'],
-                    'sortKey'    => $group['sortKey'],
-                    'members'    => $members->slice($offset, $take)->values(),
-                ];
-
-                $count  += $take;
-                $offset += $take;
-
-                if ($count >= self::PER_PAGE) {
-                    $pages[]  = $current;
-                    $current  = [];
-                    $count    = 0;
-                }
+            foreach ($group['members'] as $member) {
+                $rows[] = ['group' => $group, 'member' => $member];
             }
         }
-
-        if (!empty($current)) $pages[] = $current;
-
-        return $pages;
+        return $rows;
     }
 
     #[Computed]
     public function totalPages(): int
     {
-        return max(1, count($this->pages));
+        return max(1, (int) ceil($this->totalFiltered / self::PER_PAGE));
     }
 
     #[Computed]
     public function currentPageGroups(): array
     {
-        return $this->pages[$this->page - 1] ?? [];
+        $offset = ($this->page - 1) * self::PER_PAGE;
+        $slice  = array_slice($this->flatRows, $offset, self::PER_PAGE);
+
+        $out = [];
+        foreach ($slice as $row) {
+            $code = $row['group']['courseCode'];
+            if (!isset($out[$code])) {
+                $out[$code] = $row['group'];
+                $out[$code]['members'] = collect();
+            }
+            $out[$code]['members']->push($row['member']);
+        }
+
+        return array_values($out);
     }
 
     #[Computed]
     public function pageFrom(): int
     {
         if ($this->totalFiltered === 0) return 0;
-        $before = 0;
-        for ($i = 0; $i < $this->page - 1; $i++) {
-            foreach ($this->pages[$i] as $g) $before += $g['members']->count();
-        }
-        return $before + 1;
+        return (($this->page - 1) * self::PER_PAGE) + 1;
     }
 
     #[Computed]
     public function pageTo(): int
     {
-        $sum = 0;
-        for ($i = 0; $i < $this->page; $i++) {
-            foreach (($this->pages[$i] ?? []) as $g) $sum += $g['members']->count();
-        }
-        return $sum;
+        return min($this->page * self::PER_PAGE, $this->totalFiltered);
     }
 
     public function previousPage(): void
@@ -254,10 +242,6 @@ new class extends Component {
         return trim($name);
     }
 
-    /** Wraps matches of the current search term in a light-blue <mark>,
-     *  same visual treatment as the Alumni Records page's highlight().
-     *  Name is built via formatAlumniName() (already escaped-safe text,
-     *  no raw HTML), so this is safe to render with {!! !!}. */
     public function highlight(string $text, string $search): string
     {
         if (!$search || !$text) return e($text);
@@ -266,7 +250,7 @@ new class extends Component {
         $out     = '';
         foreach ($parts as $i => $part) {
             $out .= ($i % 2 === 1)
-                ? '<mark class="yb-hl">' . e($part) . '</mark>'
+                ? '<mark class="yb-adm-hl">' . e($part) . '</mark>'
                 : e($part);
         }
         return $out;
@@ -274,7 +258,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-adm-root-height yb-adm-noselect"
+<div class="yb-adm-noselect flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-adm-root-height"
      x-data="{
         setAvailHeight() {
             const rect = this.$el.getBoundingClientRect();
@@ -287,6 +271,7 @@ new class extends Component {
         setAvailHeight();
         window.addEventListener('resize', () => setAvailHeight());
         window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
+        Livewire.hook('morph.updated', () => setAvailHeight());
      "
      oncontextmenu="return false;"
      oncopy="return false;"
@@ -294,8 +279,25 @@ new class extends Component {
      oncut="return false;">
 
 <style>
+/* ── Disable text selection / copy ── */
+.yb-adm-noselect,
+.yb-adm-noselect * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+.yb-adm-noselect input,
+.yb-adm-noselect textarea {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+}
+
 /* ── Search highlight ── */
-mark.yb-hl {
+mark.yb-adm-hl {
     background: #BFDBFE;
     color: inherit;
     border-radius: 2px;
@@ -303,9 +305,129 @@ mark.yb-hl {
     font-weight: 700;
 }
 
-/* ── Card hover ── */
-.yb-adm-card { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
-.yb-adm-card:hover { border-color: #c49ed8 !important; box-shadow: 0 4px 14px rgba(122,63,145,.14); }
+/* ── Card base ── */
+.yb-adm-card {
+    transition: border-color .15s ease, box-shadow .15s ease;
+    position: relative;
+    width: 100%;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    height: 420px;
+    min-height: 420px;
+    max-height: 420px;
+    align-self: stretch;
+    border-color: #E2D6F0;
+}
+.yb-adm-card:not(:hover) {
+    box-shadow: 0 3px 12px rgba(90,26,138,.18);
+}
+.yb-adm-card:hover {
+    border-color: #c49ed8 !important;
+    box-shadow: 0 6px 22px rgba(0,0,0,.12);
+}
+
+/* ── Photo — top purple section ── */
+.yb-adm-card-photo-wrap {
+    width: 100%;
+    flex-shrink: 0;
+    overflow: hidden;
+    position: relative;
+    background: #7A3F91;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 22px 0 18px;
+    min-height: 190px;
+}
+.yb-adm-card-photo {
+    width: 130px;
+    height: 130px;
+    object-fit: cover;
+    object-position: top center;
+    display: block;
+    border-radius: 50%;
+    border: 4px solid rgba(255,255,255,.9);
+    box-shadow: 0 4px 16px rgba(0,0,0,.3);
+    flex-shrink: 0;
+}
+
+/* ── Right / body column ── */
+.yb-adm-card-right {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* ── Purple name ribbon ── */
+.yb-adm-card-name-band {
+    background: #7A3F91;
+    padding: 8px 36px 8px 13px;
+    position: relative;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+.yb-adm-card-name-band::before {
+    content: '';
+    position: absolute;
+    top: -10%; bottom: -10%;
+    right: 22px;
+    width: 18px;
+    background: rgba(255,255,255,.20);
+    transform: skewX(-14deg);
+    pointer-events: none;
+}
+.yb-adm-card-name-band::after {
+    content: '';
+    position: absolute;
+    top: -10%; bottom: -10%;
+    right: 9px;
+    width: 8px;
+    background: rgba(255,255,255,.10);
+    transform: skewX(-14deg);
+    pointer-events: none;
+}
+.yb-adm-card-name {
+    font-size: 15px; font-weight: 800;
+    color: #FFFFFF; line-height: 1.2;
+    text-transform: uppercase;
+    letter-spacing: .01em;
+    position: relative; z-index: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ── Card info body ── */
+.yb-adm-card-text {
+    padding: 10px 13px 12px;
+    flex: 1;
+    display: flex; flex-direction: column; gap: 3px;
+    background: #fff;
+    overflow: hidden;
+}
+.yb-adm-card-line {
+    font-size: 14px; color: #1a1a1a; line-height: 1.4; font-weight: 600;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.yb-adm-card-motto {
+    font-size: 13px; font-weight: 700;
+    color: #5A1A8A; margin-top: 4px;
+}
+.yb-adm-card-motto-text {
+    font-size: 13px; font-style: italic; font-weight: 600;
+    color: #1a1a1a; line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 
 /* ── Badges ── */
 .yb-adm-section-badge {
@@ -313,12 +435,7 @@ mark.yb-hl {
     padding: 4px 14px; border-radius: 9999px;
     font-size: 12px; font-weight: 700; letter-spacing: .02em;
     background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
-}
-.yb-adm-batch-badge {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 10px; border-radius: 9999px;
-    font-size: 11px; font-weight: 700;
-    background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
+    white-space: normal; line-height: 1.3; max-width: 100%;
 }
 .yb-adm-chip {
     display: inline-flex; align-items: center; gap: 5px;
@@ -334,13 +451,14 @@ mark.yb-hl {
 .yb-adm-scroll::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
 .yb-adm-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
 
+/* ── Entry animation ── */
 @keyframes ybAdmFadeUp {
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
 }
 .yb-adm-grid-wrap { animation: ybAdmFadeUp .22s cubic-bezier(.4,0,.2,1) both; }
 
-/* ── Filter inputs ── */
+/* ── Search input ── */
 .yb-adm-search-input {
     padding: 0.5rem 0.75rem 0.5rem 2.25rem;
     border: 1px solid #E8E0F0; border-radius: 0.5rem;
@@ -370,6 +488,7 @@ mark.yb-hl {
 .yb-adm-dd-btn:hover  { border-color: #c4b5d4; }
 .yb-adm-dd-btn.active { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); color: #7a3f91; }
 .yb-adm-dd-btn:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
+.yb-adm-dd-btn:disabled { pointer-events: none !important; cursor: default !important; opacity: 0.5; }
 
 /* ── Dropdown panel ── */
 .yb-adm-dd-panel {
@@ -392,6 +511,19 @@ mark.yb-hl {
 .yb-adm-dd-item:hover { background: #F5F0FA; color: #7A3F91; }
 .yb-adm-dd-item.sel   { background: #F0E6F8; color: #7A3F91; }
 
+/* ── Filter bar keeps controls interactive during Livewire loading ── */
+.yb-adm-filter-bar *,
+.yb-adm-dd-btn,
+.yb-adm-dd-panel,
+.yb-adm-dd-item,
+.yb-adm-search-input {
+    pointer-events: all !important;
+}
+.yb-adm-dd-btn       { cursor: pointer !important; }
+.yb-adm-dd-item      { cursor: pointer !important; }
+.yb-adm-search-input { cursor: text !important; }
+.yb-adm-dd-btn:disabled { pointer-events: none !important; cursor: default !important; }
+
 /* ── Main block ── */
 .yb-adm-table-block {
     display: flex; flex-direction: column;
@@ -404,6 +536,8 @@ mark.yb-hl {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
     padding: 0.6rem 0.875rem; flex-shrink: 0;
     position: relative; z-index: 50; overflow: visible;
+    pointer-events: all !important;
+    cursor: default !important;
 }
 .yb-adm-pagination-bar {
     flex-shrink: 0;
@@ -412,12 +546,7 @@ mark.yb-hl {
     display: flex; align-items: center;
     justify-content: space-between; gap: 0.5rem;
     flex-wrap: wrap; border-top: 1px solid rgba(122,63,145,.3);
-    /* Safety net: always pinned to the bottom of the table block,
-       so it can never end up scrolled out of view, no matter how
-       tall the card area ends up being. */
-    position: sticky;
-    bottom: 0;
-    z-index: 30;
+    position: sticky; bottom: 0; z-index: 30;
 }
 .yb-adm-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -429,69 +558,37 @@ mark.yb-hl {
 .yb-adm-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
 .yb-adm-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
-/* ── Root height ─────────────────────────────────────────
-   Desktop: reserve 180px for surrounding layout chrome.
-   Mobile: instead of guessing a fixed px offset for the
-   topbar, --yb-adm-avail-h is measured live via Alpine
-   (window.innerHeight - element's actual top offset), so the
-   block always fits exactly under whatever topbar height the
-   layout actually has, on any device. Falls back to the
-   100dvh calc if JS hasn't run yet.
-──────────────────────────────────────────────────────── */
+/* ── Root height ── */
 .yb-adm-root-height {
     height: calc(100vh - 180px);
     max-height: calc(100vh - 180px);
     overflow: hidden;
+    height: var(--yb-adm-avail-h, calc(100vh - 180px));
+    max-height: var(--yb-adm-avail-h, calc(100vh - 180px));
 }
 
-/* ── Mobile responsiveness ── */
+/* ── Mobile ── */
 @media (max-width: 640px) {
     .yb-adm-filter-bar { gap: 8px; }
 }
-
 @media (max-width: 767px) {
     html, body { overflow: hidden !important; }
-
     .yb-adm-root-height {
         height: var(--yb-adm-avail-h, 100dvh) !important;
         max-height: var(--yb-adm-avail-h, 100dvh) !important;
         overflow: hidden !important;
     }
-
     .yb-adm-mobile-subtitle { display: none; }
     .yb-adm-mobile-header-icon { width: 2.25rem !important; height: 2.25rem !important; }
     .yb-adm-mobile-title { font-size: 1rem !important; }
-
     .yb-adm-filter-bar { padding: 0.45rem 0.65rem; }
     .yb-adm-dd-btn, .yb-adm-search-input { padding-top: 0.4rem; padding-bottom: 0.4rem; }
-
     .yb-adm-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
     .yb-adm-pagination-bar p { font-size: 11px; }
-
-    .yb-adm-pagination-bar {
-        padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
-    }
+    .yb-adm-pagination-bar { padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px)); }
 }
 
 [x-cloak] { display: none !important; }
-
-/* ── Disable text selection / copy across the yearbook UI ── */
-.yb-adm-noselect,
-.yb-adm-noselect * {
-    -webkit-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-    -webkit-touch-callout: none;
-}
-/* Keep the search box usable for typing/selecting its own text */
-.yb-adm-noselect input,
-.yb-adm-noselect textarea {
-    -webkit-user-select: text;
-    -moz-user-select: text;
-    -ms-user-select: text;
-    user-select: text;
-}
 </style>
 
     {{-- ══ PAGE HEADER ══ --}}
@@ -520,7 +617,13 @@ mark.yb-hl {
     <div class="yb-adm-table-block">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="yb-adm-filter-bar flex flex-wrap gap-2 items-center">
+        <div class="yb-adm-filter-bar flex flex-wrap gap-2 items-center"
+             x-data="{
+                openDd: '',
+                init() {
+                    document.addEventListener('livewire:request', () => { this.openDd = ''; });
+                }
+             }">
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">
@@ -542,47 +645,17 @@ mark.yb-hl {
             </div>
 
             {{-- Batch dropdown ── --}}
-            <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+            <div class="relative" @click.outside="if(openDd==='batch') openDd=''">
                 <button type="button"
-                        @click="open = !open"
+                        @click="openDd = openDd === 'batch' ? '' : 'batch'"
                         :class="{ 'active': $wire.batch !== '' }"
+                        :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                        wire:loading.attr="disabled"
+                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
                         class="yb-adm-dd-btn">
                     <span x-text="$wire.batch !== '' ? 'Batch ' + $wire.batch : 'All Batches'"></span>
                 </button>
-                <div x-show="open" x-cloak
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95"
-                     x-transition:enter-end="opacity-100 scale-100"
-                     x-transition:leave="transition ease-in duration-75"
-                     x-transition:leave-start="opacity-100 scale-100"
-                     x-transition:leave-end="opacity-0 scale-95"
-                     class="yb-adm-dd-panel">
-                    <button type="button"
-                            @click="$wire.set('batch', ''); open = false"
-                            :class="{ 'sel': $wire.batch === '' }"
-                            class="yb-adm-dd-item">All Batches</button>
-                    @foreach($this->batches as $b)
-                    <button type="button"
-                            @click="$wire.set('batch', '{{ $b }}'); open = false"
-                            :class="{ 'sel': $wire.batch === '{{ $b }}' }"
-                            class="yb-adm-dd-item">{{ $b }}</button>
-                    @endforeach
-                </div>
-            </div>
-
-            {{-- Course dropdown ── --}}
-            <div class="relative" x-data="{ open: false }" @click.outside="open = false">
-                <button type="button"
-                        @click="open = !open"
-                        :class="{ 'active': $wire.course !== '' }"
-                        class="yb-adm-dd-btn">
-                    @if($course !== '')
-                        <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
-                    @else
-                        <span>All Programs</span>
-                    @endif
-                </button>
-                <div x-show="open" x-cloak
+                <div x-show="openDd === 'batch'"
                      x-transition:enter="transition ease-out duration-100"
                      x-transition:enter-start="opacity-0 scale-95"
                      x-transition:enter-end="opacity-100 scale-100"
@@ -590,58 +663,91 @@ mark.yb-hl {
                      x-transition:leave-start="opacity-100 scale-100"
                      x-transition:leave-end="opacity-0 scale-95"
                      class="yb-adm-dd-panel"
-                     style="min-width:220px;">
+                     style="display:none;">
                     <button type="button"
-                            @click="$wire.set('course', ''); open = false"
+                            @click="$wire.set('batch', ''); openDd = ''"
+                            :class="{ 'sel': $wire.batch === '' }"
+                            class="yb-adm-dd-item">All Batches</button>
+                    @foreach($this->batches as $b)
+                    <button type="button"
+                            @click="$wire.set('batch', '{{ $b }}'); openDd = ''"
+                            :class="{ 'sel': $wire.batch === '{{ $b }}' }"
+                            class="yb-adm-dd-item">{{ $b }}</button>
+                    @endforeach
+                </div>
+            </div>
+
+            {{-- Course dropdown ── --}}
+            <div class="relative" @click.outside="if(openDd==='course') openDd=''">
+                <button type="button"
+                        @click="openDd = openDd === 'course' ? '' : 'course'"
+                        :class="{ 'active': $wire.course !== '' }"
+                        :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                        wire:loading.attr="disabled"
+                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
+                        class="yb-adm-dd-btn">
+                    @if($course !== '')
+                        <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
+                    @else
+                        <span>All Programs</span>
+                    @endif
+                </button>
+                <div x-show="openDd === 'course'"
+                     x-transition:enter="transition ease-out duration-100"
+                     x-transition:enter-start="opacity-0 scale-95"
+                     x-transition:enter-end="opacity-100 scale-100"
+                     x-transition:leave="transition ease-in duration-75"
+                     x-transition:leave-start="opacity-100 scale-100"
+                     x-transition:leave-end="opacity-0 scale-95"
+                     class="yb-adm-dd-panel"
+                     style="display:none; min-width:220px;">
+                    <button type="button"
+                            @click="$wire.set('course', ''); openDd = ''"
                             :class="{ 'sel': $wire.course === '' }"
                             class="yb-adm-dd-item">All Programs</button>
                     @foreach($this->courses as $c)
                     <button type="button"
-                            @click="$wire.set('course', '{{ $c->code }}'); open = false"
+                            @click="$wire.set('course', '{{ $c->code }}'); openDd = ''"
                             :class="{ 'sel': $wire.course === '{{ $c->code }}' }"
                             class="yb-adm-dd-item">{{ $c->name }}</button>
                     @endforeach
                 </div>
             </div>
 
-            {{-- Reset --}}
+            {{-- Found count ── --}}
+            <div class="flex items-center gap-2 ml-auto">
+                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
+                      style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
+                    {{ number_format($this->totalFiltered) }} found
+                </span>
+            </div>
+
+            {{-- Reset ── --}}
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
                     @if($search === '' && $batch === '' && $course === '') disabled @endif
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer ml-auto order-2"
+                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
                     style="color:#333333;">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm"></i>
                 </span>
                 <span wire:loading wire:target="resetFilters">
-                    <svg class="animate-spin w-3.5 h-3.5" style="color:#7A3F91;"
-                         xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7A3F91;"></i>
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
-
-            {{-- Found count ── --}}
-            <div class="flex items-center gap-2 order-3">
-                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
-                      style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
-                    {{ number_format($this->totalFiltered) }} found
-                </span>
-            </div>
         </div>
 
         {{-- ── SCROLLABLE CARDS AREA ── --}}
         <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
              x-data="{ showTop: false }">
 
-            {{-- Centered loading spinner — big icon over the table itself,
-                 same pattern as the organizer-facing yearbook. --}}
+            {{-- Loading overlay ── --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 style="cursor:default;"
                  wire:loading.flex wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
@@ -653,54 +759,106 @@ mark.yb-hl {
                  wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage">
 
                 @if($this->totalFiltered > 0)
-                <div class="yb-adm-grid-wrap space-y-6">
+                <div class="yb-adm-grid-wrap space-y-2"
+                     wire:key="results-{{ md5($search . '|' . $batch . '|' . $course . '|' . $page) }}">
                     @foreach($this->currentPageGroups as $group)
-                    <div>
+                    <div wire:key="group-{{ $group['courseCode'] }}">
+
                         {{-- Section header --}}
-                        <div class="flex items-center gap-2 mb-3 px-1">
+                        <div class="flex items-center flex-wrap gap-2 pt-2 pb-2 px-1">
                             <span class="yb-adm-section-badge">
                                 <i class="fas fa-bookmark" style="font-size:10px;"></i>
                                 {{ $group['courseName'] }}
                             </span>
-                            <div class="flex-1 h-px" style="background:#D8B4FE;"></div>
+                            <div class="flex-1 min-w-[24px] h-px" style="background:#D8B4FE;"></div>
                             <span class="text-xs font-semibold shrink-0" style="color:#c0a0d8;">
                                 {{ $group['members']->count() }} shown
                             </span>
                         </div>
 
-                        {{-- Card grid --}}
-                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+                        {{-- Card grid ── capped at 5 cols, equal-height rows --}}
+                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
                             @foreach($group['members'] as $alumni)
-                            <div wire:key="adm-alum-{{ $alumni->id }}"
-                                 class="yb-adm-card relative bg-white rounded-2xl overflow-hidden border flex flex-col items-center shadow-sm cursor-default"
-                                 style="border-color:#E8E0F0;">
+                            @php
+                                $cardName = $this->formatAlumniName(
+                                    $alumni->first_name,
+                                    $alumni->middle_initial ?? null,
+                                    $alumni->last_name,
+                                    $alumni->suffix ?? null
+                                );
 
-                                {{-- Purple header strip --}}
-                                <div class="w-full h-[88px] shrink-0 relative" style="background:#7A3F91;">
-                                    <div class="absolute left-1/2 -translate-x-1/2 -bottom-[39px] z-10 w-[78px] h-[78px]">
-                                        <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
-                                             alt="{{ $this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null) }}"
-                                             class="w-full h-full rounded-full object-cover block"
-                                             style="border:3px solid #fff; box-shadow:0 2px 10px rgba(0,0,0,.12); background:#f0e6f8;"
-                                             loading="lazy" decoding="async"
-                                             onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
-                                    </div>
+                                // Birthday
+                                $cardDob = !empty($alumni->date_of_birth)
+                                    ? \Carbon\Carbon::parse($alumni->date_of_birth)->format('F j, Y')
+                                    : null;
+
+                                // Address
+                                $cardAddr = implode(', ', array_filter([
+                                    $alumni->address_street       ?? '',
+                                    $alumni->address_barangay     ?? '',
+                                    $alumni->address_municipality ?? '',
+                                    $alumni->address_province     ?? '',
+                                ]));
+
+                                // Parents
+                                $fLast  = trim($alumni->father_last_name   ?? '');
+                                $fFirst = trim($alumni->father_given_name  ?? '');
+                                $fMid   = trim($alumni->father_middle_name ?? '');
+                                $mFirst = trim($alumni->mother_given_name  ?? '');
+                                $mLast  = trim($alumni->mother_last_name   ?? '');
+
+                                if ($fFirst && $fLast) {
+                                    $fMidI      = $fMid ? strtoupper(mb_substr($fMid,0,1)).'.' : '';
+                                    $cardParents = ($mFirst ? 'Mr. & Mrs. ' : 'Mr. ') . $fFirst . ($fMidI ? ' '.$fMidI : '') . ' ' . $fLast;
+                                } elseif ($mFirst && $mLast) {
+                                    $cardParents = 'Mrs. ' . $mFirst . ' ' . $mLast;
+                                } else {
+                                    $cardParents = null;
+                                }
+                            @endphp
+                            <div wire:key="adm-alum-{{ $alumni->id }}"
+                                 class="yb-adm-card rounded-xl overflow-hidden border cursor-default"
+                                 style="border-color:#E2D6F0;">
+
+                                {{-- Portrait photo — top purple section --}}
+                                <div class="yb-adm-card-photo-wrap">
+                                    <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
+                                         alt="{{ $cardName }}"
+                                         class="yb-adm-card-photo"
+                                         loading="lazy" decoding="async"
+                                         onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
                                 </div>
 
-                                {{-- Card body --}}
-                                <div class="w-full pt-[52px] pb-5 px-3.5 flex flex-col items-center text-center flex-1">
-                                    <p class="text-sm font-semibold leading-snug mb-2.5 break-words w-full uppercase"
-                                       style="color:#111111;">
-                                        {!! $this->highlight($this->formatAlumniName($alumni->first_name, $alumni->middle_initial ?? null, $alumni->last_name, $alumni->suffix ?? null), $search) !!}
-                                    </p>
-                                    <p class="text-xs font-semibold uppercase leading-snug mb-2.5"
-                                       style="color:#111111; letter-spacing:0.02em;">
-                                        {{ $group['courseName'] }}
-                                    </p>
-                                    <span class="yb-adm-batch-badge">
-                                        <i class="fas fa-graduation-cap" style="font-size:9px;"></i>
-                                        Class of {{ $alumni->batch ?? '—' }}
-                                    </span>
+                                {{-- Name ribbon + info body --}}
+                                <div class="yb-adm-card-right">
+
+                                    {{-- Purple name ribbon --}}
+                                    <div class="yb-adm-card-name-band">
+                                        <p class="yb-adm-card-name">{!! $this->highlight($cardName, $search) !!}</p>
+                                    </div>
+
+                                    {{-- Info body (white) — plain text, no icons --}}
+                                    <div class="yb-adm-card-text">
+
+                                        @if($cardDob)
+                                        <p class="yb-adm-card-line">{{ $cardDob }}</p>
+                                        @endif
+
+                                        @if($cardAddr)
+                                        <p class="yb-adm-card-line">{{ ucwords(mb_strtolower($cardAddr)) }}</p>
+                                        @endif
+
+                                        @if($cardParents)
+                                        <p class="yb-adm-card-line">{{ ucwords(mb_strtolower($cardParents)) }}</p>
+                                        @endif
+
+                                        @if(!empty($alumni->motto))
+                                        <p class="yb-adm-card-motto">Motto:
+                                            <span class="yb-adm-card-motto-text">"{{ $alumni->motto }}"</span>
+                                        </p>
+                                        @endif
+
+                                    </div>
                                 </div>
 
                             </div>
@@ -801,3 +959,25 @@ mark.yb-hl {
     </div>{{-- /yb-adm-table-block --}}
 
 </div>{{-- /root --}}
+
+<script>
+(function () {
+    var watchedActions = ['search', 'batch', 'course', 'resetFilters', 'previousPage', 'nextPage', 'gotoPage'];
+
+    function resetScroll() {
+        var el = document.getElementById('yb-admin-scroll');
+        if (el) el.scrollTop = 0;
+    }
+
+    document.addEventListener('livewire:init', function () {
+        if (window.Livewire && typeof window.Livewire.hook === 'function') {
+            window.Livewire.hook('commit', function ({ component, commit, succeed }) {
+                var isRelevant = (commit.updates && watchedActions.some(k => k in commit.updates))
+                    || (commit.calls && commit.calls.some(c => watchedActions.includes(c.method)));
+                if (!isRelevant) return;
+                succeed(function () { resetScroll(); });
+            });
+        }
+    });
+})();
+</script>

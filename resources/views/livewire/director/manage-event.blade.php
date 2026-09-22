@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\DB;
 use App\Models\Alumni;
 use App\Models\Organizer;
+use App\Mail\EventApprovedMail;
+use Illuminate\Support\Facades\Mail;
 
 new class extends Component {
     use WithPagination, WithFileUploads;
@@ -280,6 +282,32 @@ new class extends Component {
                 'line'       => $e->getLine(),
             ]);
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Quick pre-check so we don't burn an SMTP round-trip (and time) on an
+    // email address that's obviously never going to deliver:
+    //   1. Format check — catches typos, missing @, empty domain, etc.
+    //      instantly, no network call.
+    //   2. MX record check — confirms the DOMAIN can actually receive mail
+    //      at all (catches typo'd domains like "gmial.com", made-up
+    //      domains, etc.). This is a DNS lookup, not a full mailbox check.
+    // Same helper used for new-job-posting emails in manage-job.blade.php.
+    // ─────────────────────────────────────────────────────────────────────
+    private static function isEmailPlausiblyValid(string $email): bool
+    {
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        $domain = substr(strrchr($email, '@'), 1);
+        if (!$domain) {
+            return false;
+        }
+
+        return getmxrr($domain, $mxRecords)
+            || checkdnsrr($domain, 'A')
+            || checkdnsrr($domain, 'AAAA');
     }
 
     private function notifyOrganizerEvent(?int $organizerId, string $icon, string $title, string $message, string $dedupKey, ?int $eventId = null): void
@@ -1024,6 +1052,61 @@ new class extends Component {
 
             $this->dispatch('flash-message', type: 'success', message: "'{$this->approveEventTitle}' approved!");
             $this->dispatch('event-management-updated', id: $this->approveEventId, title: $this->approveEventTitle, action: 'approved');
+
+            // ── Email all alumni matched by this event's target_participants ──
+            // target_participants format: "All Colleges" OR
+            //   "CITE, CAS · Batch 2020"  (colleges · optional batch suffix)
+            $tp     = $event->target_participants ?? '';
+            $tpParts  = explode(' · Batch ', $tp, 2);
+            $colStr = trim($tpParts[0] ?? '');
+            $batchYear  = isset($tpParts[1]) ? (int) trim($tpParts[1]) : null;
+
+            // Required fields that define a "complete" profile — mirrors
+            // applyProfileCompletionFilter() in alumni-records.blade.php exactly.
+            $profileRequiredFields = [
+                'email', 'gender', 'contact_number',
+                'father_last_name', 'father_given_name', 'father_middle_name',
+                'mother_last_name', 'mother_given_name', 'mother_middle_name',
+                'address_street', 'address_barangay', 'address_municipality', 'address_province',
+            ];
+
+            $alumniQuery = \App\Models\Alumni::where('status', 'VERIFIED')
+                ->whereNotNull('email')
+                ->whereNotNull('date_of_birth');
+
+            foreach ($profileRequiredFields as $field) {
+                $alumniQuery->whereNotNull($field)->where($field, '!=', '');
+            }
+
+            // Filter by college if not targeting all
+            if ($colStr && $colStr !== 'All Colleges') {
+                $colleges = array_map('trim', explode(',', $colStr));
+                $alumniQuery->whereHas('course', fn($c) => $c->whereIn('college', $colleges));
+            }
+
+            // Filter by batch year if specified
+            if ($batchYear) {
+                $alumniQuery->where('batch', $batchYear);
+            }
+
+            $allAlumni  = $alumniQuery->select('id', 'email', 'first_name', 'last_name', 'batch')->get();
+
+            // FIX: ->later() only INSERTS a row into the `jobs` table — it
+            // never actually sends anything unless a `queue:work` worker is
+            // running to process it, and nothing in this file ever spawns
+            // one. Emails were silently queuing forever and never sending.
+            // Switched to ->send() (synchronous, immediate) — same pattern
+            // used for the working new-job-posting emails.
+            foreach ($allAlumni as $alumni) {
+                if (!self::isEmailPlausiblyValid($alumni->email)) {
+                    \Illuminate\Support\Facades\Log::info(
+                        "[EventMail][Director] Skipped — invalid/undeliverable address for alumnus #{$alumni->id}: {$alumni->email}"
+                    );
+                    continue;
+                }
+
+                Mail::to($alumni->email)->send(new EventApprovedMail($event, $alumni));
+            }
         }
         $this->showApproveModal  = false;
         $this->approveEventId    = null;

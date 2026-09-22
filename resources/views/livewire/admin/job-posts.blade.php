@@ -939,13 +939,13 @@ select.adm-select-arrow {
 
             {{-- Centered loading spinner — mirrors Event Monitoring's table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.flex wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewJob">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             @if($this->jobPostings->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterType,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewJob">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
@@ -975,6 +975,7 @@ select.adm-select-arrow {
                         @endphp
                         <tr class="bg-white cursor-pointer transition-colors duration-100 hover:bg-[#f5f0fa]"
                             wire:click="viewJob({{ $job->id }})"
+                            wire:loading.class="opacity-60 pointer-events-none" wire:target="viewJob({{ $job->id }})"
                             wire:key="admjob-row-{{ $job->id }}"
                             data-adm-row>
 
@@ -1053,7 +1054,9 @@ select.adm-select-arrow {
                         $isUrgent         = $daysLeft <= 7 && !$isDeadlinePassed;
                         $canShare         = $isActive && !$isDeadlinePassed;
                     @endphp
-                    <div class="adm-mrow" wire:click="viewJob({{ $job->id }})" wire:key="admjob-mrow-{{ $job->id }}">
+                    <div class="adm-mrow" wire:click="viewJob({{ $job->id }})"
+                         wire:loading.class="opacity-60 pointer-events-none" wire:target="viewJob({{ $job->id }})"
+                         wire:key="admjob-mrow-{{ $job->id }}">
                         <div class="flex-1 min-w-0">
                             <div class="flex items-start justify-between gap-2">
                                 <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($job->job_title, $search) !!}</p>
@@ -1234,17 +1237,81 @@ select.adm-select-arrow {
     $vJobImgUrl = $this::jobImageUrl($vj->job_image ?? null);
 
     $vStatusLabel = $isActive ? 'Active' : 'Inactive';
-    $vStatusColor = $isActive ? 'text-emerald-600' : 'text-amber-600';
+    $vStatusBadge = $isActive
+        ? 'background:#d1fae5;color:#065f46;border:1.5px solid #6ee7b7;'
+        : 'background:#fef3c7;color:#92400e;border:1.5px solid #fcd34d;';
 
     $vDeadlineLabel = $vIsExp
-        ? 'Deadline passed'
+        ? 'Deadline Passed'
         : ($vIsUrgent
-            ? ($vDaysLeft === 0 ? 'Closing today' : $vDaysLeft.' day'.($vDaysLeft !== 1 ? 's' : '').' left')
+            ? ($vDaysLeft === 0 ? 'Closing Today' : $vDaysLeft.' day'.($vDaysLeft !== 1 ? 's' : '').' left')
             : $vDl->diffForHumans());
-    $vDeadlineColor = $vIsExp ? 'text-red-600' : ($vIsUrgent ? 'text-orange-600' : 'text-[#111111]');
+    $vDeadlineColor = $vIsExp ? '#dc2626' : ($vIsUrgent ? '#ea580c' : '#111111');
 @endphp
 
-{{-- Outer wrapper: light gray overall bg --}}
+<style>
+/* ── View Job Modal — Event Details layout ── */
+.vjob-info-card {
+    background: #ffffff;
+    border: 1.5px solid #e0e0e0;
+    border-radius: 0.875rem;
+    padding: 0.9rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+.vjob-info-icon {
+    font-size: 1.1rem;
+    color: #7a3f91;
+    margin-bottom: 2px;
+}
+.vjob-info-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #7a3f91;
+}
+.vjob-info-value {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111111;
+    line-height: 1.4;
+}
+.vjob-info-sub {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #444444;
+    margin-top: 1px;
+}
+.vjob-section-box {
+    background: #ffffff;
+    border: 1.5px solid #e0e0e0;
+    border-radius: 0.875rem;
+    padding: 1.1rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 400;
+    line-height: 1.8;
+    color: #333333;
+    white-space: pre-wrap;
+}
+.vjob-section-heading {
+    font-size: 0.8rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .09em;
+    color: #7a3f91;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1.5px solid #e0e0e0;
+}
+</style>
+
+{{-- Outer wrapper --}}
 <div class="fixed inset-0 flex flex-col overflow-hidden adm-fs-in" style="background:#f2f2f2;z-index:9995;"
      @keydown.escape.window="$wire.closeViewModal()">
 
@@ -1286,120 +1353,192 @@ select.adm-select-arrow {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden adm-scroll">
+    {{-- Scrollable content --}}
+    <div class="flex-1 min-h-0 overflow-y-auto adm-scroll" style="background:#f2f2f2;">
+        <div class="max-w-screen-xl mx-auto px-5 py-6 flex flex-col gap-6">
 
-        {{-- LEFT PANEL — white bg, white field cards --}}
-        <div class="w-full lg:w-[380px] flex flex-col flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#e0e0e0] overflow-visible lg:overflow-y-auto adm-scroll" style="background:#ffffff;">
+            {{-- ── TOP BLOCK: image left + info right ── --}}
+            <div class="bg-white rounded-2xl shadow-sm border border-[#e0e0e0] overflow-hidden flex flex-col lg:flex-row">
 
-            <div class="mx-4 mt-4 mb-0 flex-shrink-0 rounded-xl overflow-hidden" style="height:150px;">
-                <img src="{{ $vJobImgUrl }}" alt="{{ $vj->job_title }}"
-                     class="w-full h-full object-cover"
-                     onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+                {{-- Image --}}
+                <div class="w-full lg:w-[42%] flex-shrink-0" style="min-height:260px;">
+                    <img src="{{ $vJobImgUrl }}" alt="{{ $vj->job_title }}"
+                         class="w-full h-full object-cover" style="min-height:260px;"
+                         onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+                </div>
+
+                {{-- Right info --}}
+                <div class="flex-1 min-w-0 px-7 py-6 flex flex-col gap-5">
+
+                    {{-- Title + badges --}}
+                    <div>
+                        <p class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] mb-1">Job Title</p>
+                        <h3 class="text-3xl font-extrabold text-[#111111] leading-tight mb-3">{{ $vj->job_title }}</h3>
+                        <div class="flex flex-wrap items-center gap-2">
+                            {{-- Status badge --}}
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold" style="{{ $vStatusBadge }}">
+                                <span class="w-2 h-2 rounded-full inline-block"
+                                      style="{{ $isActive ? 'background:#10b981;' : 'background:#f59e0b;' }}"></span>
+                                {{ $vStatusLabel }}
+                            </span>
+                            {{-- Target college badge --}}
+                            @if($vOrgCollege)
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold"
+                                  style="background:#f5eef9;color:#7a3f91;border:1.5px solid #d4aaeb;">
+                                <i class="fas fa-building-columns text-xs"></i>
+                                {{ $vOrgCollege }}
+                            </span>
+                            @endif
+                            {{-- Employment type badge --}}
+                            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-bold"
+                                  style="background:#eff6ff;color:#1d4ed8;border:1.5px solid #bfdbfe;">
+                                <i class="fas fa-briefcase text-xs"></i>
+                                {{ $vj->employment_type }}
+                                @if($vj->experience_level) &middot; {{ $vj->experience_level }}@endif
+                            </span>
+                        </div>
+                    </div>
+
+                    {{-- Info grid: 3 columns --}}
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+
+                        <div class="vjob-info-card">
+                            <i class="vjob-info-icon fas fa-building"></i>
+                            <p class="vjob-info-label">Organization</p>
+                            <p class="vjob-info-value">{{ $vj->company_name }}</p>
+                            @if($displayType !== 'PHILCST')<p class="vjob-info-sub">{{ $displayType }}</p>@endif
+                        </div>
+
+                        <div class="vjob-info-card">
+                            <i class="vjob-info-icon fas fa-calendar-days"></i>
+                            <p class="vjob-info-label">Deadline</p>
+                            <p class="vjob-info-value" style="{{ $vIsExp ? 'color:#dc2626;' : '' }}">{{ $vDl->format('M d, Y') }}</p>
+                            <p class="vjob-info-sub" style="color:{{ $vDeadlineColor }};">{{ $vDeadlineLabel }}</p>
+                        </div>
+
+                        <div class="vjob-info-card">
+                            <i class="vjob-info-icon fas fa-users"></i>
+                            <p class="vjob-info-label">Open For</p>
+                            @if($vj->target_college)
+                                <p class="vjob-info-value">{{ str_replace(',', ' · ', $vj->target_college) }}</p>
+                            @else
+                                <p class="vjob-info-value">All Alumni</p>
+                            @endif
+                        </div>
+
+                        @if($vj->location)
+                        <div class="vjob-info-card">
+                            <i class="vjob-info-icon fas fa-location-dot"></i>
+                            <p class="vjob-info-label">Location</p>
+                            <p class="vjob-info-value">{{ $vj->location }}</p>
+                        </div>
+                        @endif
+
+                        @if($vj->salary)
+                        <div class="vjob-info-card">
+                            <i class="vjob-info-icon fas fa-money-bill-wave"></i>
+                            <p class="vjob-info-label">Salary</p>
+                            <p class="vjob-info-value">{{ $vj->salary }}</p>
+                        </div>
+                        @endif
+
+                        <div class="vjob-info-card">
+                            <i class="vjob-info-icon fas fa-clock-rotate-left"></i>
+                            <p class="vjob-info-label">Posted</p>
+                            <p class="vjob-info-value">{{ $vCreatedPH->format('M d, Y') }}</p>
+                            <p class="vjob-info-sub">{{ $vCreatedPH->diffForHumans() }}</p>
+                        </div>
+
+                    </div>
+
+                </div>
             </div>
 
-            {{-- Status + chip row --}}
-            <div class="px-4 pt-3 pb-1 flex-shrink-0 flex items-center justify-between">
-                <span class="text-sm font-bold {{ $vStatusColor }}">{{ $vStatusLabel }}</span>
-                @if($vOrgName)
-                    <span class="vw-chip">{{ $vOrgName }}</span>
-                @else
-                    <span class="vw-chip">Alumni Director</span>
-                @endif
-            </div>
+            {{-- ── BOTTOM BLOCK: sections left + posted-by right ── --}}
+            <div class="flex flex-col lg:flex-row gap-5 items-start">
 
-            <div class="flex flex-col gap-2.5 px-4 pb-4 pt-2">
+                {{-- Left: Description / Qualifications / How to Apply --}}
+                <div class="flex-1 min-w-0 flex flex-col gap-4">
 
-                <div class="vw-field">
-                    <p class="vw-label">Organization</p>
-                    <p class="vw-value">{{ $vj->company_name }}</p>
-                    @if($displayType !== 'PHILCST')<p class="vw-subvalue">{{ $displayType }}</p>@endif
-                </div>
-
-                @if($vj->location)
-                <div class="vw-field">
-                    <p class="vw-label">Location</p>
-                    <p class="vw-value">{{ $vj->location }}</p>
-                </div>
-                @endif
-
-                <div class="vw-field">
-                    <p class="vw-label">Employment</p>
-                    <p class="vw-value">{{ $vj->employment_type }}</p>
-                    <p class="vw-subvalue">{{ $vj->experience_level }}</p>
-                </div>
-
-                @if($vj->salary)
-                <div class="vw-field">
-                    <p class="vw-label">Salary</p>
-                    <p class="vw-value">{{ $vj->salary }}</p>
-                </div>
-                @endif
-
-                <div class="vw-field">
-                    <p class="vw-label">Deadline</p>
-                    <p class="vw-value {{ $vIsExp ? 'text-red-600' : '' }}">{{ $vDl->format('F d, Y') }}</p>
-                    <p class="vw-subvalue {{ $vDeadlineColor }}">{{ $vDeadlineLabel }}</p>
-                </div>
-
-                @if($vj->target_college)
-                <div class="vw-field">
-                    <p class="vw-label">Target Colleges</p>
-                    <p class="vw-value">{{ str_replace(',', ', ', $vj->target_college) }}</p>
-                </div>
-                @endif
-
-                <div class="vw-field">
-                    <p class="vw-label">{{ $vOrgName ? 'Coordinator' : 'Posted By' }}</p>
-                    @if($vOrgName)
-                        <p class="vw-value">{{ $vOrgName }}</p>
-                        @if($vOrgCollege)<p class="vw-subvalue">{{ $vOrgCollege }}</p>@endif
-                    @else
-                        <p class="vw-value">Alumni Director</p>
+                    @if($vj->description)
+                    <div>
+                        <p class="vjob-section-heading">
+                            <i class="fas fa-align-left text-[#7a3f91]"></i>
+                            Job Description
+                        </p>
+                        <div class="vjob-section-box">{{ trim($vj->description) }}</div>
+                    </div>
                     @endif
+
+                    @if($vj->qualifications)
+                    <div>
+                        <p class="vjob-section-heading">
+                            <i class="fas fa-list-check text-[#7a3f91]"></i>
+                            Qualifications
+                        </p>
+                        <div class="vjob-section-box">{{ trim($vj->qualifications) }}</div>
+                    </div>
+                    @endif
+
+                    @if($vj->application_instructions)
+                    <div>
+                        <p class="vjob-section-heading">
+                            <i class="fas fa-paper-plane text-[#7a3f91]"></i>
+                            How to Apply
+                        </p>
+                        <div class="vjob-section-box">{{ trim($vj->application_instructions) }}</div>
+                    </div>
+                    @endif
+
+                    @if(!$vj->description && !$vj->qualifications && !$vj->application_instructions)
+                    <div class="bg-white border border-[#e0e0e0] rounded-2xl flex items-center justify-center py-10">
+                        <p class="text-base font-bold text-[#111111]">No additional details provided.</p>
+                    </div>
+                    @endif
+
                 </div>
 
-                <p class="text-xs text-center text-[#111111] pt-1 font-semibold">
-                    Submitted {{ $vCreatedPH->diffForHumans() }} · {{ $vCreatedPH->format('M d, Y g:i A') }}
-                </p>
+                {{-- Right: Posted By (coordinator info) --}}
+                <div class="w-full lg:w-[340px] flex-shrink-0 flex flex-col gap-4">
+
+                    <div class="bg-white border border-[#e0e0e0] rounded-2xl overflow-hidden">
+                        <p class="vjob-section-heading px-5 pt-4 pb-3 mb-0 border-b border-[#e0e0e0]"
+                           style="border-radius:0;">
+                            <i class="fas fa-id-badge text-[#7a3f91]"></i>
+                            {{ $vOrgName ? 'Coordinator' : 'Posted By' }}
+                        </p>
+                        <div class="px-5 py-4 flex flex-col gap-2.5">
+                            <div class="flex items-center gap-3">
+                                <span class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                                      style="background:#f5eef9;">
+                                    <i class="fas fa-user text-[#7a3f91]"></i>
+                                </span>
+                                <div>
+                                    <p class="text-base font-bold text-[#111111]">
+                                        {{ $vOrgName ?? 'Alumni Director' }}
+                                    </p>
+                                    @if($vOrgCollege)
+                                        <p class="text-sm text-[#7a3f91] font-semibold">{{ $vOrgCollege }}</p>
+                                    @endif
+                                </div>
+                            </div>
+                            <p class="text-sm text-[#555555]">
+                                Submitted {{ $vCreatedPH->format('M d, Y') }} at {{ $vCreatedPH->format('g:i A') }}
+                            </p>
+                        </div>
+                    </div>
+
+                </div>
+
             </div>
+
+            {{-- Footer attribution --}}
+            <p class="text-center text-sm text-[#888888] pb-2">
+                Posted {{ $vCreatedPH->format('M d, Y') }} at {{ $vCreatedPH->format('g:i A') }} &middot; by
+                <strong class="text-[#111111]">{{ $vOrgName ?? 'Alumni Director' }}</strong>
+            </p>
+
         </div>
-
-        {{-- RIGHT PANEL — light gray bg (#f2f2f2), black text, white body boxes --}}
-        <div class="flex-1 min-w-0 flex flex-col lg:overflow-hidden" style="background:#f2f2f2;">
-
-            {{-- Scrollable body sections --}}
-            <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto adm-scroll px-5 py-5 flex flex-col gap-5" style="background:#f2f2f2;">
-
-                @if($vj->description)
-                <div>
-                    <p class="vw-section-title">Job Description</p>
-                    <div class="vw-body-box">{{ trim($vj->description) }}</div>
-                </div>
-                @endif
-
-                @if($vj->qualifications)
-                <div>
-                    <p class="vw-section-title">Qualifications</p>
-                    <div class="vw-body-box">{{ trim($vj->qualifications) }}</div>
-                </div>
-                @endif
-
-                @if($vj->application_instructions)
-                <div>
-                    <p class="vw-section-title">How to Apply</p>
-                    <div class="vw-body-box">{{ trim($vj->application_instructions) }}</div>
-                </div>
-                @endif
-
-                @if(!$vj->description && !$vj->qualifications && !$vj->application_instructions)
-                <div class="flex-1 flex items-center justify-center py-10">
-                    <p class="text-sm font-bold text-[#111111]">No additional details provided.</p>
-                </div>
-                @endif
-
-            </div>
-        </div>
-
     </div>
 </div>
 @endif

@@ -364,9 +364,24 @@ new class extends Component {
         \Illuminate\Support\Facades\Log::info('[JobMail][Director] target_college raw: ' . var_export($job->target_college, true));
         \Illuminate\Support\Facades\Log::info('[JobMail][Director] parsed colleges: ' . json_encode($colleges));
 
+        // Required fields that define a "complete" profile — mirrors
+        // applyProfileCompletionFilter() in alumni-records.blade.php exactly.
+        $profileRequiredFields = [
+            'email', 'gender', 'contact_number',
+            'father_last_name', 'father_given_name', 'father_middle_name',
+            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
+        ];
+
         $query = Alumni::query()
+            ->where('status', 'VERIFIED')
             ->whereNotNull('email')
-            ->where('email', '!=', '');
+            ->where('email', '!=', '')
+            ->whereNotNull('date_of_birth');
+
+        foreach ($profileRequiredFields as $field) {
+            $query->whereNotNull($field)->where($field, '!=', '');
+        }
 
         if (!empty($colleges)) {
             $query->whereHas('course', function ($q) use ($colleges) {
@@ -378,34 +393,28 @@ new class extends Component {
             ->select(['id', 'first_name', 'last_name', 'email', 'course_code'])
             ->get();
 
-        // DEBUG
         \Illuminate\Support\Facades\Log::info('[JobMail][Director] matched alumni count: ' . $recipients->count());
 
         if ($recipients->isEmpty()) {
             return;
         }
 
-        $queuedCount = 0;
-
+        // FIX: ->later() only INSERTS a row into the `jobs` table — it never
+        // actually sends anything unless a `queue:work` worker is running
+        // to process it. This project doesn't run one, so emails just sat
+        // queued forever. Switched to ->send() (synchronous, immediate),
+        // same as the working notifyMatchedAlumniOfNewJob() in
+        // job-management_blade.php.
         foreach ($recipients as $alumnus) {
             if (!self::isEmailPlausiblyValid($alumnus->email)) {
                 \Illuminate\Support\Facades\Log::info(
-                    "Skipped new-job-posting email for alumnus #{$alumnus->id} — invalid/undeliverable address: {$alumnus->email}"
+                    "[JobMail][Director] Skipped — invalid/undeliverable address for alumnus #{$alumnus->id}: {$alumnus->email}"
                 );
                 continue;
             }
 
-            // ->queue() here is just a fast DB INSERT into the `jobs`
-            // table — no network call, no waiting. Safe to do in a loop.
-            Mail::to($alumnus->email)->queue(new NewJobPostingMail($job, $alumnus));
-            $queuedCount++;
+            Mail::to($alumnus->email)->send(new NewJobPostingMail($job, $alumnus));
         }
-
-        if ($queuedCount === 0) {
-            return;
-        }
-
-        $this->spawnBackgroundQueueWorker();
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1088,6 +1097,16 @@ new class extends Component {
         $this->resetPostFields();
     }
 
+    /**
+     * "Reset" button next to the X on the Post Job modal — clears every
+     * field back to blank but keeps the modal open (unlike closePostModal,
+     * which also hides the modal).
+     */
+    public function resetPostForm(): void
+    {
+        $this->resetPostFields();
+    }
+
     public function savePost(): void
     {
         $this->authorizeRole();
@@ -1325,6 +1344,26 @@ new class extends Component {
     }
 
     public function closeEditModal(): void { $this->showEditModal = false; $this->resetEditFields(); }
+
+    /**
+     * "Reset" button next to the X on the Edit Job modal — clears every
+     * editable field back to blank, same as a real reset, but (unlike
+     * resetEditFields()) keeps $editingJobId intact so Save Changes still
+     * knows which job to update, and keeps the modal open.
+     */
+    public function resetEditForm(): void
+    {
+        $this->editJobTitle = $this->editCompany = $this->editCompanyType = '';
+        $this->editLocation = $this->editEmpType = $this->editExpLevel    = '';
+        $this->editSalary   = $this->editDeadline = $this->editDescription = '';
+        $this->editQualifications = $this->editApplicationInstructions = '';
+        $this->editTargetColleges = [];
+        $this->editErrors = [];
+        $this->editAllColleges  = false;
+        $this->editJobImage     = null;
+        $this->editRemoveImage  = false;
+        $this->editOrgCategory  = '';
+    }
 
     public function saveEditJob(): void
     {
@@ -2951,15 +2990,26 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <p class="text-white/60 text-xs mt-0.5">Fill in the details — job goes live immediately</p>
             </div>
         </div>
-        <button wire:click="closePostModal" type="button"
-                wire:loading.attr="disabled"
-                wire:loading.class="opacity-60"
-                wire:target="closePostModal,savePost"
-                class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none">
-            <span wire:loading wire:target="closePostModal"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
-            <span wire:loading.remove wire:target="closePostModal"><i class="fas fa-xmark text-white text-sm"></i></span>
-            <span class="mtip">Close</span>
-        </button>
+        <div class="flex items-center gap-1.5">
+            <button wire:click="resetPostForm" type="button"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60"
+                    wire:target="resetPostForm,closePostModal,savePost"
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none">
+                <span wire:loading wire:target="resetPostForm"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
+                <span wire:loading.remove wire:target="resetPostForm"><i class="fas fa-rotate-left text-white text-sm"></i></span>
+                <span class="mtip">Reset</span>
+            </button>
+            <button wire:click="closePostModal" type="button"
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60"
+                    wire:target="closePostModal,savePost"
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:pointer-events-none">
+                <span wire:loading wire:target="closePostModal"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
+                <span wire:loading.remove wire:target="closePostModal"><i class="fas fa-xmark text-white text-sm"></i></span>
+                <span class="mtip">Close</span>
+            </button>
+        </div>
     </div>
 
     {{-- 3-COLUMN BODY --}}
@@ -2972,7 +3022,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 {{-- Organization Category --}}
                 <div class="bg-white border-[1.5px] {{ isset($postErrors['postOrgCategory']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
-                        <i class="fas fa-building text-[9px] text-[#555555]"></i> Organization
+                        <i class="fas fa-building text-[9px] text-[#555555]"></i> EMPLOYER
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 space-y-2">
@@ -3022,13 +3072,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v)},syncT(v){$wire.set('postPartnerType',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
                                     <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Acme Corp" maxlength="150"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Type <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
                                     <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Private, NGO" maxlength="100"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
@@ -3047,13 +3097,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v)},syncT(v){$wire.set('postCustomType',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Name <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
                                     <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company Type <span class="text-red-500">*</span></label>
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
                                     <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomType'] }}</p>@endif
@@ -3443,11 +3493,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             @if($editingJob)
                 @if(!$editJobIsActive)
                     @if($editJobDeadlinePassed)
-                        <div class="activate-disabled-wrap" data-tip="Update deadline to activate">
-                            <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed bg-white/10 border border-white/15">
-                                <i class="fas fa-circle-play text-white/50 text-sm"></i>
-                            </span>
-                        </div>
+<span class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-not-allowed bg-white/10 border border-white/15">
+    <i class="fas fa-circle-play text-white/50 text-sm"></i>
+    <span class="mtip">Update deadline to activate</span>
+</span>
                     @else
                         <button wire:click="confirmToggle({{ $editingJobId }})" type="button"
                                 wire:loading.attr="disabled" wire:target="confirmToggle({{ $editingJobId }})"
@@ -3477,6 +3526,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </button>
                 @endif
             @endif
+
+            <button wire:click="resetEditForm" type="button" x-show="editMode" x-cloak
+                    wire:loading.attr="disabled"
+                    wire:loading.class="opacity-60"
+                    wire:target="resetEditForm,closeEditModal,saveEditJob"
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white/14">
+                <span wire:loading wire:target="resetEditForm"><i class="fas fa-spinner animate-spin text-white text-sm"></i></span>
+                <span wire:loading.remove wire:target="resetEditForm"><i class="fas fa-rotate-left text-white text-sm"></i></span>
+                <span class="mtip">Reset</span>
+            </button>
 
             <button wire:click="closeEditModal" type="button"
                     wire:loading.attr="disabled"

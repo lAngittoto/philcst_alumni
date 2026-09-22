@@ -47,31 +47,6 @@ new class extends Component {
         $this->regYear = (string) date('Y');
     }
 
-    // Bawat field na naka wire:model.live ay tatawag dito kapag nagbago,
-    // para live ma-update ang red highlight (fieldErrors) at ang
-    // disabled state ng "Register Alumni" button nang hindi na
-    // kailangan mag-full submit muna.
-    public function updated(string $property): void
-    {
-        $regFields = [
-            'regFirstName', 'regMiddleInitial', 'regLastName', 'regSuffix',
-            'regStudentId', 'regCourseCode', 'regYear', 'regEmail',
-        ];
-
-        if (!in_array($property, $regFields, true)) {
-            return;
-        }
-
-        // Habang naglilive-validate lang (hindi pa nag-submit), huwag
-        // munang i-flag as "required" ang mga blangkong field (di pa
-        // naman tapos mag-type ang user) — format/duplicate checks lang
-        // ang live. Kapag nag-submit na talaga, buong validation
-        // (kasama ang "required") ang gagamitin ng registerAlumni().
-        $result = $this->collectErrors(liveMode: true);
-        $this->fieldErrors   = $result['fields'];
-        $this->fieldMessages = $result['messages'];
-    }
-
     #[\Livewire\Attributes\Computed]
     public function courses() { return Course::orderBy('code')->get(); }
 
@@ -1425,86 +1400,11 @@ public function closeImportModal(): void
                 <div class="reg-card reg-panel">
                     <form wire:submit="registerAlumni" novalidate class="p-5 sm:p-7 space-y-5 pb-7"
                           x-data="{
-                              clientError(key) {
-                                  const nameRe = /^[a-zA-Z\s\-.']+$/;
-                                  switch (key) {
-                                      case 'firstName': {
-                                          const v = $wire.regFirstName.trim();
-                                          if (v === '') return '';
-                                          if (!nameRe.test(v)) return 'Letters, spaces, hyphens, or apostrophes only.';
-                                          return '';
-                                      }
-                                      case 'lastName': {
-                                          const v = $wire.regLastName.trim();
-                                          if (v === '') return '';
-                                          if (!nameRe.test(v)) return 'Letters, spaces, hyphens, or apostrophes only.';
-                                          return '';
-                                      }
-                                      case 'middleName': {
-                                          const v = $wire.regMiddleInitial.trim();
-                                          if (v === '') return '';
-                                          if (!/^[a-zA-Z]+$/.test(v)) return 'Letters only, no numbers or symbols.';
-                                          if (v.length < 2) return 'Must be a full word (e.g. Santos, not S).';
-                                          return '';
-                                      }
-                                      case 'suffix': {
-                                          const v = $wire.regSuffix.trim();
-                                          if (v === '') return '';
-                                          if (!/^[a-zA-Z.\s]+$/.test(v)) return 'Letters and periods only (e.g. Jr. Sr. III).';
-                                          return '';
-                                      }
-                                      case 'studentId': {
-                                          const v = $wire.regStudentId.trim();
-                                          if (v === '') return '';
-                                          if (!/^\d+$/.test(v)) return 'Numbers only.';
-                                          if (v.length < 8) return (8 - v.length) + ' more digit' + ((8 - v.length) === 1 ? '' : 's') + ' needed.';
-                                          if (v.length > 8) return 'Must be exactly 8 digits.';
-                                          return '';
-                                      }
-                                      case 'year': {
-                                          const v = $wire.regYear.trim();
-                                          if (v === '') return '';
-                                          if (!/^\d{4}$/.test(v)) return 'Must be exactly 4 digits.';
-                                          return '';
-                                      }
-                                      case 'email': {
-                                          const v = $wire.regEmail.trim();
-                                          if (v === '') return '';
-                                          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return 'Please enter a valid email address.';
-                                          if (!/^[^\s@]+@gmail\.com$/i.test(v)) return 'Only Gmail addresses are accepted (e.g. name@gmail.com).';
-                                          return '';
-                                      }
-                                      default: return '';
-                                  }
-                              },
-                              fieldStale(key) {
-                                  if (this.clientError(key) !== '') return true;
+                              fieldHasError(key) {
                                   return ($wire.fieldErrors || []).includes(key);
                               },
-                              fieldMessage(key, serverMsg) {
-                                  const c = this.clientError(key);
-                                  return c !== '' ? c : (serverMsg || '');
-                              },
-                              isValidEmail(value) {
-                                  return /^[^\s@]+@gmail\.com$/i.test(value.trim());
-                              },
-                              allFilled() {
-                                  return $wire.regFirstName.trim() !== '' && $wire.regLastName.trim() !== ''
-                                      && $wire.regMiddleInitial.trim() !== '' && $wire.regStudentId.trim() !== ''
-                                      && $wire.regCourseCode !== '' && $wire.regYear !== ''
-                                      && this.isValidEmail($wire.regEmail);
-                              },
-                              get isDisabled() {
-                                  const keys = ['firstName','lastName','middleName','suffix','studentId','year','email'];
-                                  const hasClientError = keys.some(k => this.clientError(k) !== '');
-                                  return !!$wire.submitting || !this.allFilled() || hasClientError || ($wire.fieldErrors || []).length > 0;
-                              },
-                              get tooltip() {
-                                  if ($wire.regEmail.trim() !== '' && !this.isValidEmail($wire.regEmail)) {
-                                      return 'Only Gmail addresses are accepted (e.g. name@gmail.com)';
-                                  }
-                                  if (!this.allFilled()) return 'Please fill up all required fields *';
-                                  return this.isDisabled ? 'Please fix the highlighted field(s) marked in red' : '';
+                              fieldMessage(key) {
+                                  return ($wire.fieldMessages || {})[key] ?? '';
                               }
                           }">
 
@@ -1519,29 +1419,29 @@ public function closeImportModal(): void
                                 <div>
                                     <div class="fl-group">
                                         <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                        <input wire:model.live.debounce.150ms="regFirstName" type="text" placeholder=" "
-                                               :class="{ 'field-error': fieldStale('firstName') }"
+                                        <input wire:model="regFirstName" type="text" placeholder=" "
+                                               :class="{ 'field-error': fieldHasError('firstName') }"
                                                class="fl-input"
                                                maxlength="100" autocomplete="given-name">
                                         <label class="fl-label">First Name <span class="text-red-500">*</span></label>
                                     </div>
-                                    <p x-show="fieldMessage('firstName', $wire.fieldMessages?.firstName ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <p x-show="fieldMessage('firstName') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span x-text="fieldMessage('firstName', $wire.fieldMessages?.firstName ?? '')"></span>
+                                    <span x-text="fieldMessage('firstName')"></span>
                                 </p>
                                 </div>
                                 <div>
                                     <div class="fl-group">
                                         <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                        <input wire:model.live.debounce.150ms="regLastName" type="text" placeholder=" "
-                                               :class="{ 'field-error': fieldStale('lastName') }"
+                                        <input wire:model="regLastName" type="text" placeholder=" "
+                                               :class="{ 'field-error': fieldHasError('lastName') }"
                                                class="fl-input"
                                                maxlength="100" autocomplete="family-name">
                                         <label class="fl-label">Last Name <span class="text-red-500">*</span></label>
                                     </div>
-                                    <p x-show="fieldMessage('lastName', $wire.fieldMessages?.lastName ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <p x-show="fieldMessage('lastName') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span x-text="fieldMessage('lastName', $wire.fieldMessages?.lastName ?? '')"></span>
+                                    <span x-text="fieldMessage('lastName')"></span>
                                 </p>
                                 </div>
                             </div>
@@ -1549,15 +1449,15 @@ public function closeImportModal(): void
                                 <div>
                                     <div class="fl-group">
                                         <span class="fl-icon"><i class="fas fa-user"></i></span>
-                                        <input wire:model.live.debounce.150ms="regMiddleInitial" type="text" placeholder=" "
-                                               :class="{ 'field-error': fieldStale('middleName') }"
+                                        <input wire:model="regMiddleInitial" type="text" placeholder=" "
+                                               :class="{ 'field-error': fieldHasError('middleName') }"
                                                class="fl-input"
                                                maxlength="50">
                                         <label class="fl-label">Middle Name <span class="text-red-500">*</span></label>
                                     </div>
-                                    <p x-show="fieldMessage('middleName', $wire.fieldMessages?.middleName ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                    <p x-show="fieldMessage('middleName') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span x-text="fieldMessage('middleName', $wire.fieldMessages?.middleName ?? '')"></span>
+                                    <span x-text="fieldMessage('middleName')"></span>
                                 </p>
                                 </div>
 
@@ -1598,7 +1498,7 @@ public function closeImportModal(): void
 
                                     <button type="button"
                                             @click="toggle()"
-                                            :class="{ 'has-value': $wire.regSuffix !== '', 'open': open, 'field-error': fieldStale('suffix') }"
+                                            :class="{ 'has-value': $wire.regSuffix !== '', 'open': open, 'field-error': fieldHasError('suffix') }"
                                             class="reg-dropdown-trigger">
                                         <i class="fas fa-tag reg-trigger-icon"></i>
                                         <span class="reg-trigger-label">Suffix</span>
@@ -1641,9 +1541,9 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
-                                <p x-show="fieldMessage('suffix', $wire.fieldMessages?.suffix ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                <p x-show="fieldMessage('suffix') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span x-text="fieldMessage('suffix', $wire.fieldMessages?.suffix ?? '')"></span>
+                                    <span x-text="fieldMessage('suffix')"></span>
                                 </p>
                                 </div>
                             </div>
@@ -1657,15 +1557,15 @@ public function closeImportModal(): void
                             </p>
                             <div class="fl-group">
                                 <span class="fl-icon"><i class="fas fa-id-card"></i></span>
-                                <input wire:model.live.debounce.150ms="regStudentId" type="text" placeholder=" "
-                                       :class="{ 'field-error': fieldStale('studentId') }"
+                                <input wire:model="regStudentId" type="text" placeholder=" "
+                                       :class="{ 'field-error': fieldHasError('studentId') }"
                                        class="fl-input font-mono"
                                        maxlength="8" inputmode="numeric" autocomplete="off">
                                 <label class="fl-label">Student ID <span class="text-red-500">*</span></label>
                             </div>
-                            <p x-show="fieldMessage('studentId', $wire.fieldMessages?.studentId ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                            <p x-show="fieldMessage('studentId') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span x-text="fieldMessage('studentId', $wire.fieldMessages?.studentId ?? '')"></span>
+                                    <span x-text="fieldMessage('studentId')"></span>
                                 </p>
                         </div>
 
@@ -1719,7 +1619,7 @@ public function closeImportModal(): void
 
                                     <button type="button"
                                             @click="toggle(); if(open) jumpToSelected()"
-                                            :class="{ 'has-value': $wire.regCourseCode !== '', 'open': open, 'field-error': fieldStale('course') }"
+                                            :class="{ 'has-value': $wire.regCourseCode !== '', 'open': open, 'field-error': fieldHasError('course') }"
                                             class="reg-dropdown-trigger reg-dropdown-trigger--program">
                                         <i class="fas fa-book-open reg-trigger-icon"></i>
                                         <span class="reg-trigger-label" x-show="$wire.regCourseCode === ''">Program <span class="text-red-500">*</span></span>
@@ -1773,9 +1673,9 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
-                                <p x-show="($wire.fieldMessages?.course ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                <p x-show="fieldMessage('course') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span x-text="$wire.fieldMessages?.course ?? ''"></span>
+                                    <span x-text="fieldMessage('course')"></span>
                                 </p>
                                 </div>
 
@@ -1819,7 +1719,7 @@ public function closeImportModal(): void
 
                                     <button type="button"
                                             @click="toggle()"
-                                            :class="{ 'has-value': $wire.regYear !== '', 'open': open, 'field-error': fieldStale('year') }"
+                                            :class="{ 'has-value': $wire.regYear !== '', 'open': open, 'field-error': fieldHasError('year') }"
                                             class="reg-dropdown-trigger">
                                         <i class="fas fa-calendar-alt reg-trigger-icon"></i>
                                         <span class="reg-trigger-label">Batch Year <span class="text-red-500">*</span></span>
@@ -1866,9 +1766,9 @@ public function closeImportModal(): void
                                         </div>
                                     </div>
                                 </div>
-                                <p x-show="fieldMessage('year', $wire.fieldMessages?.year ?? '') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
+                                <p x-show="fieldMessage('year') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                    <span x-text="fieldMessage('year', $wire.fieldMessages?.year ?? '')"></span>
+                                    <span x-text="fieldMessage('year')"></span>
                                 </p>
                                 </div>
 
@@ -1882,19 +1782,20 @@ public function closeImportModal(): void
                             </p>
                             <div class="fl-group">
                                 <span class="fl-icon"><i class="fas fa-envelope"></i></span>
-                                <input wire:model.live.debounce.150ms="regEmail" type="email" placeholder=" "
-                                       :class="{ 'field-error': fieldStale('email') }"
+                                <input wire:model="regEmail" type="email" placeholder=" "
+                                       :class="{ 'field-error': fieldHasError('email') }"
                                        class="fl-input"
                                        maxlength="255" autocomplete="email">
                                 <label class="fl-label">Email Address <span class="text-red-500">*</span></label>
                             </div>
                             <p class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1"
-                               x-show="fieldMessage('email', $wire.fieldMessages?.email ?? '') !== ''"
+                               x-show="fieldMessage('email') !== ''"
                                style="display:none;">
                                 <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
-                                <span x-text="fieldMessage('email', $wire.fieldMessages?.email ?? '')"></span>
+                                <span x-text="fieldMessage('email')"></span>
                             </p>
                         </div>
+
 
                         {{-- Buttons --}}
                         <div class="flex gap-3 pt-1">
@@ -1909,10 +1810,8 @@ public function closeImportModal(): void
                                 </span>
                             </button>
                             <button type="submit"
-                                    :disabled="isDisabled"
-                                    :title="tooltip"
                                     wire:loading.attr="disabled" wire:target="registerAlumni,resetForm"
-                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed hover:opacity-90 active:scale-[.99]"
+                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
                                     style="background:#7A3F91;">
                                 <span wire:loading wire:target="registerAlumni" class="inline-flex items-center gap-2">
                                     <i class="fas fa-spinner animate-spin"></i> Registering...

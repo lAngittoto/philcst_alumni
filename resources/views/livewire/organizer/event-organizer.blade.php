@@ -2110,7 +2110,10 @@ select.tw-select-arrow {
                            bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer
                            disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                 <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 3v5h5" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
                 </span>
                 <span wire:loading wire:target="resetFilters">
                     <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
@@ -2539,7 +2542,12 @@ select.tw-select-arrow {
                         wire:loading.attr="disabled" wire:target="resetForm"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Reset form">
-                    <i class="fas fa-rotate-left text-white text-base" wire:loading.remove wire:target="resetForm"></i>
+                    <span wire:loading.remove wire:target="resetForm">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M3 3v5h5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
                     <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="resetForm"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-xs font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
@@ -2549,6 +2557,24 @@ select.tw-select-arrow {
             </div>
             @endif
             @if(($isEditing || $isResubmitting) && $editingEventId)
+            <div class="relative inline-flex group">
+                <button wire:click="resetForm" type="button"
+                        wire:loading.attr="disabled" wire:target="resetForm,saveEvent"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
+                        aria-label="Reset form">
+                    <span wire:loading.remove wire:target="resetForm,saveEvent">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M3 3v5h5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                    <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="resetForm"></i>
+                </button>
+                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-xs font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                    Reset
+                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
+                </div>
+            </div>
             <div class="relative inline-flex group">
                 <button wire:click="confirmDelete({{ $editingEventId }})" type="button"
                         wire:loading.attr="disabled" wire:target="confirmDelete({{ $editingEventId }})"
@@ -3315,23 +3341,8 @@ select.tw-select-arrow {
                 <button type="button" wire:click="requestSaveEvent"
                         wire:target="requestSaveEvent,saveEvent"
                         wire:loading.attr="disabled" wire:loading.target="requestSaveEvent,saveEvent"
-                        x-data="{ uploadingPhoto: false }"
-                        x-init="
-                            $el.addEventListener('livewire-upload-start', () => uploadingPhoto = true);
-                            $el.addEventListener('livewire-upload-finish', () => uploadingPhoto = false);
-                            $el.addEventListener('livewire-upload-error', () => uploadingPhoto = false);
-                            $el.addEventListener('livewire-upload-cancel', () => uploadingPhoto = false);
-                        "
-                        :disabled="uploadingPhoto || {{ $this->isFormValid ? 'false' : 'true' }}"
                         class="w-full px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer
                                {{ $isResubmitting ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#7a3f91] hover:bg-[#5e2f72]' }}">
-                    {{-- Loading spinner/icon only reacts to the actual save
-                         request (requestSaveEvent/saveEvent) — NOT to
-                         "photo". While a photo is uploading, the button
-                         still gets disabled (see wire:target above), but
-                         its label stays the normal "Submit Event" / "Save
-                         Changes" text with no spinner or "Uploading
-                         photo…" state. --}}
                     <span wire:loading wire:target="requestSaveEvent,saveEvent">
                         <i class="fas fa-spinner animate-spin text-sm"></i>
                     </span>
@@ -3351,15 +3362,6 @@ select.tw-select-arrow {
                         @endif
                     </span>
                 </button>
-                @if(! $this->isFormValid)
-                    <p class="text-xs text-center font-medium" style="color:#b45309;">
-                        @if($this->originalFormSnapshot !== null && ! $this->hasFormChanges)
-                            <i class="fas fa-circle-info mr-1"></i>No changes yet — edit a field to enable Save Changes.
-                        @else
-                            <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable submit.
-                        @endif
-                    </p>
-                @endif
                 <button type="button" wire:click="closeFormModal"
                         wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent,closeFormModal"
                         class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">

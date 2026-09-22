@@ -301,9 +301,24 @@ new class extends Component {
             ? array_filter(array_map('trim', explode(',', $job->target_college)))
             : [];
 
+        // Required fields that define a "complete" profile — mirrors
+        // applyProfileCompletionFilter() in alumni-records.blade.php exactly.
+        $profileRequiredFields = [
+            'email', 'gender', 'contact_number',
+            'father_last_name', 'father_given_name', 'father_middle_name',
+            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
+        ];
+
         $query = Alumni::query()
+            ->where('status', 'VERIFIED')
             ->whereNotNull('email')
-            ->where('email', '!=', '');
+            ->where('email', '!=', '')
+            ->whereNotNull('date_of_birth');
+
+        foreach ($profileRequiredFields as $field) {
+            $query->whereNotNull($field)->where($field, '!=', '');
+        }
 
         if (!empty($colleges)) {
             $query->whereHas('course', function ($q) use ($colleges) {
@@ -329,15 +344,13 @@ new class extends Component {
                 continue;
             }
 
-            Mail::to($alumnus->email)->queue(new NewJobPostingMail($job, $alumnus));
+            Mail::to($alumnus->email)->send(new NewJobPostingMail($job, $alumnus));
             $queuedCount++;
         }
 
         if ($queuedCount === 0) {
             return;
         }
-
-        $this->spawnBackgroundQueueWorker();
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -980,6 +993,35 @@ new class extends Component {
         $this->search = $this->filterStatus = $this->filterType = $this->filterSource = '';
         $this->resetPage();
     }
+
+// ── Public reset handlers called by the Reset button in each modal ──
+public function resetPostForm(): void
+{
+    $this->guardAuth();
+    $this->resetPostFields();
+    // Full reset — clear everything including colleges so the form is completely blank.
+    $this->postTargetColleges = [];
+    $this->postModalOpenToken++; // re-mounts the photo picker so the file input clears
+    // Tell wire:ignore'd Alpine fields (partner/custom inputs) to clear their local state.
+    $this->dispatch('post-form-reset');
+}
+
+public function resetEditForm(): void
+{
+    $this->guardAuth();
+    if ($this->editingJobId) {
+        // Full reset — wipe every field to blank so the form is completely empty.
+        // Preserve editingJobId so the modal stays open.
+        $savedId = $this->editingJobId;
+        $this->resetEditFields();
+        $this->editingJobId = $savedId;
+        $this->editTargetColleges = [];
+        $this->editErrors         = [];
+        $this->originalEditFormSnapshot = null;
+        // Tell wire:ignore'd Alpine fields (partner/custom inputs) to clear their local state.
+        $this->dispatch('edit-form-reset');
+    }
+}
 
 public function openPostModal(): void
 {
@@ -2539,7 +2581,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     @if(!$jmHasActiveFilter) disabled @endif
                     class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
                 <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 3v5h5" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
                 </span>
                 <span wire:loading wire:target="resetFilters">
                     <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
@@ -2841,6 +2886,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
         </div>
         <div class="flex items-center gap-1.5">
+            {{-- Reset Post Form --}}
+            <button wire:click="resetPostForm" type="button"
+                    wire:loading.attr="disabled" wire:target="resetPostForm,savePost"
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
+                    data-mtip="Reset">
+                <span wire:loading.remove wire:target="resetPostForm,savePost">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 3v5h5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+                <span wire:loading wire:target="resetPostForm">
+                    <i class="fas fa-spinner fa-spin text-white text-sm"></i>
+                </span>
+            </button>
             <button wire:click="closePostModal" type="button"
                     wire:loading.attr="disabled" wire:target="closePostModal"
                     class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
@@ -2860,8 +2920,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     <div class="jm-modal-body-scroll flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- LEFT: Photo first, then Company --}}
-        <div class="jm-modal-col w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
-            <div class="p-3 space-y-3">
+        <div class="jm-modal-col w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-hidden bg-white flex flex-col">
+            <div class="p-3 space-y-3 overflow-y-auto scroll-c flex-1 min-h-0">
 
                 {{-- Job Photo — shown first so the default photo is visible immediately at the top --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -2996,7 +3056,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
 
                         @if($postOrgCategory === 'partner')
-                        <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v)},syncT(v){$wire.set('postPartnerType',v)},syncL(v){$wire.set('postLocation',v)}}">
+                        <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v)},syncT(v){$wire.set('postPartnerType',v)},syncL(v){$wire.set('postLocation',v)}}" @post-form-reset.window="pName='';pType='';loc='';">
                             <div class="space-y-2">
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Employer <span class="text-red-500">*</span></label>
@@ -3021,7 +3081,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
 
                         @if($postOrgCategory === 'custom')
-                        <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v)},syncT(v){$wire.set('postCustomType',v)},syncL(v){$wire.set('postLocation',v)}}">
+                        <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v)},syncT(v){$wire.set('postCustomType',v)},syncL(v){$wire.set('postLocation',v)}}" @post-form-reset.window="cName='';cType='';loc='';">
                             <div class="space-y-2">
                                 <div>
                                     <label class="block text-sm font-semibold uppercase tracking-wider text-[#333333] mb-1">Employer <span class="text-red-500">*</span></label>
@@ -3058,7 +3118,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         <div class="jm-modal-col flex-1 min-w-0 flex flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
             <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col p-3 gap-3">
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden flex-shrink-0">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-[0.85rem] font-semibold uppercase tracking-widest">
                         Job Information
                     </div>
@@ -3098,7 +3158,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Salary <span class="font-normal normal-case tracking-normal text-[#777777]">— optional</span>
                                 </label>
-                                <input wire:model.live.debounce.100ms="postSalary" type="text" placeholder="e.g. ₱25,000 per month" maxlength="100"
+                                <input wire:model.lazy="postSalary" type="text" placeholder="e.g. ₱25,000 per month" maxlength="100"
                                        oninput="window.__eoFormatSalaryInput(this)"
                                        class="w-full px-3 py-2 border-[1.5px] rounded-xl text-sm bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($postErrors['postSalary']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                 @if(isset($postErrors['postSalary']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-sm"></i>{{ $postErrors['postSalary'] }}</p>@endif
@@ -3107,7 +3167,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <label class="block text-[0.85rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">
                                     Deadline <span class="text-red-500">*</span>
                                 </label>
-                                <input wire:model.live="postDeadline" type="date"
+                                <input wire:model.lazy="postDeadline" type="date"
                                        min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
                                        oninput="window.__eoGuardDeadlineInput(this)"
                                        onchange="window.__eoGuardDeadlineInput(this)"
@@ -3162,8 +3222,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         </div>
 
         {{-- RIGHT: Target College + Submission Tips (moved here, above Visibility) + Actions --}}
-        <div class="jm-modal-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-y-auto scroll-c">
-            <div class="p-3 space-y-3 flex-1">
+        <div class="jm-modal-col w-full lg:w-64 xl:w-72 flex-shrink-0 bg-white flex flex-col overflow-hidden">
+            <div class="p-3 space-y-3 flex-1 overflow-y-auto scroll-c min-h-0">
 
                 {{-- Target College --}}
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
@@ -3234,7 +3294,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                      Submit Event button. --}}
                 <button type="button" wire:click="savePost"
                         wire:loading.attr="disabled" wire:target="savePost"
-                        :disabled="photoUploading || {{ $this->isPostFormValid ? 'false' : 'true' }}"
                         class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait disabled:pointer-events-none">
                     <span wire:loading.remove wire:target="savePost" class="flex items-center justify-center gap-2">
                         <i class="fas fa-paper-plane text-sm"></i>
@@ -3245,11 +3304,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         Post Job
                     </span>
                 </button>
-                @if(! $this->isPostFormValid)
-                    <p class="text-xs text-center font-medium" style="color:#b45309;">
-                        <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable posting.
-                    </p>
-                @endif
                 <button type="button" wire:click="closePostModal"
                         wire:loading.attr="disabled" wire:target="savePost,closePostModal"
                         class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
@@ -3413,6 +3467,23 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         </span>
                     </button>
                 @endif
+            @endif
+            {{-- Reset Edit Form — hidden when active job or read-only (alumni director / active) --}}
+            @if(!$editHeaderIsReadOnly)
+            <button wire:click="resetEditForm" type="button"
+                    wire:loading.attr="disabled" wire:target="resetEditForm,saveEdit"
+                    class="modal-top-btn relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95"
+                    data-mtip="Reset">
+                <span wire:loading.remove wire:target="resetEditForm,saveEdit">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M3 3v5h5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+                <span wire:loading wire:target="resetEditForm">
+                    <i class="fas fa-spinner fa-spin text-white text-xs"></i>
+                </span>
+            </button>
             @endif
             <button wire:click="closeEditModal" type="button"
                     wire:loading.attr="disabled" wire:target="closeEditModal"
@@ -4017,7 +4088,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                          and this goes back to disabled. --}}
                     <button type="button" wire:click="saveEditJob"
                             wire:loading.attr="disabled" wire:target="saveEditJob"
-                            :disabled="photoUploading || {{ $this->isEditFormValid ? 'false' : 'true' }}"
                             class="w-full px-5 py-3 rounded-xl text-sm font-semibold text-white transition flex items-center justify-center gap-2 shadow-md cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait disabled:pointer-events-none">
                         <span wire:loading.remove wire:target="saveEditJob" class="flex items-center justify-center gap-2">
                             <i class="fas fa-floppy-disk text-xs"></i>
@@ -4028,15 +4098,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             Save Changes
                         </span>
                     </button>
-                    @if(! $this->isEditFormValid)
-                        <p class="text-xs text-center font-medium mt-2" style="color:#b45309;">
-                            @if($this->originalEditFormSnapshot !== null && ! $this->hasEditFormChanges)
-                                <i class="fas fa-circle-info mr-1"></i>No changes yet — edit a field to enable Save Changes.
-                            @else
-                                <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable saving.
-                            @endif
-                        </p>
-                    @endif
                     {{-- Cancel button — same pattern as Post Job modal's Cancel:
                          disabled + wire:loading state while either saveEditJob or
                          closeEditModal is in flight, so it can't be clicked mid-save

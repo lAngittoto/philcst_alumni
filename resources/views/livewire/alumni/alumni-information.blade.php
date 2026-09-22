@@ -1675,6 +1675,24 @@ function phAddress(initial) {
             <span>Your profile is incomplete. Click the <strong>edit</strong> button to fill in all required fields.</span>
         </div>
     @endif
+
+    {{-- ══ UNLOCK FEATURES BANNER (new alumni — profile not yet complete) ══ --}}
+    @if(!$profileComplete)
+    <div class="rounded-xl border border-purple-200 bg-gradient-to-r from-purple-50 to-violet-50 px-4 py-3 flex items-start gap-3 flex-shrink-0 shadow-sm">
+        <div class="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 bg-purple-100 border border-purple-200">
+            <i class="fas fa-lock text-purple-500 text-sm"></i>
+        </div>
+        <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-purple-900 leading-snug">Complete your profile to unlock all features</p>
+            <p class="text-xs text-purple-700 mt-0.5 leading-relaxed">
+                Fill in all required fields to get full access — including job listings, event RSVPs, and your alumni dashboard. Some features are locked until your information is complete.
+            </p>
+        </div>
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-200/70 text-purple-800 text-[10px] font-bold uppercase tracking-wider flex-shrink-0 border border-purple-300">
+            <i class="fas fa-lock text-[9px]"></i> Locked
+        </span>
+    </div>
+    @endif
     @if($profileComplete && !$editingProfile && !$this->canEditProfile)
         <div class="rounded-xl px-4 py-2 text-xs border bg-gray-50 text-gray-700 border-gray-200 flex items-center gap-2 flex-shrink-0">
             <i class="fas fa-lock flex-shrink-0"></i>
