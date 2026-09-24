@@ -321,17 +321,8 @@
     </div>
 </div>
 
-{{-- ── Employment Type / Further Education ── --}}
-<div class="rp-two-col">
-    <div class="rp-two-col-row">
-        <div class="rp-two-col-cell">
-            {!! $simpleSection('Employment Type', $data['empType'], ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe', '#ede9fe']) !!}
-        </div>
-        <div class="rp-two-col-cell">
-            {!! $simpleSection('Further Education', $data['edu'], ['#9ca3af', '#3b82f6', '#7a3f91']) !!}
-        </div>
-    </div>
-</div>
+{{-- ── Employment Type ── --}}
+{!! $simpleSection('Employment Type', $data['empType'], ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe', '#ede9fe']) !!}
 
 {{-- ── Career Path Labels ── --}}
 {!! $simpleSection('Career Path Labels', $data['careerPath'], ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#7a3f91']) !!}

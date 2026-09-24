@@ -28,6 +28,7 @@ new class extends Component {
     public string $successMsg     = '';
 
     public bool   $showImportModal      = false;
+    public string $importAlumniType     = 'recent'; // 'recent' (new graduate, complete data) or 'old' (existing alumni, lenient/partial data)
     public        $importFile           = null;
     public string $importFileName       = '';
     public bool   $importingFile        = false;
@@ -101,11 +102,7 @@ new class extends Component {
 
         $mid = trim($this->regMiddleInitial);
         if ($mid === '') {
-            if (!$liveMode) {
-                $errors[]               = 'Middle name is required.';
-                $fieldErrors[]          = 'middleName';
-                $fieldMsgs['middleName'] = 'Middle name is required.';
-            }
+            // Optional — not everyone has a middle name on record.
         } else {
             if (!preg_match('/^[a-zA-Z]+$/', $mid)) {
                 $errors[]               = 'Middle name must contain letters only.';
@@ -299,6 +296,13 @@ public function openImportModal(): void
     $this->dispatch('modal-opened');
 }
 
+public function setImportAlumniType(string $type): void
+{
+    if (in_array($type, ['recent', 'old'], true)) {
+        $this->importAlumniType = $type;
+    }
+}
+
 public function closeImportModal(): void
 {
     if ($this->importStep === 'processing') return;
@@ -309,6 +313,7 @@ public function closeImportModal(): void
 
     public function resetImport(): void
     {
+        $this->importAlumniType     = 'recent';
         $this->importFile           = null;
         $this->importFileName       = '';
         $this->importingFile        = false;
@@ -396,6 +401,17 @@ public function closeImportModal(): void
             && preg_match('/^[^\s@]+@gmail\.com$/i', $email) === 1;
     }
 
+    /**
+     * Lenient version used only for "Old" (existing) alumni imports —
+     * accepts any valid email format/domain (e.g. yahoo.com, hotmail.com),
+     * not just gmail.com, since older records were never required to
+     * follow the current gmail-only convention.
+     */
+    private function validateEmailLenient(string $email): bool
+    {
+        return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
     public function processImport(): void
     {
         if (function_exists('set_time_limit')) @set_time_limit(300);
@@ -437,7 +453,17 @@ public function closeImportModal(): void
                 $header[array_search('program_code', $header)] = 'course';
             }
 
-            $required = ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
+            $isOld = $this->importAlumniType === 'old';
+
+            // Recent (new graduates) — unchanged, everything below is required.
+            // Old (existing alumni) — only the minimum identifying columns are
+            // required; everything else (middle_name, suffix, email, motto,
+            // father's/mother's name, dswd, address) is optional since older
+            // records are often incomplete or missing entirely.
+            $required = $isOld
+                ? ['first_name', 'last_name', 'student_id', 'course', 'batch']
+                : ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
+
             foreach ($required as $col)
                 if (!in_array($col, $header, true))
                     throw new \Exception("Missing required column: \"{$col}\".");
@@ -471,29 +497,48 @@ public function closeImportModal(): void
                 $fullName  = $this->buildFullName($firstName, $mid, $lastName, $suffix);
                 $label     = 'Row '.($i + 1).($fullName ? " ({$fullName})" : '');
 
-                if (!$email) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Email is required."); continue; }
-                if (!$this->validateEmail($email)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Email \"{$email}\" is invalid."); continue; }
-                if (isset($existingEmails[$email]) || isset($seenEmails[$email])) {
-                    $duplicates[] = "{$label}: Email \"{$email}\" already registered.";
-                    $this->importDuplicateCount++;
-                    continue;
+                // ── Email ──────────────────────────────────────────────
+                // Recent: unchanged — required, gmail.com only.
+                // Old: optional; if provided, any valid email domain is
+                // accepted (e.g. yahoo.com) since old records predate the
+                // gmail-only convention.
+                if ($email !== '') {
+                    $emailOk = $isOld ? $this->validateEmailLenient($email) : $this->validateEmail($email);
+                    if (!$emailOk) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Email \"{$email}\" is invalid."); continue; }
+                    if (isset($existingEmails[$email]) || isset($seenEmails[$email])) {
+                        $duplicates[] = "{$label}: Email \"{$email}\" already registered.";
+                        $this->importDuplicateCount++;
+                        continue;
+                    }
+                } elseif (!$isOld) {
+                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Email is required."); continue;
                 }
+                // else: Old + no email provided — allowed, $email stays ''.
 
                 if (!$firstName) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: First name is empty."); continue; }
                 if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $firstName)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: First name has invalid characters."); continue; }
                 if (!$lastName)  { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Last name is empty."); continue; }
                 if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $lastName)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Last name has invalid characters."); continue; }
-                if ($mid === '') { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name is required."); continue; }
-                if (!preg_match('/^[a-zA-Z][a-zA-Z ]*[a-zA-Z]$|^[a-zA-Z]$/', $mid)) {
-                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name must contain letters only."); continue;
-                }
-                $midError = false;
-                foreach (explode(' ', $mid) as $part) {
-                    if (strlen($part) < 2) {
-                        $this->appendImportError($validationErrors, $maxErrors, "{$label}: Each word in middle name must be >=2 chars."); $midError = true; break;
+
+                // ── Middle name ────────────────────────────────────────
+                // Optional for both Recent and Old — a blank cell is fine
+                // since not every alumni has a middle name on record.
+                // Format (letters only, each word >=2 chars) is still
+                // checked whenever a value is actually provided.
+                if ($mid === '') {
+                    // no-op — allowed blank
+                } else {
+                    if (!preg_match('/^[a-zA-Z][a-zA-Z ]*[a-zA-Z]$|^[a-zA-Z]$/', $mid)) {
+                        $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name must contain letters only."); continue;
                     }
+                    $midError = false;
+                    foreach (explode(' ', $mid) as $part) {
+                        if (strlen($part) < 2) {
+                            $this->appendImportError($validationErrors, $maxErrors, "{$label}: Each word in middle name must be >=2 chars."); $midError = true; break;
+                        }
+                    }
+                    if ($midError) continue;
                 }
-                if ($midError) continue;
 
                 $rawId      = preg_replace('/\..*$/', '', rtrim(rtrim((string)($row['student_id'] ?? ''), '0'), '.'));
                 $rawIdClean = ltrim($rawId, '0') ?: '0';
@@ -514,9 +559,30 @@ public function closeImportModal(): void
                 $batchYear = (int)($row['batch'] ?? 0);
                 if ($batchYear < 1000 || $batchYear > 9999) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Batch \"{$batchYear}\" must be 4-digit year."); continue; }
 
-                $jobs[] = compact('fullName','firstName','mid','lastName','suffix','email','sid','batchYear') + ['code' => $courseMatch->code, 'courseName' => $courseMatch->name];
-                $seenIds[$sid]      = true;
-                $seenEmails[$email] = true;
+                // Extra profile columns — only read/saved for "Old" alumni
+                // imports; Recent stays exactly as before (all left blank/null).
+                $motto               = $isOld ? trim($row['motto']               ?? '') : '';
+                $fatherLastName      = $isOld ? trim($row['father_last_name']     ?? '') : '';
+                $fatherGivenName     = $isOld ? trim($row['father_given_name']    ?? '') : '';
+                $fatherMiddleName    = $isOld ? trim($row['father_middle_name']   ?? '') : '';
+                $fatherSuffix        = $isOld ? trim($row['father_suffix']        ?? '') : '';
+                $motherLastName      = $isOld ? trim($row['mother_last_name']     ?? '') : '';
+                $motherGivenName     = $isOld ? trim($row['mother_given_name']    ?? '') : '';
+                $motherMiddleName    = $isOld ? trim($row['mother_middle_name']   ?? '') : '';
+                $dswdHouseholdNo     = $isOld ? trim($row['dswd_household_no']    ?? '') : '';
+                $addressStreet       = $isOld ? trim($row['address_street']       ?? '') : '';
+                $addressBarangay     = $isOld ? trim($row['address_barangay']     ?? '') : '';
+                $addressMunicipality = $isOld ? trim($row['address_municipality'] ?? '') : '';
+                $addressProvince     = $isOld ? trim($row['address_province']     ?? '') : '';
+
+                $jobs[] = compact(
+                    'fullName','firstName','mid','lastName','suffix','email','sid','batchYear',
+                    'motto','fatherLastName','fatherGivenName','fatherMiddleName','fatherSuffix',
+                    'motherLastName','motherGivenName','motherMiddleName','dswdHouseholdNo',
+                    'addressStreet','addressBarangay','addressMunicipality','addressProvince'
+                ) + ['code' => $courseMatch->code, 'courseName' => $courseMatch->name];
+                $seenIds[$sid] = true;
+                if ($email !== '') $seenEmails[$email] = true;
             }
 
             $this->importErrors     = $validationErrors;
@@ -543,22 +609,27 @@ public function closeImportModal(): void
                     $loginEmails = [];
                     foreach ($chunk as $job) {
                         $plain = $this->generateTempPassword($job['sid'], $job['lastName']);
+                        // Old alumni with no email in the sheet — fall back to the
+                        // same pending.local placeholder the manual single-add
+                        // form uses, since the users table still needs a login email.
+                        $loginEmail    = $job['email'] !== '' ? $job['email'] : ($job['sid'] . '@pending.local');
                         $userRows[]    = [
                             'name'       => $job['fullName'],
                             'role'       => 'alumni',
-                            'email'      => $job['email'],
+                            'email'      => $loginEmail,
                             'password'   => password_hash($plain, PASSWORD_BCRYPT, ['cost' => 4]),
                             'created_at' => $now,
                             'updated_at' => $now,
                         ];
-                        $loginEmails[] = $job['email'];
+                        $loginEmails[] = $loginEmail;
                     }
                     DB::table('users')->insert($userRows);
                     $userIdMap = DB::table('users')->whereIn('email', $loginEmails)->pluck('id', 'email')->toArray();
 
                     $alumniRows = [];
                     foreach ($chunk as $job) {
-                        $uid = $userIdMap[$job['email']] ?? null;
+                        $loginEmail = $job['email'] !== '' ? $job['email'] : ($job['sid'] . '@pending.local');
+                        $uid = $userIdMap[$loginEmail] ?? null;
                         if (!$uid) continue;
                         $alumniRows[] = [
                             'user_id'              => $uid,
@@ -567,7 +638,7 @@ public function closeImportModal(): void
                             'last_name'            => $job['lastName'],
                             'suffix'               => $job['suffix'] ?: null,
                             'student_id'           => $job['sid'],
-                            'email'                => $job['email'],
+                            'email'                => $job['email'] ?: null,
                             'course_code'          => $job['code'],
                             'course_name'          => $job['courseName'],
                             'batch'                => $job['batchYear'],
@@ -579,17 +650,19 @@ public function closeImportModal(): void
                             'date_of_birth'        => null,
                             'contact_number'       => null,
                             'disability'           => null,
-                            'dswd_household_no'    => null,
-                            'father_last_name'     => null,
-                            'father_given_name'    => null,
-                            'father_middle_name'   => null,
-                            'mother_last_name'     => null,
-                            'mother_given_name'    => null,
-                            'mother_middle_name'   => null,
-                            'address_street'       => null,
-                            'address_barangay'     => null,
-                            'address_municipality' => null,
-                            'address_province'     => null,
+                            'motto'                => $job['motto'] ?: null,
+                            'dswd_household_no'    => $job['dswdHouseholdNo'] ?: null,
+                            'father_last_name'     => $job['fatherLastName'] ?: null,
+                            'father_given_name'    => $job['fatherGivenName'] ?: null,
+                            'father_middle_name'   => $job['fatherMiddleName'] ?: null,
+                            'father_suffix'        => $job['fatherSuffix'] ?: null,
+                            'mother_last_name'     => $job['motherLastName'] ?: null,
+                            'mother_given_name'    => $job['motherGivenName'] ?: null,
+                            'mother_middle_name'   => $job['motherMiddleName'] ?: null,
+                            'address_street'       => $job['addressStreet'] ?: null,
+                            'address_barangay'     => $job['addressBarangay'] ?: null,
+                            'address_municipality' => $job['addressMunicipality'] ?: null,
+                            'address_province'     => $job['addressProvince'] ?: null,
                             'created_at'           => $now,
                             'updated_at'           => $now,
                         ];
@@ -1220,6 +1293,40 @@ public function closeImportModal(): void
         padding: 4px 10px;
         white-space: nowrap;
     }
+    /* ── Recent / Old alumni-type toggle (import modal) ── */
+    .import-type-toggle {
+        display: flex;
+        gap: 8px;
+        padding: 4px;
+        background: #F3F1F7;
+        border-radius: 12px;
+        shrink: 0;
+    }
+    .import-type-btn {
+        flex: 1;
+        padding: 10px 12px;
+        border-radius: 9px;
+        border: none;
+        background: transparent;
+        font-size: .85rem;
+        font-weight: 700;
+        color: #666666;
+        cursor: pointer;
+        transition: all .15s ease;
+        text-align: center;
+    }
+    .import-type-btn.active {
+        background: #ffffff;
+        color: #7A3F91;
+        box-shadow: 0 1px 3px rgba(0,0,0,.12);
+    }
+    .import-type-btn .import-type-sub {
+        display: block;
+        font-size: .68rem;
+        font-weight: 600;
+        opacity: .7;
+        margin-top: 1px;
+    }
 
     /* ── Page card: solid white with soft shadow + visible (non-black) border ── */
     .reg-card {
@@ -1254,7 +1361,7 @@ public function closeImportModal(): void
     /* ── Import modal: fixed size on desktop, full screen on mobile ── */
     .import-modal-box {
         width: 640px;
-        height: 640px;
+        height: 700px;
         max-width: calc(100vw - 32px);
         max-height: calc(100dvh - 40px);
         display: flex;
@@ -1453,7 +1560,7 @@ public function closeImportModal(): void
                                                :class="{ 'field-error': fieldHasError('middleName') }"
                                                class="fl-input"
                                                maxlength="50">
-                                        <label class="fl-label">Middle Name <span class="text-red-500">*</span></label>
+                                        <label class="fl-label">Middle Name</label>
                                     </div>
                                     <p x-show="fieldMessage('middleName') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
@@ -1895,24 +2002,60 @@ public function closeImportModal(): void
             {{-- STEP 1: UPLOAD (just a dropzone/radio-style file picker — no confirm step) --}}
             @if($importStep === 'upload')
 
+            {{-- Recent vs Old alumni-type toggle — decides which columns are required --}}
+            <div class="import-type-toggle shrink-0">
+                <button type="button" wire:click="setImportAlumniType('recent')"
+                        class="import-type-btn {{ $importAlumniType === 'recent' ? 'active' : '' }}">
+                    Recent - New graduates
+                </button>
+                <button type="button" wire:click="setImportAlumniType('old')"
+                        class="import-type-btn {{ $importAlumniType === 'old' ? 'active' : '' }}">
+                    Old - Existing alumni
+                </button>
+            </div>
+
             <div class="rounded-xl border border-blue-200 overflow-hidden shrink-0" style="background:#F8FBFF;">
                 <div class="flex items-center gap-2 px-4 py-2.5 border-b border-blue-100" style="background:#EEF4FF;">
                     <div class="w-6 h-6 rounded-md flex items-center justify-center shrink-0" style="background:#1D4ED8;">
                         <i class="fas fa-table-columns text-white" style="font-size:.6rem;"></i>
                     </div>
-                    <p class="font-bold text-blue-900 text-sm">Required Excel Columns</p>
+                    <p class="font-bold text-blue-900 text-sm">
+                        {{ $importAlumniType === 'old' ? 'Excel Columns' : 'Required Excel Columns' }}
+                    </p>
                 </div>
 
                 @php
-                $reqCols = [
-                    'first_name', 'last_name', 'middle_name', 'suffix',
-                    'student_id', 'programs',   'batch',       'email',
-                ];
+                    // Recent — unchanged, everything listed is required.
+                    $recentCols = [
+                        'first_name', 'last_name', 'middle_name', 'suffix',
+                        'student_id', 'programs',   'batch',       'email',
+                    ];
+
+                    // Old — only these are truly required; the rest (pulled
+                    // straight from the Alumni Information profile fields)
+                    // are optional and can be left blank in the sheet.
+                    $oldRequiredCols = ['first_name', 'last_name', 'student_id', 'programs', 'batch'];
+                    $oldOptionalCols = [
+                        'middle_name', 'suffix', 'email', 'motto',
+                        'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
+                        'mother_last_name', 'mother_given_name', 'mother_middle_name',
+                        'dswd_household_no',
+                        'address_street', 'address_barangay', 'address_municipality', 'address_province',
+                    ];
                 @endphp
                 <div class="req-col-chips">
-                    @foreach($reqCols as $col)
-                        <span class="req-col-chip">{{ $col }}</span>
-                    @endforeach
+                    @if($importAlumniType === 'old')
+                        @foreach($oldRequiredCols as $col)
+                            <span class="req-col-chip">{{ $col }}</span>
+                        @endforeach
+                        @foreach($oldOptionalCols as $col)
+                            <span class="req-col-chip">{{ $col }}</span>
+                        @endforeach
+                    @else
+                        @foreach($recentCols as $col)
+                            <span class="req-col-chip">{{ $col }}</span>
+                        @endforeach
+                    @endif
                 </div>
             </div>
 

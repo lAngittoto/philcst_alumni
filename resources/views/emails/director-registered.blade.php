@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Director Account Created</title>
+    <title>{{ $type === 'email_updated' ? 'Email & Credentials Updated' : 'Director Account Created' }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f0eaf6; padding: 20px; }
@@ -15,7 +15,9 @@
         .content { padding: 40px 30px; }
         .greeting { font-size: 15px; color: #333; margin-bottom: 20px; line-height: 1.6; }
         .greeting strong { color: #7a3f91; }
-        .success-message { background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 13px 15px; border-radius: 8px; margin: 0 0 20px; font-size: 13px; color: #047857; }
+        .alert-message { padding: 13px 15px; border-radius: 8px; margin: 0 0 20px; font-size: 13px; }
+        .alert-success { background-color: #f0fdf4; border-left: 4px solid #10b981; color: #047857; }
+        .alert-warning { background-color: #fef9c3; border-left: 4px solid #eab308; color: #713f12; }
         .body-text { font-size: 13px; color: #555; line-height: 1.7; margin-bottom: 20px; }
         .credentials-section { background-color: #f9f5ff; border: 2px dashed #c084e8; border-radius: 10px; padding: 25px; margin: 0 0 20px; }
         .credentials-label { font-size: 11px; font-weight: 700; color: #7a3f91; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 20px; display: block; }
@@ -23,6 +25,7 @@
         .credential-item:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
         .credential-label { font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase; margin-bottom: 6px; display: block; letter-spacing: 0.5px; }
         .credential-value { font-size: 15px; font-weight: 700; color: #1f2937; font-family: 'Courier New', monospace; background-color: #fff; padding: 11px 14px; border-radius: 6px; border: 1px solid #e5e7eb; word-break: break-all; }
+        .new-badge { display: inline-block; background: #dcfce7; color: #16a34a; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; border: 1px solid #bbf7d0; margin-left: 6px; vertical-align: middle; text-transform: uppercase; letter-spacing: 0.5px; }
         .profile-box { background-color: #fafafa; border-radius: 8px; border: 1px solid #eee; padding: 20px; margin-bottom: 20px; }
         .profile-box h3 { font-size: 13px; color: #333; font-weight: 600; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid #eee; }
         .profile-box p { font-size: 12px; color: #666; margin-bottom: 8px; }
@@ -46,7 +49,7 @@
         {{-- Header --}}
         <div class="header">
             <div class="header-badge">🎓 Philcst Alumni Connect</div>
-            <h1>Director Account Created</h1>
+            <h1>{{ $type === 'email_updated' ? 'Email & Credentials Updated' : 'Director Account Created' }}</h1>
             <p>Philippine College of Science and Technology</p>
         </div>
 
@@ -55,38 +58,57 @@
                 Hello, <strong>{{ $fullName }}</strong>!
             </div>
 
-            <div class="success-message">
+            {{-- Top alert — green for new account, yellow for email update --}}
+            @if($type === 'email_updated')
+            <div class="alert-message alert-warning">
+                ⚠️ Your email address on record has been updated by the administrator. A new temporary password has been issued for your account.
+            </div>
+            @else
+            <div class="alert-message alert-success">
                 ✓ Your director account has been successfully created in Philcst Alumni Connect.
             </div>
+            @endif
 
             <p class="body-text">
-                You have been registered as a <strong>Director</strong> in the Philcst Alumni Connect system.
-                Below are your login credentials. Please keep them safe and confidential.
+                @if($type === 'email_updated')
+                    Your director account email has been changed. Your login credentials have been reset for security purposes.
+                    Use the details below to log in, then <strong>change your password immediately</strong>.
+                @else
+                    You have been registered as a <strong>Director</strong> in the Philcst Alumni Connect system.
+                    Below are your login credentials. Please keep them safe and confidential.
+                @endif
             </p>
 
             {{-- Credentials --}}
             <div class="credentials-section">
-                <span class="credentials-label">🔐 Your Login Credentials</span>
+                <span class="credentials-label">🔐 {{ $type === 'email_updated' ? 'Your Updated Login Credentials' : 'Your Login Credentials' }}</span>
 
                 <div class="credential-item">
-                    <span class="credential-label">Username (used to log in)</span>
+                    <span class="credential-label">Username (used to log in{{ $type === 'email_updated' ? ' — unchanged' : '' }})</span>
                     <div class="credential-value">{{ $username }}</div>
                 </div>
 
                 <div class="credential-item">
-                    <span class="credential-label">Temporary Password</span>
+                    <span class="credential-label">
+                        {{ $type === 'email_updated' ? 'New Temporary Password' : 'Temporary Password' }}
+                        @if($type === 'email_updated')<span class="new-badge">New</span>@endif
+                    </span>
                     <div class="credential-value">{{ $tempPassword }}</div>
                 </div>
 
                 @if(!empty($email))
                 <div class="credential-item">
-                    <span class="credential-label">Email Address (on record)</span>
+                    <span class="credential-label">
+                        Email Address (on record)
+                        @if($type === 'email_updated')<span class="new-badge">Updated</span>@endif
+                    </span>
                     <div class="credential-value">{{ $email }}</div>
                 </div>
                 @endif
             </div>
 
-            {{-- Profile summary --}}
+            {{-- Profile summary — only shown on new account creation --}}
+            @if($type !== 'email_updated')
             <div class="profile-box">
                 <h3>Your Director Profile</h3>
                 <p><span>Full Name:</span> {{ $fullName }}</p>
@@ -96,13 +118,14 @@
                 <p><span>Role:</span> Director</p>
                 <p><span>Account Status:</span> Active (pending password change)</p>
             </div>
+            @endif
 
             {{-- Steps --}}
             <div class="steps-box">
                 <h3>📋 Next Steps</h3>
                 <div class="step">
                     <div class="step-num">1</div>
-                    <div>Go to the Philcst Alumni Connect login page and enter your <strong>username</strong> and the temporary password above.</div>
+                    <div>Go to the Philcst Alumni Connect login page and enter your <strong>username</strong> and the {{ $type === 'email_updated' ? 'new ' : '' }}temporary password above.</div>
                 </div>
                 <div class="step">
                     <div class="step-num">2</div>
@@ -110,7 +133,7 @@
                 </div>
                 <div class="step">
                     <div class="step-num">3</div>
-                    <div>Once your password is set, you will have full access to the Director portal.</div>
+                    <div>Once your password is set, you will have full access to the Director portal{{ $type === 'email_updated' ? ' again' : '' }}.</div>
                 </div>
             </div>
 
@@ -119,13 +142,21 @@
                 <strong>⚠️ Important Security Notice:</strong><br>
                 Your temporary password is case-sensitive and is valid for first-time login only.
                 You will be required to change it immediately upon logging in.
-                Please do not share your credentials with anyone.
+                @if($type === 'email_updated')
+                    If you did not expect this change, contact the system administrator right away.
+                @else
+                    Please do not share your credentials with anyone.
+                @endif
             </div>
 
             <div class="divider"></div>
 
             <p style="font-size: 13px; color: #555; line-height: 1.6;">
-                If you did not expect this account or have any questions, please contact the system administrator immediately.
+                @if($type === 'email_updated')
+                    If you did not expect this update or have any questions, please contact the system administrator immediately.
+                @else
+                    If you did not expect this account or have any questions, please contact the system administrator immediately.
+                @endif
             </p>
         </div>
 

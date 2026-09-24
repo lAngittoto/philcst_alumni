@@ -120,8 +120,28 @@ new #[Layout('app')] class extends Component {
     {
         $this->stats = Cache::remember('dashboard_stats', 60, function () {
             $totalAlumni  = Alumni::count();
-            $complete     = Alumni::where('profile_completed', 1)->count();
-            $pending      = Alumni::where('profile_completed', 0)->count();
+
+            // ── Profile completeness: field-based check (same required-field
+            //    set as alumni_blade.php's applyProfileCompletionFilter() and
+            //    isProfileComplete()), NOT the stale profile_completed DB flag.
+            //    The flag can be wrong (alumni edits profile down to blank after
+            //    flag was set, or old records never got backfilled), so the
+            //    dashboard Complete / Pending counts now always agree with the
+            //    Alumni Management page instead of showing a different number.
+            $requiredTextFields = [
+                'email', 'gender', 'contact_number',
+                'father_last_name', 'father_given_name', 'father_middle_name',
+                'mother_last_name', 'mother_given_name', 'mother_middle_name',
+                'address_street', 'address_barangay', 'address_municipality', 'address_province',
+            ];
+
+            $completeQuery = Alumni::whereNotNull('date_of_birth');
+            foreach ($requiredTextFields as $field) {
+                $completeQuery->whereNotNull($field)->where($field, '!=', '');
+            }
+            $complete = (clone $completeQuery)->count();
+            $pending  = $totalAlumni - $complete;
+
             $totalCourses = Course::count();
             $thisMonth    = Alumni::whereMonth('created_at', now()->month)
                                    ->whereYear('created_at',  now()->year)
@@ -373,7 +393,20 @@ new #[Layout('app')] class extends Component {
    ══════════════════════════════════════════════ */
 .adm-root {
     display: flex; flex-direction: column; min-height: 100%;
-    max-width: 100%; overflow-x: hidden;
+    width: 100%; max-width: 100%; overflow-x: hidden;
+    /* Prevent any child from blowing past the root boundary */
+    contain: layout;
+}
+/* Flex children default to min-width: auto — they won't shrink past
+   their content size, which causes overflow on narrow screens even with
+   overflow-x: hidden on the root. Setting min-width: 0 lets them shrink. */
+.adm-panel-col,
+.adm-snap-stack,
+.adm-snap-card,
+.adm-snap-row,
+.adm-body-grid > * {
+    min-width: 0;
+    max-width: 100%;
 }
 /* Consistent box model everywhere in the dashboard — without this,
    padding on cards/chart boxes can push their rendered width past
@@ -505,8 +538,8 @@ new #[Layout('app')] class extends Component {
 
 /* ── KPI Stat grid — icon LEFT, text RIGHT ── */
 .adm-stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; flex-shrink: 0; }
-@media (max-width: 900px) { .adm-stat-grid { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 480px) { .adm-stat-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1100px) { .adm-stat-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px)  { .adm-stat-grid { grid-template-columns: 1fr; } }
 
 .adm-stat-card {
     background: #ffffff;
@@ -556,13 +589,13 @@ new #[Layout('app')] class extends Component {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
     align-items: start;
 }
-@media (max-width: 1023px) {
+@media (max-width: 1280px) {
     .adm-body-grid { grid-template-columns: 1fr; }
 }
 
 .adm-panel-col { display: flex; flex-direction: column; gap: 0.75rem; }
 .adm-panel-body-scroll { max-height: 520px; overflow-y: auto; }
-@media (max-width: 1023px) {
+@media (max-width: 1280px) {
     .adm-panel-body-scroll { max-height: 400px; }
 }
 @media (max-width: 640px) {
@@ -577,7 +610,7 @@ new #[Layout('app')] class extends Component {
     gap: 0.75rem;
     flex-shrink: 0;
 }
-@media (max-width: 640px) {
+@media (max-width: 900px) {
     .adm-role-strip { grid-template-columns: 1fr; }
 }
 .adm-role-tile {
@@ -627,7 +660,7 @@ new #[Layout('app')] class extends Component {
 .adm-snap-mini-tiles {
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;
 }
-@media (max-width: 480px) {
+@media (max-width: 600px) {
     .adm-snap-mini-tiles { grid-template-columns: 1fr; }
 }
 .adm-snap-mini-tile {
@@ -710,7 +743,7 @@ new #[Layout('app')] class extends Component {
 .adm-snap-chart-box {
     width: 100%; height: 150px; position: relative;
     margin-bottom: 12px;
-    overflow: visible; /* never clip Chart.js tick labels (e.g. "1,000") */
+    overflow: hidden; /* Chart.js renders labels inside the canvas bitmap, not outside */
 }
 @media (max-width: 480px) {
     .adm-snap-chart-box { height: 140px; margin-bottom: 10px; }
@@ -820,13 +853,13 @@ new #[Layout('app')] class extends Component {
 @media (max-width: 768px) { .adm-announce-img { height: 220px; } }
 @media (max-width: 480px) { .adm-announce-img { height: 170px; } }
 @media (max-width: 360px) { .adm-announce-img { height: 130px; border-radius: 10px; } }
-.adm-announce-title { font-size: .9rem; font-weight: 700; color: #000000; }
-.adm-announce-desc { font-size: .78rem; color: #333333; font-weight: 500; max-width: 320px; }
-.adm-announce-time { font-size: .7rem; color: #333333; font-weight: 600; margin-top: 2px; }
+.adm-announce-title { font-size: 1.15rem; font-weight: 700; color: #000000; }
+.adm-announce-desc { font-size: 1rem; color: #333333; font-weight: 500; max-width: 320px; }
+.adm-announce-time { font-size: .88rem; color: #333333; font-weight: 600; margin-top: 2px; }
 @media (max-width: 360px) {
-    .adm-announce-title { font-size: .8rem; }
-    .adm-announce-desc { font-size: .7rem; max-width: 260px; }
-    .adm-announce-time { font-size: .64rem; }
+    .adm-announce-title { font-size: .95rem; }
+    .adm-announce-desc { font-size: .85rem; max-width: 260px; }
+    .adm-announce-time { font-size: .75rem; }
 }
 .adm-announce-dots {
     display: flex; align-items: center; justify-content: center; gap: 6px;
@@ -1431,7 +1464,7 @@ new #[Layout('app')] class extends Component {
                 indexAxis: 'y',
                 responsive: true,
                 maintainAspectRatio: false,
-                animation: { duration: 500, easing: 'easeInOutQuart' },
+                animation: false,
                 layout: { padding: { right: 18, left: 2 } },
                 scales: {
                     x: {
@@ -1733,6 +1766,7 @@ new #[Layout('app')] class extends Component {
 
         syncDots(0);
         startAuto();
+        bindResizeObserver();
     }
 
     // Re-snap to the correct slide once the ENTIRE page (fonts, images,
@@ -1750,28 +1784,26 @@ new #[Layout('app')] class extends Component {
         syncDots(activeIndex);
     });
 
-    // Re-snap on viewport resize (window resize, orientation change, or
-    // devtools responsive-mode resize). This is the missing piece that
-    // made the carousel look right after a hard refresh but wrong after
-    // wire:navigate: a hard refresh always fires 'load' at the FINAL
-    // viewport size, so the initial scrollTo math above is correct for
-    // that size. wire:navigate never fires 'load' — it just paints the
-    // swapped-in DOM at whatever size the browser is currently at, which
-    // is fine UNLESS the viewport was resized earlier in the session,
-    // because scrollLeft math (idx * clientWidth) computed by an earlier
-    // init()/goTo() call doesn't automatically re-run just because the
-    // window changed size later. Debounced so continuous drag-resizing
-    // doesn't spam re-snaps.
-    var carouselResizeDebounce = null;
-    window.addEventListener('resize', function(){
-        if (carouselResizeDebounce) clearTimeout(carouselResizeDebounce);
-        carouselResizeDebounce = setTimeout(function(){
-            var t = track();
-            if (!t) return;
+    // Re-snap the carousel the instant the track element's width changes
+    // (viewport resize, sidebar toggle, devtools open/close, orientation
+    // change — anything that causes a layout reflow on the track itself).
+    // ResizeObserver fires synchronously with the layout change, so
+    // scrollLeft is always recalculated against the NEW clientWidth
+    // with zero delay — no 120ms gap where the carousel is stuck at
+    // the wrong position showing a partial/cropped slide.
+    var carouselRO = null;
+    function bindResizeObserver(){
+        if(carouselRO){ carouselRO.disconnect(); carouselRO = null; }
+        var t = track();
+        if(!t || !window.ResizeObserver) return;
+        carouselRO = new ResizeObserver(function(){
+            // scrollLeft must be recomputed against the new clientWidth
+            // immediately — any async delay risks showing a partial slide.
             t.scrollTo({ left: activeIndex * t.clientWidth, behavior: 'auto' });
             syncDots(activeIndex);
-        }, 120);
-    });
+        });
+        carouselRO.observe(t);
+    }
 
     if(document.readyState === 'loading'){
         document.addEventListener('DOMContentLoaded', init);
@@ -1785,6 +1817,7 @@ new #[Layout('app')] class extends Component {
     document.addEventListener('livewire:navigated', function(){
         stopAuto();
         if(resumeTimer) clearTimeout(resumeTimer);
+        if(carouselRO){ carouselRO.disconnect(); carouselRO = null; }
         boundTrack = null; // force rebind to the freshly-swapped-in track element
         requestAnimationFrame(init);
 

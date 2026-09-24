@@ -1286,6 +1286,9 @@ select.adm-select-arrow {
     margin-top: 1px;
 }
 .vjob-section-box {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
     background: #ffffff;
     border: 1.5px solid #e0e0e0;
     border-radius: 0.875rem;
@@ -1404,7 +1407,7 @@ select.adm-select-arrow {
 
                         <div class="vjob-info-card">
                             <i class="vjob-info-icon fas fa-building"></i>
-                            <p class="vjob-info-label">Organization</p>
+                            <p class="vjob-info-label">Employer</p>
                             <p class="vjob-info-value">{{ $vj->company_name }}</p>
                             @if($displayType !== 'PHILCST')<p class="vjob-info-sub">{{ $displayType }}</p>@endif
                         </div>
@@ -1458,10 +1461,10 @@ select.adm-select-arrow {
             <div class="flex flex-col lg:flex-row gap-5 items-start">
 
                 {{-- Left: Description / Qualifications / How to Apply --}}
-                <div class="flex-1 min-w-0 flex flex-col gap-4">
+                <div class="flex-1 min-w-0 w-full flex flex-col gap-4">
 
                     @if($vj->description)
-                    <div>
+                    <div class="w-full">
                         <p class="vjob-section-heading">
                             <i class="fas fa-align-left text-[#7a3f91]"></i>
                             Job Description
@@ -1471,7 +1474,7 @@ select.adm-select-arrow {
                     @endif
 
                     @if($vj->qualifications)
-                    <div>
+                    <div class="w-full">
                         <p class="vjob-section-heading">
                             <i class="fas fa-list-check text-[#7a3f91]"></i>
                             Qualifications
@@ -1481,7 +1484,7 @@ select.adm-select-arrow {
                     @endif
 
                     @if($vj->application_instructions)
-                    <div>
+                    <div class="w-full">
                         <p class="vjob-section-heading">
                             <i class="fas fa-paper-plane text-[#7a3f91]"></i>
                             How to Apply
@@ -1491,42 +1494,10 @@ select.adm-select-arrow {
                     @endif
 
                     @if(!$vj->description && !$vj->qualifications && !$vj->application_instructions)
-                    <div class="bg-white border border-[#e0e0e0] rounded-2xl flex items-center justify-center py-10">
+                    <div class="w-full bg-white border border-[#e0e0e0] rounded-2xl flex items-center justify-center py-10">
                         <p class="text-base font-bold text-[#111111]">No additional details provided.</p>
                     </div>
                     @endif
-
-                </div>
-
-                {{-- Right: Posted By (coordinator info) --}}
-                <div class="w-full lg:w-[340px] flex-shrink-0 flex flex-col gap-4">
-
-                    <div class="bg-white border border-[#e0e0e0] rounded-2xl overflow-hidden">
-                        <p class="vjob-section-heading px-5 pt-4 pb-3 mb-0 border-b border-[#e0e0e0]"
-                           style="border-radius:0;">
-                            <i class="fas fa-id-badge text-[#7a3f91]"></i>
-                            {{ $vOrgName ? 'Coordinator' : 'Posted By' }}
-                        </p>
-                        <div class="px-5 py-4 flex flex-col gap-2.5">
-                            <div class="flex items-center gap-3">
-                                <span class="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
-                                      style="background:#f5eef9;">
-                                    <i class="fas fa-user text-[#7a3f91]"></i>
-                                </span>
-                                <div>
-                                    <p class="text-base font-bold text-[#111111]">
-                                        {{ $vOrgName ?? 'Alumni Director' }}
-                                    </p>
-                                    @if($vOrgCollege)
-                                        <p class="text-sm text-[#7a3f91] font-semibold">{{ $vOrgCollege }}</p>
-                                    @endif
-                                </div>
-                            </div>
-                            <p class="text-sm text-[#555555]">
-                                Submitted {{ $vCreatedPH->format('M d, Y') }} at {{ $vCreatedPH->format('g:i A') }}
-                            </p>
-                        </div>
-                    </div>
 
                 </div>
 

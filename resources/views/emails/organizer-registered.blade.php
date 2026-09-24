@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Organizer Account Created</title>
+    <title>{{ isset($isEmailUpdate) && $isEmailUpdate ? 'Organizer Account Credentials Updated' : 'Organizer Account Created' }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f0f7; padding: 20px; }
@@ -35,18 +35,22 @@
     <div class="container">
         <div class="header">
             <h1>🎓 Philcst Alumni Connect</h1>
-            <p>Philippine College of Science and Technology</p>
+            <p>{{ isset($isEmailUpdate) && $isEmailUpdate ? 'Account Credentials Update' : 'New Organizer Account' }}</p>
         </div>
 
         <div class="content">
             <div class="greeting">Hello <strong>{{ $name }}</strong>,</div>
 
-            <div class="success-message">✓ Your organizer account has been successfully created in Philcst Alumni Connect.</div>
-
-            <p class="body-text">Below are your login credentials to access the system.</p>
+            @if(isset($isEmailUpdate) && $isEmailUpdate)
+                <div class="success-message">✓ Your email address has been updated by the system administrator. New login credentials have been generated for your account.</div>
+                <p class="body-text">Your email address has been changed. Please use the credentials below to log in to your account. You will be required to change your password upon your next login.</p>
+            @else
+                <div class="success-message">✓ Your organizer account has been successfully created in Philcst Alumni Connect.</div>
+                <p class="body-text">Below are your login credentials to access the system.</p>
+            @endif
 
             <div class="credentials-section">
-                <span class="credentials-label">📋 Your Account Credentials</span>
+                <span class="credentials-label">{{ isset($isEmailUpdate) && $isEmailUpdate ? '🔄 Updated Account Credentials' : '📋 Your Account Credentials' }}</span>
 
                 <div class="credential-item">
                     <span class="credential-label">Teacher ID / Username</span>
@@ -73,10 +77,18 @@
 
             <div class="info-text">
                 <strong style="color: #7a3f91;">⚠️ Important:</strong><br>
-                Your temporary password is case-sensitive. Please change it after your first login. Keep your credentials secure and do not share them with anyone.
+                @if(isset($isEmailUpdate) && $isEmailUpdate)
+                    Your previous password has been reset. Use the new temporary password above to log in, then change it immediately. Keep your credentials secure and do not share them with anyone.
+                @else
+                    Your temporary password is case-sensitive. Please change it after your first login. Keep your credentials secure and do not share them with anyone.
+                @endif
             </div>
 
-            <p style="font-size: 13px; color: #555; line-height: 1.6;">If you did not request this account or have any questions, please contact the system administrator immediately.</p>
+            @if(isset($isEmailUpdate) && $isEmailUpdate)
+                <p style="font-size: 13px; color: #555; line-height: 1.6;">If you did not request this email change or believe this was done in error, please contact the system administrator immediately.</p>
+            @else
+                <p style="font-size: 13px; color: #555; line-height: 1.6;">If you did not request this account or have any questions, please contact the system administrator immediately.</p>
+            @endif
         </div>
 
         <div class="footer">

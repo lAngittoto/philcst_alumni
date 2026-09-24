@@ -960,6 +960,14 @@ public function closeFormModal(): void
         $batchFrom = trim($this->batchYearFrom);
         $batchTo   = trim($this->batchYearTo);
 
+        // -- REQUIRED: Batch Year must be explicitly chosen. The Submit
+        //    button is already disabled via isFormValid() while this is
+        //    empty, but we still need a visible error message here so
+        //    the organizer knows exactly what is missing.
+        if (!$this->allAlumniChosen && $batchFrom === '' && $batchTo === '') {
+            $errors['batch_year'] = 'Batch year is required. Please select a batch, a range, or choose "All Alumni".';
+        }
+
         if ($batchFrom !== '' && !preg_match('/^\d{4}$/', $batchFrom)) {
             $errors['batch_year'] = 'Batch year must be a valid 4-digit year (numbers only, e.g. ' . now()->year . ').';
         }

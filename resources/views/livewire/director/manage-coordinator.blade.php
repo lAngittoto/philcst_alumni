@@ -630,17 +630,37 @@ new class extends Component {
                 throw new \Exception('This email address is already taken.');
             }
 
-            $coordinator->update(['email' => $newEmail]);
+            // Generate a new temp password — the original is hashed and
+            // unrecoverable, so we reset it here so the coordinator can
+            // still log in via the credentials sent to the new address.
+            $tmp = Str::random(12);
+
+            // Null out password_changed_at so the force-change-password
+            // redirect fires on their next login (same as a fresh registration).
+            $coordinator->update([
+                'email'               => $newEmail,
+                'password_changed_at' => null,
+            ]);
 
             if ($coordinator->user_id) {
-                User::where('id', $coordinator->user_id)->update(['email' => $newEmail]);
+                User::where('id', $coordinator->user_id)->update([
+                    'email'    => $newEmail,
+                    'password' => Hash::make($tmp),
+                ]);
+            }
+
+            // Send credentials to the new email address.
+            try {
+                Mail::to($newEmail)->send(new \App\Mail\OrganizerRegistered($coordinator, $tmp));
+            } catch (\Throwable $e) {
+                Log::warning('[CoordinatorEmailUpdate] Failed to send credentials email to ' . $newEmail . ': ' . $e->getMessage());
             }
 
             $this->viewingProfile['email'] = $newEmail;
             $this->editingProfileEmail     = false;
             $this->profileEmailInput       = '';
 
-            $this->flash('success', 'Email address updated successfully.');
+            $this->flash('success', 'Email updated — new login credentials sent to ' . $newEmail . '.');
 
             $this->dispatch('dir-coordinator-updated',
                 id: $coordinator->id,

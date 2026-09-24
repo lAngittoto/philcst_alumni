@@ -56,14 +56,6 @@
                                             </td>
                                         </tr>
                                         <tr>
-                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;vertical-align:top;">📍 Venue</td>
-                                            <td style="padding:7px 0;font-size:14px;color:#333;">
-                                                {{ $event->venue }}
-                                                @if($event->venue_address)
-                                                    <span style="color:#888;font-size:13px;"><br>{{ $event->venue_address }}</span>
-                                                @endif
-                                            </td>
-                                        </tr>
                                         @if($event->target_participants)
                                         <tr>
                                             <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;vertical-align:top;">🎯 For</td>

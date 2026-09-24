@@ -24,6 +24,21 @@ new class extends Component {
     public string $gender        = '';
     public string $date_of_birth = '';
 
+    // Once these already have a value on record, they must never be editable
+    // again (sex, birthdate, and parents' names don't change) — computed
+    // once at mount() from the ORIGINAL database value, not the live/bound
+    // property, so a field only unlocks by staying genuinely empty.
+    public bool $genderLocked = false;
+    public bool $dobLocked    = false;
+    public bool $fatherLocked = false;
+    public bool $motherLocked = false;
+    public bool $mottoLocked  = false;
+
+    // Same 'motto' column the Yearbook page reads/writes — editing it here
+    // updates the exact same record, so it shows up on the Yearbook
+    // automatically without any extra sync step.
+    public string $motto = '';
+
     public string $father_last_name   = '';
     public string $father_given_name  = '';
     public string $father_middle_name = '';
@@ -95,6 +110,7 @@ new class extends Component {
             'dswd_household_no',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
             'disability', 'contact_number',
+            'motto',
         ];
     }
 
@@ -130,7 +146,7 @@ new class extends Component {
             'mother_last_name',  'mother_given_name',  'mother_middle_name',
             'dswd_household_no',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
-            'disability', 'contact_number', 'profile_completed',
+            'disability', 'contact_number', 'profile_completed', 'motto',
         ];
         if ($this->hasEmailColumn) $columns[] = 'email_changed_at';
         if ($this->hasProfileChangedAtColumn) $columns[] = 'profile_changed_at';
@@ -172,6 +188,19 @@ new class extends Component {
         $this->mother_given_name  = $alumni->mother_given_name  ?? '';
         $this->mother_middle_name = $alumni->mother_middle_name ?? '';
 
+        // Lock flags — based on what was ALREADY in the database before this
+        // page loaded, not on whatever the form fields hold live. This is
+        // what makes the lock permanent instead of resettable by clearing
+        // the field first.
+        $this->genderLocked = !empty($alumni->gender);
+        $this->dobLocked    = !empty($alumni->date_of_birth);
+        $this->fatherLocked = !empty($alumni->father_last_name)
+                            && !empty($alumni->father_given_name)
+                            && !empty($alumni->father_middle_name);
+        $this->motherLocked = !empty($alumni->mother_last_name)
+                            && !empty($alumni->mother_given_name)
+                            && !empty($alumni->mother_middle_name);
+
         $this->dswd_household_no    = $alumni->dswd_household_no    ?? '';
         $this->address_street       = $alumni->address_street       ?? '';
         $this->address_barangay     = $alumni->address_barangay     ?? '';
@@ -179,6 +208,8 @@ new class extends Component {
         $this->address_province     = $alumni->address_province     ?? '';
         $this->disability           = $alumni->disability           ?? '';
         $this->contact_number       = $alumni->contact_number       ?? '';
+        $this->motto                = $alumni->motto                ?? '';
+        $this->mottoLocked          = !empty($alumni->motto);
 
         $this->profileComplete = (bool)($alumni->profile_completed ?? false);
         $this->editingProfile  = !$this->profileComplete;
@@ -293,10 +324,30 @@ new class extends Component {
             return;
         }
 
+        // Locked fields can never be part of an update — reset them to the
+        // originally-loaded value regardless of what the request sent, so
+        // a locked field can't be changed even by tampering with the
+        // underlying Livewire request directly.
+        if ($this->genderLocked) $this->gender        = $this->snapshot['gender']        ?? $this->gender;
+        if ($this->dobLocked)    $this->date_of_birth = $this->snapshot['date_of_birth'] ?? $this->date_of_birth;
+        if ($this->fatherLocked) {
+            $this->father_last_name   = $this->snapshot['father_last_name']   ?? $this->father_last_name;
+            $this->father_given_name  = $this->snapshot['father_given_name']  ?? $this->father_given_name;
+            $this->father_middle_name = $this->snapshot['father_middle_name'] ?? $this->father_middle_name;
+            $this->father_suffix      = $this->snapshot['father_suffix']      ?? $this->father_suffix;
+        }
+        if ($this->motherLocked) {
+            $this->mother_last_name   = $this->snapshot['mother_last_name']   ?? $this->mother_last_name;
+            $this->mother_given_name  = $this->snapshot['mother_given_name']  ?? $this->mother_given_name;
+            $this->mother_middle_name = $this->snapshot['mother_middle_name'] ?? $this->mother_middle_name;
+        }
+        if ($this->mottoLocked) $this->motto = $this->snapshot['motto'] ?? $this->motto;
+
         foreach ($this->upperCaseFields() as $field) {
             $this->$field = strtoupper(trim($this->$field));
         }
         $this->email = trim($this->email);
+        $this->motto = trim($this->motto);
 
         $isDirty = false;
         foreach ($this->editableKeys() as $key) {
@@ -337,6 +388,7 @@ new class extends Component {
                 'address_province'     => ['required', 'string', 'max:255', 'regex:' . self::NAME_REGEX],
                 'disability'           => 'nullable|string|max:255',
                 'contact_number'       => 'required|string|max:20|regex:/^[0-9\-\+\s]+$/',
+                'motto'                => 'nullable|string|max:300',
             ], [
                 'email.required'                => 'Email address is required.',
                 'email.regex'                   => 'Only Gmail addresses are accepted (e.g. yourname@gmail.com).',
@@ -366,6 +418,7 @@ new class extends Component {
                 'address_province.regex'        => 'Province must not contain numbers.',
                 'contact_number.required'       => 'Contact number is required.',
                 'contact_number.regex'          => 'Contact number must contain digits only.',
+                'motto.max'                     => 'Motto must be 300 characters or less.',
             ]);
         } catch (ValidationException $e) {
             $this->dispatch('profile-save-failed');
@@ -403,6 +456,7 @@ new class extends Component {
                 'address_province'     => $this->address_province     ?: null,
                 'disability'           => $this->disability           ?: null,
                 'contact_number'       => $this->contact_number       ?: null,
+                'motto'                => $this->motto                ?: null,
                 'profile_completed'    => $profileComplete,
                 'updated_at'           => now(),
             ];
@@ -444,6 +498,44 @@ new class extends Component {
             Log::error('Alumni saveProfile error: ' . $e->getMessage());
             $this->errorMessage = 'Failed to save profile. Please try again.';
             $this->dispatch('show-toast', type: 'error', message: $this->errorMessage);
+        }
+    }
+
+    // ══════════ MOTTO (standalone — bypasses profile cooldown) ══════════
+    // Motto is a one-time permanent action that has nothing to do with the
+    // 30-day profile edit cooldown. Once saved it locks forever via mottoLocked.
+    public function saveMotto(): void
+    {
+        if ($this->mottoLocked) {
+            $this->dispatch('show-toast', type: 'error', message: 'Your motto is already on record and cannot be changed.');
+            return;
+        }
+
+        $motto = trim($this->motto);
+
+        $this->validate(
+            ['motto' => 'required|string|min:1|max:300'],
+            [
+                'motto.required' => 'Please enter a motto before saving.',
+                'motto.max'      => 'Motto must be 300 characters or less.',
+            ]
+        );
+
+        try {
+            DB::table('alumni')->where('id', $this->alumniId)->update([
+                'motto'      => $motto,
+                'updated_at' => now(),
+            ]);
+
+            $this->motto       = $motto;
+            $this->mottoLocked = true;
+            $this->snapshot['motto'] = $motto;
+
+            $this->dispatch('show-toast', type: 'success', message: 'Motto saved! It is now permanently on your yearbook.');
+            Log::info("Alumni motto saved permanently | id: {$this->alumniId}");
+        } catch (\Throwable $e) {
+            Log::error('Alumni saveMotto error: ' . $e->getMessage());
+            $this->dispatch('show-toast', type: 'error', message: 'Failed to save motto. Please try again.');
         }
     }
 
@@ -1757,8 +1849,8 @@ function phAddress(initial) {
                         <div class="ai-card-body flex flex-col gap-1.5">
                             <div class="grid grid-cols-2 gap-1.5">
                                 <div class="ai-cell">
-                                    <p class="field-label">Sex @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                    @if($editingProfile)
+                                    <p class="field-label">Sex @if($genderLocked)<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@elseif($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                    @if($editingProfile && !$genderLocked)
                                         <div class="flex gap-3 flex-wrap pt-1">
                                             <label class="inline-flex items-center gap-1.5 text-sm font-semibold text-gray-900 cursor-pointer">
                                                 <input wire:model.live="gender" type="radio" value="Male" class="w-4 h-4 accent-[#7a3f91] cursor-pointer"> Male
@@ -1773,8 +1865,8 @@ function phAddress(initial) {
                                     @endif
                                 </div>
                                 <div class="ai-cell">
-                                    <p class="field-label">Birthdate @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                    @if($editingProfile)
+                                    <p class="field-label">Birthdate @if($dobLocked)<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@elseif($editingProfile)<span class="text-red-500">*</span>@endif</p>
+                                    @if($editingProfile && !$dobLocked)
                                         <input wire:model.live.debounce.300ms="date_of_birth" type="date" max="{{ date('Y-m-d') }}"
                                             onclick="this.showPicker && this.showPicker()"
                                             class="field-input cursor-pointer {{ $errors->has('date_of_birth') ? 'field-error' : '' }}">
@@ -1896,6 +1988,64 @@ function phAddress(initial) {
                         </div>
                     </div>
 
+                    {{-- Motto — same column used on the Yearbook page, so changes
+                         here show up there automatically. Once it already has a
+                         value it becomes permanently locked, same as the other
+                         one-time fields above. Input is always available as long
+                         as !$mottoLocked, regardless of $editingProfile state. --}}
+                    <div class="ai-card">
+                        <div class="ai-card-header">
+                            <div class="ai-card-header-title">
+                                <i class="fas fa-quote-left" style="color:#7A3F91 !important;"></i>
+                                <p>Motto</p>
+                                @if($mottoLocked)
+                                    <i class="fas fa-lock text-[9px] text-gray-400" title="Permanently locked — cannot be changed"></i>
+                                @endif
+                            </div>
+                        </div>
+                        <div class="ai-card-body">
+                            <div class="ai-cell">
+                                @if(!$mottoLocked)
+                                    {{-- Always editable until first save — independent of profile cooldown --}}
+                                    <textarea wire:model.live.debounce.300ms="motto" rows="2" maxlength="300"
+                                        placeholder="Add your motto to make it visible on your Yearbook…"
+                                        class="field-input {{ $errors->has('motto') ? 'field-error' : '' }}"
+                                        style="resize:none;"></textarea>
+                                    @error('motto') <p class="text-xs text-red-400 font-medium mt-1 m-0">{{ $message }}</p> @enderror
+                                    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;flex-wrap:wrap;gap:6px;">
+                                        <span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:#92400e;background:#FEF3C7;border:1px solid #FDE68A;border-radius:20px;padding:2px 9px;">
+                                            <i class="fas fa-lock" style="font-size:9px;"></i> Permanent — cannot be changed once saved
+                                        </span>
+                                        <div style="display:flex;align-items:center;gap:8px;">
+                                            <span style="font-size:11px;color:#aaa;">{{ 300 - strlen($motto) }} chars left</span>
+                                            <button type="button"
+                                                    wire:click="saveMotto"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="saveMotto"
+                                                    wire:loading.class="opacity-60 cursor-wait"
+                                                    @if(trim($motto) === '') disabled @endif
+                                                    style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:5px 16px;border-radius:8px;border:none;background:#7A3F91;color:#fff;cursor:pointer;transition:opacity .15s;"
+                                                    @if(trim($motto) === '') style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:700;padding:5px 16px;border-radius:8px;border:none;background:#c4a8d8;color:#fff;cursor:not-allowed;" @endif>
+                                                <span wire:loading.remove wire:target="saveMotto">
+                                                    <i class="fas fa-check" style="font-size:10px;"></i> Save Motto
+                                                </span>
+                                                <span wire:loading wire:target="saveMotto">
+                                                    <i class="fas fa-spinner fa-spin" style="font-size:10px;"></i> Saving…
+                                                </span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                @else
+                                    {{-- Locked: read-only display --}}
+                                    <p class="field-value" style="margin:0;">"{{ $motto }}"</p>
+                                    <p style="font-size:11px;color:#aaa;margin-top:4px;">
+                                        <i class="fas fa-lock" style="font-size:9px;"></i> This motto is permanently on record and can no longer be changed.
+                                    </p>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+
                 </div>{{-- end left column --}}
 
                 {{-- ══ RIGHT COLUMN ══ --}}
@@ -1904,12 +2054,12 @@ function phAddress(initial) {
                     {{-- Father's Name --}}
                     <div class="ai-card">
                         <div class="ai-card-header">
-                            <div class="ai-card-header-title"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p></div>
+                            <div class="ai-card-header-title"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p> @if($fatherLocked)<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
                         </div>
                         <div class="ai-card-body grid grid-cols-3 gap-1.5">
                             <div class="ai-cell text-center">
-                                <p class="field-label">Last Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
+                                <p class="field-label">Last Name @if($editingProfile && !$fatherLocked)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile && !$fatherLocked)
                                     <input wire:model.live.debounce.300ms="father_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_last_name') ? 'field-error' : '' }}">
                                     @error('father_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1918,8 +2068,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Given Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
+                                <p class="field-label">Given Name @if($editingProfile && !$fatherLocked)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile && !$fatherLocked)
                                     <input wire:model.live.debounce.300ms="father_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_given_name') ? 'field-error' : '' }}">
                                     @error('father_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1928,8 +2078,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Middle Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
+                                <p class="field-label">Middle Name @if($editingProfile && !$fatherLocked)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile && !$fatherLocked)
                                     <input wire:model.live.debounce.300ms="father_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_middle_name') ? 'field-error' : '' }}">
                                     @error('father_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1943,12 +2093,12 @@ function phAddress(initial) {
                     {{-- Mother's Maiden Name --}}
                     <div class="ai-card">
                         <div class="ai-card-header">
-                            <div class="ai-card-header-title"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p></div>
+                            <div class="ai-card-header-title"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p> @if($motherLocked)<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
                         </div>
                         <div class="ai-card-body grid grid-cols-3 gap-1.5">
                             <div class="ai-cell text-center">
-                                <p class="field-label">Last Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
+                                <p class="field-label">Last Name @if($editingProfile && !$motherLocked)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile && !$motherLocked)
                                     <input wire:model.live.debounce.300ms="mother_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_last_name') ? 'field-error' : '' }}">
                                     @error('mother_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1957,8 +2107,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Given Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
+                                <p class="field-label">Given Name @if($editingProfile && !$motherLocked)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile && !$motherLocked)
                                     <input wire:model.live.debounce.300ms="mother_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_given_name') ? 'field-error' : '' }}">
                                     @error('mother_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -1967,8 +2117,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Middle Name @if($editingProfile)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile)
+                                <p class="field-label">Middle Name @if($editingProfile && !$motherLocked)<span class="text-red-500">*</span>@endif</p>
+                                @if($editingProfile && !$motherLocked)
                                     <input wire:model.live.debounce.300ms="mother_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_middle_name') ? 'field-error' : '' }}">
                                     @error('mother_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror

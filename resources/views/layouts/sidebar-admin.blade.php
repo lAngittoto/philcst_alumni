@@ -46,15 +46,7 @@
         }
         .bell-badge { pointer-events: none; }
 
-        /* ── Ripple / expanding wave effect for unread indicators ──
-           Used on the bell badge count AND the per-notification red
-           dot. Rather than a ::before that inherits the parent's exact
-           box shape (which broke for .bell-badge, since it's
-           min-width-based and can be oblong once it holds "99+"), this
-           renders a separate small ABSOLUTE, perfectly circular layer
-           centered directly behind the badge/dot via a fixed size +
-           top/left/transform centering — independent of whatever shape
-           or size the parent element itself ends up being. */
+        /* ── Ripple / expanding wave effect for unread indicators ── */
         .notif-ripple {
             position: relative;
         }
@@ -81,9 +73,6 @@
         }
         .admin-notif-item { cursor: pointer; position: relative; }
 
-        /* ── Hover-grow on the unread dot — hovering the row scales the
-           red dot up (the ripple wave underneath keeps animating as-is),
-           so hovering makes clear this is a live unread indicator. ── */
         .notif-ripple {
             transition: transform 0.15s ease;
         }
@@ -91,12 +80,6 @@
             transform: scale(1.6);
         }
 
-        /* ── In-place notif loading overlay (used while marking read /
-           navigating to the notif's target, and while deleting). Same
-           visual language as the rest of the app: fa-spinner fa-spin,
-           brand purple (red for delete). The item's own content blurs
-           out underneath instead of being fully covered, so it still
-           reads as "this item is busy" rather than an empty gap. ── */
         .admin-notif-item.is-loading > *:not(.admin-notif-item-loading-overlay) {
             filter: blur(4px);
             opacity: 0.5;
@@ -117,9 +100,7 @@
             color: #7A3F91;
         }
 
-        /* Disable text selection/copy inside the notif panel — header
-           label, item titles, messages, timestamps, footer hint.
-           Buttons/links still clickable, just no text selection. */
+        /* Disable text selection inside notif panel */
         .admin-notif-no-select,
         .admin-notif-no-select * {
             -webkit-user-select: none;
@@ -128,10 +109,7 @@
             user-select: none;
         }
 
-        /* Disable text selection/copy across the whole sidebar — menu
-           labels, section headers ("MENU"), logout button, etc. Links
-           and buttons stay fully clickable; only highlighting/selecting
-           the text is blocked. */
+        /* Disable text selection across the whole sidebar */
         #admin-sidebar-aside,
         #admin-sidebar-aside * {
             -webkit-user-select: none;
@@ -280,9 +258,32 @@
                 max-height: calc(100vh - 190px) !important;
             }
         }
+
         /* ════════════════════════════════════════════════════════
-           SIDEBAR COLLAPSE (desktop only)
+           SIDEBAR CORE
         ════════════════════════════════════════════════════════ */
+        #admin-sidebar-aside {
+            background-color: #FFFFFF;
+            border-right: 1px solid #E8E0F0;
+            transition:
+                width 0.2s ease,
+                min-width 0.2s ease,
+                transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 0.25s ease,
+                border-color 0.25s ease;
+        }
+
+        /* ── Kill transition on first paint / hard refresh ────────────
+           Without this the sidebar animates from its default state to
+           the saved (collapsed/expanded) state on every refresh — an
+           ugly flash/slide. The no-transition class is removed in x-init
+           after two rAF frames, so only user-triggered toggles get the
+           smooth animation. */
+        #admin-sidebar-aside.no-transition {
+            transition: none !important;
+        }
+
+        /* ── Collapsible text (labels, section headers) ── */
         .admin-collapsible-text {
             opacity: 1;
             max-width: 220px;
@@ -322,16 +323,17 @@
         .admin-collapse-icon-btn:active { transform: scale(0.88); }
         .admin-collapse-icon-btn i { pointer-events: none; }
 
+        /* ════════════════════════════════════════════════════════
+           DESKTOP — collapsed / expanded states
+        ════════════════════════════════════════════════════════ */
         @media (min-width: 1024px) {
-            /* Sidebar must stay perfectly still on desktop — the
-               open/closed slide (translate-x) is a mobile-only concept.
-               Force the transform every time and drop the transition on
-               that property so a stray `open` flip (e.g. during a
-               Livewire navigate re-render) never produces a visible
-               slide/jump on desktop. */
+            /* Sidebar must stay perfectly still on desktop — transform is
+               a mobile-only concept. Force it every time and drop the
+               transition on that property so a stray `open` flip never
+               produces a visible slide/jump on desktop. */
             #admin-sidebar-aside {
                 transform: none !important;
-                transition-property: width, min-width, background-color !important;
+                transition-property: width, min-width, background-color, opacity, border-color !important;
             }
             #admin-sidebar-aside.is-collapsed {
                 width: 5rem !important;
@@ -373,29 +375,58 @@
             #admin-sidebar-aside.is-collapsed form button[type="submit"] i {
                 margin-right: 0 !important;
             }
-            #admin-sidebar-aside.is-collapsed .p-4 > a[href*="logout"] {
-                gap: 0;
-                padding: 0.9rem;
+
+            /* ── is-modal-hidden: shrink sidebar to zero when a modal is
+               open on desktop so the overlay never peeks through the sidebar
+               edge — same technique as the registrar sidebar. ── */
+            #admin-sidebar-aside.is-modal-hidden {
+                width: 0 !important;
+                min-width: 0 !important;
+                opacity: 0;
+                pointer-events: none;
+                overflow: hidden;
+                border-right-color: transparent;
+                transition: none !important;
             }
-            #admin-sidebar-aside.is-collapsed .p-4 > a[href*="logout"] i.fa-right-from-bracket {
-                margin-right: 0 !important;
+            #admin-sidebar-aside.is-modal-hidden .admin-collapsible-text {
+                display: none !important;
             }
         }
 
+        /* ── is-modal-hidden: on mobile, slide the sidebar fully off-screen
+           when a modal is open so it never fights the modal overlay. ── */
         @media (max-width: 1023px) {
             #admin-sidebar-aside {
                 box-shadow: 0 0 60px rgba(0,0,0,0.18);
             }
+            #admin-sidebar-aside.is-modal-hidden {
+                transform: translateX(-100%) !important;
+                transition: none !important;
+                pointer-events: none;
+                box-shadow: none;
+            }
         }
 
-        /* ── Nav link click spinner — mirrors the organizer sidebar's
-           coord-nav-spinner. Shows a small spinner at the end of the
-           row while a page navigation is in flight, so clicking a
-           sidebar link gives immediate feedback instead of feeling
-           unresponsive until the next page lands.
-           Expanded sidebar: sits at the end of the row (where the
-           active dot sits), icon stays visible. Collapsed sidebar /
-           mobile: centered on top of the icon chip, icon hidden. ── */
+        /* ── Lock other nav links while one is navigating (same pattern as
+           registrar sidebar) — everything except the clicked link is dimmed
+           and inert so double-clicks / stray clicks are harmless. ── */
+        #admin-sidebar-aside.is-navigating-any .admin-nav-link:not(.is-navigating) {
+            pointer-events: none !important;
+            opacity: 0.45 !important;
+            filter: grayscale(0.3);
+            cursor: default !important;
+        }
+        #admin-sidebar-aside.is-navigating-any .admin-collapse-icon-btn {
+            pointer-events: none !important;
+            opacity: 0.45 !important;
+        }
+        .admin-nav-link.is-navigating { cursor: wait !important; }
+
+        /* ── Nav link click spinner — mirrors the registrar sidebar's
+           approach. Shows a small spinner on the row while a page
+           navigation is in flight for immediate feedback.
+           Expanded sidebar: sits at the end of the row (active dot slot).
+           Collapsed sidebar / mobile: centered on top of the icon chip. ── */
         .admin-nav-link { position: relative; }
         .admin-nav-icon-wrap { position: relative; }
         .admin-nav-link.is-navigating .admin-nav-icon-wrap {
@@ -438,8 +469,36 @@
                 display: none !important;
             }
             #admin-sidebar-aside:not(.is-collapsed) .admin-nav-link.is-navigating .admin-nav-icon-wrap i.fa-solid {
-                display: none !important;
+                display: inline-block !important;
             }
+        }
+
+        /* Logout button */
+        .admin-logout-btn {
+            position: relative;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.55rem;
+            padding: 0.9rem 1rem;
+            border-radius: 12px;
+            font-weight: 700;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: #fff;
+            background: linear-gradient(135deg, #7A3F91, #6a3080);
+            border: none;
+            cursor: pointer;
+            transition: opacity 0.2s ease, transform 0.15s ease;
+        }
+        .admin-logout-btn:hover   { opacity: 0.92; }
+        .admin-logout-btn:active  { transform: scale(0.97); }
+
+        @keyframes admLogoutDotBounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+            40% { transform: translateY(-4px); opacity: 1; }
         }
     </style>
 
@@ -456,6 +515,29 @@
         'events':               '/events',
         'course':               '/course',
     };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  GLOBAL "MODAL OPEN" STORE — same pattern as registrar sidebar.
+    //  Livewire pages dispatch 'modal-opened' / 'modal-closed' so the
+    //  sidebar can slide away and never fight the overlay.
+    // ─────────────────────────────────────────────────────────────────────────
+    document.addEventListener('alpine:init', function () {
+        if (!Alpine.store('adminModal')) {
+            Alpine.store('adminModal', { open: false });
+        }
+    });
+    window.addEventListener('modal-opened', function () {
+        var s = window.Alpine && Alpine.store('adminModal');
+        if (s) s.open = true;
+    });
+    window.addEventListener('modal-closed', function () {
+        var s = window.Alpine && Alpine.store('adminModal');
+        if (s) s.open = false;
+    });
+    document.addEventListener('livewire:navigated', function () {
+        var s = window.Alpine && Alpine.store('adminModal');
+        if (s) s.open = false;
+    });
 
     // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY
@@ -478,17 +560,12 @@
             _startPolling() {
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
-                // 1.5s so a new job posting (or any admin notif) lands in
-                // the bell almost the instant it's written to the DB —
-                // was 10000ms, which is what made the bell lag behind the
-                // jobs table by several seconds even after the write
-                // itself became real-time.
                 this._pollTimer = setInterval(function () { self._fetch(); }, 1500);
             },
 
             async _fetch() {
-                if (this._deleting)  return; // don't let a poll refresh clobber an in-flight delete
-                if (this.navigating) return; // don't let a poll refresh clobber an in-flight mark-read/navigate
+                if (this._deleting)  return;
+                if (this.navigating) return;
                 try {
                     var res = await window.fetch('/admin/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
@@ -512,24 +589,25 @@
                             : 'unknown';
                         var rawDedup = n.dedup_key || '';
 
-                        // ── event type flags ───────────────────────────────
-
-                        // USER MANAGEMENT — separate-per-action types (never grouped)
                         var isUserCreatedEvent  = rawDedup.startsWith('user-created::');
                         var isUserToggledEvent  = rawDedup.startsWith('user-toggled::');
                         var isUserEmailEvent    = rawDedup.startsWith('user-email::');
                         var isUserUsernameEvent = rawDedup.startsWith('user-username::');
-                        // user_id lives right after the prefix in dedup_key
-                        // (user-email::{uid}::{minute}) — parsed here the
-                        // same way job_id/event_id are parsed above, so
-                        // clicking an "Email Updated" notif can jump
-                        // straight to that alumni's View Details instead
-                        // of just landing on the unfiltered user list.
-                        var userIdFromEmailDedup = isUserEmailEvent
-                            ? (rawDedup.split('::')[1] || null)
-                            : null;
 
-                        // Generic user management update (still groups by day)
+                        // Extract user_id from ALL per-user dedup keys:
+                        // user-created::{uid}
+                        // user-toggled::{uid}::{minute}
+                        // user-email::{uid}::{minute}
+                        // user-username::{uid}::{minute}
+                        // The uid is always the segment right after the first "::"
+                        // so split('::')[1] works for all four formats.
+                        var userIdFromDedup = (
+                            isUserCreatedEvent  ||
+                            isUserToggledEvent  ||
+                            isUserEmailEvent    ||
+                            isUserUsernameEvent
+                        ) ? (rawDedup.split('::')[1] || null) : null;
+
                         var isUserEvent = (
                             rawDedup.startsWith('user-management::') ||
                             n.icon === 'users'
@@ -544,28 +622,11 @@
                             n.icon === 'book-open'
                         );
 
-                        // NEW JOB POST — dedup prefix: job-posted:: (separate row per job, never grouped)
                         var isNewJobEvent = rawDedup.startsWith('job-posted::');
-                        // job_id lives right after the prefix in dedup_key
-                        // (job-posted::{id}) — parsed here since the API
-                        // payload doesn't carry a separate job_id field.
                         var jobIdFromDedup = isNewJobEvent
                             ? (rawDedup.split('::')[1] || null)
                             : null;
 
-                        // EVENT APPROVED / COMPLETED — dedup prefix: event-status::
-                        // One row PER EVENT that morphs in place: created as
-                        // "Event Approved", later updated (same dedup_key,
-                        // same row) to "Event Completed" when the event's
-                        // date passes. Never grouped/collapsed. Badge is
-                        // decided by the row's current title/icon rather
-                        // than by a fixed dedup suffix, since the same row
-                        // can represent either state depending on when you
-                        // look at it.
-                        //
-                        // Legacy prefixes (event-approved:: / event-completed::)
-                        // are still recognized for any older rows already in
-                        // the table before this morph-in-place change.
                         var isEventStatusRow = rawDedup.startsWith('event-status::');
                         var isApprovedEvent = isEventStatusRow
                             ? (n.title === 'Event Approved')
@@ -573,35 +634,27 @@
                         var isCompletedEvent = isEventStatusRow
                             ? (n.title === 'Event Completed')
                             : rawDedup.startsWith('event-completed::');
-                        // event_id lives right after the prefix in dedup_key
-                        // (event-status::{id} / event-approved::{id} /
-                        // event-completed::{id}) — parsed here the same way
-                        // job_id is parsed above, since the API payload
-                        // doesn't carry a separate event_id field either.
                         var eventIdFromDedup = (isApprovedEvent || isCompletedEvent)
                             ? (rawDedup.split('::')[1] || null)
                             : null;
 
-                        // COURSE — capped at 2 rows a day (AM / PM slot), dedup_key already
-                        // encodes course::{day}::{am|pm} so the map naturally caps it.
                         var isCourseEvent = (
                             rawDedup.startsWith('course::') ||
                             (n.icon === 'clipboard-list' && n.title === 'Course Update')
                         );
 
-                        // ── group key ──────────────────────────────────────
                         var groupKey;
-                        if (isUserCreatedEvent)      { groupKey = rawDedup; }           // per-creation, no collapsing
-                        else if (isUserToggledEvent) { groupKey = rawDedup; }           // per-toggle, no collapsing
-                        else if (isUserEmailEvent)   { groupKey = rawDedup; }           // per-email-update, no collapsing
-                        else if (isUserUsernameEvent){ groupKey = rawDedup; }           // per-username-update, no collapsing
+                        if (isUserCreatedEvent)      { groupKey = rawDedup; }
+                        else if (isUserToggledEvent) { groupKey = rawDedup; }
+                        else if (isUserEmailEvent)   { groupKey = rawDedup; }
+                        else if (isUserUsernameEvent){ groupKey = rawDedup; }
                         else if (isUserEvent)         { groupKey = 'user_day::' + day; }
                         else if (isEmploymentEvent)  { groupKey = 'employment_day::' + day; }
                         else if (isYearbookEvent)    { groupKey = 'yearbook_day::' + day; }
                         else if (isNewJobEvent)      { groupKey = rawDedup; }
                         else if (isApprovedEvent)    { groupKey = rawDedup; }
                         else if (isCompletedEvent)   { groupKey = rawDedup; }
-                        else if (isCourseEvent)      { groupKey = rawDedup; }           // dedup_key already caps to 2/day
+                        else if (isCourseEvent)      { groupKey = rawDedup; }
                         else { groupKey = (n.title || '') + '::' + day + '::' + (rawDedup || n.id); }
 
                         if (map.has(groupKey)) {
@@ -610,7 +663,6 @@
                             if (!n.read) g.read = false;
                             g._ids.push(n.id);
 
-                            // Update group titles for collapsible types only
                             if (isUserEvent)         { g.title = 'User Management Update'; }
                             else if (isEmploymentEvent)  { g.title = 'Employment Tracking Update'; }
                             else if (isYearbookEvent)    { g.title = 'Yearbook Update'; }
@@ -643,7 +695,6 @@
                                      : isCompletedEvent    ? 'circle-check'
                                      : isCourseEvent       ? 'clipboard-list'
                                      : (n.icon || 'bell'),
-                                // Carry flags so the template knows what kind of row this is
                                 _isNewJob:         isNewJobEvent,
                                 _isApprovedEvent:  isApprovedEvent,
                                 _isCompletedEvent: isCompletedEvent,
@@ -653,23 +704,7 @@
                                 _isUserUsername:   isUserUsernameEvent,
                                 job_id:            n.job_id || jobIdFromDedup || null,
                                 event_id:          n.event_id || eventIdFromDedup || null,
-                                user_id:           n.user_id || userIdFromEmailDedup || null,
-                                // ── Force the correct destination for a
-                                //    "New Job Posting" row instead of
-                                //    trusting whatever link_route is
-                                //    sitting on the DB row. A job posting
-                                //    always goes to Job Posts — but some
-                                //    rows created before an earlier fix
-                                //    (a client-side race between two
-                                //    competing dispatches) got saved with
-                                //    the wrong link_route and silently
-                                //    kept sending their click to the
-                                //    dashboard instead, forever, since
-                                //    nothing here used to correct it.
-                                //    Normalizing it here — the same way
-                                //    title/icon are already normalized
-                                //    above — means it self-heals for any
-                                //    old bad rows too, not just new ones. ──
+                                user_id:           n.user_id || userIdFromDedup || null,
                                 link_route:        isNewJobEvent ? 'job.posts'
                                                   : (isApprovedEvent || isCompletedEvent) ? 'events'
                                                   : n.link_route,
@@ -677,14 +712,6 @@
                         }
                     });
 
-                // ── Stable sort: unread items first, then read items —
-                //    each block keeps its existing created_at-desc order.
-                //    Without this, the "Already Read" divider (which
-                //    fires on every unread→read transition in the list)
-                //    can render more than once whenever an unread and a
-                //    read item end up interleaved instead of cleanly
-                //    grouped (e.g. after a poll refresh reorders things
-                //    by timestamp instead of by read state). ──
                 var grouped = Array.from(map.values());
                 var unreadGroup = grouped.filter(function (n) { return !n.read; });
                 var readGroup   = grouped.filter(function (n) { return n.read; });
@@ -697,9 +724,6 @@
 
             toggle() {
                 this.open = !this.open;
-                // Fetch immediately on open — don't wait for the next
-                // 1.5s poll tick, so anything posted a split-second ago
-                // is guaranteed visible the moment the panel appears.
                 if (this.open) this._fetch();
             },
             close()  { this.open = false; },
@@ -723,27 +747,11 @@
                         allOk = false;
                     }
                 }
-                // ── Only flip the item to "read" once the PATCH has
-                //    actually confirmed. Flipping it optimistically before
-                //    the request resolves used to change the item's look
-                //    (background, badges, the "Already Read" divider on a
-                //    neighboring row) WHILE the loading spinner overlay was
-                //    still showing on top of it — a jarring flash/glitch
-                //    right under the spinner. Setting it here instead means
-                //    all of that visual change happens in one clean step,
-                //    right as the spinner is about to be removed. ──
                 if (allOk) {
                     item.read = true;
                 }
             },
 
-            // Click entry point for a notif row: shows a spinner overlay on
-            // the item (via `navigating` + `loadingId`) while it's marked
-            // read and routed to its target — same UX as the organizer
-            // sidebar's notif panel. The overlay is left on until either
-            // the destination page actually lands (`livewire:navigated`,
-            // handled globally below) or, for a same-page click that never
-            // navigates at all, a short timeout clears it itself.
             async openNotif(item) {
                 this.navigating = true;
                 this.loadingId  = item.id;
@@ -759,10 +767,6 @@
                 }
             },
 
-            // Routes to wherever this notif points. Returns true when it
-            // kicked off some kind of transition (so the caller leaves the
-            // spinner on), false when there was nowhere to go (spinner
-            // clears immediately).
             _goToTarget(item) {
                 if (!item.link_route) return false;
 
@@ -772,20 +776,14 @@
                     url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_job=' + encodeURIComponent(item.job_id);
                 } else if (item.link_route === 'events' && item.event_id) {
                     url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_event=' + encodeURIComponent(item.event_id);
-                } else if (item.link_route === 'user.management' && item._isUserEmail && item.user_id) {
+                } else if (item.link_route === 'user.management' && item.user_id &&
+                           (item._isUserEmail || item._isUserCreated || item._isUserToggled || item._isUserUsername)) {
                     url += (url.indexOf('?') === -1 ? '?' : '&') + 'highlight_user=' + encodeURIComponent(item.user_id);
                 }
 
                 var targetPath    = url.split('?')[0];
                 var isSameLocation = window.location.pathname === targetPath;
 
-                // ── Already on Job Posts? Skip the URL/reload entirely —
-                //    dispatch straight to the mounted Livewire component
-                //    so it opens View Details immediately, no page flash.
-                //    Nothing actually navigates here, so drop the spinner
-                //    (and close the panel) shortly after instead of
-                //    waiting on a `livewire:navigated` that will never
-                //    fire. ──
                 if (isSameLocation && item.link_route === 'job.posts' && item.job_id && window.Livewire) {
                     Livewire.dispatch('open-view-job', { id: Number(item.job_id) });
                     setTimeout(function () {
@@ -795,9 +793,6 @@
                     }, 400);
                     return true;
                 } else if (isSameLocation && item.link_route === 'events' && item.event_id && window.Livewire) {
-                    // Same as the Job Posts case above — already on
-                    // Events, so dispatch straight to the mounted
-                    // component instead of a full navigate/reload.
                     Livewire.dispatch('open-view-event', { id: Number(item.event_id) });
                     setTimeout(function () {
                         self.navigating = false;
@@ -805,10 +800,14 @@
                         self.open       = false;
                     }, 400);
                     return true;
-                } else if (isSameLocation && item.link_route === 'user.management' && item._isUserEmail && item.user_id && window.Livewire) {
-                    // Same as the Job Posts / Events cases above — already
-                    // on User Management, so dispatch straight to the
-                    // mounted component instead of a full navigate/reload.
+                } else if (isSameLocation && item.link_route === 'user.management' && item.user_id &&
+                           (item._isUserEmail || item._isUserCreated || item._isUserToggled || item._isUserUsername) &&
+                           window.Livewire) {
+                    // Already on User Management — dispatch directly to the
+                    // mounted component so View Details opens immediately with
+                    // the right user, no page flash. Works for every per-user
+                    // notif type: New Director Created, Account Activated/
+                    // Deactivated, Email Updated, and Username Updated.
                     Livewire.dispatch('open-view-user', { id: Number(item.user_id) });
                     setTimeout(function () {
                         self.navigating = false;
@@ -817,10 +816,6 @@
                     }, 400);
                     return true;
                 } else if (isSameLocation) {
-                    // Already on the target page — nothing will actually
-                    // navigate, so just close the panel and drop the
-                    // spinner shortly after instead of waiting on a
-                    // `livewire:navigated` that will never fire.
                     setTimeout(function () {
                         self.navigating = false;
                         self.loadingId  = null;
@@ -828,13 +823,6 @@
                     }, 400);
                     return true;
                 } else if (window.Livewire) {
-                    // ── Keep the panel open (with the spinner overlay
-                    //    showing on this item) until the destination page
-                    //    actually lands — closing it here left a visible
-                    //    flash of "panel closed, spinner still spinning"
-                    //    right before navigation kicked in. The
-                    //    `livewire:navigated` handler below closes the
-                    //    panel once the new page has truly landed. ──
                     Livewire.navigate(url);
                     return true;
                 } else {
@@ -856,19 +844,12 @@
                 } catch (e) { /* ignore */ }
             },
 
-            // Deletes a notification MESSAGE only — never the underlying
-            // record that generated it. Only ever called for notifs that
-            // are 30+ days old (enforced by the x-show on the delete
-            // button in the markup), so this is purely a "clean up old
-            // noise" action, not a moderation action on real data.
             async deleteNotif(item) {
                 var ids = item._ids || [item.id];
                 var self = this;
                 this._deleting = true;
                 this._showDeleteToast('Notification deleted');
 
-                // Give the slide-out leave transition time to play before
-                // actually removing the item from the array.
                 await new Promise(function (resolve) { setTimeout(resolve, 250); });
                 this.items = this.items.filter(function (n) { return n !== item; });
 
@@ -898,9 +879,6 @@
                 }
             },
 
-            // Small self-clearing toast shown at the edge of the notif
-            // panel. Re-triggerable: calling this again while a toast is
-            // already showing resets its timer instead of stacking.
             _showDeleteToast(message) {
                 var self = this;
                 this.deleteToast.message = message;
@@ -956,32 +934,6 @@
     });
 
     // PATH D — livewire:navigated
-    //
-    // FIX: this used to unconditionally clear + restart the poller (or
-    // even create a brand-new one) on every single wire:navigate hop,
-    // with no check on WHERE we navigated to. Two bugs came from that:
-    //
-    //   1. Navigating away from the admin portal entirely (e.g. after
-    //      logout, or — if an Alpine store ever survives across a role
-    //      switch — into a Director/Organizer page) would still find
-    //      #admin-bell-btn missing, but the code didn't check for that:
-    //      it called s.init() anyway, which kicks off _fetch() +
-    //      _startPolling() against /admin/notifications using whatever
-    //      session happens to be active at that moment. If a fresh
-    //      login (as a DIFFERENT account) landed in the same 150ms
-    //      window, this stray poll could interfere with the new
-    //      session and boot it back out — the exact "log in, instantly
-    //      logged out" bug.
-    //
-    //   2. The bare 150ms setTimeout meant the poller could still be
-    //      alive and ticking during that gap even when we're mid-
-    //      logout, since wire:navigate doesn't tear down window-scoped
-    //      JS state.
-    //
-    // Now: only (re)start the poller if we've actually landed on an
-    // admin page (#admin-bell-btn or #admin-bell-btn-mobile present in
-    // the DOM). Anywhere else, tear the store down completely so it
-    // can't keep firing requests in the background.
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
@@ -990,9 +942,6 @@
             var s = Alpine.store('adminNotifs');
 
             if (!onAdminPage) {
-                // Left the admin portal (logout, role switch, or any
-                // other page) — fully stop and drop the store so
-                // nothing keeps polling in the background.
                 if (s) {
                     if (s._pollTimer) clearInterval(s._pollTimer);
                     s._pollTimer = null;
@@ -1007,7 +956,7 @@
                 if (s._pollTimer) clearInterval(s._pollTimer);
                 s._pollTimer = null;
                 s.open = false;
-                s.navigating = false; // destination page has landed — drop the spinner now, not before
+                s.navigating = false;
                 s.loadingId  = null;
                 s.init();
             } else {
@@ -1038,7 +987,7 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  PANEL POSITIONING — desktop only (mobile is handled entirely by CSS, full screen)
+    //  PANEL POSITIONING — desktop only (mobile is handled entirely by CSS)
     // ─────────────────────────────────────────────────────────────────────────
     function positionAdminPanel() {
         if (window.innerWidth < 1024) return;
@@ -1058,7 +1007,7 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  TIMESTAMP HELPER — "Today, 5:07 PM" vs "Jun 23, 5:07 PM"
+    //  TIMESTAMP HELPER
     // ─────────────────────────────────────────────────────────────────────────
     window.__adminFormatNotifTime = function (isoStr) {
         if (!isoStr) return '';
@@ -1077,15 +1026,6 @@
 
     // ─────────────────────────────────────────────────────────────────────────
     //  NOTIFICATION EVENT LISTENERS
-    //
-    //  user-created:: = new director created    → separate row per creation
-    //  user-toggled:: = activate / deactivate   → separate row per action
-    //  user-email::   = alumni email updated    → separate row per update
-    //
-    //  job-posted::      = brand-new job post      → separate row per job (only job trigger — no "edit" notif)
-    //  event-approved::  = event approved           → separate row per event
-    //  event-completed:: = event marked completed   → separate row per event
-    //  course::{day}::{am|pm} = course changes       → capped at 2 rows a day (matches chat's cap)
     // ─────────────────────────────────────────────────────────────────────────
     if (!window.__philcstAdminNotifListeners) {
         window.__philcstAdminNotifListeners = true;
@@ -1137,10 +1077,6 @@
             } catch (e) { /* ignore */ }
         }
 
-        // ── NEW DIRECTOR CREATED ─────────────────────────────────────────────
-        // Fired by manage-users.blade.php via __admin-user-created-rich.
-        // dedup_key: user-created::{uid} — separate row per creation, never grouped.
-        // Message: "Full Name account has been created. (Username: username)"
         window.addEventListener('__admin-user-created-rich', function (e) {
             var d = _adminDetail(e);
             if (!d || !d.uid) return;
@@ -1155,10 +1091,6 @@
             });
         });
 
-        // ── DIRECTOR / REGISTRAR ACTIVATE | DEACTIVATE ───────────────────────
-        // Fired by manage-users.blade.php via __admin-user-toggled-rich.
-        // dedup_key: user-toggled::{uid}::{minute} — separate row per action.
-        // Message: "Full Name has been activated/deactivated. (Director)"
         window.addEventListener('__admin-user-toggled-rich', function (e) {
             var d = _adminDetail(e);
             if (!d || !d.uid) return;
@@ -1177,10 +1109,6 @@
             });
         });
 
-        // ── EMAIL UPDATED (Alumni / Director) ────────────────────────────────
-        // Fired by manage-users.blade.php via __admin-user-email-rich.
-        // dedup_key: user-email::{uid}::{minute} — separate row per update.
-        // Message: "Full Name email has been updated. New email: newemail@x.com"
         window.addEventListener('__admin-user-email-rich', function (e) {
             var d = _adminDetail(e);
             if (!d || !d.uid) return;
@@ -1199,10 +1127,6 @@
             });
         });
 
-        // ── USERNAME UPDATED (Registrar) ─────────────────────────────────────
-        // Fired by manage-users.blade.php via __admin-user-username-rich.
-        // dedup_key: user-username::{uid}::{minute} — separate row per update.
-        // Message: "Full Name username has been updated. New username: jdelacruz2024"
         window.addEventListener('__admin-user-username-rich', function (e) {
             var d = _adminDetail(e);
             if (!d || !d.uid) return;
@@ -1217,7 +1141,6 @@
             });
         });
 
-        // ── user (generic grouped) ────────────────────────────────────────────
         window.addEventListener('admin-user-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -1230,7 +1153,6 @@
             });
         });
 
-        // ── employment ──────────────────────────────────────────────────────
         window.addEventListener('admin-employment-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -1243,7 +1165,6 @@
             });
         });
 
-        // ── yearbook ────────────────────────────────────────────────────────
         window.addEventListener('admin-yearbook-updated', function (e) {
             var d = _adminDetail(e);
             _saveAdminNotif({
@@ -1256,7 +1177,6 @@
             });
         });
 
-        // ── NEW JOB POST ─────────────────────────────────────────────────────
         window.addEventListener('__admin-job-posted-rich', function (e) {
             var d = e.detail;
             if (!d || !d.id) return;
@@ -1270,12 +1190,11 @@
                 title:      'New Job Posting',
                 message:    message,
                 link_route: 'job.posts',
-                link_label: 'View Jobs',
+                link_label: 'View Job Posts',
                 dedup_key:  'job-posted::' + d.id,
             });
         });
 
-        // ── EVENT APPROVED ───────────────────────────────────────────────────
         window.addEventListener('__admin-event-approved-rich', function (e) {
             var d = e.detail;
             if (!d || !d.id) return;
@@ -1289,7 +1208,6 @@
             });
         });
 
-        // ── EVENT COMPLETED ──────────────────────────────────────────────────
         window.addEventListener('__admin-event-completed-rich', function (e) {
             var d = e.detail;
             if (!d || !d.id) return;
@@ -1303,9 +1221,6 @@
             });
         });
 
-        // ── course — capped at 2 notifications a day ─────────────────────────
-        // dedup_key groups by DAY + slot (AM/PM half), so no matter how many
-        // course edits happen, only up to 2 rows land in the bell per day.
         window.addEventListener('admin-course-updated', function (e) {
             var d = _adminDetail(e);
             var now  = new Date();
@@ -1321,7 +1236,6 @@
             });
         });
 
-        // ── generic refresh ──────────────────────────────────────────────────
         window.addEventListener('admin-notif-refresh', function () {
             var s = window.__safeAdminNotifsStore();
             if (s) {
@@ -1341,6 +1255,7 @@
     x-data="{
         open: false,
         sidebarCollapsed: localStorage.getItem('admin_sidebar_collapsed') === '1',
+        sidebarSettled: false,
         navClickedRoute: null,
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
@@ -1348,10 +1263,10 @@
     }"
     x-init="
         $watch('sidebarCollapsed', function (val) { localStorage.setItem('admin_sidebar_collapsed', val ? '1' : '0'); });
-        $watch('open', function (val) { if (val && sidebarCollapsed) open = false; });
+        requestAnimationFrame(function () { requestAnimationFrame(function () { sidebarSettled = true; }); });
     "
     @click="$store.adminNotifs && $store.adminNotifs.open && $store.adminNotifs.close()"
-    @@livewire:navigated.window="navClickedRoute = null; if (!sidebarCollapsed) open = false;">
+    @@livewire:navigated.window="navClickedRoute = null; open = false; sidebarSettled = false; requestAnimationFrame(function () { requestAnimationFrame(function () { sidebarSettled = true; }); });">
 
 @php
     $authAdmin = auth()->user();
@@ -1361,7 +1276,8 @@
 
     {{-- Mobile overlay --}}
     <div
-        x-show="open"
+        x-show="open && !($store.adminModal && $store.adminModal.open)"
+        x-cloak
         x-transition:enter="transition ease-out duration-300"
         x-transition:enter-start="opacity-0"
         x-transition:enter-end="opacity-100"
@@ -1374,13 +1290,25 @@
     </div>
 
     {{-- ══ SIDEBAR ══ --}}
+    {{-- x-bind:class is evaluated as soon as this element is parsed. "is-collapsed"
+         is seeded synchronously from localStorage so on desktop the narrow width is
+         already correct on first paint — no flash of the wide sidebar snapping narrow.
+         "no-transition" suppresses the animation until Alpine finishes initializing,
+         preventing the jarring slide-in on hard refresh. --}}
     <aside
         id="admin-sidebar-aside"
-        :class="[open ? 'translate-x-0' : '-translate-x-full', sidebarCollapsed ? 'is-collapsed' : '']"
-        class="fixed inset-y-0 left-0 w-72 min-w-[18rem] transform transition-all duration-300
+        x-bind:class="{
+            'translate-x-0':     open && !($store.adminModal && $store.adminModal.open),
+            'is-collapsed':      sidebarCollapsed,
+            'is-modal-hidden':   ($store.adminModal && $store.adminModal.open),
+            'no-transition':     !sidebarSettled,
+            'is-navigating-any': navClickedRoute !== null
+        }"
+        class="fixed inset-y-0 left-0 w-72 min-w-[18rem] transform -translate-x-full
+               transition-all duration-300
                shadow-2xl lg:!translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
-        style="background-color: #FFFFFF; border-right: 1px solid #E8E0F0; z-index: 9991;">
+        style="z-index: 9991;">
 
         {{-- Sidebar header --}}
         <div class="admin-sidebar-header flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
@@ -1390,7 +1318,7 @@
                     Admin<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
                 </h1>
                 <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
-                    Management System
+                    System Administration
                 </p>
             </div>
 
@@ -1402,10 +1330,10 @@
         </div>
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-2 overflow-y-auto no-scrollbar">
+        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
 
             <div class="admin-nav-section-row">
-                <p class="admin-section-label admin-collapsible-text">MENU</p>
+                <p class="admin-section-label admin-collapsible-text">MAIN MENU</p>
 
                 <button type="button"
                         @click.stop="toggleSidebar()"
@@ -1425,13 +1353,15 @@
                         'label'   => 'Dashboard',
                         'pattern' => 'admin/dashboard*',
                         'color'   => '#7A3F91',
+                        'bg'      => '#EDE9F8',
                     ],
                     [
                         'route'   => 'user.management',
-                        'icon'    => 'users',
+                        'icon'    => 'users-gear',
                         'label'   => 'User Management',
                         'pattern' => 'user/management*',
                         'color'   => '#7A3F91',
+                        'bg'      => '#EDE9F8',
                     ],
                     [
                         'route'   => 'employment.tracking',
@@ -1439,34 +1369,39 @@
                         'label'   => 'Employment Tracking',
                         'pattern' => 'employment/tracking*',
                         'color'   => '#D97706',
+                        'bg'      => '#FEF3C7',
                     ],
                     [
                         'route'   => 'admin.yearbook',
                         'icon'    => 'book-open',
-                        'label'   => 'Yearbook',
+                        'label'   => 'Alumni Yearbook',
                         'pattern' => 'yearbook*',
                         'color'   => '#0284C7',
+                        'bg'      => '#DBEAFE',
                     ],
                     [
                         'route'   => 'job.posts',
                         'icon'    => 'briefcase',
-                        'label'   => 'Job Posts',
+                        'label'   => 'Job Postings',
                         'pattern' => 'job/posts*',
                         'color'   => '#059669',
+                        'bg'      => '#DCFCE7',
                     ],
                     [
                         'route'   => 'events',
                         'icon'    => 'calendar-check',
-                        'label'   => 'Events',
+                        'label'   => 'Events & Activities',
                         'pattern' => 'events*',
                         'color'   => '#059669',
+                        'bg'      => '#DCFCE7',
                     ],
                     [
                         'route'   => 'course',
-                        'icon'    => 'clipboard-list',
-                        'label'   => 'Courses',
+                        'icon'    => 'graduation-cap',
+                        'label'   => 'Programs',
                         'pattern' => 'course*',
                         'color'   => '#7A3F91',
+                        'bg'      => '#EDE9F8',
                     ],
                 ];
             @endphp
@@ -1476,16 +1411,16 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024 && !sidebarCollapsed) open = false;"
+                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024) open = false;"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
-                   class="admin-nav-link flex items-center px-4 py-3 transition-all duration-300 rounded-xl group
+                   class="admin-nav-link flex items-center px-4 py-3 transition-all duration-200 rounded-xl group
                           {{ $isActive
-                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-md'
+                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-sm'
                               : 'hover:bg-[#F9F7FC]' }}">
 
                     <div class="admin-nav-icon-wrap w-10 h-10 flex items-center justify-center rounded-lg
-                                transition-transform duration-300 group-hover:scale-110 shrink-0 mr-4"
-                         style="background-color:{{ $isActive ? $link['color'].'1F' : '#F9F7FC' }};color:{{ $link['color'] }};">
+                                transition-transform duration-200 group-hover:scale-110 shrink-0 mr-4"
+                         style="background-color:{{ $isActive ? $link['color'].'22' : $link['bg'] }};color:{{ $link['color'] }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
                            x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
                         <template x-if="navClickedRoute === '{{ $link['route'] }}'">
@@ -1497,7 +1432,7 @@
 
                     <span class="admin-collapsible-text font-medium tracking-wide flex-1
                                  {{ $isActive ? 'font-semibold' : 'text-[#333333]' }}"
-                          style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}{{ $link['route'] === 'employment.tracking' ? 'font-size:13.5px;' : '' }}">
+                          style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}{{ in_array($link['route'], ['employment.tracking','events']) ? 'font-size:13.5px;' : '' }}">
                         {{ $link['label'] }}
                     </span>
 
@@ -1515,16 +1450,7 @@
             @endforeach
         </nav>
 
-        {{-- Admin notification poller — mounted here (not <head>) so it
-             renders as part of the sidebar's own Livewire tree. On mount
-             it preloads existing admin_notifications straight into the
-             JS store, so the bell already has data on the very first
-             paint instead of waiting for the client-side poll's first
-             tick. Wrapped in the same "kill it before logout" guard as
-             the organizer sidebar's coord-notif-poller, so it can't keep
-             firing requests into a session that's about to be destroyed
-             — see the logout link's @click below, which dispatches
-             'stop-admin-polling' before the wire:navigate hop starts. --}}
+        {{-- Admin notification poller --}}
         <div wire:ignore.self x-data="{ pollingActive: true }" x-on:stop-admin-polling.window="pollingActive = false">
             <template x-if="pollingActive">
                 @livewire('admin.admin-notif-poller')
@@ -1533,43 +1459,12 @@
 
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            {{-- Plain wire:navigate link to a GET /logout route — same
-                 pattern as every other sidebar link above. No form, no
-                 CSRF token, so there's nothing that can go stale after
-                 SPA hops or session expiry. This replaced a POST form
-                 whose hidden _token field (and even a JS-synced version
-                 read from the <meta name="csrf-token"> tag) could still
-                 go stale, since wire:navigate never re-renders <head> —
-                 that was the root cause of the immediate 419 Page
-                 Expired on Logout click.
-
-                 loggingOut just swaps the button's content to a
-                 "Logging out" bouncing-dot state on click. The link
-                 still navigates normally right after — this only
-                 changes what's visible in the instant before the
-                 redirect lands. --}}
             <a href="{{ route('logout') }}"
                wire:navigate
                title="Logout"
                x-data="{ loggingOut: false }"
                @click="
                    loggingOut = true;
-                   /* Stop the admin notif poller RIGHT NOW, before the
-                      wire:navigate hop even starts. Without this, the
-                      setInterval poll timer survives the SPA navigation
-                      (wire:navigate never fully reloads the page/JS
-                      context) and keeps firing /admin/notifications
-                      requests using the about-to-be-invalidated session.
-                      If you log back in as a different account fast
-                      enough, one of those stale in-flight requests can
-                      land after the new session is established and
-                      knock it back out — which is what caused the
-                      'log in as X, instantly logged out again' bug.
-                      Also dispatches stop-admin-polling, which unmounts
-                      the admin-notif-poller Livewire component entirely
-                      (its own wire:poll can't be reached by a plain
-                      JS clearInterval, since it's driven by Livewire's
-                      own request cycle, not a setInterval we control). */
                    window.dispatchEvent(new CustomEvent('stop-admin-polling'));
                    if (window.__safeAdminNotifsStore) {
                        var s = window.__safeAdminNotifsStore();
@@ -1579,9 +1474,7 @@
                        }
                    }
                "
-               class="w-full text-white px-6 py-4 rounded-xl font-black uppercase tracking-widest text-xs
-                      transition-all flex items-center justify-center shadow-lg active:scale-95 hover:brightness-110"
-               style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+               class="admin-logout-btn">
                 <template x-if="!loggingOut">
                     <span class="flex items-center justify-center">
                         <i class="fa-solid fa-right-from-bracket mr-2"></i>
@@ -1602,17 +1495,22 @@
                     </span>
                 </template>
             </a>
-            <style>
-                @keyframes admLogoutDotBounce {
-                    0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
-                    40% { transform: translateY(-4px); opacity: 1; }
-                }
-            </style>
         </div>
     </aside>
 
     {{-- ══ MAIN CONTENT ══ --}}
-    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0">
+    <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 relative">
+
+        {{-- Click-eating overlay while nav is in-flight — prevents stray
+             clicks on the bell or page content from interrupting navigation.
+             Scoped inside <main> so it never covers the sidebar. --}}
+        <div x-show="navClickedRoute !== null"
+             x-cloak
+             class="absolute inset-0 z-40 cursor-wait"
+             style="background: transparent;"
+             @click.stop.prevent=""
+             aria-hidden="true">
+        </div>
 
         {{-- Mobile top bar --}}
         <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
@@ -1621,11 +1519,11 @@
                     class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
                     <span :class="open ? 'rotate-45 translate-y-2' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                          class="w-full h-0.5 bg-[#7A3F91] transition-all duration-300 origin-center"></span>
                     <span :class="open ? 'opacity-0' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
+                          class="w-full h-0.5 bg-[#7A3F91] transition-all duration-300"></span>
                     <span :class="open ? '-rotate-45 -translate-y-2.5' : ''"
-                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
+                          class="w-full h-0.5 bg-[#7A3F91] transition-all duration-300 origin-center"></span>
                 </div>
             </button>
             <h2 class="text-lg font-bold text-[#333333]">Admin Portal</h2>
@@ -1789,7 +1687,7 @@
         </span>
     </div>
 
-    {{-- Delete toast — appears right below Recent Activity, quick fade --}}
+    {{-- Delete toast --}}
     <div
         x-show="$store.adminNotifs && $store.adminNotifs.deleteToast.show"
         x-cloak
@@ -1851,8 +1749,6 @@
                     ]"
                     @click.stop="$store.adminNotifs.openNotif(notif)">
 
-                    {{-- Loading overlay — shown while this notif is being
-                         marked read and routed to its target page. --}}
                     <template x-if="$store.adminNotifs.navigating && $store.adminNotifs.loadingId === notif.id">
                         <div class="admin-notif-item-loading-overlay">
                             <i class="fas fa-spinner fa-spin admin-notif-item-spinner"></i>
@@ -1906,123 +1802,87 @@
                                     x-text="'×' + Number(notif.count)">
                                 </span>
 
-                                {{-- NEW DIRECTOR badge (indigo) --}}
-                                <span
-                                    x-show="notif._isUserCreated && !notif.read"
-                                    x-cloak
+                                {{-- NEW DIRECTOR badge --}}
+                                <span x-show="notif._isUserCreated && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#4f46e5,#3730a3);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#4f46e5,#3730a3);">
                                     NEW DIR
                                 </span>
 
-                                {{-- ACTIVATED badge (green) --}}
-                                <span
-                                    x-show="notif._isUserToggled && !notif.read && notif.icon === 'circle-check'"
-                                    x-cloak
+                                {{-- ACTIVATED badge --}}
+                                <span x-show="notif._isUserToggled && !notif.read && notif.icon === 'circle-check'" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#059669,#047857);">
                                     ACTIVATED
                                 </span>
 
-                                {{-- DEACTIVATED badge (red) --}}
-                                <span
-                                    x-show="notif._isUserToggled && !notif.read && notif.icon === 'ban'"
-                                    x-cloak
+                                {{-- DEACTIVATED badge --}}
+                                <span x-show="notif._isUserToggled && !notif.read && notif.icon === 'ban'" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#dc2626,#b91c1c);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#dc2626,#b91c1c);">
                                     DEACTIVATED
                                 </span>
 
-                                {{-- EMAIL UPDATED badge (blue) --}}
-                                <span
-                                    x-show="notif._isUserEmail && !notif.read"
-                                    x-cloak
+                                {{-- EMAIL UPDATED badge --}}
+                                <span x-show="notif._isUserEmail && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#0284c7,#0369a1);">
                                     EMAIL
                                 </span>
 
-                                {{-- USERNAME UPDATED badge (purple) --}}
-                                <span
-                                    x-show="notif._isUserUsername && !notif.read"
-                                    x-cloak
+                                {{-- USERNAME UPDATED badge --}}
+                                <span x-show="notif._isUserUsername && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5e2f72);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#7A3F91,#5e2f72);">
                                     USERNAME
                                 </span>
 
-                                {{-- NEW JOB badge (green) --}}
-                                <span
-                                    x-show="notif._isNewJob && !notif.read"
-                                    x-cloak
+                                {{-- NEW JOB badge --}}
+                                <span x-show="notif._isNewJob && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#059669,#047857);">
                                     NEW JOB
                                 </span>
 
-                                {{-- APPROVED EVENT badge (green) --}}
-                                <span
-                                    x-show="notif._isApprovedEvent && !notif.read"
-                                    x-cloak
+                                {{-- APPROVED EVENT badge --}}
+                                <span x-show="notif._isApprovedEvent && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#059669,#047857);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#059669,#047857);">
                                     APPROVED
                                 </span>
 
-                                {{-- COMPLETED EVENT badge (teal) --}}
-                                <span
-                                    x-show="notif._isCompletedEvent && !notif.read"
-                                    x-cloak
+                                {{-- COMPLETED EVENT badge --}}
+                                <span x-show="notif._isCompletedEvent && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0d9488,#0f766e);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#0d9488,#0f766e);">
                                     COMPLETED
                                 </span>
 
-                                {{-- User badge (generic grouped) --}}
-                                <span
-                                    x-show="notif.icon === 'users' && !notif.read"
-                                    x-cloak
+                                {{-- USER badge (generic grouped) --}}
+                                <span x-show="notif.icon === 'users' && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#7A3F91,#5A2D70);">
                                     USER
                                 </span>
 
                                 {{-- Employment badge --}}
-                                <span
-                                    x-show="notif.icon === 'chart-line' && !notif.read"
-                                    x-cloak
+                                <span x-show="notif.icon === 'chart-line' && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#d97706,#b45309);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#d97706,#b45309);">
                                     EMPLOYMENT
                                 </span>
 
                                 {{-- Yearbook badge --}}
-                                <span
-                                    x-show="notif.icon === 'book-open' && !notif.read"
-                                    x-cloak
+                                <span x-show="notif.icon === 'book-open' && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#0284c7,#0369a1);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#0284c7,#0369a1);">
                                     YEARBOOK
                                 </span>
 
                                 {{-- Course badge --}}
-                                <span
-                                    x-show="notif.icon === 'clipboard-list' && notif.title === 'Course Update' && !notif.read"
-                                    x-cloak
+                                <span x-show="notif.icon === 'clipboard-list' && notif.title === 'Course Update' && !notif.read" x-cloak
                                     class="inline-flex items-center px-2 py-0.5 rounded-full text-white leading-none"
-                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;
-                                           background:linear-gradient(135deg,#7A3F91,#5A2D70);">
+                                    style="font-size:9px;font-weight:800;letter-spacing:0.06em;background:linear-gradient(135deg,#7A3F91,#5A2D70);">
                                     COURSE
                                 </span>
                             </div>
@@ -2040,7 +1900,7 @@
                            x-text="notif.message">
                         </p>
 
-                        {{-- Timestamp + delete (delete only shows once notif is 30+ days old) --}}
+                        {{-- Timestamp + delete --}}
                         <div class="flex items-center justify-between gap-1 mt-2">
                             <span class="flex items-center gap-1">
                                 <i class="fas fa-clock" style="font-size:10px;color:#333333;"></i>

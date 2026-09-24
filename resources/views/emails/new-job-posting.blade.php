@@ -40,7 +40,7 @@
 
                                     <table width="100%" cellpadding="0" cellspacing="0" border="0">
                                         <tr>
-                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;width:110px;vertical-align:top;">Employer</td>
+                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;width:130px;vertical-align:top;">Employer</td>
                                             <td style="padding:7px 0;font-size:14px;color:#333;">{{ $job->company_name }}</td>
                                         </tr>
                                         @if($job->location)
@@ -51,7 +51,7 @@
                                         @endif
                                         @if($job->employment_type)
                                         <tr>
-                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;vertical-align:top;">Type</td>
+                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;vertical-align:top;">Employment Type</td>
                                             <td style="padding:7px 0;font-size:14px;color:#333;">{{ $job->employment_type }}</td>
                                         </tr>
                                         @endif

@@ -73,6 +73,12 @@ new #[Layout('app')] class extends Component {
             }
 
             if ($user->role === 'director') {
+                $dirRecord = DB::table('director')->where('user_id', $user->id)->first();
+                if ($dirRecord && $dirRecord->password_changed_at === null) {
+                    session()->put('director_requires_password_change', true);
+                    $this->redirect(route('director.change-password'));
+                    return;
+                }
                 $this->redirect(route('director.dashboard'));
                 return;
             }
@@ -339,6 +345,82 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // ── Director login ─────────────────────────────────────────────────
+        // Directors are stored in the `users` table with:
+        //   email  = "{username}@director.internal"
+        //   name   = full name  (NOT the username they type)
+        //   role   = 'director'
+        // Auth::attempt(['name' => ...]) won't find them because `name` ≠
+        // the username they type. We look them up by their internal email
+        // address, verify the password manually, then use Auth::login() —
+        // same approach used for organizers above.
+        $directorLoginEmail = trim($this->name) . '@director.internal';
+        $directorUser = DB::table('users')
+            ->where('email', $directorLoginEmail)
+            ->where('role', 'director')
+            ->first();
+
+        if ($directorUser) {
+            if (!Hash::check($this->password, $directorUser->password)) {
+                RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
+                $attempts = $this->recordFailedAttempt();
+
+                AuditLog::logLogin([
+                    'id'    => $directorUser->id,
+                    'name'  => $directorUser->name,
+                    'email' => $directorUser->email,
+                    'role'  => 'director',
+                ], false, 'Incorrect password');
+
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    AuditLog::logAccountLocked($this->name, $attempts, $directorUser->id);
+                    $this->password = '';
+                    $this->addError('invalid',
+                        "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
+                        . " after {$attempts} failed attempts."
+                    );
+                    return;
+                }
+
+                $remaining = self::MAX_ATTEMPTS - $attempts;
+                $this->password = '';
+                $this->addError('invalid',
+                    'Username/ID or password is invalid. '
+                    . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+                );
+                return;
+            }
+
+            // Password correct — log in
+            $userModel = \App\Models\User::find($directorUser->id);
+            Auth::login($userModel, false);
+            $this->clearAttempts();
+            session()->regenerate();
+
+            $directorRecord = DB::table('director')->where('user_id', $directorUser->id)->first();
+            if ($directorRecord) {
+                $this->markPresenceOnline('director', (int) $directorRecord->id);
+            }
+
+            AuditLog::logLogin([
+                'id'    => $directorUser->id,
+                'name'  => $directorUser->name,
+                'email' => $directorUser->email,
+                'role'  => 'director',
+            ], true);
+
+            if ($directorRecord && $directorRecord->password_changed_at === null) {
+                session()->put('director_requires_password_change', true);
+                $this->keepLoadingThroughRedirect();
+                $this->redirectRoute('director.change-password', navigate: true);
+                return;
+            }
+
+            $this->keepLoadingThroughRedirect();
+            $this->redirectRoute('director.dashboard', navigate: true);
+            return;
+        }
+
         if (!Auth::attempt(['name' => $this->name, 'password' => $this->password])) {
             RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
             $attempts = $this->recordFailedAttempt();
@@ -385,12 +467,27 @@ new #[Layout('app')] class extends Component {
             session()->regenerate();
 
             // ── Online the instant login succeeds ──────────────────────
-            $directorId = DB::table('director')->where('user_id', $user->id)->value('id');
-            if ($directorId) {
-                $this->markPresenceOnline('director', (int) $directorId);
+            $directorRecord = DB::table('director')->where('user_id', $user->id)->first();
+            if ($directorRecord) {
+                $this->markPresenceOnline('director', (int) $directorRecord->id);
             }
 
             AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'director'], true);
+
+            // ── Force password change when password_changed_at is null —
+            // this is set by the admin whenever they update the director's
+            // email, issuing a new temp password that must be changed on
+            // first use. EnsureDirectorPasswordChanged middleware also
+            // enforces this on every subsequent request, but checking here
+            // means the redirect happens in the same login flow without an
+            // extra page load.
+            if ($directorRecord && $directorRecord->password_changed_at === null) {
+                session()->put('director_requires_password_change', true);
+                $this->keepLoadingThroughRedirect();
+                $this->redirectRoute('director.change-password', navigate: true);
+                return;
+            }
+
             $this->keepLoadingThroughRedirect();
             $this->redirectRoute('director.dashboard', navigate: true);
             return;
@@ -813,6 +910,25 @@ new #[Layout('app')] class extends Component {
             margin: 0;
         }
 
+        /* ── Info box ── */
+        .guide-info {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-left: 3px solid #3B82F6;
+            border-radius: 10px;
+            padding: 0.9rem 1.1rem;
+        }
+        .guide-info-txt {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.875rem;
+            color: #1E3A5F;
+            line-height: 1.65;
+            margin: 0;
+        }
+
         /* ── Close button ── */
         .guide-close-btn {
             font-family: 'Inter', sans-serif;
@@ -863,6 +979,9 @@ new #[Layout('app')] class extends Component {
 
             .guide-warning     { padding: 0.75rem 0.9rem; }
             .guide-warning-txt { font-size: 0.8rem; line-height: 1.55; }
+
+            .guide-info     { padding: 0.75rem 0.9rem; }
+            .guide-info-txt { font-size: 0.8rem; line-height: 1.55; }
 
             .guide-close-btn { padding: 0.85rem; font-size: 0.75rem; }
         }
@@ -1145,6 +1264,14 @@ new #[Layout('app')] class extends Component {
                         Use <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">Ar</span>,
                         not <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">ar</span>
                         or <span class="guide-code" style="background:#FEF3C7; border-color:#E8D9A0;">AR</span>.
+                    </p>
+                </div>
+
+                {{-- Email changed by admin info --}}
+                <div class="guide-info">
+                    <i class="fa-solid fa-circle-info flex-shrink-0 mt-0.5" style="font-size:0.8rem; color:#3B82F6;"></i>
+                    <p class="guide-info-txt">
+                        If your email was changed by the administrator, the same password formula still applies.
                     </p>
                 </div>
 

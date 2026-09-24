@@ -1,5 +1,7 @@
 <?php
+
 namespace App\Mail;
+
 use App\Models\Organizer;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -14,18 +16,20 @@ class OrganizerRegistered extends Mailable
     public function __construct(
         public Organizer $organizer,
         public string $tempPassword,
+        public bool $isEmailUpdate = false,  // false = bagong account, true = email update
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Welcome to PHILCST Alumni System - Your Account Has Been Created',
+            subject: $this->isEmailUpdate
+                ? 'PHILCST Alumni System - Your Account Credentials Have Been Updated'
+                : 'Welcome to PHILCST Alumni System - Your Account Has Been Created',
         );
     }
 
     public function content(): Content
     {
-        // Build full name manually from split fields
         $fullName = trim(implode(' ', array_filter([
             $this->organizer->first_name,
             $this->organizer->middle_initial ?: null,
@@ -36,13 +40,14 @@ class OrganizerRegistered extends Mailable
         return new Content(
             view: 'emails.organizer-registered',
             with: [
-                'organizer'    => $this->organizer,
-                'idNumber'     => $this->organizer->id_number,
-                'tempPassword' => $this->tempPassword,
-                'loginUrl'     => url('/login'),
-                'name'         => $fullName,        // ← computed manually
-                'email'        => $this->organizer->email,
-                'department'   => $this->organizer->department,
+                'organizer'     => $this->organizer,
+                'idNumber'      => $this->organizer->id_number,
+                'tempPassword'  => $this->tempPassword,
+                'loginUrl'      => url('/login'),
+                'name'          => $fullName,
+                'email'         => $this->organizer->email,
+                'department'    => $this->organizer->department,
+                'isEmailUpdate' => $this->isEmailUpdate,  // passed to blade template
             ],
         );
     }

@@ -232,26 +232,29 @@
 
 <script>
     function initRevealBounce() {
+        // Reset all elements so re-navigation (Livewire SPA) replays them.
         const bounceTargets = document.querySelectorAll('.reveal-bounce[data-reveal]');
+
+        bounceTargets.forEach((el) => el.classList.remove('is-visible'));
+
         const bounceObserver = new IntersectionObserver((entries) => {
             entries.forEach((entry) => {
                 if (entry.isIntersecting) {
                     entry.target.classList.add('is-visible');
-                } else {
-                    entry.target.classList.remove('is-visible');
+                    // One-time only — stop watching once revealed.
+                    bounceObserver.unobserve(entry.target);
                 }
             });
         }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
 
         bounceTargets.forEach((el) => {
-            bounceObserver.observe(el);
-            // Safety net: if element is already within/near the viewport
-            // right when we start observing (e.g. after a Livewire SPA
-            // navigation where the section is instantly on screen),
-            // reveal it immediately instead of waiting for a scroll event.
+            // Safety net: reveal immediately if already in viewport on load
+            // (e.g. right after a Livewire SPA navigation).
             const rect = el.getBoundingClientRect();
             if (rect.top < window.innerHeight && rect.bottom > 0) {
                 el.classList.add('is-visible');
+            } else {
+                bounceObserver.observe(el);
             }
         });
     }

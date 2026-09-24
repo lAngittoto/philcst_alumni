@@ -1606,8 +1606,8 @@ new class extends Component {
 
     </div>
 
-    {{-- ── ROW 2 — Emp Type / Career Path / Education / Top Courses ── --}}
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 flex-shrink-0">
+    {{-- ── ROW 2 — Emp Type / Career Path / Top Courses ── --}}
+    <div class="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-3 gap-4 flex-shrink-0">
 
         <div class="{{ $chartCard }}">
             <div class="{{ $chartHead }}">
@@ -1636,22 +1636,6 @@ new class extends Component {
                 <canvas id="admChartCareerPath"></canvas>
                 <div id="admChartCareerPathNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
                     <i class="fa-solid fa-route text-[1.8rem] adm-nodata-icon" style="color:#14b8a6; opacity:.35;"></i>
-                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="{{ $chartCard }}">
-            <div class="{{ $chartHead }}">
-                <div class="flex items-center gap-2">
-                    <div class="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-                    <span class="{{ $chartTtl }}">Further Education</span>
-                </div>
-            </div>
-            <div class="p-4 flex items-center justify-center relative" style="height:220px;" wire:ignore>
-                <canvas id="admChartEduStatus"></canvas>
-                <div id="admChartEduStatusNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
-                    <i class="fa-solid fa-graduation-cap text-[1.8rem] adm-nodata-icon" style="color:#3b82f6; opacity:.4;"></i>
                     <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
                 </div>
             </div>
@@ -1710,8 +1694,20 @@ new class extends Component {
                     </div>
                 </div>
             </div>
-            <div class="p-4" style="height:270px;" wire:ignore>
-                <canvas id="admChartCollege"></canvas>
+            {{-- Scrollable wrapper: canvas height grows with the number of
+                 colleges (40px per row + 60px for the legend), capped at
+                 420px so it never blows out the card. overflow-y: auto
+                 lets you scroll down when there are many colleges instead
+                 of everything squishing to illegible bar sizes. ── --}}
+            @php
+                $collegeCount = count(json_decode($chartCollegeData, true)['labels'] ?? []);
+                $collegeChartH = max(200, min(420, $collegeCount * 40 + 60));
+            @endphp
+            <div class="overflow-y-auto [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]"
+                 style="max-height:420px;" wire:ignore>
+                <div style="height:{{ $collegeChartH }}px; padding:1rem;">
+                    <canvas id="admChartCollege"></canvas>
+                </div>
             </div>
         </div>
 
@@ -2392,7 +2388,6 @@ new class extends Component {
         safe(function(){ donut('admChartLocation', d.location); });
         safe(function(){ donut('admChartRelevance', d.relevance); });
         safe(function(){ donut('admChartEmpType',    d.emptype); });
-        safe(function(){ donut('admChartEduStatus',  d.edu); });
         safe(function(){ donut('admChartUnemployed', d.unemployed); });
         safe(function(){ hbar( 'admChartCourse',     d.course); });
         safe(function(){ polar('admChartCareerPath', d.career); });

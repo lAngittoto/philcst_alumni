@@ -3405,14 +3405,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
             <div class="shrink-0 px-3 py-3 border-t border-gray-200 bg-white space-y-2"
                  x-data="{ get photoUploading() { return $store.eoPostPhoto ? $store.eoPostPhoto.uploading : false; } }">
-                {{-- BUG FIX: was only guarded by photoUploading — a completely
-                     empty form could still be submitted. Now also disabled
-                     whenever a required (*) field is still empty
-                     (isPostFormValid), same pattern as Job Management's
-                     (organizer) Post Job button. --}}
                 <button type="button" wire:click="savePost"
                         wire:loading.attr="disabled" wire:target="savePost"
-                        :disabled="photoUploading || {{ $this->isPostFormValid ? 'false' : 'true' }}"
+                        :disabled="photoUploading"
                         class="w-full px-4 py-2.5 rounded-xl font-semibold text-white text-sm transition flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                     <span wire:loading wire:target="savePost"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                     <span wire:loading.remove wire:target="savePost"><i class="fas fa-paper-plane text-xs"></i></span>
@@ -3422,11 +3417,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <p x-show="photoUploading" x-cloak class="text-xs text-center font-medium" style="color:#b45309;">
                     <i class="fas fa-circle-info mr-1"></i>Please wait for the photo to finish uploading.
                 </p>
-                @if(! $this->isPostFormValid)
-                    <p class="text-xs text-center font-medium" style="color:#b45309;">
-                        <i class="fas fa-circle-info mr-1"></i>Fill in all required (<span class="text-red-500 font-bold">*</span>) fields to enable posting.
-                    </p>
-                @endif
                 <button type="button" wire:click="closePostModal"
                         wire:loading.attr="disabled"
                         wire:loading.class="opacity-60 cursor-wait"

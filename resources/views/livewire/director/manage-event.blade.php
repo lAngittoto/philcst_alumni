@@ -1061,27 +1061,23 @@ new class extends Component {
             $colStr = trim($tpParts[0] ?? '');
             $batchYear  = isset($tpParts[1]) ? (int) trim($tpParts[1]) : null;
 
-            // Required fields that define a "complete" profile — mirrors
-            // applyProfileCompletionFilter() in alumni-records.blade.php exactly.
-            $profileRequiredFields = [
-                'email', 'gender', 'contact_number',
-                'father_last_name', 'father_given_name', 'father_middle_name',
-                'mother_last_name', 'mother_given_name', 'mother_middle_name',
-                'address_street', 'address_barangay', 'address_municipality', 'address_province',
-            ];
-
+            // Only require VERIFIED status + a non-empty email address.
+            // The old "complete profile" filter (father/mother name, address,
+            // date_of_birth, etc.) was copied from alumni-records display logic
+            // and is far too strict here — it was silently excluding every
+            // alumni whose profile wasn't 100% filled, so 0 emails were ever
+            // sent. An alumni only needs a valid email to receive an event
+            // notification — incomplete profile fields are irrelevant.
             $alumniQuery = \App\Models\Alumni::where('status', 'VERIFIED')
                 ->whereNotNull('email')
-                ->whereNotNull('date_of_birth');
+                ->where('email', '!=', '');
 
-            foreach ($profileRequiredFields as $field) {
-                $alumniQuery->whereNotNull($field)->where($field, '!=', '');
-            }
-
-            // Filter by college if not targeting all
+            // Filter by course code if not targeting all.
+            // target_participants stores course CODES (e.g. "BSN, BSIT"), not
+            // college names — so filter on courses.code, not courses.college.
             if ($colStr && $colStr !== 'All Colleges') {
-                $colleges = array_map('trim', explode(',', $colStr));
-                $alumniQuery->whereHas('course', fn($c) => $c->whereIn('college', $colleges));
+                $courseCodes = array_map('trim', explode(',', $colStr));
+                $alumniQuery->whereHas('course', fn($c) => $c->whereIn('code', $courseCodes));
             }
 
             // Filter by batch year if specified
@@ -1091,22 +1087,54 @@ new class extends Component {
 
             $allAlumni  = $alumniQuery->select('id', 'email', 'first_name', 'last_name', 'batch')->get();
 
+            // ── Debug: log exactly how many alumni matched the query so we
+            //    can distinguish "query returned 0" (too-strict filter or
+            //    wrong target_participants value) from "sending failed"
+            //    (SMTP / route error) when emails don't arrive. ──
+            \Illuminate\Support\Facades\Log::info(
+                "[EventMail][Director] Event #{$this->approveEventId} ({$this->approveEventTitle}) approved — "
+                . "{$allAlumni->count()} alumni matched the target filter (tp: \"{$tp}\")."
+            );
+
             // FIX: ->later() only INSERTS a row into the `jobs` table — it
             // never actually sends anything unless a `queue:work` worker is
             // running to process it, and nothing in this file ever spawns
             // one. Emails were silently queuing forever and never sending.
             // Switched to ->send() (synchronous, immediate) — same pattern
             // used for the working new-job-posting emails.
+            $sent    = 0;
+            $skipped = 0;
+            $failed  = 0;
             foreach ($allAlumni as $alumni) {
                 if (!self::isEmailPlausiblyValid($alumni->email)) {
                     \Illuminate\Support\Facades\Log::info(
-                        "[EventMail][Director] Skipped — invalid/undeliverable address for alumnus #{$alumni->id}: {$alumni->email}"
+                        "[EventMail][Director] Skipped — invalid/undeliverable address for alumni #{$alumni->id}: {$alumni->email}"
                     );
+                    $skipped++;
                     continue;
                 }
 
-                Mail::to($alumni->email)->send(new EventApprovedMail($event, $alumni));
+                try {
+                    Mail::to($alumni->email)->send(new EventApprovedMail($event, $alumni));
+                    \Illuminate\Support\Facades\Log::info(
+                        "[EventMail][Director] Sent to alumni #{$alumni->id} ({$alumni->email})."
+                    );
+                    $sent++;
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error(
+                        "[EventMail][Director] FAILED for alumni #{$alumni->id} ({$alumni->email}): {$e->getMessage()}",
+                        ['event_id' => $this->approveEventId, 'file' => $e->getFile(), 'line' => $e->getLine()]
+                    );
+                    $failed++;
+                    // Continue to next alumni — one bad address or transient
+                    // SMTP hiccup must not abort the entire batch.
+                }
             }
+
+            \Illuminate\Support\Facades\Log::info(
+                "[EventMail][Director] Event #{$this->approveEventId} email batch done — "
+                . "sent: {$sent}, skipped (bad addr): {$skipped}, failed: {$failed}."
+            );
         }
         $this->showApproveModal  = false;
         $this->approveEventId    = null;

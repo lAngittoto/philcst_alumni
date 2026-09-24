@@ -9,6 +9,7 @@ use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 
 class EventApprovedMail extends Mailable
 {
@@ -36,6 +37,21 @@ class EventApprovedMail extends Mailable
 
     public function content(): Content
     {
+        // Guard: route() will throw if 'upcoming.events' is not defined —
+        // catch it here so a missing route doesn't silently kill the whole
+        // mail send and leave the alumni without an invite.
+        try {
+            $eventUrl = route('upcoming.events', ['event' => $this->event->id]);
+        } catch (\Throwable $e) {
+            Log::warning('[EventApprovedMail] Could not build eventUrl — route "upcoming.events" may not be defined.', [
+                'event_id' => $this->event->id,
+                'error'    => $e->getMessage(),
+            ]);
+            // Fall back to the app root so the email still renders and sends
+            // rather than crashing mid-loop and skipping all remaining alumni.
+            $eventUrl = config('app.url', '/');
+        }
+
         return new Content(
             view: 'emails.event-approved',
             with: [
@@ -43,7 +59,7 @@ class EventApprovedMail extends Mailable
                 'alumni'   => $this->alumni,
                 // Deep-link to the upcoming events page — ?event=ID opens
                 // the detail modal directly, same as the director deep-link.
-                'eventUrl' => route('upcoming.events', ['event' => $this->event->id]),
+                'eventUrl' => $eventUrl,
             ],
         );
     }

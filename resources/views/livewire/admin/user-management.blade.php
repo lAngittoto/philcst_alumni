@@ -170,12 +170,23 @@ new class extends Component {
             $regActive   = DB::table('users')->where('role','registrar')->where('user_status','ACTIVE')->count();
             $regInactive = DB::table('users')->where('role','registrar')->where('user_status','INACTIVE')->count();
 
-            $alumniTotal    = $rows->get('alumni', 0);
+            // FIX: use Alumni model (same source as dashboard's loadStats())
+            // so both pages always show the same Total Alumni count.
+            // Previously this pulled from the users table (role='alumni')
+            // which can differ from the alumni table when soft-deleted
+            // records exist — causing the dashboard's 1,681 vs User
+            // Management's 1,679 mismatch.
+            $alumniTotal    = \App\Models\Alumni::count();
+
             // FIX: same as computed_status/statusFilter above — Complete
             // means every required profile field is filled in, not
             // "has ever logged in" (password_changed_at). Kept in sync
             // with alumni_blade.php's PROFILE_REQUIRED_FIELDS.
+            // Also added whereNull('deleted_at') so soft-deleted alumni
+            // are excluded — matching the Alumni model's implicit scope
+            // used by the dashboard's completeQuery.
             $alumniVerified = DB::table('alumni')
+                ->whereNull('deleted_at')
                 ->whereNotNull('email')->where('email', '!=', '')
                 ->whereNotNull('gender')->where('gender', '!=', '')
                 ->whereNotNull('date_of_birth')
@@ -325,7 +336,7 @@ new class extends Component {
                     DB::raw("COALESCE(dir.last_name,'')          as dir_last_name"),
                     DB::raw("COALESCE(dir.suffix,'')              as dir_suffix"),
                 ])
-                ->leftJoin('alumni as al', 'al.user_id', '=', 'users.id')
+                ->leftJoin('alumni as al', fn($j) => $j->on('al.user_id','=','users.id')->whereNull('al.deleted_at'))
                 ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
                 ->leftJoin('director as dir',  fn($j) => $j->on('dir.user_id','=','users.id')->whereNull('dir.deleted_at'));
 
@@ -340,20 +351,33 @@ new class extends Component {
                 // and alumni_blade.php's PROFILE_REQUIRED_FIELDS — kept
                 // in sync so this filter and the computed_status column
                 // it's filtering against never disagree.
-                $profileFields = [
-                    'al.email', 'al.gender', 'al.date_of_birth', 'al.contact_number',
+                // String fields: checked for both NOT NULL and non-empty string.
+                // Date fields (date_of_birth): DATE columns cannot hold '' in MySQL
+                // and comparing them to '' in strict mode causes an error — check
+                // NOT NULL only, matching the same logic in stats()'s alumniVerified
+                // count so "Complete" shows the same 1,007 records the stat card does.
+                $profileStringFields = [
+                    'al.email', 'al.gender', 'al.contact_number',
                     'al.father_last_name', 'al.father_given_name', 'al.father_middle_name',
                     'al.mother_last_name', 'al.mother_given_name', 'al.mother_middle_name',
                     'al.address_street', 'al.address_barangay', 'al.address_municipality', 'al.address_province',
                 ];
+                $profileDateFields = ['al.date_of_birth'];
+                $profileFields = array_merge($profileStringFields, $profileDateFields);
                 if ($this->statusFilter === 'complete') {
-                    foreach ($profileFields as $field) {
+                    foreach ($profileStringFields as $field) {
                         $q->whereNotNull($field)->where($field, '!=', '');
                     }
+                    foreach ($profileDateFields as $field) {
+                        $q->whereNotNull($field);
+                    }
                 } elseif ($this->statusFilter === 'pending') {
-                    $q->where(function ($s) use ($profileFields) {
-                        foreach ($profileFields as $field) {
+                    $q->where(function ($s) use ($profileStringFields, $profileDateFields) {
+                        foreach ($profileStringFields as $field) {
                             $s->orWhereNull($field)->orWhere($field, '=', '');
+                        }
+                        foreach ($profileDateFields as $field) {
+                            $s->orWhereNull($field);
                         }
                     });
                 } else { // new_this_month
@@ -415,17 +439,21 @@ new class extends Component {
     public function createDirector(): void {
         $this->dErrs=[]; $this->dOk=''; $this->dSave=true;
         try {
-            $errors = [];
-            if (!trim($this->dFn))       $errors[] = 'First name is required.';
-            if (!trim($this->dMn))       $errors[] = 'Middle name is required.';
-            if (!trim($this->dLn))       $errors[] = 'Last name is required.';
-            if (!trim($this->dUsername)) $errors[] = 'Teacher ID is required.';
-            elseif (!preg_match('/^\d{8}$/', trim($this->dUsername)))
-                                         $errors[] = 'Teacher ID must be exactly 8 digits.';
-            if (!trim($this->dEmail))    $errors[] = 'Email address is required.';
-            elseif (!filter_var(trim($this->dEmail), FILTER_VALIDATE_EMAIL))
-                                         $errors[] = 'Please enter a valid email address.';
-            if (!empty($errors)) { $this->dErrs = ['general' => $errors]; return; }
+            $fieldErrors = [];
+            if (!trim($this->dFn))       $fieldErrors['first_name']  = 'First name is required.';
+            if (!trim($this->dLn))       $fieldErrors['last_name']   = 'Last name is required.';
+            if (!trim($this->dMn))       $fieldErrors['middle_name'] = 'Middle name is required.';
+            if (!trim($this->dUsername)) {
+                $fieldErrors['username'] = 'Username is required.';
+            } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', trim($this->dUsername))) {
+                $fieldErrors['username'] = 'Letters, numbers, dots, dashes, and underscores only.';
+            }
+            if (!trim($this->dEmail)) {
+                $fieldErrors['email'] = 'Email address is required.';
+            } elseif (!filter_var(trim($this->dEmail), FILTER_VALIDATE_EMAIL)) {
+                $fieldErrors['email'] = 'Please enter a valid email address.';
+            }
+            if (!empty($fieldErrors)) { $this->dErrs = $fieldErrors; return; }
 
             if (DB::table('director')->where('status', 'ACTIVE')->exists()) {
                 $this->dErrs = ['general' => ['There is already an active Director. Please deactivate the current Director first.']];
@@ -434,7 +462,7 @@ new class extends Component {
 
             $loginEmail = trim($this->dUsername).'@director.internal';
             if (DB::table('users')->where('email', $loginEmail)->exists()) {
-                $this->dErrs = ['general' => ['That Teacher ID is already taken. Please choose a different one.']];
+                $this->dErrs = ['username' => 'That username is already taken. Please choose a different one.'];
                 return;
             }
 
@@ -463,17 +491,32 @@ new class extends Component {
                 'updated_at'  => now(),
             ]);
 
-            \Mail::send('emails.director-registered', [
-                'fullName'     => $full,
-                'username'     => $uname,
-                'tempPassword' => $autoPassword,
-                'email'        => trim($this->dEmail),
-            ], function ($m) { $m->to(trim($this->dEmail))->subject("Your Director Account – Philcst Alumni Connect"); });
+            // Send credential email synchronously (->send) so it fires immediately
+            // without needing a queue worker running. Wrapped in try/catch so a
+            // mail misconfiguration never blocks the director from being created —
+            // the account is already saved at this point.
+            try {
+                \Mail::to(trim($this->dEmail))
+                    ->send(new \App\Mail\DirectorRegistered(
+                        fullName:     $full,
+                        username:     $uname,
+                        tempPassword: $autoPassword,
+                        email:        trim($this->dEmail),
+                    ));
+            } catch (\Exception $mailEx) {
+                \Illuminate\Support\Facades\Log::warning('DirectorRegistered mail failed: ' . $mailEx->getMessage());
+            }
 
-            $this->dOk = "Director <strong>{$full}</strong> created successfully!"
-                . "|Login Teacher ID: <code class='font-mono bg-green-100 px-1.5 py-0.5 rounded text-green-800'>{$uname}</code>"
-                . "|Auto-generated password: <code class='font-mono bg-yellow-100 px-1.5 py-0.5 rounded text-yellow-800'>{$autoPassword}</code>"
-                . "|<span class='text-amber-700 font-medium'>⚠ Please share the password with the director and advise them to change it upon first login.</span>";
+            // Bust the cache so the new director row appears in the table
+            // immediately after creation without waiting for the 15s TTL.
+            $this->bustUserListCache();
+
+            // Success message — no credentials shown here; they are in the
+            // email. Showing the password in the UI was the original source
+            // of "modal feels cluttered and slow to read after registering".
+            $this->dOk = "Director <strong>{$full}</strong> registered successfully!"
+                . "|Credentials have been sent to <strong>" . e(trim($this->dEmail)) . "</strong>."
+                . "|The director can log in using their username once they receive the email.";
 
             // ── DISPATCH: new director created notification ──────────────────
             $this->dispatch('__admin-user-created-rich', [
@@ -524,7 +567,9 @@ new class extends Component {
                 DB::raw("COALESCE(al.suffix,'')             as alumni_suffix"),
                 DB::raw("COALESCE(al.email,'')              as record_email"),
                 DB::raw("COALESCE(org.first_name,'')        as org_first_name"),
+                DB::raw("COALESCE(org.middle_initial,'')   as org_middle_name"),
                 DB::raw("COALESCE(org.last_name,'')         as org_last_name"),
+                DB::raw("COALESCE(org.suffix,'')            as org_suffix"),
                 DB::raw("COALESCE(org.id_number,'')         as id_number"),
                 DB::raw("COALESCE(org.department,'')        as department"),
                 DB::raw("COALESCE(dir.first_name,'')        as first_name"),
@@ -540,7 +585,7 @@ new class extends Component {
                 END) as email_updated_at"),
                 DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
             ])
-            ->leftJoin('alumni as al','al.user_id','=','users.id')
+            ->leftJoin('alumni as al', fn($j) => $j->on('al.user_id','=','users.id')->whereNull('al.deleted_at'))
             ->leftJoin('organizer as org', fn($j)=>$j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
             ->leftJoin('director as dir',  fn($j)=>$j->on('dir.user_id','=','users.id')->whereNull('dir.deleted_at'))
             ->where('users.id',$id)->first();
@@ -625,8 +670,10 @@ new class extends Component {
             // cached list so it doesn't keep showing the old photo.
             $this->bustUserListCache();
             $this->flash('success', 'Profile photo updated successfully!');
+            $this->dispatch('mu-save-done');
         } catch (\Exception $e) {
             $this->flash('error', 'Failed to upload photo: ' . $e->getMessage());
+            $this->dispatch('mu-save-done');
         } finally { $this->vPhotoSave = false; }
     }
 
@@ -666,12 +713,6 @@ new class extends Component {
                 // visibly reflects the new state, not just the toast.
                 $this->ueEmail = $uname;
 
-                // Bust the cached stats/list immediately — otherwise the
-                // table and stat cards keep serving the pre-update
-                // snapshot for up to 15s, which is what made this feel
-                // slow/broken even though the DB write already succeeded.
-                $this->bustUserListCache();
-
                 // ── DISPATCH: username updated notification ─────────────────────
                 $this->dispatch('__admin-user-username-rich', [
                     'uid'      => $this->ueId,
@@ -695,28 +736,104 @@ new class extends Component {
                 if ($duplicate) {
                     $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another director account."]]; return;
                 }
+
+                // Fetch records before updating so we have name + username for the email.
+                $dirRecord = DB::table('director')->where('user_id', $this->ueId)->first();
+                $dirUser   = DB::table('users')->where('id', $this->ueId)->first();
+
+                // Generate a fresh temp password and reset the account.
+                // password_changed_at = null forces EnsureDirectorPasswordChanged
+                // middleware to redirect to change-password on next login.
+                $newTempPassword = Str::upper(Str::random(3)) . rand(100, 999) . Str::random(4) . '!';
+
                 DB::table('director')->where('user_id', $this->ueId)
-                    ->update(['email' => $email, 'email_updated_at' => now(), 'updated_at' => now()]);
-                if ($this->vData) { $this->vData['director_email'] = $email; $this->vData['email_updated_at'] = now(); }
+                    ->update([
+                        'email'               => $email,
+                        'email_updated_at'    => now(),
+                        'password_changed_at' => null,
+                        'updated_at'          => now(),
+                    ]);
+
+                DB::table('users')->where('id', $this->ueId)
+                    ->update([
+                        'password'   => Hash::make($newTempPassword),
+                        'updated_at' => now(),
+                    ]);
+
+                // Username is stored as "username@director.internal" in users.email
+                $dirUsername = $dirUser ? explode('@', $dirUser->email)[0] : '';
+
+                // Full name from director table
+                $dirFullName = $dirRecord
+                    ? implode(' ', array_filter([
+                        $dirRecord->first_name  ?? '',
+                        $dirRecord->middle_name ?? '',
+                        $dirRecord->last_name   ?? '',
+                        $dirRecord->suffix      ?? '',
+                      ]))
+                    : ($dirUser->name ?? $this->ueName);
+
+                // Send credential email to the NEW address synchronously.
+                // Reuses DirectorRegistered with type='email_updated' so
+                // there is only one Mailable and one blade template for all
+                // director credential emails — the template branches on $type.
+                try {
+                    \Mail::to($email)
+                        ->send(new \App\Mail\DirectorRegistered(
+                            fullName:     $dirFullName,
+                            username:     $dirUsername,
+                            tempPassword: $newTempPassword,
+                            email:        $email,
+                            type:         'email_updated',
+                        ));
+                } catch (\Exception $mailEx) {
+                    \Illuminate\Support\Facades\Log::warning('DirectorRegistered email-update mail failed: ' . $mailEx->getMessage());
+                }
+
+                if ($this->vData) {
+                    $this->vData['director_email'] = $email;
+                    $this->vData['email_updated_at'] = now();
+                }
+
+                // Bust cache so the table row reflects the new email right away.
+                $this->bustUserListCache();
             } else {
                 $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
                 if ($duplicate) {
                     $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another alumni account."]]; return;
                 }
+
+                // ── Grab alumni record BEFORE updating so we can build the
+                // temp password from student_id + last_name (same formula as
+                // first-time login: studentID_Ar).  Must be fetched now because
+                // the update below doesn't change those columns, but doing it
+                // first makes the intent clear and avoids a second round-trip.
+                $alumniRecord = DB::table('alumni')->where('user_id', $this->ueId)->first();
+
                 DB::table('alumni')->where('user_id', $this->ueId)
                     ->update(['email' => $email, 'password_changed_at' => null, 'email_updated_at' => now(), 'updated_at' => now()]);
+
+                // ── Reset the login password to the temporary password so the
+                // alumni must re-authenticate with a known credential after an
+                // admin-side email change.  Format: {student_id}_{Xx} where Xx
+                // is the first 2 letters of last_name, title-cased (e.g.
+                // student_id=00037801, last_name=Aranda → 00037801_Ar).
+                // The login page already redirects to change-password whenever
+                // password_changed_at is null — no login.blade change needed.
+                if ($alumniRecord && !empty($alumniRecord->student_id) && !empty($alumniRecord->last_name)) {
+                    $twoLetters   = strtoupper(substr($alumniRecord->last_name, 0, 1))
+                                  . strtolower(substr($alumniRecord->last_name, 1, 1));
+                    $tempPassword = $alumniRecord->student_id . '_' . $twoLetters;
+                    DB::table('users')->where('id', $this->ueId)
+                        ->update(['password' => Hash::make($tempPassword), 'updated_at' => now()]);
+                }
+
                 if ($this->vData) { $this->vData['record_email'] = $email; $this->vData['email_updated_at'] = now(); }
             }
             $this->ueErrors = [];
             // Same reasoning as the registrar branch above: keep the
             // field showing the email that actually got saved.
             $this->ueEmail = $email;
-
-            // Bust the cached stats/list immediately — otherwise the
-            // table and stat cards keep serving the pre-update snapshot
-            // for up to 15s, which is what made this feel slow/broken
-            // even though the DB write already succeeded.
-            $this->bustUserListCache();
 
             // ── DISPATCH: email updated notification ─────────────────────────
             $this->dispatch('__admin-user-email-rich', [
@@ -727,16 +844,24 @@ new class extends Component {
             ]);
 
             $msg = $role === 'director'
-                ? "Email updated for {$this->ueName}."
-                : "Email updated for {$this->ueName}. They will be required to reset their password on next login.";
+                ? "Email updated for {$this->ueName}. A new temporary password has been sent to {$email}. They must log in and change it immediately."
+                : "Email updated for {$this->ueName}. Their password has been reset to the temporary password (Student ID + first 2 letters of last name). They must log in using that and change it immediately.";
             $this->ueSuccess = $msg;
             $this->flash('success', $msg);
+            // Signal Alpine to clear the saving overlay immediately after a
+            // successful save — the overlay was set to true on @click and
+            // Livewire's morph won't reset it automatically because Alpine
+            // owns that state. The dispatch reaches every Alpine x-data scope
+            // on the page so the viewProfile modal's saving flag clears right away.
+            $this->dispatch('mu-save-done');
         } catch (\Illuminate\Database\QueryException $e) {
             $this->ueErrors = ($e->errorInfo[1] ?? null) === 1062
                 ? ['general' => ['That email is already in use by another alumni account.']]
                 : ['general' => ['A database error occurred. Please try again.']];
+            $this->dispatch('mu-save-done');
         } catch (\Exception $e) {
             $this->ueErrors = ['general' => [$e->getMessage()]];
+            $this->dispatch('mu-save-done');
         } finally { $this->ueSave = false; }
     }
 
@@ -756,8 +881,10 @@ new class extends Component {
             };
             $this->cpNew = $this->cpConfirm = '';
             $this->flash('success', "Password updated for {$this->cpName}. They will be required to change it on next login.");
+            $this->dispatch('mu-save-done');
         } catch (\Exception $e) {
             $this->cpErrs = ['general' => [$e->getMessage()]];
+            $this->dispatch('mu-save-done');
         } finally { $this->cpSave = false; }
     }
 
@@ -772,6 +899,7 @@ new class extends Component {
         try {
             $s = $this->tAction==='activate' ? 'ACTIVE' : 'INACTIVE';
             if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
+            if ($this->tRole==='organizer') DB::table('organizer')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='registrar') DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
 
             // Status shown in the table/stats cards, so bust the cache
@@ -789,7 +917,14 @@ new class extends Component {
 
             $this->flash('success', $this->tName.' has been '.($s==='ACTIVE'?'activated':'deactivated').'.');
         } catch (\Exception $e) { $this->flash('error','Failed: '.$e->getMessage()); }
-        finally { $this->closeModal(); }
+        finally {
+            // Signal Alpine to run exit transitions on BOTH the toggleConfirm
+            // and viewProfile modals, then close everything server-side.
+            // Without this, Livewire's morph removes both modal divs instantly
+            // (no leave animation) as soon as closeModal() nulls activeModal.
+            $this->dispatch('mu-toggle-done');
+            $this->closeModal();
+        }
     }
 
     private function flash(string $t, string $m): void { $this->dispatch('flash-message', type:$t, message:$m); }
@@ -1292,6 +1427,7 @@ select.mu-filter-input.mu-active {
 <div class="flex flex-col gap-3 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full mu-main-layout" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow:hidden;">
 
     {{-- PAGE HEADER --}}
+    @php $s = $this->stats; $hasActiveDirector = $s['dirActive'] > 0; @endphp
     <div class="flex items-center gap-4 flex-shrink-0">
         <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
              style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
@@ -1302,28 +1438,46 @@ select.mu-filter-input.mu-active {
             <p class="text-xs sm:text-sm leading-relaxed mt-0.5" style="color:#000000;">Manage all system users across every role</p>
         </div>
         <div class="ml-auto relative" x-data="{tip:false}">
-            <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
-                    @mouseenter="tip=true" @mouseleave="tip=false"
-                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
-                    style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                <span wire:loading wire:target="openModal('createDirector')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
-                <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas fa-user-tie text-white text-base"></i></span>
-            </button>
-            <div x-show="tip" x-cloak
-                 x-transition:enter="transition ease-out duration-100"
-                 x-transition:enter-start="opacity-0 scale-95"
-                 x-transition:enter-end="opacity-100 scale-100"
-                 class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
-                <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
-                    <i class="fas fa-user-tie mr-1.5"></i>New Director
+            @if($hasActiveDirector)
+                <button type="button" disabled
+                        @mouseenter="tip=true" @mouseleave="tip=false"
+                        class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md cursor-not-allowed opacity-40"
+                        style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                    <i class="fas fa-user-tie text-white text-base"></i>
+                </button>
+                <div x-show="tip" x-cloak
+                     x-transition:enter="transition ease-out duration-100"
+                     x-transition:enter-start="opacity-0 scale-95"
+                     x-transition:enter-end="opacity-100 scale-100"
+                     class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
+                    <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                        <i class="fas fa-lock mr-1.5 text-amber-400"></i>Only one active Director account is allowed
+                    </div>
+                    <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
                 </div>
-                <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
-            </div>
+            @else
+                <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
+                        @mouseenter="tip=true" @mouseleave="tip=false"
+                        class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
+                        style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                    <span wire:loading wire:target="openModal('createDirector')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
+                    <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas fa-user-tie text-white text-base"></i></span>
+                </button>
+                <div x-show="tip" x-cloak
+                     x-transition:enter="transition ease-out duration-100"
+                     x-transition:enter-start="opacity-0 scale-95"
+                     x-transition:enter-end="opacity-100 scale-100"
+                     class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
+                    <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                        <i class="fas fa-user-tie mr-1.5"></i>New Director
+                    </div>
+                    <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
+                </div>
+            @endif
         </div>
     </div>
 
     {{-- KPI STAT CARDS --}}
-    @php $s = $this->stats; @endphp
     <div class="mu-stat-grid">
         <div class="mu-stat-card" style="--stat-accent:#7a3f91;--stat-accent-shadow:rgba(122,63,145,.15);">
             <div class="mu-stat-icon-lg" style="background:linear-gradient(135deg,#6d2f84,#9b59b6);">
@@ -1362,7 +1516,7 @@ select.mu-filter-input.mu-active {
             <div class="mu-stat-text">
                 <div class="mu-stat-num">{{ number_format($s['registrar']) }}</div>
                 <div class="mu-stat-lbl">Registrars</div>
-                <div class="mu-stat-sub">{{ $s['regActive'] }} active · {{ $s['regInactive'] }} inactive</div>
+                <div class="mu-stat-sub">System accounts</div>
             </div>
         </div>
         <div class="mu-stat-card" style="--stat-accent:#2563eb;--stat-accent-shadow:rgba(37,99,235,.15);">
@@ -1489,14 +1643,14 @@ select.mu-filter-input.mu-active {
 
             {{-- Centered loading spinner overlay — mirrors Manage Events' table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage">
+                 wire:loading.flex wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage,showProfile">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             @if($pu->items->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c transition-opacity duration-200" style="background:#fff;"
                  wire:loading.class="opacity-50 pointer-events-none"
-                 wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage">
+                 wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage,showProfile">
                 <table class="w-full bg-white border-collapse mu-users-table">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow:0 1px 0 #E8E0F0;">
                         <tr>
@@ -1538,7 +1692,8 @@ select.mu-filter-input.mu-active {
                             };
                         @endphp
                         <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
-                            wire:key="mu-row-{{ $u->id }}" data-mu-row>
+                            wire:key="mu-row-{{ $u->id }}" data-mu-row
+                            wire:loading.class="opacity-60 pointer-events-none" wire:target="showProfile({{ $u->id }})">
                             <td class="px-3 sm:px-4 py-3.5 min-w-0">
                                 <div class="flex items-center gap-2 sm:gap-3 min-w-0">
                                     @unless($u->role === 'registrar')
@@ -1618,7 +1773,6 @@ select.mu-filter-input.mu-active {
         <div class="mu-table-block-pagination">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $pu->from }}&ndash;{{ $pu->to }}</strong>
-                of <strong class="text-white font-bold">{{ $pu->total }}</strong> users
                 @if($search)
                     <span class="text-white/60 text-xs ml-1">(filtered)</span>
                 @endif
@@ -1709,7 +1863,7 @@ select.mu-filter-input.mu-active {
     $isReg    = $vRole === 'registrar';
     $isAdmin  = $vRole === 'admin';
     $canPhoto = in_array($vRole, ['director']);
-    $canToggle= in_array($vRole, ['director','registrar']);
+    $canToggle= in_array($vRole, ['director']);
 
     if ($isDir)
         $headerName = implode(' ', array_filter([$vd['first_name']??'', $vd['middle_name']??'', $vd['last_name']??'', $vd['suffix']??''])) ?: $vd['name'];
@@ -1732,10 +1886,12 @@ select.mu-filter-input.mu-active {
 @endphp
 <div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     x-data="{ muClosing: false }"
+     x-data="{ muClosing: false, saving: false }"
      x-show="!muClosing"
-     x-init="muClosing = false"
-     @keydown.escape.window="$wire.closeModal(); setTimeout(() => muClosing = true, 220)">
+     x-init="muClosing = false; saving = false"
+     @mu-save-done.window="saving = false"
+     @mu-toggle-done.window="muClosing = true"
+     @keydown.escape.window="if(!saving){ $wire.closeModal(); setTimeout(() => muClosing = true, 220) }">
     <div class="w-full h-full flex flex-col" style="background:#F2F2F2;overflow:hidden;">
 
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1759,10 +1915,26 @@ select.mu-filter-input.mu-active {
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3 mu-vp-scroll max-w-4xl mx-auto w-full">
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3 mu-vp-scroll max-w-4xl mx-auto w-full relative">
+
+            {{-- Saving overlay: appears instantly when any modal action fires,
+                 before the Livewire round-trip completes. Prevents double-clicks
+                 and makes the UI feel snappy while the DB write runs. --}}
+            <div x-show="saving" x-cloak
+                 class="absolute inset-0 z-20 flex items-center justify-center rounded-xl"
+                 style="background:rgba(255,255,255,0.75);backdrop-filter:blur(2px);">
+                <div class="flex flex-col items-center gap-3">
+                    <div class="w-12 h-12 rounded-2xl flex items-center justify-center shadow" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                        <i class="fas fa-spinner animate-spin text-white text-lg"></i>
+                    </div>
+                    <p class="text-sm font-semibold" style="color:#000000;">Saving…</p>
+                </div>
+            </div>
 
             {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
-            <div class="bg-white rounded-xl border border-[#E8E0F0] p-3 flex items-start gap-4">
+            {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
+            @if(!$isOrg)
+            <div class="bg-white rounded-xl border border-[#E8E0F0] p-5 flex items-start gap-5">
                 @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0"
                      x-data="{ dragging: false }"
@@ -1774,7 +1946,7 @@ select.mu-filter-input.mu-active {
                     <label @if($canPhoto) for="vPhotoInput" @endif class="relative group {{ $canPhoto ? 'cursor-pointer' : '' }}">
                         @if($vPhoto)
                             <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
-                                 class="w-14 h-14 rounded-xl object-cover ring-2 ring-[#7A3F91]/30" :class="dragging ? 'ring-[#7A3F91]' : ''">
+                                 class="w-20 h-20 rounded-xl object-cover ring-2 ring-[#7A3F91]/30" :class="dragging ? 'ring-[#7A3F91]' : ''">
                         @else
                             <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
                                  class="w-14 h-14 rounded-xl object-cover ring-2 ring-[#E8E0F0]" :class="dragging ? 'ring-[#7A3F91]' : ''">
@@ -1809,14 +1981,14 @@ select.mu-filter-input.mu-active {
                 @endunless
 
                 <div class="min-w-0 flex-1">
-                    <p class="text-lg font-bold uppercase leading-tight" style="color:#000000;">{{ $headerName }}</p>
+                    <p class="text-2xl font-bold uppercase leading-tight" style="color:#333333;">{{ $headerName }}</p>
 
                     @if($isAlumni)
-                        <p class="text-sm font-semibold mt-0.5" style="color:#000000;">{{ $vd['student_id'] ?: '—' }}</p>
+                        <p class="text-lg font-semibold mt-0.5" style="color:#333333;">{{ $vd['student_id'] ?: '—' }}</p>
                         <div class="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span class="text-sm font-bold" style="color:#000000;">{{ $vd['course_code'] ?: '—' }}</span>
+                            <span class="text-lg font-bold" style="color:#333333;">{{ $vd['course_code'] ?: '—' }}</span>
                             <span style="color:#000000;">&middot;</span>
-                            <span class="text-sm font-bold" style="color:#000000;">Batch {{ $vd['batch'] ?: '—' }}</span>
+                            <span class="text-lg font-bold" style="color:#333333;">Batch {{ $vd['batch'] ?: '—' }}</span>
                             <span style="color:#000000;">&middot;</span>
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold border {{ $vStatus === 'VERIFIED' ? 'text-emerald-700 border-emerald-300 bg-emerald-50' : 'text-amber-700 border-amber-300 bg-amber-50' }}">
                                 {{ $vStatus === 'VERIFIED' ? 'COMPLETE' : 'PENDING' }}
@@ -1834,98 +2006,210 @@ select.mu-filter-input.mu-active {
                     @endif
 
                     @unless($isReg)
-                    <p class="text-sm mt-1 font-medium" style="color:#000000;">{{ $headerSub ?: '—' }}</p>
+                    <p class="text-lg mt-1 font-medium" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
                     @endunless
 
-                    <p class="text-xs font-semibold mt-1" style="color:#000000;">
+                    <p class="text-base font-semibold mt-1" style="color:#333333;">
                         <i class="fa-regular fa-calendar mr-1"></i>
                         Joined {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
                     </p>
                 </div>
             </div>
+            @endif {{-- /!$isOrg --}}
 
             {{-- ALUMNI: STUDENT ID + STUDENT'S NAME --}}
             @if($isAlumni)
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden p-3">
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Student ID</p>
-                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['student_id'] ?: '—' }}</p>
+                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                    {{-- invisible text mirrors the right header height exactly --}}
+                    <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                        <p class="text-base font-bold uppercase tracking-widest invisible select-none" aria-hidden="true">Student's Name</p>
+                    </div>
+                    <div class="p-4 flex flex-col gap-3">
+                        <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                            <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Student ID</p>
+                            <p class="text-lg font-semibold" style="color:#333333;">{{ $vd['student_id'] ?: '—' }}</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                            <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Program</p>
+                            <p class="text-lg font-semibold" style="color:#333333;">{{ $vd['course_name'] ?: '—' }}</p>
+                        </div>
                     </div>
                 </div>
 
                 <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                    <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Student's Name</p>
+                    <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                        <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Student's Name</p>
                     </div>
-                    <div class="p-3 grid grid-cols-2 gap-2">
+                    <div class="p-4 grid grid-cols-2 gap-3">
                         @foreach([
                             ['Last Name',    $vd['alumni_last_name']   ?? ''],
                             ['Given Name',   $vd['alumni_first_name']  ?? ''],
                             ['Middle Name',  $vd['alumni_middle_name'] ?? ''],
                             ['Ext.',         $vd['alumni_suffix']      ?? ''],
                         ] as [$lbl,$val])
-                        <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
-                            <p class="text-xs font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
+                        <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                            <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">{{ $lbl }}</p>
+                            <p class="text-lg font-semibold" style="color:#333333;">{{ $val ?: '—' }}</p>
                         </div>
                         @endforeach
                     </div>
                 </div>
             </div>
 
-            {{-- ALUMNI: PROGRAM --}}
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden p-3">
-                <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                    <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Program</p>
-                    <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['course_name'] ?: '—' }}</p>
-                </div>
-            </div>
             @endif
 
             {{-- DIRECTOR INFO --}}
             @if($isDir)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Director Information</p>
+                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Director Information</p>
                 </div>
-                <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div class="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                     @foreach([
                         ['First Name',  $vd['first_name']  ?? '—'],
                         ['Middle Name', $vd['middle_name'] ?? '—'],
                         ['Last Name',   $vd['last_name']   ?? '—'],
                         ['Suffix',      $vd['suffix']      ?? '—'],
-                        // Same as Coordinator's Teacher ID — the director's login
-                        // username, read from the local part of their
-                        // @director.internal email. Directors made before this
-                        // change won't have one, so this reads '—' for them;
-                        // nothing about their existing record is touched.
-                        ['Teacher ID',  $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
+                        ['Username',  $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
                     ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">{{ $lbl }}</p>
-                        <p class="text-xs font-semibold" style="color:#000000;">{{ $val ?: '—' }}</p>
+                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">{{ $lbl }}</p>
+                        <p class="text-lg font-semibold" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
             </div>
             @endif
 
-            {{-- COORDINATOR INFO --}}
+            {{-- COORDINATOR INFO — two-panel layout (left: photo card, right: details) --}}
             @if($isOrg)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Coordinator Details</p>
+            @php
+                $orgName  = trim(implode(' ', array_filter([
+                    $vd['org_first_name']   ?? '',
+                    $vd['org_middle_name']  ?? '',
+                    $vd['org_last_name']    ?? '',
+                    $vd['org_suffix']       ?? '',
+                ]))) ?: $vd['name'];
+                $orgFirst  = $vd['org_first_name']  ?: '—';
+                $orgMiddle = $vd['org_middle_name'] ?: '—';
+                $orgLast   = $vd['org_last_name']   ?: '—';
+                $orgSuffix = $vd['org_suffix']      ?: '—';
+                $orgStatus = $vStatus;
+            @endphp
+            <div class="flex flex-col sm:flex-row gap-3">
+
+                {{-- LEFT PANEL: photo + name + status + college + toggle --}}
+                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden flex flex-col items-center p-5 gap-3 sm:w-56 shrink-0">
+
+                    {{-- Avatar --}}
+                    <div class="relative">
+                        <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $orgName }}"
+                             class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#E8E0F0]">
+                        {{-- Active/Inactive dot --}}
+                        <span class="absolute bottom-1 right-1 w-4 h-4 rounded-full border-2 border-white
+                                     {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
+                    </div>
+
+                    {{-- Name + ID --}}
+                    <div class="text-center">
+                        <p class="font-bold text-lg leading-snug" style="color:#333333;">{{ $orgName }}</p>
+                        <p class="text-base font-mono font-semibold mt-0.5" style="color:#333333;">{{ $vd['id_number'] ?: '—' }}</p>
+                        {{-- Status badge --}}
+                        <span class="inline-flex items-center gap-1.5 mt-1.5 px-3 py-1 rounded-full text-xs font-bold
+                                     {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200' }}">
+                            <span class="w-1.5 h-1.5 rounded-full {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
+                            {{ $orgStatus }}
+                        </span>
+                    </div>
+
+                    {{-- College --}}
+                    @if($vd['department'])
+                    <div class="w-full rounded-xl px-3 py-2.5 text-center" style="background:#F9F7FC;border:1px solid #E8E0F0;">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#7A3F91;">College</p>
+                        <p class="text-base font-semibold leading-snug" style="color:#333333;">{{ $vd['department'] }}</p>
+                    </div>
+                    @endif
+
+                    {{-- Account access note (read-only for admin — director manages this) --}}
+                    <div class="w-full rounded-xl px-3 py-2.5" style="background:#F9F7FC;border:1px solid #E8E0F0;">
+                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#7A3F91;">Account Access</p>
+                        <p class="text-sm font-medium leading-snug" style="color:#333333;">
+                            @if($orgStatus === 'ACTIVE')
+                                <span class="text-emerald-700 font-semibold">Active</span> · can log in and manage their college.
+                            @else
+                                <span class="text-amber-700 font-semibold">Inactive</span> · login is currently disabled.
+                            @endif
+                        </p>
+                    </div>
+
+                    {{-- Registered date --}}
+                    <p class="text-sm font-medium text-center" style="color:#555555;">
+                        Registered {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A') }}
+                    </p>
                 </div>
-                <div class="p-3 grid grid-cols-2 gap-2">
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Teacher ID</p>
-                        <p class="text-xs font-bold font-mono" style="color:#000000;">{{ $vd['id_number'] ?: '—' }}</p>
+
+                {{-- RIGHT PANEL: Name Details + Account Details --}}
+                <div class="flex-1 flex flex-col gap-3 min-w-0">
+
+                    {{-- Name Details --}}
+                    <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                        <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                            <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Name Details</p>
+                        </div>
+                        <div class="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">First Name</p>
+                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgFirst }}</p>
+                            </div>
+                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Middle Name</p>
+                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgMiddle }}</p>
+                            </div>
+                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Last Name</p>
+                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgLast }}</p>
+                            </div>
+                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Suffix</p>
+                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgSuffix }}</p>
+                            </div>
+                        </div>
                     </div>
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">College / Dept</p>
-                        <p class="text-xs font-semibold" style="color:#000000;">{{ $vd['department'] ?: '—' }}</p>
+
+                    {{-- Account Details --}}
+                    <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                        <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                            <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Account Details</p>
+                        </div>
+                        <div class="p-4 flex flex-col gap-3">
+                            {{-- Teacher ID --}}
+                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Teacher ID</p>
+                                <p class="text-lg font-bold font-mono" style="color:#333333;">{{ $vd['id_number'] ?: '—' }}</p>
+                            </div>
+                            {{-- Email — read-only, no edit icon (director manages coordinator emails) --}}
+                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Email Address</p>
+                                <p class="text-lg font-semibold break-all" style="color:#333333;">
+                                    @php
+                                        $orgEmail = $vd['email'] ?? '';
+                                        $orgEmailDisplay = (!empty($orgEmail) && !str_ends_with($orgEmail, '.internal'))
+                                            ? $orgEmail : '—';
+                                    @endphp
+                                    {{ $orgEmailDisplay }}
+                                </p>
+                            </div>
+                            {{-- College Assignment --}}
+                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">College Assignment</p>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <p class="text-lg font-semibold" style="color:#333333;">{{ $vd['department'] ?: '—' }}</p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
+
                 </div>
             </div>
             @endif
@@ -1933,19 +2217,19 @@ select.mu-filter-input.mu-active {
             {{-- ADMIN INFO --}}
             @if($isAdmin)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Account Details</p>
+                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Account Details</p>
                 </div>
-                <div class="p-3 grid grid-cols-2 gap-2">
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Username</p>
-                        <p class="text-xs font-bold font-mono" style="color:#000000;">
+                <div class="p-4 grid grid-cols-2 gap-3">
+                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Username</p>
+                        <p class="text-lg font-bold font-mono" style="color:#333333;">
                             {{ $this->adminUsername($vd['email'], $vd['name']) }}
                         </p>
                     </div>
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0]">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Role</p>
-                        <p class="text-xs font-semibold" style="color:#000000;">{{ $this->roleLabel($vRole) }}</p>
+                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
+                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Role</p>
+                        <p class="text-lg font-semibold" style="color:#333333;">{{ $this->roleLabel($vRole) }}</p>
                     </div>
                 </div>
             </div>
@@ -1958,35 +2242,36 @@ select.mu-filter-input.mu-active {
                 $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Username</p>
+                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Username</p>
                 </div>
-                <div class="p-3">
-                    <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fef2f2;border:1px solid #fecaca;">
+                <div class="p-4">
+                    <div class="mb-3 p-3 rounded-xl flex items-start gap-2" style="background:#fef2f2;border:1px solid #fecaca;">
                         <i class="fas fa-triangle-exclamation text-red-500 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#991b1b;">
-                            This is the registrar's login username — this account has no separate email, only a username. Changing it takes effect immediately: their old username/password stops working right away, and no notification is sent automatically. Give them the new username and a new password yourself.
+                        <p class="text-sm font-semibold leading-snug" style="color:#991b1b;">
+                            Only the login username changes — all registrar data stays intact. The registrar must use the new username to log in. No notification is sent, so inform them directly.
                         </p>
                     </div>
                     @if($ueCooldown > 0)
                     <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
-                        <i class="fas fa-lock text-xs mt-0.5 shrink-0" style="color:#7A3F91;"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#7A3F91;">
+                        <i class="fas fa-lock text-xs mt-0.5 shrink-0" style="color:#555555;"></i>
+                        <p class="text-sm font-semibold leading-snug" style="color:#333333;">
                             Username was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.
                         </p>
                     </div>
                     @endif
                     @if($ueSuccess)
-                    <div class="mb-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
-                        <i class="fas fa-circle-check text-emerald-600 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
+                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
                     </div>
                     @endif
                     @if(count($ueErrors))
+                    <div x-init="saving = false"></div>
                     <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
                         @foreach($ueErrors as $msgs)
                             @foreach($msgs as $msg)
-                            <p class="text-xs text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
                             @endforeach
                         @endforeach
                     </div>
@@ -1996,19 +2281,23 @@ select.mu-filter-input.mu-active {
                             <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="text" placeholder="New username…"
                                    @if($ueCooldown > 0) disabled @endif
-                                   class="mu-filter-input w-full {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
+                                   class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
                         </div>
-                        <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                        <button wire:click="saveUpdateEmail"
+                                @click="saving = true"
+                                wire:loading.attr="disabled" wire:target="saveUpdateEmail"
                                 @if($ueCooldown > 0) disabled @endif
-                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
+                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
                                 style="background:#7A3F91;">
-                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-xs"></i> Update</span>
+                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
+                            <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
                         </button>
                     </div>
-                    <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-key text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">After you update this, log in with the new username uses whatever password is currently set — set a new one below if needed.</p>
+                    <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-key text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold leading-snug" style="color:#92400e;">After updating, they log in using the new username with their current password. Use Change Password below if you also need to reset their password.</p>
                     </div>
                 </div>
             </div>
@@ -2026,39 +2315,41 @@ select.mu-filter-input.mu-active {
                 $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Email Address</p>
+                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Email Address</p>
                 </div>
-                <div class="p-3">
-                    <div class="bg-gray-50 rounded-xl px-2.5 py-2 border border-[#E8E0F0] mb-2.5">
-                        <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#000000;">Current Email</p>
-                        <p class="text-xs font-semibold break-all" style="color:#000000;">
+                <div class="p-4">
+                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0] mb-3">
+                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Current Email</p>
+                        <p class="text-lg font-semibold break-all" style="color:#333333;">
                             @if($ueCurrent)
                                 {{ $ueCurrent }}
                             @else
-                                <span class="italic" style="color:#000000;">Not set</span>
+                                <span class="italic" style="color:#555555;">Not set</span>
                             @endif
                         </p>
                     </div>
                     @if($ueCooldown > 0)
-                    <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
-                        <i class="fas fa-lock text-xs mt-0.5 shrink-0" style="color:#7A3F91;"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#7A3F91;">
+                    <div class="mb-3 p-3 rounded-xl flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
+                        <i class="fas fa-lock text-sm mt-0.5 shrink-0" style="color:#555555;"></i>
+                        <p class="text-sm font-semibold leading-snug" style="color:#333333;">
                             Email was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.
                         </p>
                     </div>
                     @endif
                     @if($ueSuccess)
-                    <div class="mb-2.5 p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
-                        <i class="fas fa-circle-check text-emerald-600 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
+                    <div x-init="saving = false"></div>
+                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
                     </div>
                     @endif
                     @if(count($ueErrors))
+                    <div x-init="saving = false"></div>
                     <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
                         @foreach($ueErrors as $msgs)
                             @foreach($msgs as $msg)
-                            <p class="text-xs text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
                             @endforeach
                         @endforeach
                     </div>
@@ -2068,19 +2359,23 @@ select.mu-filter-input.mu-active {
                             <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
                                    @if($ueCooldown > 0) disabled @endif
-                                   class="mu-filter-input w-full {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
+                                   class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
                         </div>
-                        <button wire:click="saveUpdateEmail" wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                        <button wire:click="saveUpdateEmail"
+                                @click="saving = true"
+                                wire:loading.attr="disabled" wire:target="saveUpdateEmail"
                                 @if($ueCooldown > 0) disabled @endif
-                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
+                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
                                 style="background:#7A3F91;">
-                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-xs"></i> Update</span>
+                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
+                            <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
                         </button>
                     </div>
-                    <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-key text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">{{ $ueNote }}</p>
+                    <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-key text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold leading-snug" style="color:#92400e;">{{ $ueNote }}</p>
                     </div>
                 </div>
             </div>
@@ -2089,36 +2384,37 @@ select.mu-filter-input.mu-active {
             {{-- CHANGE PASSWORD — Registrar / Admin --}}
             @if($isReg || $isAdmin)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Change Password</p>
+                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Change Password</p>
                 </div>
-                <div class="p-3">
+                <div class="p-4">
                     @if(count($cpErrs))
                     <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
                         @foreach($cpErrs as $msgs)
                             @foreach($msgs as $msg)
-                            <p class="text-xs text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
                             @endforeach
                         @endforeach
                     </div>
                     @endif
                     <div class="grid grid-cols-2 gap-1.5 mb-1.5">
                         <input wire:model.defer="cpNew" type="password" placeholder="New password (min. 8)"
-                               class="mu-filter-input w-full" autocomplete="new-password">
+                               class="mu-filter-input w-full text-base" autocomplete="new-password">
                         <input wire:model.defer="cpConfirm" type="password" placeholder="Confirm new password"
-                               class="mu-filter-input w-full" autocomplete="new-password">
+                               class="mu-filter-input w-full text-base" autocomplete="new-password">
                     </div>
-                    <button wire:click="saveChangePassword" wire:loading.attr="disabled" wire:target="saveChangePassword"
-                            class="px-3.5 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center gap-1.5"
+                    <button wire:click="saveChangePassword"
+                            @click="saving = true"
+                            wire:loading.attr="disabled" wire:target="saveChangePassword"
+                            class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5"
                             style="background:#7A3F91;">
-                        <span wire:loading wire:target="saveChangePassword"><i class="fas fa-spinner animate-spin text-xs"></i> Saving…</span>
-                        <span wire:loading.remove wire:target="saveChangePassword"><i class="fas fa-key text-xs"></i> Update Password</span>
+                        <i class="fas fa-key text-sm"></i> Update Password
                     </button>
-                    <div class="mt-1.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-rotate-left text-amber-500 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
+                    <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-rotate-left text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
                             @if($isReg)
-                                This is set as their actual login password right away — they can log in with it immediately using their current username. No reset link is sent, so give them this password directly.
+                                Password is updated immediately. They can log in right away using their current username and this new password. No email is sent — give it to them directly.
                             @else
                                 After saving, the user will be required to change their password on next login.
                             @endif
@@ -2131,26 +2427,26 @@ select.mu-filter-input.mu-active {
             {{-- ACTIVATE / DEACTIVATE --}}
             @if($canToggle)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-3.5 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-xs font-bold uppercase tracking-widest" style="color:#000000;">Account Status</p>
+                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Account Status</p>
                 </div>
-                <div class="p-3">
+                <div class="p-4">
                     @if($vStatus === 'ACTIVE')
                     <button wire:click="confirmToggle({{ $vd['id'] }}, 'deactivate')"
                             wire:loading.attr="disabled" wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"
-                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90 disabled:opacity-50"
+                            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition hover:opacity-90 disabled:opacity-50"
                             style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">
-                        <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                        <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-ban text-xs"></i></span>
+                        <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                        <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-ban text-sm"></i></span>
                         Deactivate Account
                     </button>
                     @else
                     <button wire:click="confirmToggle({{ $vd['id'] }}, 'activate')"
                             wire:loading.attr="disabled" wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"
-                            class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition hover:opacity-90 disabled:opacity-50"
+                            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition hover:opacity-90 disabled:opacity-50"
                             style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;">
-                        <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                        <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-circle-check text-xs"></i></span>
+                        <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                        <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-circle-check text-sm"></i></span>
                         Activate Account
                     </button>
                     @endif
@@ -2170,25 +2466,10 @@ select.mu-filter-input.mu-active {
 @if($activeModal === 'createDirector')
 <div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     x-data="{
-        muClosing: false,
-        dPhotoFull: false,
-        dFnLive: @js($dFn),
-        dMnLive: @js($dMn),
-        dLnLive: @js($dLn),
-        dUsernameLive: @js($dUsername),
-        dEmailLive: @js($dEmail),
-        get dRequiredFilled() {
-            return this.dFnLive.trim() !== ''
-                && this.dMnLive.trim() !== ''
-                && this.dLnLive.trim() !== ''
-                && /^\d{8}$/.test(this.dUsernameLive.trim())
-                && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.dEmailLive.trim());
-        }
-     }"
+     x-data="{ muClosing: false, dPhotoFull: false, submitting: false }"
      x-show="!muClosing"
-     x-init="muClosing = false"
-     @keydown.escape.window="dPhotoFull ? (dPhotoFull = false) : ($wire.closeModal(), setTimeout(() => muClosing = true, 220))">
+     x-init="muClosing = false; submitting = false"
+     @keydown.escape.window="dPhotoFull ? (dPhotoFull = false) : (!submitting && ($wire.closeModal(), muClosing = true))">
     <div class="w-full h-full flex flex-col" style="background:#FFFFFF;overflow:hidden;">
 
         <div class="flex items-center justify-between px-6 sm:px-8 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -2201,10 +2482,10 @@ select.mu-filter-input.mu-active {
                     <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
                 </div>
             </div>
-            <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal"
-                    class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
-                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-lg"></i>
-                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-lg"></i>
+            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting"
+                    :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/30'"
+                    class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center transition text-white shrink-0">
+                <i class="fa-solid fa-xmark text-lg"></i>
             </button>
         </div>
 
@@ -2225,41 +2506,69 @@ select.mu-filter-input.mu-active {
             @endif
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 mu-vp-scroll max-w-4xl mx-auto w-full" style="scrollbar-width:thin;scrollbar-color:#cccccc #F5F5F5;">
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 mu-vp-scroll max-w-4xl mx-auto w-full relative" style="scrollbar-width:thin;scrollbar-color:#cccccc #F5F5F5;">
 
             @if($dOk)
+            {{-- Success: reset the Alpine submitting flag so the overlay clears
+                 immediately — same pattern as the ueErrors branch below.
+                 Auto-close the modal after a short delay so the admin can see
+                 the confirmation briefly, then the table is already refreshed. --}}
+            <div x-init="
+                submitting = false;
+                setTimeout(() => { $wire.closeModal(); muClosing = true; }, 1800);
+            "></div>
             @php $parts = explode('|', $dOk); @endphp
-            <div class="p-4 rounded-xl border bg-emerald-50 border-emerald-200 mb-5 space-y-2">
+            <div class="p-5 rounded-xl border bg-emerald-50 border-emerald-200 mb-5 space-y-3">
                 <div class="flex items-start gap-3">
-                    <i class="fas fa-circle-check text-emerald-500 mt-0.5 shrink-0"></i>
-                    <div class="space-y-1.5">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <i class="fas fa-circle-check text-white text-base"></i>
+                    </div>
+                    <div class="space-y-1.5 flex-1">
                         @foreach($parts as $part)
-                        <p class="text-base text-emerald-800">{!! $part !!}</p>
+                        <p class="text-base text-emerald-800 leading-snug">{!! $part !!}</p>
                         @endforeach
                     </div>
                 </div>
             </div>
-            <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="$wire.closeModal(); muClosing = true" wire:loading.attr="disabled" wire:target="closeModal"
                     class="w-full py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
                 <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-sm"></i>
                 <span>Done</span>
             </button>
             @endif
 
-            @if(count($dErrs))
+            @if($dErrs)
+            {{-- Errors came back → reset submitting so the overlay clears --}}
+            <div x-init="submitting = false"></div>
+            @endif
+
+            @if(isset($dErrs['general']))
             <div class="mb-5 p-4 rounded-xl bg-red-50 border border-red-200 space-y-1.5">
-                @foreach($dErrs as $msgs)
-                    @foreach($msgs as $msg)
-                    <p class="text-base text-red-700 flex items-start gap-2">
-                        <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-sm"></i><span>{{ $msg }}</span>
-                    </p>
-                    @endforeach
+                @foreach($dErrs['general'] as $msg)
+                <p class="text-base text-red-700 flex items-start gap-2">
+                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-sm"></i><span>{{ $msg }}</span>
+                </p>
                 @endforeach
             </div>
             @endif
 
             @if(!$dOk)
-            <div class="space-y-4" wire:loading.class="opacity-60 pointer-events-none" wire:target="createDirector" style="transition: opacity .15s ease;">
+            {{-- Full-form loading overlay — appears the instant the button is clicked,
+                 before Livewire's round-trip even starts. Covers the whole scroll area
+                 so the user gets immediate visual feedback while Mail::send() runs. --}}
+            <div x-show="submitting" x-cloak
+                 class="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10"
+                 style="background:rgba(255,255,255,0.88);backdrop-filter:blur(2px);">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    <i class="fas fa-spinner animate-spin text-white text-xl"></i>
+                </div>
+                <div class="text-center">
+                    <p class="text-lg font-bold" style="color:#333333;">Creating Director Account…</p>
+                    <p class="text-sm font-medium mt-1" style="color:#6b6b6b;">Sending login credentials via email</p>
+                </div>
+            </div>
+            <div class="space-y-4" :class="submitting ? 'pointer-events-none select-none' : ''" style="transition: opacity .2s ease;" :style="submitting ? 'opacity:0.4' : 'opacity:1'"
+                 wire:loading.class="opacity-60 pointer-events-none" wire:target="createDirector">
 
                 <div class="rounded-xl border overflow-visible" style="border-color:#E5E5E5;">
                     <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
@@ -2301,39 +2610,45 @@ select.mu-filter-input.mu-active {
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dFn" x-model="dFnLive" type="text" placeholder="e.g. Juan" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <input wire:model.defer="dFn" type="text" placeholder="e.g. Juan"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['first_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($dErrs['first_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $dErrs['first_name'] }}
+                                </p>
+                                @endif
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dLn" x-model="dLnLive" type="text" placeholder="e.g. dela Cruz" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <input wire:model.defer="dLn" type="text" placeholder="e.g. dela Cruz"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['last_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($dErrs['last_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $dErrs['last_name'] }}
+                                </p>
+                                @endif
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
-                                <input wire:model.defer="dMn" x-model="dMnLive" type="text" placeholder="e.g. Santos" class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($dErrs['middle_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $dErrs['middle_name'] }}
+                                </p>
+                                @endif
                             </div>
                             <div class="relative" x-data="{ open: false, sfxOptions: [
-                                    { v: 'I',    l: 'The First' },
-                                    { v: 'II',   l: 'The Second' },
-                                    { v: 'III',  l: 'The Third' },
-                                    { v: 'IV',   l: 'The Fourth' },
-                                    { v: 'V',    l: 'The Fifth' },
-                                    { v: 'VI',   l: 'The Sixth' },
-                                    { v: 'VII',  l: 'The Seventh' },
-                                    { v: 'VIII', l: 'The Eighth' },
-                                    { v: 'IX',   l: 'The Ninth' },
-                                    { v: 'X',    l: 'The Tenth' },
-                                    { v: 'XI',   l: 'The Eleventh' },
-                                    { v: 'XII',  l: 'The Twelfth' },
-                                    { v: 'XIII', l: 'The Thirteenth' },
-                                    { v: 'XIV',  l: 'The Fourteenth' },
-                                    { v: 'XV',   l: 'The Fifteenth' },
-                                    { v: 'XVI',  l: 'The Sixteenth' },
-                                    { v: 'XVII', l: 'The Seventeenth' },
-                                    { v: 'XVIII',l: 'The Eighteenth' },
-                                    { v: 'XIX',  l: 'The Nineteenth' },
-                                    { v: 'XX',   l: 'The Twentieth' },
-                                    { v: 'Jr.',  l: 'Junior' },
-                                    { v: 'Sr.',  l: 'Senior' },
+                                    { v: 'Jr.',   l: 'Junior' },
+                                    { v: 'Sr.',   l: 'Senior' },
+                                    { v: 'II',    l: 'II — the Second' },
+                                    { v: 'III',   l: 'III — the Third' },
+                                    { v: 'IV',    l: 'IV — the Fourth' },
+                                    { v: 'V',     l: 'V — the Fifth' },
+                                    { v: 'VI',    l: 'VI — the Sixth' },
                                 ] }" @click.away="open = false">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="text-red-400 font-normal">*</span></p>
                                 <div class="mu-sfx-field">
@@ -2382,45 +2697,64 @@ select.mu-filter-input.mu-active {
                     <div class="p-5">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Teacher ID <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dUsername" x-model="dUsernameLive" type="text" inputmode="numeric" maxlength="8"
-                                       placeholder="e.g. 20240001" class="mu-filter-input w-full mu-smooth-input font-mono text-base" autocomplete="off">
-                                <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Must be exactly 8 digits</p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Username <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="dUsername" type="text"
+                                       placeholder="e.g. jdelacruz"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['username']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($dErrs['username']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $dErrs['username'] }}
+                                </p>
+                                @else
+                                <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Letters, numbers, dots, dashes, underscores only</p>
+                                @endif
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dEmail" x-model="dEmailLive" type="email" placeholder="director@example.com"
-                                       class="mu-filter-input w-full mu-smooth-input text-base" autocomplete="off">
+                                <input wire:model.defer="dEmail" type="email" placeholder="director@example.com"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['email']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($dErrs['email']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $dErrs['email'] }}
+                                </p>
+                                @else
                                 <p class="text-xs font-medium mt-1.5" style="color:#6b6b6b;">Login credentials will be sent here</p>
+                                @endif
                             </div>
                         </div>
                         <div class="mt-4 p-4 rounded-xl flex items-start gap-2.5" style="background:#fffbeb;border:1px solid #fde68a;">
                             <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
                             <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
                                 A secure password will be <strong>auto-generated</strong> and sent to this email.
-                                The director logs in using their <strong>Teacher ID</strong>.
+                                The director logs in using their <strong>Username</strong>.
                             </p>
                         </div>
                     </div>
                 </div>
 
                 <div class="flex gap-3 pt-1">
-                    <button type="button" @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal,createDirector"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition hover:bg-black/5 flex items-center justify-center gap-2"
+                    <button type="button"
+                            @click="if(!submitting){ $wire.closeModal(); muClosing = true; }"
+                            :disabled="submitting"
+                            :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
                             style="color:#000000;border-color:#E5E5E5;">
-                        <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-sm"></i>
                         <span>Cancel</span>
                     </button>
-                    <button wire:click="createDirector" wire:loading.attr="disabled" wire:target="createDirector"
-                            :disabled="!dRequiredFilled"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn"
-                            :class="dRequiredFilled ? 'hover:opacity-90' : 'opacity-40 cursor-not-allowed'"
+                    {{-- Set submitting=true immediately on click so the overlay and
+                         disabled states fire before the Livewire round-trip begins —
+                         especially important because Mail::send() is synchronous and
+                         can take 1-3 s before the server responds. --}}
+                    <button wire:click="createDirector"
+                            @click="submitting = true"
+                            wire:loading.attr="disabled" wire:target="createDirector"
+                            :disabled="submitting"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
                             style="background:#7A3F91;">
-                        <span wire:loading.remove wire:target="createDirector" class="flex items-center gap-2">
+                        <span class="flex items-center gap-2">
                             <i class="fas fa-user-tie text-sm"></i> Create Director
-                        </span>
-                        <span wire:loading wire:target="createDirector" class="flex items-center gap-2">
-                            <i class="fas fa-spinner animate-spin text-sm"></i> Creating…
                         </span>
                     </button>
                 </div>
@@ -2441,12 +2775,20 @@ select.mu-filter-input.mu-active {
      style="z-index:9996;"
      x-data="{ muClosing: false }"
      x-show="!muClosing"
+     x-transition:leave="transition ease-in duration-150"
+     x-transition:leave-start="opacity-100"
+     x-transition:leave-end="opacity-0"
      x-init="muClosing = false"
-     @keydown.escape.window="$wire.closeModal(); setTimeout(() => muClosing = true, 220)">
+     @mu-toggle-done.window="muClosing = true"
+     @keydown.escape.window="$wire.closeModal(); muClosing = true">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-[#E8E0F0]"
+         x-show="!muClosing"
          x-transition:enter="transition ease-out duration-150"
          x-transition:enter-start="opacity-0 scale-95"
-         x-transition:enter-end="opacity-100 scale-100">
+         x-transition:enter-end="opacity-100 scale-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100 scale-100"
+         x-transition:leave-end="opacity-0 scale-95">
         <div class="p-6">
             <div class="flex items-center gap-4 mb-4">
                 <div class="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0
@@ -2468,19 +2810,21 @@ select.mu-filter-input.mu-active {
                 @endif
             </p>
             <div class="flex gap-2">
-                <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal,executeToggle"
+                <button @click="$wire.closeModal(); muClosing = true"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
                         style="color:#000000;border-color:#E8E0F0;">
-                    <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
                     <span>Cancel</span>
                 </button>
-                <button wire:click="executeToggle" wire:loading.attr="disabled" wire:target="executeToggle"
+                {{-- Close modal animation IMMEDIATELY on click — don't wait for the
+                     full Livewire round-trip (DB update + cache bust + re-render).
+                     muClosing=true fires the leave transition right away so it feels
+                     instant; the list refreshes in the background when Livewire returns. --}}
+                <button wire:click="executeToggle"
+                        @click="muClosing = true"
+                        wire:loading.attr="disabled" wire:target="executeToggle"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition flex items-center justify-center gap-2
                                {{ $tAction==='deactivate' ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700' }}">
-                    <span wire:loading wire:target="executeToggle"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                    <span wire:loading.remove wire:target="executeToggle">
-                        {{ $tAction==='deactivate' ? 'Yes, Deactivate' : 'Yes, Activate' }}
-                    </span>
+                    {{ $tAction==='deactivate' ? 'Yes, Deactivate' : 'Yes, Activate' }}
                 </button>
             </div>
         </div>

@@ -1111,7 +1111,7 @@ new class extends Component {
 .yb-modal-header {
     position: relative;
     background: #7A3F91;
-    padding: 40px 20px 76px;
+    padding: 24px 20px 40px;
     text-align: center;
     flex-shrink: 0;
 }
@@ -1133,7 +1133,7 @@ new class extends Component {
 .yb-modal-photo-ring {
     position: relative;
     margin: 0 auto;
-    width: 180px; height: 180px; border-radius: 9999px;
+    width: 150px; height: 150px; border-radius: 9999px;
     background: #fff; padding: 5px;
     box-shadow: 0 8px 22px rgba(60,20,80,.3);
     z-index: 2;
@@ -1178,7 +1178,7 @@ new class extends Component {
 .yb-modal-photo-actions {
     position: absolute;
     left: 50%; transform: translateX(-50%);
-    bottom: -32px;
+    bottom: -28px;
     display: flex; gap: 6px;
     z-index: 3;
 }
@@ -1189,7 +1189,7 @@ new class extends Component {
 .yb-modal-photo-hint {
     position: relative;
     z-index: 2;
-    margin-top: 8px;
+    margin-top: 5px;
     text-align: center;
     font-size: 10px;
     font-weight: 600;
@@ -1223,13 +1223,13 @@ new class extends Component {
 }
 .yb-modal-face-error i { margin-top: 1px; flex-shrink: 0; }
 .yb-modal-body {
-    padding: 100px 24px 24px;
+    padding: 60px 24px 20px;
     text-align: left;
     overflow-y: auto;
 }
 .yb-modal-info-stack {
-    margin-top: 14px;
-    display: flex; flex-direction: column; gap: 10px;
+    margin-top: 10px;
+    display: flex; flex-direction: column; gap: 7px;
 }
 .yb-modal-info-row {
     display: flex; align-items: flex-start; gap: 10px;
@@ -1243,8 +1243,8 @@ new class extends Component {
     color: #333333;
 }
 .yb-modal-motto {
-    margin-top: 10px;
-    padding: 12px 14px;
+    margin-top: 8px;
+    padding: 10px 13px;
     border-radius: 10px;
     background: #F3E8FF;
     border: 1.5px solid #E4CBFA;
@@ -1780,7 +1780,7 @@ new class extends Component {
                 </div>
 
                 <div class="yb-modal-body">
-                    <p class="font-bold uppercase leading-snug text-center" style="color:#333333;font-size:1.25rem;" x-text="profileData.name"></p>
+                    <p class="font-bold uppercase leading-snug text-center" style="color:#333333;font-size:1.15rem;margin-top:0;" x-text="profileData.name"></p>
 
                     {{-- Face-check rejection message --}}
                     <template x-if="profileData.isMe && faceError">
