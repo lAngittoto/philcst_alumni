@@ -505,7 +505,7 @@ new #[Layout('app')] class extends Component {
             $otp = $alumni->generateOtp();
 
             try {
-               Mail::to($targetEmail)->queue(new AlumniPasswordReset($alumni, $otp));
+                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
                 Log::info("Alumni OTP sent to: {$targetEmail}");
             } catch (\Exception $e) {
                 Log::warning("Alumni OTP mail failed: " . $e->getMessage());
@@ -524,6 +524,7 @@ new #[Layout('app')] class extends Component {
             // the visible countdown genuinely start at 10:00 instead of
             // already being several seconds short.
             $alumni->update(['otp_expires_at' => now()->addMinutes(10)]);
+            $alumni->refresh(); // ensure syncOtpExpiry() reads the just-written value
 
             // A fresh code being sent means any previously-verified flag
             // no longer applies — clear it so a stale cache entry can't
@@ -1094,7 +1095,7 @@ new #[Layout('app')] class extends Component {
                             @endif
                         </div>
 
-                        <div class="flex flex-col justify-center" x-data="{ otpLen: {{ strlen(trim($otp)) }} }">
+                        <div class="flex flex-col justify-center">
                             <label class="block text-sm font-semibold mb-2" style="color: #333333;">6-Digit Code</label>
                             <input wire:model="otp"
                                    wire:keydown.enter="verifyOtp"
@@ -1421,6 +1422,7 @@ new #[Layout('app')] class extends Component {
             seconds: 0,
             expired: true,
             canResend: true,
+            otpLen: 0,
             _interval: null,
 
             get formattedTime() {
