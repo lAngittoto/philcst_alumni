@@ -505,7 +505,7 @@ new #[Layout('app')] class extends Component {
             $otp = $alumni->generateOtp();
 
             try {
-                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+               Mail::to($targetEmail)->queue(new AlumniPasswordReset($alumni, $otp));
                 Log::info("Alumni OTP sent to: {$targetEmail}");
             } catch (\Exception $e) {
                 Log::warning("Alumni OTP mail failed: " . $e->getMessage());
