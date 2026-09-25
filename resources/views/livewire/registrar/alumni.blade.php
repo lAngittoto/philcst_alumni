@@ -950,7 +950,7 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
             $this->newAlumniPhoto = null;
 
             $this->dispatch('flash-message', type: 'success', message: 'Profile photo updated successfully.');
-            $this->dispatch('photo-saved');
+            $this->dispatch('photo-saved', newSrc: asset('storage/' . $path));
         } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo.');
         }
@@ -2663,10 +2663,15 @@ if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png
                          isDefaultPending: false,
                          get isShowingDefault() { return this.previewSrc === this.defaultSrc; },
                          init() {
-                             $wire.$on('photo-saved', () => {
+                             $wire.$on('photo-saved', (event) => {
                                  this.pendingFile = null; this.hasFile = false;
                                  this.saving = false; this.isDefaultPending = false;
-                                 this.originalSrc = this.previewSrc;
+                                 if (event && event.newSrc) {
+                                     this.previewSrc = event.newSrc + '?t=' + Date.now();
+                                     this.originalSrc = this.previewSrc;
+                                 } else {
+                                     this.originalSrc = this.previewSrc;
+                                 }
                                  document.dispatchEvent(new CustomEvent('photo-save-end'));
                              });
                          },
