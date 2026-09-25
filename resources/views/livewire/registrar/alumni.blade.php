@@ -1,4 +1,4 @@
-\{{-- resources/views/livewire/registrar/alumni-records.blade.php --}}
+{{-- resources/views/livewire/registrar/alumni-records.blade.php --}}
 
 <?php
 
