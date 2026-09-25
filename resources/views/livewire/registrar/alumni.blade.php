@@ -1,4 +1,4 @@
-{{-- resources/views/livewire/registrar/alumni-records.blade.php --}}
+\{{-- resources/views/livewire/registrar/alumni-records.blade.php --}}
 
 <?php
 
@@ -932,28 +932,47 @@ new class extends Component {
     }
 
     #[Renderless]
-    public function uploadAlumniPhoto(): void
+    /**
+     * Receives photo as base64 from JS FileReader — bypasses Livewire
+     * signed URL upload entirely (no 401 issues on Railway).
+     */
+    public function receiveAlumniPhoto(string $filename, string $base64): void
     {
-        if (!$this->viewingProfileId || !$this->newAlumniPhoto) return;
+        if (!$this->viewingProfileId) return;
 
         try {
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                $this->dispatch('flash-message', type: 'error', message: 'Invalid file type.');
+                return;
+            }
+
             $alumni = Alumni::findOrFail($this->viewingProfileId);
 
-if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png')) {
-    Storage::disk('public')->delete($alumni->profile_photo);
-}
+            // Delete old photo if exists
+            if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png')) {
+                Storage::disk('public')->delete($alumni->profile_photo);
+            }
 
-            $path = $this->newAlumniPhoto->store('alumni-photos', 'public');
+            // Save base64 decoded file to storage
+            $newFilename = uniqid('alumni_') . '.' . $ext;
+            $path        = 'alumni-photos/' . $newFilename;
+            Storage::disk('public')->put($path, base64_decode($base64));
+
             $alumni->update(['profile_photo' => $path]);
-
             $this->viewingProfile['profile_photo'] = $path;
-            $this->newAlumniPhoto = null;
 
             $this->dispatch('flash-message', type: 'success', message: 'Profile photo updated successfully.');
             $this->dispatch('photo-saved', newSrc: asset('storage/' . $path));
         } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo.');
         }
+    }
+
+    public function uploadAlumniPhoto(): void
+    {
+        // Kept for compatibility but no longer used — photo upload now goes
+        // through receiveAlumniPhoto() via base64 to avoid Railway 401 errors.
     }
 
     #[Renderless]
@@ -2738,17 +2757,26 @@ compressImage(file, maxW, maxH, quality) {
                              if (this.isDefaultPending) {
                                  $wire.resetAlumniPhoto();
                              } else if (this.pendingFile) {
-                                 $wire.upload('newAlumniPhoto', this.pendingFile,
-                                     () => { $wire.uploadAlumniPhoto(); },
-                                     () => {
-                                         this.saving = false; this.hasFile = false;
-                                         this.isDefaultPending = false; this.pendingFile = null;
-                                         this.previewSrc = this.originalSrc;
-                                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
-                                         document.dispatchEvent(new CustomEvent('photo-save-end'));
-                                     },
-                                     () => {}
-                                 );
+                                 // Use base64 approach (same as Excel import) to avoid
+                                 // Livewire signed-URL 401 errors on Railway production.
+                                 const file = this.pendingFile;
+                                 const reader = new FileReader();
+                                 reader.onload = (e) => {
+                                     const base64 = e.target.result.split(',')[1];
+                                     $wire.receiveAlumniPhoto(file.name, base64)
+                                         .catch(() => {
+                                             this.saving = false; this.hasFile = false;
+                                             this.isDefaultPending = false; this.pendingFile = null;
+                                             this.previewSrc = this.originalSrc;
+                                             if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                             document.dispatchEvent(new CustomEvent('photo-save-end'));
+                                         });
+                                 };
+                                 reader.onerror = () => {
+                                     this.saving = false;
+                                     document.dispatchEvent(new CustomEvent('photo-save-end'));
+                                 };
+                                 reader.readAsDataURL(file);
                              } else {
                                  this.saving = false;
                                  document.dispatchEvent(new CustomEvent('photo-save-end'));
