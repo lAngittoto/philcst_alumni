@@ -2701,15 +2701,28 @@ new class extends Component {
                          isDefaultPending: false,
                          get isShowingDefault() { return this.previewSrc === this.defaultSrc; },
                          init() {
+                             // photo-saved is the SINGLE source of truth for both
+                             // updating previewSrc and dispatching photo-save-end.
+                             // savePhoto()'s .then() only handles error/cleanup —
+                             // it never dispatches photo-save-end on success so
+                             // there is no race between the two paths.
                              $wire.$on('photo-saved', (event) => {
-                                 this.pendingFile = null; this.hasFile = false;
-                                 this.saving = false; this.isDefaultPending = false;
+                                 this.pendingFile = null;
+                                 this.hasFile = false;
+                                 this.saving = false;
+                                 this.isDefaultPending = false;
+                                 if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                                  if (event && event.newSrc) {
+                                     // Normal upload — use the Cloudinary URL returned
+                                     // by the server (with a cache-bust so the browser
+                                     // doesn't serve a stale copy from its disk cache).
                                      this.previewSrc = event.newSrc + '?t=' + Date.now();
-                                     this.originalSrc = this.previewSrc;
                                  } else {
-                                     this.originalSrc = this.previewSrc;
+                                     // Reset-to-default flow — the server sent no newSrc,
+                                     // so show the placeholder explicitly.
+                                     this.previewSrc = this.defaultSrc;
                                  }
+                                 this.originalSrc = this.previewSrc;
                                  document.dispatchEvent(new CustomEvent('photo-save-end'));
                              });
                          },
@@ -2774,40 +2787,37 @@ compressImage(file, maxW, maxH, quality) {
                              this.saving = true;
                              document.dispatchEvent(new CustomEvent('photo-save-start'));
                              if (this.isDefaultPending) {
+                                 // Reset-to-default: photo-saved (dispatched by the server
+                                 // with no newSrc) handles previewSrc + photo-save-end.
+                                 // .catch() is the only branch that needs to clean up here.
                                  $wire.resetAlumniPhoto()
-                                     .then(() => {
-                                         this.saving = false;
-                                         this.hasFile = false;
-                                         this.isDefaultPending = false;
-                                         this.pendingFile = null;
-                                         document.dispatchEvent(new CustomEvent('photo-save-end'));
-                                     })
                                      .catch(() => {
                                          this.saving = false;
                                          this.hasFile = false;
                                          this.isDefaultPending = false;
                                          this.pendingFile = null;
+                                         this.previewSrc = this.originalSrc;
+                                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                                          document.dispatchEvent(new CustomEvent('photo-save-end'));
                                      });
                              } else if (this.pendingFile) {
                                  // Use base64 approach (same as Excel import) to avoid
                                  // Livewire signed-URL 401 errors on Railway production.
+                                 // On SUCCESS: do nothing here — photo-saved event from
+                                 // the server is the single place that updates previewSrc
+                                 // and dispatches photo-save-end, preventing any race.
                                  const file = this.pendingFile;
                                  const reader = new FileReader();
                                  reader.onload = (e) => {
                                      const base64 = e.target.result.split(',')[1];
                                      $wire.receiveAlumniPhoto(file.name, base64)
-                                         .then(() => {
+                                         .catch(() => {
+                                             // Only the error path cleans up manually —
+                                             // success is fully handled by photo-saved.
                                              this.saving = false;
                                              this.hasFile = false;
                                              this.isDefaultPending = false;
                                              this.pendingFile = null;
-                                             if (this.$refs.photoInput) this.$refs.photoInput.value = '';
-                                             document.dispatchEvent(new CustomEvent('photo-save-end'));
-                                         })
-                                         .catch(() => {
-                                             this.saving = false; this.hasFile = false;
-                                             this.isDefaultPending = false; this.pendingFile = null;
                                              this.previewSrc = this.originalSrc;
                                              if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                                              document.dispatchEvent(new CustomEvent('photo-save-end'));
@@ -2815,6 +2825,8 @@ compressImage(file, maxW, maxH, quality) {
                                  };
                                  reader.onerror = () => {
                                      this.saving = false;
+                                     this.previewSrc = this.originalSrc;
+                                     if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                                      document.dispatchEvent(new CustomEvent('photo-save-end'));
                                  };
                                  reader.readAsDataURL(file);
