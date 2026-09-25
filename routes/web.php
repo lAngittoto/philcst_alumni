@@ -204,6 +204,19 @@ Route::middleware(['auth', 'admin'])->group(function () {
 });
 
 // ===================================
+// Storage Files (php -S symlink workaround)
+// ===================================
+Route::get('/storage/{path}', function ($path) {
+    $fullPath = storage_path('app/public/' . $path);
+
+    if (!file_exists($fullPath)) {
+        abort(404);
+    }
+
+    return response()->file($fullPath);
+})->where('path', '.*');
+
+// ===================================
 // Logout
 // ===================================
 // Accepts both GET and POST. GET is what the admin sidebar's
