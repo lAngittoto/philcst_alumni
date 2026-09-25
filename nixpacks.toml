@@ -10,10 +10,11 @@ cmds = [
 
 [phases.build]
 cmds = [
+  "php artisan livewire:publish --assets",
   "php artisan config:cache",
   "php artisan route:cache",
   "php artisan view:cache"
 ]
 
 [start]
-cmd = "php artisan migrate:fresh --force && php artisan storage:link && php -S 0.0.0.0:$PORT -t public"
+cmd = "php artisan migrate --force && php artisan storage:link && php -S 0.0.0.0:$PORT -t public"
