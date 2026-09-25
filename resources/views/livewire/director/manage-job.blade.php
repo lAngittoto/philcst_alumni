@@ -876,6 +876,22 @@ new class extends Component {
         }
     }
 
+    public function updatedEditOrgCategory(string $value): void
+    {
+        // Clear stale company/location when the director switches category so
+        // the new category's inputs always start empty (or auto-filled for
+        // PHILCST) instead of carrying over the previous selection's text.
+        $this->editCompany     = '';
+        $this->editCompanyType = '';
+        $this->editLocation    = '';
+
+        if ($value === 'philcst' && $this->philcstName) {
+            $this->editCompany     = $this->philcstName;
+            $this->editCompanyType = $this->philcstName;
+            $this->editLocation    = $this->philcstLocation;
+        }
+    }
+
     public function updatedEditCompanyType(string $value): void
     {
         if ($value === '') return;
@@ -939,11 +955,9 @@ new class extends Component {
         if ($this->postOrgCategory === '') return false;
         if ($this->postOrgCategory === 'partner') {
             if (trim($this->postPartnerName) === '') return false;
-            if (trim($this->postPartnerType) === '') return false;
             if (trim($this->postLocation) === '')    return false;
         } elseif ($this->postOrgCategory === 'custom') {
             if (trim($this->postCustomName) === '') return false;
-            if (trim($this->postCustomType) === '') return false;
             if (trim($this->postLocation) === '')   return false;
         }
         // 'philcst' category uses fixed name/location — nothing further
@@ -951,8 +965,6 @@ new class extends Component {
 
         if (trim($this->postEmpType) === '')  return false;
         if (trim($this->postExpLevel) === '') return false;
-
-        if (trim($this->postDeadline) === '') return false;
 
         if (trim($this->postDescription) === '')             return false;
         if (trim($this->postQualifications) === '')          return false;
@@ -1031,8 +1043,9 @@ new class extends Component {
         $paginated->getCollection()->transform(function ($job) use ($collegeMap, $now) {
             $dept                   = $job->organizer?->department;
             $job->_organizerCollege = $dept ? ($collegeMap[$dept] ?? $dept) : null;
-            $deadline               = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->startOfDay();
-            $job->_isDeadlinePassed = $deadline < $now;
+            $job->_isDeadlinePassed = $job->deadline
+                ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt($now)
+                : false;
             return $job;
         });
 
@@ -1042,8 +1055,10 @@ new class extends Component {
     #[Computed]
     public function jobOptions()
     {
-        return Cache::remember('job_options_grouped', 300, function () {
-            return JobOption::orderBy('type')->orderBy('label')->get()->groupBy('type');
+        return Cache::remember('job_options_grouped_v2', 300, function () {
+            return JobOption::orderBy('type')->orderBy('label')->get()
+                ->reject(fn($opt) => $opt->type === 'employment_type' && strtolower($opt->label) === 'internship')
+                ->groupBy('type');
         });
     }
 
@@ -1141,21 +1156,17 @@ new class extends Component {
 
         if ($orgCat === 'partner') {
             if (!$partnerName) $errors['postPartnerName'] = 'Organization name is required.';
-            if (!$partnerType) $errors['postPartnerType'] = 'Organization type is required.';
             if (!$location)    $errors['postLocation']    = 'Location is required.';
         }
         if ($orgCat === 'custom') {
             if (!$customName) $errors['postCustomName'] = 'Organization name is required.';
-            if (!$customType) $errors['postCustomType'] = 'Organization type is required.';
             if (!$location)   $errors['postLocation']   = 'Location is required.';
         }
 
         if (!$empType)  $errors['postEmpType']  = 'Employment type is required.';
         if (!$expLevel) $errors['postExpLevel'] = 'Experience level is required.';
 
-        if (!$deadline) {
-            $errors['postDeadline'] = 'Deadline is required.';
-        } else {
+        if ($deadline) {
             $today        = now('Asia/Manila')->startOfDay();
             $deadlineDate = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->startOfDay();
             if ($deadlineDate->lte($today)) {
@@ -1198,12 +1209,11 @@ new class extends Component {
 
         $duplicate = JobPosting::where('job_title', $title)
             ->where('company_name', $companyName)
-            ->where('employment_type', $empType)
             ->whereNotIn('status', ['ORGANIZER_DELETED', 'ADMIN_DELETED'])
             ->exists();
 
         if ($duplicate) {
-            $this->postErrors['postJobTitle'] = 'A job posting with this title, organization, and employment type already exists.';
+            $this->postErrors['postJobTitle'] = 'A job posting with this title and organization already exists.';
             return;
         }
 
@@ -1220,7 +1230,7 @@ new class extends Component {
             'employment_type'          => $empType,
             'experience_level'         => $expLevel,
             'salary'                   => $salary ?: null,
-            'deadline'                 => $deadline,
+            'deadline'                 => $deadline ?: null,
             'description'              => $description,
             'qualifications'           => $qualifications ?: null,
             'application_instructions' => $applicationInstructions ?: null,
@@ -1314,7 +1324,9 @@ new class extends Component {
         $this->editEmpType                 = $job->employment_type;
         $this->editExpLevel                = $job->experience_level;
         $this->editSalary                  = $job->salary ?? '';
-        $this->editDeadline                = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d');
+        $this->editDeadline                = $job->deadline
+            ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('Y-m-d')
+            : '';
         $this->editDescription             = $job->description;
         $this->editQualifications          = $job->qualifications ?? '';
         $this->editApplicationInstructions = $job->application_instructions ?? '';
@@ -1413,16 +1425,13 @@ new class extends Component {
         $qualifications          = $this->sanitize($this->editQualifications);
         $applicationInstructions = $this->sanitize($this->editApplicationInstructions);
 
-        if (!$title)       $errors['editJobTitle']    = 'Job title is required.';
-        if (!$company)     $errors['editCompany']     = 'Organization name is required.';
-        if (!$companyType) $errors['editCompanyType'] = 'Organization type is required.';
-        if (!$location)    $errors['editLocation']    = 'Location is required.';
-        if (!$empType)     $errors['editEmpType']     = 'Employment type is required.';
-        if (!$expLevel)    $errors['editExpLevel']    = 'Experience level is required.';
+        if (!$title)    $errors['editJobTitle'] = 'Job title is required.';
+        if (!$company)  $errors['editCompany']  = 'Organization name is required.';
+        if (!$location) $errors['editLocation'] = 'Location is required.';
+        if (!$empType)  $errors['editEmpType']  = 'Employment type is required.';
+        if (!$expLevel) $errors['editExpLevel'] = 'Experience level is required.';
 
-        if (!$deadline) {
-            $errors['editDeadline'] = 'Deadline is required.';
-        } else {
+        if ($deadline) {
             $today        = now('Asia/Manila')->startOfDay();
             $deadlineDate = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->startOfDay();
             if ($deadlineDate->lte($today)) {
@@ -1458,13 +1467,12 @@ new class extends Component {
 
         $duplicate = JobPosting::where('job_title', $title)
             ->where('company_name', $company)
-            ->where('employment_type', $empType)
             ->whereNotIn('status', ['ORGANIZER_DELETED', 'ADMIN_DELETED'])
             ->where('id', '!=', $this->editingJobId)
             ->exists();
 
         if ($duplicate) {
-            $this->editErrors['editJobTitle'] = 'A job posting with this title, organization, and employment type already exists.';
+            $this->editErrors['editJobTitle'] = 'A job posting with this title and organization already exists.';
             return;
         }
 
@@ -1478,7 +1486,7 @@ new class extends Component {
             'employment_type'          => $job->employment_type,
             'experience_level'         => $job->experience_level,
             'salary'                   => $job->salary,
-            'deadline'                 => \Carbon\Carbon::parse($job->deadline)->format('Y-m-d'),
+            'deadline'                 => $job->deadline ? \Carbon\Carbon::parse($job->deadline)->format('Y-m-d') : null,
             'target_college'           => $job->target_college,
             'qualifications'           => $job->qualifications,
             'application_instructions' => $job->application_instructions,
@@ -1506,15 +1514,16 @@ new class extends Component {
             'employment_type'          => $empType,
             'experience_level'         => $expLevel,
             'salary'                   => $salary ?: null,
-            'deadline'                 => $deadline,
+            'deadline'                 => $deadline ?: null,
             'target_college'           => $targetCollegeStr,
             'qualifications'           => $qualifications,
             'application_instructions' => $applicationInstructions,
             'has_image'                => $newImagePath ? 'yes' : 'no (default)',
         ];
 
-        $deadlineDate     = \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->endOfDay();
-        $shouldReactivate = $job->status === 'INACTIVE' && $deadlineDate >= now('Asia/Manila');
+        $shouldReactivate = $deadline
+            ? ($job->status === 'INACTIVE' && \Carbon\Carbon::createFromFormat('Y-m-d', $deadline, 'Asia/Manila')->endOfDay()->gte(now('Asia/Manila')))
+            : false;
 
         $job->update(array_merge($newValues, [
             'description'              => $description,
@@ -1528,7 +1537,7 @@ new class extends Component {
 
         $this->notifySelf('updated', $job, [
             'deadline_changed' => $deadline !== $oldValues['deadline'],
-            'deadline_label'   => \Carbon\Carbon::parse($deadline)->format('M d, Y'),
+            'deadline_label'   => $deadline ? \Carbon\Carbon::parse($deadline)->format('M d, Y') : 'No deadline',
             'reactivated'      => $shouldReactivate,
         ]);
         $this->notifyOrganizers('updated', $job);
@@ -1578,7 +1587,7 @@ new class extends Component {
             return;
         }
 
-        if ($job->status === 'INACTIVE') {
+        if ($job->status === 'INACTIVE' && $job->deadline) {
             $deadline = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->startOfDay();
             $today    = now('Asia/Manila')->startOfDay();
             if ($today > $deadline) {
@@ -1633,6 +1642,7 @@ new class extends Component {
 
         if ($toggleAction === 'activated') {
             (new AlumniNotificationController())->notifyAlumniOfActivatedJob($job);
+            $this->notifyMatchedAlumniOfNewJob($job);
         }
 
         $label = $newStatus === 'ACTIVE' ? 'activated' : 'deactivated';
@@ -1836,7 +1846,9 @@ new class extends Component {
         $this->shareJobEmpType     = $job->employment_type;
         $this->shareJobExpLevel    = $job->experience_level;
         $this->shareJobSalary      = $job->salary ?? '';
-        $this->shareJobDeadline    = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('F d, Y');
+        $this->shareJobDeadline    = $job->deadline
+            ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('F d, Y')
+            : 'No deadline';
         $this->shareJobDescription = $job->description ?? '';
         $this->shareJobTarget      = $job->target_college ?? '';
         $this->shareJobPhotoUrl    = $this::jobImageUrl($job->job_image ?? null);
@@ -2537,10 +2549,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @php
                             $isOrgDel         = $job->status === 'ORGANIZER_DELETED';
                             $isActive         = $job->status === 'ACTIVE';
-                            $dl               = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                            $dl               = $job->deadline ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila') : null;
                             $isDeadlinePassed = $job->_isDeadlinePassed ?? false;
-                            $daysLeft         = (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false);
-                            $isUrgent         = $daysLeft <= 7 && !$isDeadlinePassed;
+                            $daysLeft         = $dl ? (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false) : PHP_INT_MAX;
+                            $isUrgent         = $dl && $daysLeft <= 7 && !$isDeadlinePassed;
                             $organizerName    = $job->organizer?->name ?? null;
                             $organizerCollege = $job->_organizerCollege ?? null;
                             $canShare         = $isActive && !$isDeadlinePassed;
@@ -2556,7 +2568,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <p class="font-semibold text-sm leading-snug line-clamp-2 {{ $isOrgDel ? 'line-through text-red-400' : 'text-[#333333]' }}">{!! $isOrgDel ? e($job->job_title) : $this->highlight($job->job_title, $search) !!}</p>
                                 <p class="text-xs mt-0.5 {{ $isOrgDel ? 'text-red-400' : 'text-[#777777]' }}">
                                     @if($isOrgDel) Deleted {{ $job->updated_at->diffForHumans() }}
-                                    @else {{ $job->created_at->diffForHumans() }}
+                                    @else {{ $job->updated_at->diffForHumans() }}
                                     @endif
                                 </p>
                             </td>
@@ -3022,12 +3034,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 {{-- Organization Category --}}
                 <div class="bg-white border-[1.5px] {{ isset($postErrors['postOrgCategory']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
-                        <i class="fas fa-building text-[9px] text-[#555555]"></i> EMPLOYER
+                        <i class="fas fa-building text-[9px] text-[#555555]"></i> COMPANY/ORGANIZATION
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 space-y-2">
                         <div class="grid grid-cols-1 gap-1.5">
-                            @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Company','Known partner organization','fa-handshake'],['custom','Other / Custom','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
+                            @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Company','Known partner company','fa-handshake'],['custom','Other Company','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
                             <button type="button" wire:click="$set('postOrgCategory','{{ $val }}')"
                                     class="px-2.5 py-2 border-2 rounded-xl bg-white cursor-pointer transition text-left font-semibold flex items-center gap-2.5 text-sm
                                            {{ $postOrgCategory===$val ? 'border-[#7a3f91] text-white shadow-md' : 'border-gray-200 hover:border-[#7a3f91] hover:bg-purple-50 text-[#333333]' }}"
@@ -3069,19 +3081,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                              happened to trigger a real commit. Dropping the `false`
                              (equivalent to passing `true`) makes each field commit
                              normally, same as every other input in this form. --}}
-                        <div wire:ignore x-data="{pName:@js($postPartnerName),pType:@js($postPartnerType),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v)},syncT(v){$wire.set('postPartnerType',v)},syncL(v){$wire.set('postLocation',v)}}">
+                        <div wire:ignore x-data="{pName:@js($postPartnerName),loc:@js($postLocation),syncN(v){$wire.set('postPartnerName',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
-                                    <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Acme Corp" maxlength="150"
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company/Organization <span class="text-red-500">*</span></label>
+                                    <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Accenture Philippines" maxlength="150"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postPartnerName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerName'] }}</p>@endif
-                                </div>
-                                <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
-                                    <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Private, NGO" maxlength="100"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postPartnerType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
-                                    @if(isset($postErrors['postPartnerType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postPartnerType'] }}</p>@endif
                                 </div>
                                 <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
@@ -3094,23 +3100,17 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         @endif
 
                         @if($postOrgCategory === 'custom')
-                        <div wire:ignore x-data="{cName:@js($postCustomName),cType:@js($postCustomType),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v)},syncT(v){$wire.set('postCustomType',v)},syncL(v){$wire.set('postLocation',v)}}">
+                        <div wire:ignore x-data="{cName:@js($postCustomName),loc:@js($postLocation),syncN(v){$wire.set('postCustomName',v)},syncL(v){$wire.set('postLocation',v)}}">
                             <div class="space-y-2">
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
-                                    <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
+                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company/Organization <span class="text-red-500">*</span></label>
+                                    <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Accenture Philippines" maxlength="150"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomName']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postCustomName']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomName'] }}</p>@endif
                                 </div>
                                 <div>
-                                    <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
-                                    <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
-                                           class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postCustomType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
-                                    @if(isset($postErrors['postCustomType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postCustomType'] }}</p>@endif
-                                </div>
-                                <div>
                                     <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
-                                    <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
+                                    <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                     @if(isset($postErrors['postLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postLocation'] }}</p>@endif
                                 </div>
@@ -3224,9 +3224,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 <input wire:model.defer="postSalary" type="text" placeholder="e.g. ₱25,000/mo" maxlength="100"
                                        oninput="window.__eoFormatSalaryInput(this)"
                                        class="w-full px-3.5 py-2.5 border-[1.5px] border-gray-300 rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
+                                <p class="text-[10px] text-[#777777] mt-1 flex items-start gap-1 leading-tight"><i class="fas fa-circle-info text-[9px] mt-0.5 flex-shrink-0 text-[#7a3f91]/60"></i>Leave blank if salary is negotiable or not yet disclosed.</p>
                             </div>
                             <div>
-                                <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Deadline <span class="text-red-500">*</span></label>
+                                <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Deadline <span class="font-normal normal-case tracking-normal text-[#777777] text-xs">— optional</span></label>
                                 <input wire:model.live="postDeadline" type="date"
                                        min="{{ now()->setTimezone('Asia/Manila')->addDay()->format('Y-m-d') }}"
                                        oninput="window.__eoGuardDeadlineInput(this)"
@@ -3235,6 +3236,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                        onfocus="window.__eoOpenDatePicker(this)"
                                        class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors['postDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
                                 @if(isset($postErrors['postDeadline']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors['postDeadline'] }}</p>@endif
+                                <p class="text-[10px] text-[#777777] mt-1 flex items-start gap-1 leading-tight"><i class="fas fa-circle-info text-[9px] mt-0.5 flex-shrink-0 text-[#7a3f91]/60"></i>Leave blank to keep the job open indefinitely. Add a date to auto-close when it ends.</p>
                             </div>
                         </div>
                     </div>
@@ -3242,15 +3244,15 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                 {{-- Textareas --}}
                 @foreach([['postDescription','Description','fas fa-file-lines','Describe the role, responsibilities, and what the candidate will be doing…','5000'],['postQualifications','Qualifications','fas fa-list-check','e.g. Bachelor\'s degree in a relevant field, at least 1 year experience…','3000'],['postApplicationInstructions','How to Apply','fas fa-paper-plane','e.g. Send your resume to hr@company.com with subject: Application – [Position]','3000']] as [$field,$title,$ico,$placeholder,$maxlen])
-                <div class="bg-white border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden flex flex-col" style="min-height:180px;">
+                <div class="bg-white border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden flex flex-col" style="min-height:260px;">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91] shrink-0">
                         <i class="{{ $ico }} text-[9px] text-[#555555]"></i> {{ $title }} <span class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 flex flex-col flex-1">
                         <textarea wire:model.live.debounce.400ms="{{ $field }}"
-                                  class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition resize-none"
+                                  class="w-full flex-1 px-3.5 py-2.5 border-[1.5px] {{ isset($postErrors[$field]) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition resize-y overflow-y-auto"
                                   placeholder="{{ $placeholder }}" maxlength="{{ $maxlen }}"
-                                  style="min-height:100px;"></textarea>
+                                  style="min-height:180px;"></textarea>
                         @if(isset($postErrors[$field]))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $postErrors[$field] }}</p>@endif
                     </div>
                 </div>
@@ -3453,7 +3455,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 @php
     $editingJob = $editingJobId ? \App\Models\JobPosting::find($editingJobId) : null;
     $editJobIsActive       = $editingJob && $editingJob->status === 'ACTIVE';
-    $editJobDeadlinePassed = $editingJob ? \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay()) : false;
+    $editJobDeadlinePassed = $editingJob && $editingJob->deadline
+        ? \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay())
+        : false;
     $editJobCanShare       = $editingJob && !$editJobDeadlinePassed && $editJobIsActive;
     // Auto-editable the moment the job is INACTIVE — no manual toggle.
     $editModeAllowed       = $editingJob && !$editJobIsActive;
@@ -3569,7 +3573,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 {{-- ── EMPLOYER / ORGANIZATION — same 3-button selector as Post Job ── --}}
                 <div class="bg-white border-[1.5px] {{ (isset($editErrors['editCompany']) || isset($editErrors['editCompanyType'])) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
-                        <i class="fas fa-building text-[9px] text-[#555555]"></i> Employer
+                        <i class="fas fa-building text-[9px] text-[#555555]"></i> Company/Organization
                         <span x-show="editMode" x-cloak class="text-red-400 font-semibold ml-0.5">*</span>
                     </div>
                     <div class="p-3.5 space-y-2">
@@ -3577,11 +3581,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         {{-- VIEW mode: show plain labels --}}
                         <div x-show="!editMode" class="space-y-2.5">
                             <div>
-                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Employer Type</label>
-                                <div class="view-field-display">{{ $editCompanyType ?: '—' }}</div>
-                            </div>
-                            <div>
-                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Employer Name</label>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company/Organization</label>
                                 <div class="view-field-display">{{ $editCompany ?: '—' }}</div>
                             </div>
                             <div>
@@ -3595,7 +3595,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                             {{-- Category Buttons --}}
                             <div class="grid grid-cols-1 gap-1.5">
-                                @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Employer','Known partner organization','fa-handshake'],['custom','Other / Custom','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
+                                @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Company','Known partner company','fa-handshake'],['custom','Other Company','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
                                 <button type="button" wire:click="$set('editOrgCategory','{{ $val }}')"
                                         class="px-2.5 py-2 border-2 rounded-xl bg-white cursor-pointer transition text-left font-semibold flex items-center gap-2.5 text-sm
                                                {{ $editOrgCategory===$val ? 'border-[#7a3f91] text-white shadow-md' : 'border-gray-200 hover:border-[#7a3f91] hover:bg-purple-50 text-[#333333]' }}"
@@ -3626,25 +3626,19 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             </div>
                             @endif
 
-                            {{-- Partner: name + type inputs --}}
+                            {{-- Partner: name + location inputs --}}
                             @if($editOrgCategory === 'partner')
-                            <div wire:ignore x-data="{pName:@js($editCompany),pType:@js($editCompanyType),loc:@js($editLocation),syncN(v){$wire.set('editCompany',v)},syncT(v){$wire.set('editCompanyType',v)},syncL(v){$wire.set('editLocation',v)}}">
+                            <div wire:ignore x-data="{pName:@js($editCompany),loc:@js($editLocation),syncN(v){$wire.set('editCompany',v)},syncL(v){$wire.set('editLocation',v)}}">
                                 <div class="space-y-2">
                                     <div>
-                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
-                                        <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company/Organization <span class="text-red-500">*</span></label>
+                                        <input x-model="pName" @input.debounce.300ms="syncN(pName)" type="text" placeholder="e.g. Accenture Philippines" maxlength="150"
                                                class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                         @if(isset($editErrors['editCompany']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
                                     </div>
                                     <div>
-                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
-                                        <input x-model="pType" @input.debounce.300ms="syncT(pType)" type="text" placeholder="e.g. Government, Private" maxlength="100"
-                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
-                                        @if(isset($editErrors['editCompanyType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
-                                    </div>
-                                    <div>
                                         <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
-                                        <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
+                                        <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120"
                                                class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                         @if(isset($editErrors['editLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
                                     </div>
@@ -3652,25 +3646,19 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             </div>
                             @endif
 
-                            {{-- Custom: free-text name + type --}}
+                            {{-- Custom: free-text name + location --}}
                             @if($editOrgCategory === 'custom')
-                            <div wire:ignore x-data="{cName:@js($editCompany),cType:@js($editCompanyType),loc:@js($editLocation),syncN(v){$wire.set('editCompany',v)},syncT(v){$wire.set('editCompanyType',v)},syncL(v){$wire.set('editLocation',v)}}">
+                            <div wire:ignore x-data="{cName:@js($editCompany),loc:@js($editLocation),syncN(v){$wire.set('editCompany',v)},syncL(v){$wire.set('editLocation',v)}}">
                                 <div class="space-y-2">
                                     <div>
-                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Name <span class="text-red-500">*</span></label>
-                                        <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Dept. of Labor" maxlength="150"
+                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Company/Organization <span class="text-red-500">*</span></label>
+                                        <input x-model="cName" @input.debounce.300ms="syncN(cName)" type="text" placeholder="e.g. Accenture Philippines" maxlength="150"
                                                class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompany']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                         @if(isset($editErrors['editCompany']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompany'] }}</p>@endif
                                     </div>
                                     <div>
-                                        <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Employer Type <span class="text-red-500">*</span></label>
-                                        <input x-model="cType" @input.debounce.300ms="syncT(cType)" type="text" placeholder="e.g. Government, NGO" maxlength="100"
-                                               class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editCompanyType']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
-                                        @if(isset($editErrors['editCompanyType']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editCompanyType'] }}</p>@endif
-                                    </div>
-                                    <div>
                                         <label class="block text-[0.78rem] font-semibold uppercase tracking-[.06em] text-[#333333] mb-1.5">Location <span class="text-red-500">*</span></label>
-                                        <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Manila / Remote / Hybrid" maxlength="120"
+                                        <input x-model="loc" @input.debounce.300ms="syncL(loc)" type="text" placeholder="e.g. Tuguegarao / Remote" maxlength="120"
                                                class="w-full px-3.5 py-2.5 border-[1.5px] {{ isset($editErrors['editLocation']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }} rounded-xl text-[0.95rem] bg-white text-[#222] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition">
                                         @if(isset($editErrors['editLocation']))<p class="text-red-600 flex items-center gap-1 mt-0.5 text-[0.7rem]"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editLocation'] }}</p>@endif
                                     </div>
@@ -3797,17 +3785,18 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div class="grid grid-cols-2 gap-2">
                             <div>
                                 <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">
-                                    Salary <span class="font-normal normal-case tracking-normal text-[#777777] text-[10px]">optional</span>
+                                    Salary <span class="font-normal normal-case tracking-normal text-[#777777] text-[10px]">— optional</span>
                                 </label>
                                 <div x-show="!editMode" class="view-field-display">{{ $editSalary ?: 'Not disclosed' }}</div>
                                 <div x-show="editMode" x-cloak>
                                     <input wire:model.defer="editSalary" type="text" maxlength="100" placeholder="e.g. ₱25k/mo"
                                            oninput="window.__eoFormatSalaryInput(this)"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] border-gray-300 rounded-xl text-[0.85rem] leading-tight bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10">
+                                    <p class="text-[10px] text-[#777777] mt-1 flex items-start gap-1 leading-tight"><i class="fas fa-circle-info text-[9px] mt-0.5 flex-shrink-0 text-[#7a3f91]/60"></i>Leave blank if salary is negotiable or not yet disclosed.</p>
                                 </div>
                             </div>
                             <div>
-                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Deadline <span x-show="editMode" x-cloak class="text-red-500">*</span></label>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Deadline <span class="font-normal normal-case tracking-normal text-[#777777] text-xs">— optional</span></label>
                                 <div x-show="!editMode" class="view-field-display">
                                     @if($editDeadline)
                                         {{ \Carbon\Carbon::parse($editDeadline)->setTimezone('Asia/Manila')->format('M d, Y') }}
@@ -3823,6 +3812,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                            onfocus="window.__eoOpenDatePicker(this)"
                                            class="w-full px-3.5 py-2.5 border-[1.5px] rounded-xl text-[0.85rem] leading-tight bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($editErrors['editDeadline']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
                                     @if(isset($editErrors['editDeadline']))<p class="text-red-600 text-xs mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-[10px]"></i>{{ $editErrors['editDeadline'] }}</p>@endif
+                                    <p class="text-[10px] text-[#777777] mt-1 flex items-start gap-1 leading-tight"><i class="fas fa-circle-info text-[9px] mt-0.5 flex-shrink-0 text-[#7a3f91]/60"></i>Leave blank to keep the job open indefinitely. Add a date to auto-close when it ends.</p>
                                 </div>
                             </div>
                         </div>
@@ -4245,15 +4235,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Job Title</label>
                             <div class="view-field-display font-semibold">{{ $job->job_title ?: '—' }}</div>
                         </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div>
-                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Employment Type</label>
-                                <div class="view-field-display">{{ $job->employment_type ?: '—' }}</div>
-                            </div>
-                            <div>
-                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Experience Level</label>
-                                <div class="view-field-display">{{ $job->experience_level ?: '—' }}</div>
-                            </div>
+                        <div>
+                            <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Experience Level</label>
+                            <div class="view-field-display">{{ $job->experience_level ?: '—' }}</div>
                         </div>
                         <div class="grid grid-cols-2 gap-2">
                             <div>

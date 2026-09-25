@@ -203,8 +203,13 @@ new class extends Component {
         // expired postings remain visible with an Expired badge. All other
         // filter selections (including "All Types") keep the normal
         // still-open-only behavior.
+        // NULL deadline = no expiry (always open) — must be included even
+        // outside Job History, so we keep it with: deadline IS NULL OR deadline >= today.
         if ($this->filterType !== '__job_history') {
-            $q->where('deadline', '>=', $today);
+            $q->where(fn($sub) =>
+                $sub->whereNull('deadline')
+                    ->orWhere('deadline', '>=', $today)
+            );
         }
 
         if ($this->search !== '') {
@@ -325,7 +330,7 @@ new class extends Component {
     {
         $job = JobPosting::findOrFail($id);
 
-        $deadlinePassed = \Carbon\Carbon::parse($job->deadline)
+        $deadlinePassed = $job->deadline && \Carbon\Carbon::parse($job->deadline)
             ->setTimezone('Asia/Manila')->startOfDay()
             ->lt(now('Asia/Manila')->startOfDay());
 
@@ -630,11 +635,13 @@ select.filter-input {
     stroke-linecap: round; stroke-linejoin: round;
 }
 
-[data-jb-card] { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
-[data-jb-card]:hover {
-    border-color: #c4b5d4 !important;
-    box-shadow: 0 4px 20px rgba(122,63,145,.12) !important;
-}
+[data-jb-card] { transition: background .15s ease; position: relative; }
+
+/* Seek-style list rows */
+.jb-list-row { background: #fff; }
+.jb-list-row:hover { background: #faf7fc; }
+.jb-list-row-active { background: #f5eef9 !important; border-left: 3px solid #7a3f91 !important; }
+.jb-list-row-active:hover { background: #f0e8f7 !important; }
 
 /* ── Job card click spinner ───────────────────────────
    Same purple "..." dot loader used on the Alumni Dashboard
@@ -828,7 +835,7 @@ select.filter-input option {
     padding: 5px 12px; border-radius: 999px;
 }
 .philcst-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.philcst-checklist li { display: flex; align-items: flex-start; gap: 10px; font-size: clamp(12px, 1vw, 15px); line-height: 1.6; color: #333333; }
+.philcst-checklist li { display: flex; align-items: flex-start; gap: 10px; font-size: clamp(15px, 1.2vw, 17px); line-height: 1.6; color: #333333; }
 .philcst-checklist li .chk {
     flex-shrink: 0; width: 22px; height: 22px; border-radius: 6px;
     background: #f5eef9; color: #7a3f91;
@@ -842,14 +849,14 @@ select.filter-input option {
    their own if their content is long — the page
    itself never grows past the viewport.
 ───────────────────────────────────────────── */
-.detail-side-item { display: flex; align-items: flex-start; gap: 10px; }
+.detail-side-item { display: flex; align-items: center; gap: 10px; }
 .detail-side-icon {
-    flex-shrink: 0; width: 34px; height: 34px; border-radius: 9px;
+    flex-shrink: 0; width: 38px; height: 38px; border-radius: 9px;
     background: #f5eef9; color: #7a3f91;
-    display: flex; align-items: center; justify-content: center; font-size: 15px;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
 }
-.detail-side-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #666; margin: 0; }
-.detail-side-value { font-size: 16px; font-weight: 600; color: #333333; margin: 2px 0 0; line-height: 1.4; }
+.detail-side-label { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #666; margin: 0; }
+.detail-side-value { font-size: 17px; font-weight: 600; color: #333333; margin: 0; line-height: 1.4; }
 
 /* ─────────────────────────────────────────────
    RESPONSIVE — icon-only on small / touch screens:
@@ -975,290 +982,406 @@ select.filter-input option {
         </div>
     </div>
 
-    {{-- ══ CONTENT BLOCK ══ ── ONE request at a time: JS lockJbAll()
-         adds .is-blocked to every other card, filter, and pagination
-         button the instant a card or filter fires. Cleared on commit
-         succeed/fail and livewire:navigated. ── --}}
-    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
+    {{-- ══ SEEK-STYLE 2-COLUMN LAYOUT ══ --}}
+    <div class="flex-1 min-h-0 flex gap-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
          id="jb-content-block">
 
-        {{-- ── FILTER BAR ── --}}
-        <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0 select-none">
+        {{-- ── LEFT PANEL: Filter bar + List + Pagination ── --}}
+        <div class="flex flex-col w-full lg:w-[420px] xl:w-[460px] flex-shrink-0 border-r border-[#E8E0F0] bg-white min-h-0">
 
-            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
-
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
-                       placeholder="Search…"
-                       class="filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                              hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
-                       style="cursor:text;user-select:text;-webkit-user-select:text;"
-                       autocomplete="off" maxlength="100" spellcheck="false">
+            {{-- Filter bar --}}
+            <div class="bg-gray-50 border-b border-[#E8E0F0] px-3 pt-2.5 pb-2 flex flex-col gap-2 flex-shrink-0 select-none">
+                {{-- Row 1: label + search + dropdowns --}}
+                <div class="flex flex-wrap gap-2 items-center">
+                    <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1 flex-shrink-0">Filters</span>
+                    <div class="relative flex-1 min-w-[120px] max-w-xs"
+                         wire:ignore
+                         x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
+                        <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
+                               placeholder="Search…"
+                               class="filter-input w-full pl-8 pr-3 py-[6px] text-[12px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                      hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                               style="cursor:text;user-select:text;-webkit-user-select:text;"
+                               autocomplete="off" maxlength="100" spellcheck="false">
+                    </div>
+                    <select wire:model.live="filterType"
+                            class="filter-input flex-shrink-0 py-[6px] px-2.5 text-[12px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                   hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] transition cursor-pointer">
+                        <option value="">All Types</option>
+                        <option value="Full-Time">Full-Time</option>
+                        <option value="Part-Time">Part-Time</option>
+                        <option value="Contract">Contract</option>
+                        <option value="Freelance">Freelance</option>
+                    </select>
+                    <select wire:model.live="filterLevel"
+                            class="filter-input flex-shrink-0 py-[6px] px-2.5 text-[12px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                   hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] transition cursor-pointer">
+                        <option value="">All Level</option>
+                        <option value="No Experience Required">No Experience Required</option>
+                        <option value="Entry Level (At Least 1 Year)">Entry Level (At Least 1 Year)</option>
+                        <option value="Mid Level (2-3 Years)">Mid Level (2-3 Years)</option>
+                        <option value="Senior Level (4-5 Years)">Senior Level (4-5 Years)</option>
+                        <option value="Expert Level (5+ Years)">Expert Level (5+ Years)</option>
+                    </select>
+                </div>
+                {{-- Row 2: reset button (left-aligned, below) --}}
+                @php $hasActiveFilters = $search !== '' || $filterType !== '' || $filterLevel !== '' || $filterSort !== 'recent'; @endphp
+                <div class="flex items-center px-1">
+                    <button wire:click="resetFilters"
+                            wire:loading.attr="disabled"
+                            wire:loading.class="opacity-60 cursor-wait"
+                            wire:target="resetFilters"
+                            data-jb-reset
+                            @disabled(!$hasActiveFilters)
+                            class="inline-flex items-center gap-1.5 px-3 py-[5px] rounded-lg text-xs font-semibold border transition active:scale-95
+                                   {{ $hasActiveFilters ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
+                        <span wire:loading.remove wire:target="resetFilters"><i class="fas fa-rotate-left text-xs"></i> Reset</span>
+                        <span wire:loading wire:target="resetFilters"><i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i> Reset</span>
+                    </button>
+                </div>
             </div>
 
-            <select wire:model.live="filterType"
-                    class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                           hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
-                <option value="">All Types</option>
-                <option value="Full-Time">Full-Time</option>
-                <option value="Part-Time">Part-Time</option>
-                <option value="Contract">Contract</option>
-                <option value="Internship">Internship</option>
-                <option value="Freelance">Freelance</option>
-            </select>
+            {{-- Loading overlay --}}
+            <div class="hidden fixed z-[9999] items-center justify-center pointer-events-none"
+                 style="top:0;bottom:0;left:284px;right:0;"
+                 wire:loading.flex wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page,resetFilters">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+            </div>
 
-            <select wire:model.live="filterLevel"
-                    class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                           hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
-                <option value="">All Experience</option>
-                <option value="No Experience Required">No Experience Required</option>
-                <option value="Entry Level (At Least 1 Year)">Entry Level (At Least 1 Year)</option>
-                <option value="Mid Level (2-3 Years)">Mid Level (2-3 Years)</option>
-                <option value="Senior Level (4-5 Years)">Senior Level (4-5 Years)</option>
-                <option value="Expert Level (5+ Years)">Expert Level (5+ Years)</option>
-            </select>
+            {{-- Job list --}}
+            <div class="flex-1 min-h-0 overflow-y-auto scroll-thin transition-opacity duration-200"
+                 wire:loading.class="opacity-40 pointer-events-none"
+                 wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page,resetFilters">
 
-            @php $hasActiveFilters = $search !== '' || $filterType !== '' || $filterLevel !== '' || $filterSort !== 'recent'; @endphp
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    data-jb-reset
-                    @disabled(!$hasActiveFilters)
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold
-                           border transition active:scale-95
-                           {{ $hasActiveFilters
-                                ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
-                                : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-xs"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline" style="user-select:none;-webkit-user-select:none;">Reset</span>
-            </button>
+                @if($this->jobPostings->count() > 0)
+                    @foreach($this->jobPostings as $job)
+                    @php
+                        $isExpired   = false;
+                        $daysLeft    = null;
+                        $dlLabelCard = '';
+                        if ($job->deadline) {
+                            $dlC       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                            $todayC    = now('Asia/Manila')->startOfDay();
+                            $daysLeft  = (int) $todayC->diffInDays($dlC->copy()->startOfDay(), false);
+                            $isExpired = $daysLeft < 0;
+                            $dlLabelCard = $daysLeft === 0 ? 'Closes today' : ($daysLeft === 1 ? '1 day left' : $daysLeft . ' days left');
+                        }
+                        $descPreview  = $job->description ? Str::limit(strip_tags($job->description), 80) : null;
+                        $cardImageUrl = $this::jobImageUrl($job->job_image ?? null);
+                        $isActive     = $viewingJobId === $job->id;
+                    @endphp
 
-        </div>
+                    <div wire:key="job-card-{{ $job->id }}"
+                         class="jb-list-row relative cursor-pointer select-none border-b border-gray-100 transition-colors
+                                {{ $isActive ? 'jb-list-row-active' : '' }}
+                                {{ $isExpired ? 'opacity-60' : '' }}"
+                         data-jb-card
+                         wire:click="viewJob({{ $job->id }})"
+                         role="button" tabindex="0"
+                         onkeypress="if(event.key==='Enter')this.click()">
 
-        {{-- ── CARDS BODY ──
-             CHANGED: was `flex-1 min-h-0 overflow-y-auto`, which forced this
-             block to stretch and fill 100% of the remaining panel height no
-             matter how few job cards there were — that's what pushed the
-             pagination bar all the way down to the bottom with a big empty
-             gray gap above it (see image 1). Now it just hugs its own
-             content and caps out with a max-height (so it still scrolls
-             normally when there ARE many results) — pagination sits right
-             under the cards instead of far below them. --}}
-        {{-- ── Loading overlay: fixed to viewport so it stays centered
-                regardless of scroll position. Left offset accounts for
-                the sidebar (~284px) so the spinner sits in the content
-                area, not behind the nav. ──── --}}
-        <div class="hidden fixed z-[9999] items-center justify-center pointer-events-none"
-             style="top:0;bottom:0;left:284px;right:0;"
-             wire:loading.flex wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page,resetFilters">
-            <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
-        </div>
+                        <div class="jb-card-spinner"><span></span><span></span><span></span></div>
 
-        <div class="bg-white p-4 relative overflow-y-auto transition-opacity duration-200 flex-1 min-h-0"
-             wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page,resetFilters">
+                        <div class="flex gap-3 px-4 py-4">
+                            {{-- Thumbnail --}}
+                            <img src="{{ $cardImageUrl }}" alt="{{ $job->job_title }}"
+                                 loading="lazy"
+                                 class="w-16 h-16 rounded-lg object-contain bg-gray-50 border border-gray-100 flex-shrink-0"
+                                 onerror="
+                                     var img=this;
+                                     if(!img.dataset.retried){img.dataset.retried='1';setTimeout(function(){img.src=img.dataset.realSrc+(img.dataset.realSrc.indexOf('?')>-1?'&':'?')+'retry='+Date.now();},400);}
+                                     else{img.onerror=null;img.src='{{ asset('storage/job/default-photo-job.jpg') }}';}
+                                 "
+                                 data-real-src="{{ $cardImageUrl }}">
 
-            @if($this->jobPostings->count() > 0)
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                @foreach($this->jobPostings as $job)
-                @php
-                    $isExpired = false;
-                    $daysLeft  = null;
-                    if ($job->deadline) {
-                        $dl       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-                        $today    = now('Asia/Manila')->startOfDay();
-                        $daysLeft = (int) $today->diffInDays($dl->copy()->startOfDay(), false);
-                        $isExpired = $daysLeft < 0;
-                    }
+                            <div class="flex-1 min-w-0">
+                                <h3 class="font-bold text-[16px] leading-snug line-clamp-1 text-[#7a3f91]">{!! $this->highlightMatch($job->job_title) !!}</h3>
+                                <p class="text-[14px] font-medium text-gray-600 mt-0.5 line-clamp-1">{{ $job->company_name }}</p>
 
-                    $descPreview  = $job->description ? Str::limit(strip_tags($job->description), 90) : null;
-                    $cardImageUrl = $this::jobImageUrl($job->job_image ?? null);
-                @endphp
+                                <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-1.5">
+                                    @if($job->location)
+                                    <span class="text-[13px] text-gray-500 flex items-center gap-1">
+                                        <i class="fas fa-location-dot text-[12px] text-[#7a3f91]/60"></i>{{ Str::limit($job->location, 30) }}
+                                    </span>
+                                    @endif
+                                    @if($job->employment_type)
+                                    <span class="text-[13px] text-gray-500 flex items-center gap-1">
+                                        <i class="fas fa-briefcase text-[12px] text-[#7a3f91]/60"></i>{{ $job->employment_type }}
+                                    </span>
+                                    @endif
+                                    @if($job->salary)
+                                    <span class="text-[13px] text-emerald-600 font-semibold flex items-center gap-1">
+                                        <i class="fas fa-money-bill-wave text-[12px]"></i>{{ $job->salary }}
+                                    </span>
+                                    @endif
+                                </div>
 
-                <div wire:key="job-card-{{ $job->id }}"
-                     class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
-                            cursor-pointer relative select-none flex flex-col group
-                            {{ $isExpired ? 'opacity-70' : '' }}"
-                     data-jb-card
-                     wire:click="viewJob({{ $job->id }})"
-                     role="button" tabindex="0"
-                     onkeypress="if(event.key==='Enter')this.click()">
+                                <div class="flex items-center justify-between mt-2">
+                                    <span class="text-[13px] text-gray-400">{{ \Carbon\Carbon::parse($job->updated_at)->setTimezone('Asia/Manila')->diffForHumans() }}</span>
+                                    <div class="flex items-center gap-2">
+                                        @if($isExpired)
+                                            <span class="text-[12px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full border border-gray-200">Expired</span>
+                                        @elseif($daysLeft !== null && $daysLeft <= 7)
+                                            <span class="text-[12px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
+                                                <i class="fas fa-fire text-[11px] mr-0.5"></i>{{ $dlLabelCard }}
+                                            </span>
+                                        @endif
+                                        <button type="button"
+                                                data-jb-share
+                                                wire:click.stop="openShareModal({{ $job->id }})"
+                                                wire:loading.attr="disabled"
+                                                wire:target="openShareModal({{ $job->id }})"
+                                                class="card-share-btn">
+                                            <span wire:loading.remove wire:target="openShareModal({{ $job->id }})"><i class="fas fa-share-nodes text-[12px]"></i></span>
+                                            <span wire:loading wire:target="openShareModal({{ $job->id }})"><i class="fas fa-spinner fa-spin text-[12px]"></i></span>
+                                            <span class="tip">Share</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    @endforeach
+                @else
+                <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16">
+                    <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
+                        <i class="fas fa-briefcase text-xl text-gray-400"></i>
+                    </div>
+                    <div>
+                        <p class="font-semibold text-base text-gray-700">
+                            @if($search || $filterType || $filterLevel) No jobs match your filters
+                            @else No job openings yet @endif
+                        </p>
+                        <p class="text-sm mt-1 text-gray-500">
+                            @if($search || $filterType || $filterLevel) Try clearing your filters.
+                            @else Check back soon — new opportunities will be posted here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>. @endif
+                        </p>
+                    </div>
+                </div>
+                @endif
+            </div>
 
-                    <div class="jb-card-spinner"><span></span><span></span><span></span></div>
+            {{-- ── PAGINATION BAR ── --}}
+            @php
+                $total   = $this->jobPostings->total();
+                $pp      = $this->jobPostings->perPage();
+                $cp      = $this->jobPostings->currentPage();
+                $lp      = $this->jobPostings->lastPage();
+                $from    = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
+                $to      = min($cp * $pp, $total);
+                $pgStart = max(1, $cp - 2);
+                $pgEnd   = min($lp, $cp + 2);
+            @endphp
+            <div class="flex items-center justify-between gap-2 flex-wrap px-4 py-2.5 min-h-[44px]
+                        bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0 select-none"
+                 style="padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px));">
+                <p class="text-white/80 text-[11px] font-normal whitespace-nowrap">
+                    <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong> / <strong class="text-white font-bold">{{ $total }}</strong>
+                </p>
+                <div class="flex items-center gap-1">
+                    <button wire:click="previousPage" wire:loading.attr="disabled" wire:loading.class="opacity-50 cursor-wait" wire:target="previousPage"
+                            class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                            @if($this->jobPostings->onFirstPage()) disabled @endif aria-label="Previous">
+                        <i class="fas fa-chevron-left text-[9px]"></i>
+                    </button>
+                    @if($pgStart > 1)
+                        <button wire:click="$set('page', 1)" wire:loading.attr="disabled" wire:target="$set('page', 1)"
+                                class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
+                            <span wire:loading.remove wire:target="$set('page', 1)">1</span>
+                            <span wire:loading wire:target="$set('page', 1)"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                        </button>
+                        @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
+                    @endif
+                    @for($p = $pgStart; $p <= $pgEnd; $p++)
+                        @if($p === $cp)
+                            <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
+                        @else
+                            <button wire:click="$set('page', {{ $p }})" wire:loading.attr="disabled" wire:target="$set('page', {{ $p }})"
+                                    class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
+                                <span wire:loading.remove wire:target="$set('page', {{ $p }})">{{ $p }}</span>
+                                <span wire:loading wire:target="$set('page', {{ $p }})"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                            </button>
+                        @endif
+                    @endfor
+                    @if($pgEnd < $lp)
+                        @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
+                        <button wire:click="$set('page', {{ $lp }})" wire:loading.attr="disabled" wire:target="$set('page', {{ $lp }})"
+                                class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
+                            <span wire:loading.remove wire:target="$set('page', {{ $lp }})">{{ $lp }}</span>
+                            <span wire:loading wire:target="$set('page', {{ $lp }})"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
+                        </button>
+                    @endif
+                    <button wire:click="nextPage" wire:loading.attr="disabled" wire:loading.class="opacity-50 cursor-wait" wire:target="nextPage"
+                            class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                            @if(!$this->jobPostings->hasMorePages()) disabled @endif aria-label="Next">
+                        <i class="fas fa-chevron-right text-[9px]"></i>
+                    </button>
+                </div>
+            </div>
+        </div>{{-- end left panel --}}
 
-                    <div class="relative w-full h-40 bg-gray-50 flex-shrink-0 overflow-hidden pointer-events-none">
-                        <img src="{{ $cardImageUrl }}" alt="{{ $job->job_title }}"
-                             loading="lazy"
-                             class="w-full h-full object-contain"
-                             data-real-src="{{ $cardImageUrl }}"
-                             onerror="
-                                 var img=this;
-                                 if(!img.dataset.retried){
-                                     img.dataset.retried='1';
-                                     setTimeout(function(){ img.src = img.dataset.realSrc + (img.dataset.realSrc.indexOf('?')>-1?'&':'?') + 'retry=' + Date.now(); }, 400);
-                                 } else {
-                                     img.onerror=null;
-                                     img.src='{{ asset('storage/job/default-photo-job.jpg') }}';
-                                 }
-                             ">
+        {{-- ── RIGHT PANEL: Job Detail inline (desktop only) ── --}}
+        <div class="hidden lg:flex flex-1 min-w-0 min-h-0 flex-col bg-gray-50 jb-right-panel">
+            @if($showDetail && $this->viewingJob)
+            @php
+                $job      = $this->viewingJob;
+                $hasDeadline  = !empty($job->deadline);
+                $dl           = $hasDeadline ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila') : null;
+                $daysLeft     = $hasDeadline ? (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false) : null;
+                if (!$hasDeadline)       $dlLabel = 'No deadline';
+                elseif ($daysLeft === 0) $dlLabel = 'Closes today';
+                elseif ($daysLeft === 1) $dlLabel = '1 day left';
+                else                     $dlLabel = $daysLeft . ' days left';
+                $dlIsUrgent   = $hasDeadline && $daysLeft <= 3;
+                $dlIsSoon     = $hasDeadline && !$dlIsUrgent && $daysLeft <= 14;
+                $dlValueClass = !$hasDeadline ? 'text-emerald-600 font-semibold' : ($dlIsUrgent ? 'text-red-600 font-bold' : ($dlIsSoon ? 'text-orange-700 font-bold' : 'text-gray-900 font-semibold'));
+                $isUrgent     = $hasDeadline && $daysLeft <= 7;
+                $isExpired    = $hasDeadline && $daysLeft < 0;
+                $postedPH     = \Carbon\Carbon::parse($job->updated_at)->setTimezone('Asia/Manila');
+                $displayType  = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
+                $hasQual      = !empty($job->qualifications);
+                $hasInstr     = !empty($job->application_instructions);
+                $isPhilcst    = $displayType === 'PHILCST';
+                $detailImg    = $this::jobImageUrl($job->job_image ?? null);
+                $qualLines    = $hasQual  ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $job->qualifications)), fn($l) => $l !== '')) : [];
+                $instrLines   = $hasInstr ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $job->application_instructions)), fn($l) => $l !== '')) : [];
+            @endphp
+
+            {{-- Right panel top bar --}}
+            <div class="flex items-center justify-between px-5 h-[48px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-3">
+                <span class="text-white font-semibold text-base truncate">{{ $job->job_title }}</span>
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <button type="button" wire:click="openShareModal({{ $job->id }})" wire:loading.attr="disabled" wire:target="openShareModal({{ $job->id }})" class="detail-top-btn share-btn" aria-label="Share">
+                        <span wire:loading.remove wire:target="openShareModal({{ $job->id }})"><i class="fas fa-share-nodes text-[13px] text-white"></i></span>
+                        <span wire:loading wire:target="openShareModal({{ $job->id }})"><i class="fas fa-spinner fa-spin text-[13px] text-white"></i></span>
+                        <span class="tip">Share</span>
+                    </button>
+                    <button type="button" wire:click="closeDetail" wire:loading.attr="disabled" wire:target="closeDetail" class="detail-top-btn close-btn" aria-label="Close" data-jb-reset>
+                        <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeDetail"><path d="M2 2L12 12M12 2L2 12"/></svg>
+                        <i class="fas fa-spinner fa-spin text-[13px] text-white" wire:loading wire:target="closeDetail"></i>
+                        <span class="tip">Close</span>
+                    </button>
+                </div>
+            </div>
+
+            {{-- Right panel scrollable content --}}
+            <div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 py-5 flex flex-col gap-4 bg-white">
+
+                {{-- Top: image + title --}}
+                <div class="flex items-center gap-5">
+                    <img src="{{ $detailImg }}" alt="{{ $job->job_title }}"
+                         class="w-[130px] h-[130px] flex-shrink-0 object-contain bg-white border border-gray-100 rounded-xl shadow-sm"
+                         onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
+                    <div class="flex flex-col gap-2 min-w-0">
+                        @if($isPhilcst)
+                            <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[12px]"></i> Official PHILCST Posting</span>
+                        @endif
+                        <p class="text-2xl font-bold leading-snug" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
                         @if($isExpired)
-                            <span class="absolute top-2.5 right-2.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-gray-700/90 text-white">
-                                <i class="fas fa-ban text-[9px]"></i> Expired
+                            <span class="inline-flex items-center text-sm font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 border border-gray-200 self-start">
+                                <i class="fas fa-ban mr-1 text-[11px]"></i>Expired
                             </span>
                         @endif
                     </div>
+                </div>
 
-                    <div class="flex flex-col flex-1 p-4 gap-2.5">
+                <div class="border-t border-gray-100"></div>
 
-                        <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{!! $this->highlightMatch($job->job_title) !!}</h3>
-
-                        @if($descPreview)
-                        <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
-                        @endif
-
-                        <div class="flex items-center justify-end pt-2.5 border-t border-gray-100 mt-auto">
-                            <button type="button"
-                                    data-jb-share
-                                    wire:click.stop="openShareModal({{ $job->id }})"
-                                    wire:loading.attr="disabled"
-                                    wire:target="openShareModal({{ $job->id }})"
-                                    class="card-share-btn">
-                                <span wire:loading.remove wire:target="openShareModal({{ $job->id }})">
-                                    <i class="fas fa-share-nodes text-[11px]"></i>
-                                </span>
-                                <span wire:loading wire:target="openShareModal({{ $job->id }})">
-                                    <i class="fas fa-spinner fa-spin text-[11px]"></i>
-                                </span>
-                                <span class="tip">Share</span>
-                            </button>
-                        </div>
+                {{-- Meta info compact --}}
+                <div class="flex flex-wrap gap-x-5 gap-y-2 items-center">
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-building"></i></span>
+                        <p class="detail-side-value">{{ $job->company_name }}</p>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
+                        <p class="detail-side-value">{{ $job->location ?: '—' }}</p>
+                    </div>
+                    @if($hasDeadline)
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
+                        <p class="detail-side-value {{ $dlValueClass }}">
+                            {{ $dl->format('M d, Y') }} <span class="font-normal text-xs">(@if($dlIsUrgent)<i class="fas fa-fire"></i> @endif{{ $dlLabel }})</span>
+                        </p>
+                    </div>
+                    @endif
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-briefcase"></i></span>
+                        <p class="detail-side-value">{{ $job->employment_type }}</p>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-chart-line"></i></span>
+                        <p class="detail-side-value">{{ $job->experience_level }}</p>
+                    </div>
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
+                        <p class="detail-side-value" style="color:#888;">
+                            Posted {{ $postedPH->diffForHumans() }}
+                            @if($job->salary)
+                                &nbsp;·&nbsp;<span class="text-emerald-600 font-semibold">{{ $job->salary }}</span>
+                            @endif
+                        </p>
                     </div>
                 </div>
-                @endforeach
-            </div>
 
+                @if($isUrgent)
+                <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg px-4 py-3 text-sm text-gray-900 leading-relaxed">
+                    @if($daysLeft === 0) Deadline is <strong class="text-red-600">today</strong>. Apply before it's too late.
+                    @elseif($daysLeft === 1) Only <strong class="text-red-600">1 day</strong> left — apply now.
+                    @else Only <strong class="text-red-600">{{ $daysLeft }} days</strong> left. Closes {{ $dl->format('F d, Y') }}.
+                    @endif
+                </div>
+                @endif
+
+                <div class="border-t border-gray-100"></div>
+
+                {{-- Content sections --}}
+                <div class="grid grid-cols-1 {{ ($hasQual || $hasInstr) ? 'xl:grid-cols-2' : '' }} gap-4">
+                    <div class="border border-gray-200 rounded-xl px-4 py-3.5">
+                        <p class="font-bold mb-2" style="color:#333333;font-size:clamp(16px,1.3vw,18px);">📄 Job Description:</p>
+                        <div class="pre-wrap leading-relaxed" style="color:#333333;font-size:clamp(15px,1.2vw,17px);">{{ trim($job->description) }}</div>
+                    </div>
+                    @if($hasQual || $hasInstr)
+                    <div class="flex flex-col gap-3">
+                        @if($hasQual)
+                        <div class="border border-gray-200 rounded-xl px-4 py-3.5">
+                            <p class="font-bold mb-2" style="color:#333333;font-size:clamp(16px,1.3vw,18px);">📌 Requirements &amp; Qualifications:</p>
+                            <ul class="philcst-checklist">
+                                @foreach($qualLines as $line)
+                                    <li><span class="chk"><i class="fas fa-check"></i></span><span>{{ $line }}</span></li>
+                                @endforeach
+                            </ul>
+                        </div>
+                        @endif
+                        @if($hasInstr)
+                        <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-4 py-3.5">
+                            <p class="font-bold text-emerald-800 mb-2" style="font-size:clamp(16px,1.3vw,18px);">📝 How to Apply:</p>
+                            <ul class="philcst-checklist">
+                                @foreach($instrLines as $line)
+                                    <li><span class="chk" style="background:#d1fae5;color:#047857;"><i class="fas fa-arrow-right"></i></span><span>{{ $line }}</span></li>
+                                @endforeach
+                            </ul>
+                        </div>
+                        @endif
+                    </div>
+                    @endif
+                </div>
+
+            </div>
             @else
-            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16">
-                <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
-                    <i class="fas fa-briefcase text-xl text-gray-400"></i>
+            {{-- No job selected placeholder --}}
+            <div class="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
+                <div class="w-20 h-20 rounded-3xl flex items-center justify-center bg-gradient-to-br from-[#f5eef9] to-[#ede1f5] shadow-sm">
+                    <i class="fas fa-briefcase text-3xl text-[#7a3f91]/50"></i>
                 </div>
                 <div>
-                    <p class="font-semibold text-base text-gray-700">
-                        @if($search || $filterType || $filterLevel) No jobs match your filters
-                        @else No job openings yet @endif
-                    </p>
-                    <p class="text-sm mt-1 text-gray-500">
-                        @if($search || $filterType || $filterLevel) Try clearing your filters to see all available jobs.
-                        @else Check back soon — new opportunities will be posted here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>. @endif
-                    </p>
+                    <p class="font-bold text-lg text-gray-700">Select a job</p>
+                    <p class="text-sm text-gray-400 mt-1">Click any job on the left to view details here</p>
                 </div>
-
             </div>
             @endif
-        </div>
-
-        {{-- ══ PAGINATION BAR ══ --}}
-        @php
-            $total   = $this->jobPostings->total();
-            $pp      = $this->jobPostings->perPage();
-            $cp      = $this->jobPostings->currentPage();
-            $lp      = $this->jobPostings->lastPage();
-            $from    = $total > 0 ? ($cp - 1) * $pp + 1 : 0;
-            $to      = min($cp * $pp, $total);
-            $pgStart = max(1, $cp - 2);
-            $pgEnd   = min($lp, $cp + 2);
-        @endphp
-        <div class="flex items-center justify-between gap-2 flex-wrap px-5 py-2.5 min-h-[48px] mt-auto
-                    bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0 select-none"
-             style="padding-bottom: calc(0.625rem + env(safe-area-inset-bottom, 0px));">
-
-            <p class="text-white/80 text-xs font-normal whitespace-nowrap">
-                Showing <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong>
-                of <strong class="text-white font-bold">{{ $total }}</strong>
-                {{ $total !== 1 ? 'records' : 'record' }}
-            </p>
-
-            <div class="flex items-center gap-1 flex-wrap">
-                <button wire:click="previousPage"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-50 cursor-wait"
-                        wire:target="previousPage"
-                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                               bg-white/15 border border-white/25 text-white
-                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
-                        @if($this->jobPostings->onFirstPage()) disabled @endif
-                        aria-label="Previous">
-                    <i class="fas fa-chevron-left text-[9px]"></i>
-                </button>
-
-                @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)"
-                            wire:loading.attr="disabled"
-                            wire:loading.class="opacity-50 cursor-wait"
-                            wire:target="$set('page', 1)"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
-                        <span wire:loading.remove wire:target="$set('page', 1)">1</span>
-                        <span wire:loading wire:target="$set('page', 1)"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
-                    </button>
-                    @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                @endif
-
-                @for($p = $pgStart; $p <= $pgEnd; $p++)
-                    @if($p === $cp)
-                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                     bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
-                    @else
-                        <button wire:click="$set('page', {{ $p }})"
-                                wire:loading.attr="disabled"
-                                wire:loading.class="opacity-50 cursor-wait"
-                                wire:target="$set('page', {{ $p }})"
-                                class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                       bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
-                            <span wire:loading.remove wire:target="$set('page', {{ $p }})">{{ $p }}</span>
-                            <span wire:loading wire:target="$set('page', {{ $p }})"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
-                        </button>
-                    @endif
-                @endfor
-
-                @if($pgEnd < $lp)
-                    @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                    <button wire:click="$set('page', {{ $lp }})"
-                            wire:loading.attr="disabled"
-                            wire:loading.class="opacity-50 cursor-wait"
-                            wire:target="$set('page', {{ $lp }})"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                                   bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">
-                        <span wire:loading.remove wire:target="$set('page', {{ $lp }})">{{ $lp }}</span>
-                        <span wire:loading wire:target="$set('page', {{ $lp }})"><i class="fas fa-spinner fa-spin text-[9px]"></i></span>
-                    </button>
-                @endif
-
-                <button wire:click="nextPage"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-50 cursor-wait"
-                        wire:target="nextPage"
-                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
-                               bg-white/15 border border-white/25 text-white
-                               hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
-                        @if(!$this->jobPostings->hasMorePages()) disabled @endif
-                        aria-label="Next">
-                    <i class="fas fa-chevron-right text-[9px]"></i>
-                </button>
-
-                <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
-                    Page {{ $cp }}/{{ $lp }}
-                </span>
-            </div>
-        </div>
+        </div>{{-- end right panel --}}
 
     </div>{{-- end content-block --}}
 </div>
@@ -1267,21 +1390,23 @@ select.filter-input option {
 {{-- ══ FULL-SCREEN JOB DETAIL — fixed height, no page scroll ══ --}}
 @if($showDetail && $this->viewingJob)
 @php
-    $job      = $this->viewingJob;
-    $dl       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-    $daysLeft = (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false);
+    $job         = $this->viewingJob;
+    $hasDeadline = !empty($job->deadline);
+    $dl          = $hasDeadline ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila') : null;
+    $daysLeft    = $hasDeadline ? (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false) : null;
 
-    if ($daysLeft === 0)     $dlLabel = 'Closes today';
+    if (!$hasDeadline)       $dlLabel = 'No deadline';
+    elseif ($daysLeft === 0) $dlLabel = 'Closes today';
     elseif ($daysLeft === 1) $dlLabel = '1 day left';
     else                     $dlLabel = $daysLeft . ' days left';
 
-    $dlIsUrgent = $daysLeft <= 3;
-    $dlIsSoon   = !$dlIsUrgent && $daysLeft <= 14;
-    $dlValueClass = $dlIsUrgent ? 'text-red-600 font-bold' : ($dlIsSoon ? 'text-orange-700 font-bold' : 'text-gray-900 font-semibold');
+    $dlIsUrgent   = $hasDeadline && $daysLeft <= 3;
+    $dlIsSoon     = $hasDeadline && !$dlIsUrgent && $daysLeft <= 14;
+    $dlValueClass = !$hasDeadline ? 'text-emerald-600 font-semibold' : ($dlIsUrgent ? 'text-red-600 font-bold' : ($dlIsSoon ? 'text-orange-700 font-bold' : 'text-gray-900 font-semibold'));
 
-    $isUrgent    = $daysLeft <= 7;
-    $isExpired   = $daysLeft < 0;
-    $createdPH   = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
+    $isUrgent    = $hasDeadline && $daysLeft <= 7;
+    $isExpired   = $hasDeadline && $daysLeft < 0;
+    $postedPH    = \Carbon\Carbon::parse($job->updated_at)->setTimezone('Asia/Manila');
     $displayType = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
     $hasQual     = !empty($job->qualifications);
     $hasInstr    = !empty($job->application_instructions);
@@ -1296,43 +1421,26 @@ select.filter-input option {
         : [];
 @endphp
 
-<div class="detail-page fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-y-auto lg:overflow-hidden"
+{{-- ══ MOBILE FULL-SCREEN DETAIL (hidden on lg+) ══ --}}
+<div class="detail-page lg:hidden fixed inset-0 z-[9000] flex flex-col bg-gray-100 overflow-y-auto"
      @keydown.escape.window="$wire.closeDetail()">
 
     {{-- Purple top bar --}}
     <div class="flex items-center justify-between px-6 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
-
         <div class="flex items-center gap-3 flex-1 min-w-0">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
                 <i class="fas fa-briefcase text-white text-sm"></i>
             </div>
             <span class="detail-header-title">Job Details</span>
         </div>
-
         <div class="flex items-center gap-1.5 flex-shrink-0">
-            <button type="button"
-                    wire:click="openShareModal({{ $job->id }})"
-                    wire:loading.attr="disabled"
-                    wire:target="openShareModal({{ $job->id }})"
-                    class="detail-top-btn share-btn"
-                    aria-label="Share">
-                <span wire:loading.remove wire:target="openShareModal({{ $job->id }})">
-                    <i class="fas fa-share-nodes text-[13px] text-white"></i>
-                </span>
-                <span wire:loading wire:target="openShareModal({{ $job->id }})">
-                    <i class="fas fa-spinner fa-spin text-[13px] text-white"></i>
-                </span>
+            <button type="button" wire:click="openShareModal({{ $job->id }})" wire:loading.attr="disabled" wire:target="openShareModal({{ $job->id }})" class="detail-top-btn share-btn" aria-label="Share">
+                <span wire:loading.remove wire:target="openShareModal({{ $job->id }})"><i class="fas fa-share-nodes text-[13px] text-white"></i></span>
+                <span wire:loading wire:target="openShareModal({{ $job->id }})"><i class="fas fa-spinner fa-spin text-[13px] text-white"></i></span>
                 <span class="tip">Share</span>
             </button>
-            <button type="button"
-                    wire:click="closeDetail"
-                    wire:loading.attr="disabled"
-                    wire:target="closeDetail"
-                    class="detail-top-btn close-btn"
-                    aria-label="Close">
-                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeDetail">
-                    <path d="M2 2L12 12M12 2L2 12"/>
-                </svg>
+            <button type="button" wire:click="closeDetail" wire:loading.attr="disabled" wire:target="closeDetail" class="detail-top-btn close-btn" aria-label="Close" data-jb-reset>
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeDetail"><path d="M2 2L12 12M12 2L2 12"/></svg>
                 <i class="fas fa-spinner fa-spin text-[13px] text-white" wire:loading wire:target="closeDetail"></i>
                 <span class="tip">Close</span>
             </button>
@@ -1344,107 +1452,74 @@ select.filter-input option {
             <div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 sm:px-8 py-5 flex flex-col gap-4">
 
                 {{-- Top section: banner + hiring intro side-by-side with job title/tags --}}
-                <div class="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-5 items-start">
+                <div class="flex items-center gap-4">
                     <img src="{{ $detailImg }}" alt="{{ $job->job_title }}"
-                         class="w-full h-36 lg:h-full object-contain bg-white border border-gray-100 rounded-xl"
+                         class="w-[120px] h-[120px] flex-shrink-0 object-contain bg-white border border-gray-100 rounded-xl"
                          onerror="this.onerror=null;this.src='{{ asset('storage/job/default-photo-job.jpg') }}';">
 
-                    <div class="flex flex-col gap-2.5 min-w-0">
+                    <div class="flex flex-col gap-1.5 min-w-0">
                         @if($isPhilcst)
                             <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[11px]"></i> Official PHILCST Posting</span>
                         @endif
-                        <p class="text-2xl font-bold leading-snug" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
-                        <p class="text-base leading-relaxed" style="color:#333333;">
-                            @if($isPhilcst)
-                                The Philippine College of Science and Technology is looking for passionate, dedicated individuals to join our growing academic community! ✨
-                            @else
-                                {{ $job->company_name }} is looking for passionate, dedicated individuals to join their growing team! ✨
-                            @endif
-                        </p>
+                        <p class="text-xl font-bold leading-snug" style="color:#333333;">🎉 WE'RE HIRING: {{ strtoupper($job->job_title) }}</p>
+
                         @if($isExpired)
-                        <div class="flex flex-wrap gap-2 mt-1">
-                            <span class="inline-flex items-center text-sm font-bold px-3 py-1.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
-                                <i class="fas fa-ban mr-1.5 text-xs"></i>Expired
-                            </span>
-                        </div>
+                        <span class="inline-flex items-center text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 border border-gray-200 self-start">
+                            <i class="fas fa-ban mr-1 text-[10px]"></i>Expired
+                        </span>
                         @endif
                     </div>
                 </div>
 
+
+
                 <div class="border-t border-gray-100"></div>
 
-                {{-- Meta info row 1: Employer / Location / Salary / Deadline (Posted moved to footer) --}}
-                <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {{-- Meta info: all fields flex-wrapped, compact, no labels --}}
+                <div class="flex flex-wrap gap-x-6 gap-y-2 items-center">
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-building"></i></span>
                         <div class="min-w-0">
-                            <p class="detail-side-label">Employer</p>
                             <p class="detail-side-value">{{ $job->company_name }}</p>
                         </div>
                     </div>
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
                         <div class="min-w-0">
-                            <p class="detail-side-label">Location</p>
                             <p class="detail-side-value">{{ $job->location ?: '—' }}</p>
                         </div>
                     </div>
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-money-bill-wave"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Salary</p>
-                            @if($job->salary)
-                                <p class="detail-side-value text-emerald-600">{{ $job->salary }}</p>
-                            @else
-                                <p class="detail-side-value italic font-normal" style="color:#666;">Not disclosed</p>
-                            @endif
-                        </div>
-                    </div>
+                    @if($hasDeadline)
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
                         <div class="min-w-0">
-                            <p class="detail-side-label">Deadline</p>
-                            <p class="detail-side-value {{ $dlValueClass }}">{{ $dl->format('M d, Y') }}</p>
-                            <p class="text-xs {{ $dlValueClass }} mt-0.5">
-                                @if($dlIsUrgent)<i class="fas fa-fire mr-0.5"></i>@endif{{ $dlLabel }}
+                            <p class="detail-side-value {{ $dlValueClass }}">
+                                {{ $dl->format('M d, Y') }} <span class="font-normal text-xs">(@if($dlIsUrgent)<i class="fas fa-fire"></i> @endif{{ $dlLabel }})</span>
                             </p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="border-t border-gray-100"></div>
-
-                {{-- Meta info row 2: Employer Type / Employment Type / Experience Level / Posted --}}
-                <div class="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    @if($displayType)
-                    <div class="detail-side-item">
-                        <span class="detail-side-icon"><i class="fas fa-tag"></i></span>
-                        <div class="min-w-0">
-                            <p class="detail-side-label">Employer Type</p>
-                            <p class="detail-side-value">{{ $displayType }}</p>
                         </div>
                     </div>
                     @endif
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-briefcase"></i></span>
                         <div class="min-w-0">
-                            <p class="detail-side-label">Employment Type</p>
                             <p class="detail-side-value">{{ $job->employment_type }}</p>
                         </div>
                     </div>
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-chart-line"></i></span>
                         <div class="min-w-0">
-                            <p class="detail-side-label">Experience Level</p>
                             <p class="detail-side-value">{{ $job->experience_level }}</p>
                         </div>
                     </div>
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
                         <div class="min-w-0">
-                            <p class="detail-side-label">Posted</p>
-                            <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
-                            <p class="text-xs mt-0.5" style="color:#666;">{{ $createdPH->diffForHumans() }}</p>
+                            <p class="detail-side-value" style="color:#888;">
+                                Posted {{ $postedPH->diffForHumans() }}
+                                @if($job->salary)
+                                    &nbsp;·&nbsp;<span class="text-emerald-600 font-semibold">{{ $job->salary }}</span>
+                                @endif
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -1500,7 +1575,6 @@ select.filter-input option {
 
 </div>
 @endif
-
 
 {{-- ══ SHARE MODAL — simplified: icon + label only per option (no
      subtext). Facebook/Messenger no longer auto-download the image —

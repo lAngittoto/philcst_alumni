@@ -35,33 +35,38 @@
                         <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f9f5ff;border:2px dashed #c4b5fd;border-radius:12px;margin-bottom:24px;">
                             <tr>
                                 <td style="padding:24px;">
-                                    <span style="display:block;font-size:11px;font-weight:700;color:#7a3f91;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Job Title</span>
-                                    <p style="margin:0 0 18px;font-size:22px;font-weight:700;color:#1f2937;line-height:1.3;">{{ $job->job_title }}</p>
 
-                                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                                        <tr>
-                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;width:130px;vertical-align:top;">Employer</td>
-                                            <td style="padding:7px 0;font-size:14px;color:#333;">{{ $job->company_name }}</td>
-                                        </tr>
+                                    {{-- Label: Job Title --}}
+                                    <span style="display:block;font-size:11px;font-weight:700;color:#7a3f91;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:10px;">Job Title</span>
+
+                                    {{-- Value: big bold title --}}
+                                    <p style="margin:0 0 14px;font-size:22px;font-weight:700;color:#1f2937;line-height:1.3;">{{ $job->job_title }}</p>
+
+                                    {{-- Meta row: Company · Location · Employment Type (values only, no labels) --}}
+                                    <p style="margin:0 0 18px;font-size:13px;color:#6b7280;line-height:1.6;">
+                                        @if($job->company_name)
+                                            <span style="color:#374151;font-weight:600;">{{ $job->company_name }}</span>
+                                        @endif
                                         @if($job->location)
-                                        <tr>
-                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;vertical-align:top;">Location</td>
-                                            <td style="padding:7px 0;font-size:14px;color:#333;">{{ $job->location }}</td>
-                                        </tr>
+                                            @if($job->company_name)<span style="color:#c4b5fd;margin:0 6px;">&bull;</span>@endif
+                                            <span>{{ $job->location }}</span>
                                         @endif
                                         @if($job->employment_type)
-                                        <tr>
-                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;vertical-align:top;">Employment Type</td>
-                                            <td style="padding:7px 0;font-size:14px;color:#333;">{{ $job->employment_type }}</td>
-                                        </tr>
+                                            @if($job->company_name || $job->location)<span style="color:#c4b5fd;margin:0 6px;">&bull;</span>@endif
+                                            <span style="display:inline-block;background-color:#ede9fe;color:#6d28d9;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;vertical-align:middle;">{{ $job->employment_type }}</span>
                                         @endif
-                                        @if($job->deadline)
+                                    </p>
+
+                                    {{-- Deadline row (label + value) --}}
+                                    @if($job->deadline)
+                                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
                                         <tr>
-                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;vertical-align:top;">Deadline</td>
+                                            <td style="padding:7px 0;font-size:13px;color:#7a3f91;font-weight:700;width:130px;vertical-align:top;">Deadline</td>
                                             <td style="padding:7px 0;font-size:14px;color:#333;">{{ \Illuminate\Support\Carbon::parse($job->deadline)->format('M d, Y') }}</td>
                                         </tr>
-                                        @endif
                                     </table>
+                                    @endif
+
                                 </td>
                             </tr>
                         </table>
