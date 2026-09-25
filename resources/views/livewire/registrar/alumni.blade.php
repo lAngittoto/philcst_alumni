@@ -787,6 +787,9 @@ new class extends Component {
     {
         if (!$path || str_contains($path, 'default.png'))
             return asset('storage/alumni-photos/default.png');
+        // Cloudinary URL — return as-is
+        if (str_starts_with($path, 'https://res.cloudinary.com'))
+            return $path;
         if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/'))
             return asset('storage/' . $path);
         return asset('storage/alumni-photos/default.png');
@@ -933,8 +936,8 @@ new class extends Component {
 
     #[Renderless]
     /**
-     * Receives photo as base64 from JS FileReader — bypasses Livewire
-     * signed URL upload entirely (no 401 issues on Railway).
+     * Receives photo as base64 from JS FileReader — uploads to Cloudinary
+     * for persistent storage across Railway deploys.
      */
     public function receiveAlumniPhoto(string $filename, string $base64): void
     {
@@ -949,23 +952,37 @@ new class extends Component {
 
             $alumni = Alumni::findOrFail($this->viewingProfileId);
 
-            // Delete old photo if exists
-            if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png')) {
-                Storage::disk('public')->delete($alumni->profile_photo);
+            // Delete old photo from Cloudinary if exists
+            if ($alumni->profile_photo_public_id) {
+                cloudinary()->uploadApi()->destroy($alumni->profile_photo_public_id);
             }
 
-            // Save base64 decoded file to storage
-            $newFilename = uniqid('alumni_') . '.' . $ext;
-            $path        = 'alumni-photos/' . $newFilename;
-            Storage::disk('public')->put($path, base64_decode($base64));
+            // Upload to Cloudinary via base64
+            $uploadResult = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'alumni-photos',
+                    'public_id'     => 'alumni_' . $this->viewingProfileId . '_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
 
-            $alumni->update(['profile_photo' => $path]);
-            $this->viewingProfile['profile_photo'] = $path;
+            $cloudinaryUrl      = $uploadResult['secure_url'];
+            $cloudinaryPublicId = $uploadResult['public_id'];
+
+            $alumni->update([
+                'profile_photo'           => $cloudinaryUrl,
+                'profile_photo_public_id' => $cloudinaryPublicId,
+            ]);
+
+            $this->viewingProfile['profile_photo'] = $cloudinaryUrl;
 
             $this->dispatch('flash-message', type: 'success', message: 'Profile photo updated successfully.');
-            $this->dispatch('photo-saved', newSrc: asset('storage/' . $path));
+            $this->dispatch('photo-saved', newSrc: $cloudinaryUrl);
+
         } catch (\Exception $e) {
-            $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo.');
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo: ' . $e->getMessage());
         }
     }
 
@@ -983,13 +1000,15 @@ new class extends Component {
         try {
             $alumni = Alumni::findOrFail($this->viewingProfileId);
 
-            if ($alumni->profile_photo
-                && !str_contains($alumni->profile_photo, 'default.png')
-                && Storage::disk('public')->exists($alumni->profile_photo)) {
-                Storage::disk('public')->delete($alumni->profile_photo);
+            // Delete from Cloudinary if has public_id
+            if ($alumni->profile_photo_public_id) {
+                cloudinary()->uploadApi()->destroy($alumni->profile_photo_public_id);
             }
 
-            $alumni->update(['profile_photo' => null]);
+            $alumni->update([
+                'profile_photo'           => null,
+                'profile_photo_public_id' => null,
+            ]);
             $this->viewingProfile['profile_photo'] = null;
 
             $this->dispatch('flash-message', type: 'success', message: 'Profile photo reset to default.');
