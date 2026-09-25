@@ -494,36 +494,40 @@ new #[Layout('app')] class extends Component {
         }
 
         try {
-            // FIX: generateOtp() sets a provisional otp_expires_at, but we
-            // must NOT treat that as the real start of the 10-minute window
-            // yet — Mail::send() is synchronous and can take several
-            // seconds (sometimes longer on a slow SMTP connection). If we
-            // started the clock at generateOtp() time, the user would open
-            // their inbox and already see e.g. 9:50 instead of 10:00,
-            // because those seconds ticked away while the email was still
-            // being sent. Same fix as forgot-password.blade.php.
+            // Generate the OTP token (stores it hashed in the DB; also sets a
+            // provisional otp_expires_at that we overwrite below AFTER the
+            // mail actually goes out — so the visible 10-minute countdown
+            // always starts from the moment the email is sent, never from
+            // when generateOtp() was called).
             $otp = $alumni->generateOtp();
 
-            try {
-                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
-                Log::info("Alumni OTP sent to: {$targetEmail}");
-            } catch (\Exception $e) {
-                Log::warning("Alumni OTP mail failed: " . $e->getMessage());
-            }
+            // ── FIX: mail errors are now surfaced to the user ─────────────
+            // Previously this was wrapped in its own silent try-catch that
+            // only logged a warning — the OTP was written to the DB but the
+            // email never arrived, and the user saw no error at all.  Now we
+            // let the exception bubble up to the outer try-catch below, which
+            // shows a visible error message and stops the wizard from
+            // advancing to Step 2.
+            Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+            Log::info("Alumni OTP sent to: {$targetEmail}");
 
-            // Only count this attempt once we've actually tried to send —
-            // counted here (not gated on mail success) to match this file's
-            // original behavior of not hard-failing on mail errors. The
-            // attempts counter itself expires after RESEND_LOCK_MINUTES
-            // (24 hours) so a clean, non-locked user isn't stuck being
-            // counted forever.
+            // Count the successful send attempt. Counter lives for
+            // RESEND_LOCK_MINUTES (24 h) so it resets naturally.
             cache()->put($resendAttemptsKey, $sendAttempts + 1, now()->addMinutes(self::RESEND_LOCK_MINUTES));
 
-            // NOW that the send has actually been attempted, restart the
-            // 10-minute window from this exact moment. This is what makes
-            // the visible countdown genuinely start at 10:00 instead of
-            // already being several seconds short.
-            $alumni->update(['otp_expires_at' => now()->addMinutes(10)]);
+            // ── FIX: timer always starts at exactly 10:00 ─────────────────
+            // generateOtp() internally saves otp_expires_at to the DB
+            // (possibly with a small extra buffer like +20 s).  Using
+            // $alumni->update() can fail to overwrite that value due to
+            // Eloquent dirty-tracking after generateOtp()'s own save().
+            // DB::table() bypasses the model layer entirely, guaranteeing
+            // the expiry is reset to exactly now() + 10 min *after* the
+            // email has been sent — so the countdown the user sees is always
+            // a true 10:00, never 10:20 or shorter.
+            $exactExpiry = now()->addMinutes(10);
+            DB::table('alumni')->where('id', $alumni->id)->update([
+                'otp_expires_at' => $exactExpiry,
+            ]);
             $alumni->refresh(); // ensure syncOtpExpiry() reads the just-written value
 
             // A fresh code being sent means any previously-verified flag
