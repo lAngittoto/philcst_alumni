@@ -11,10 +11,7 @@ return new class extends Migration
         Schema::create('events', function (Blueprint $table) {
             $table->id();
 
-            $table->foreignId('organizer_id')
-                  ->constrained('organizer')
-                  ->cascadeOnDelete()
-                  ->index();
+            $table->unsignedBigInteger('organizer_id')->index();
 
             $table->string('title');
             $table->text('description')->nullable();
@@ -51,7 +48,12 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
-            $table->foreign('reviewed_by')
+            $table->foreign('organizer_id', 'events_organizer_fk')
+                  ->references('id')
+                  ->on('organizer')
+                  ->cascadeOnDelete();
+
+            $table->foreign('reviewed_by', 'events_reviewed_by_fk')
                   ->references('id')
                   ->on('users')
                   ->nullOnDelete();
