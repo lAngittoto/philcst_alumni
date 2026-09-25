@@ -2774,7 +2774,21 @@ compressImage(file, maxW, maxH, quality) {
                              this.saving = true;
                              document.dispatchEvent(new CustomEvent('photo-save-start'));
                              if (this.isDefaultPending) {
-                                 $wire.resetAlumniPhoto();
+                                 $wire.resetAlumniPhoto()
+                                     .then(() => {
+                                         this.saving = false;
+                                         this.hasFile = false;
+                                         this.isDefaultPending = false;
+                                         this.pendingFile = null;
+                                         document.dispatchEvent(new CustomEvent('photo-save-end'));
+                                     })
+                                     .catch(() => {
+                                         this.saving = false;
+                                         this.hasFile = false;
+                                         this.isDefaultPending = false;
+                                         this.pendingFile = null;
+                                         document.dispatchEvent(new CustomEvent('photo-save-end'));
+                                     });
                              } else if (this.pendingFile) {
                                  // Use base64 approach (same as Excel import) to avoid
                                  // Livewire signed-URL 401 errors on Railway production.
@@ -2783,6 +2797,14 @@ compressImage(file, maxW, maxH, quality) {
                                  reader.onload = (e) => {
                                      const base64 = e.target.result.split(',')[1];
                                      $wire.receiveAlumniPhoto(file.name, base64)
+                                         .then(() => {
+                                             this.saving = false;
+                                             this.hasFile = false;
+                                             this.isDefaultPending = false;
+                                             this.pendingFile = null;
+                                             if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                             document.dispatchEvent(new CustomEvent('photo-save-end'));
+                                         })
                                          .catch(() => {
                                              this.saving = false; this.hasFile = false;
                                              this.isDefaultPending = false; this.pendingFile = null;
