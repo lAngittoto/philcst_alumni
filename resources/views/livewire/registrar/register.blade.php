@@ -1,7 +1,6 @@
 <?php
 
 use Livewire\Volt\Component;
-use Livewire\WithFileUploads;
 use App\Models\Alumni;
 use App\Models\Course;
 use App\Models\User;
@@ -10,8 +9,6 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 
 new class extends Component {
-    use WithFileUploads;
-
     public string $regFirstName     = '';
     public string $regMiddleInitial = '';
     public string $regLastName      = '';
@@ -330,14 +327,12 @@ public function closeImportModal(): void
     }
 
     /**
-     * No more wizard steps — the moment a valid file is chosen,
-     * we go straight into processing (which validates + imports).
+     * Receives file as base64 from JS FileReader — bypasses Livewire
+     * signed URL upload entirely (no 401 issues on Railway).
      */
-    public function updatedImportFile(): void
+    public function receiveFile(string $filename, string $base64): void
     {
-        if (!$this->importFile) return;
-
-        $ext = strtolower($this->importFile->getClientOriginalExtension());
+        $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 
         if (!in_array($ext, ['xlsx', 'xls'], true)) {
             $this->importFile     = null;
@@ -347,8 +342,12 @@ public function closeImportModal(): void
             return;
         }
 
+        $tmpPath = sys_get_temp_dir() . '/' . uniqid('import_', true) . '.' . $ext;
+        file_put_contents($tmpPath, base64_decode($base64));
+
+        $this->importFile     = $tmpPath;
+        $this->importFileName = $filename;
         $this->importStatus   = '';
-        $this->importFileName = $this->importFile->getClientOriginalName();
         $this->importStep     = 'processing';
         $this->importingFile  = true;
     }
@@ -429,12 +428,12 @@ public function closeImportModal(): void
         try {
             if (!$this->importFile) throw new \Exception('No file selected.');
 
-            $ext = strtolower($this->importFile->getClientOriginalExtension());
+            $ext = strtolower(pathinfo($this->importFile, PATHINFO_EXTENSION));
 
             if (!in_array($ext, ['xlsx', 'xls'], true))
                 throw new \Exception('File must be .xlsx or .xls. CSV is not accepted.');
 
-            $rows = $this->parseExcel($this->importFile->getRealPath());
+            $rows = $this->parseExcel($this->importFile);
 
             if (count($rows) < 2) throw new \Exception('File is empty or has no data rows.');
 
@@ -2070,31 +2069,43 @@ public function closeImportModal(): void
             @endif
 
             {{-- Dropzone normal --}}
-            <div wire:loading.remove wire:target="importFile" class="shrink-0">
-                <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2">Choose File</p>
-                <div class="border-2 border-dashed border-[#E8E0F0] rounded-xl p-8 text-center cursor-pointer hover:border-[#2563EB] hover:bg-[#eff6ff] hover:shadow-sm transition-all duration-200"
+            <div x-data="{ uploading: false }" class="shrink-0">
+                <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2" x-show="!uploading">Choose File</p>
+                <div x-show="!uploading"
+                     class="border-2 border-dashed border-[#E8E0F0] rounded-xl p-8 text-center cursor-pointer hover:border-[#2563EB] hover:bg-[#eff6ff] hover:shadow-sm transition-all duration-200"
                      @click="document.getElementById('importFileInput').click()">
                     <div class="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center shadow-sm" style="background:rgba(37,99,235,.12);">
                         <i class="fas fa-file-excel text-3xl" style="color:#2563EB;"></i>
                     </div>
                     <p class="text-[#333333] font-semibold text-base">Click to choose file</p>
                     <p class="text-[#888888] text-sm mt-1">Excel files only (.xlsx / .xls) — upload starts importing automatically</p>
-                    <input type="file" id="importFileInput" wire:model="importFile" accept=".xlsx,.xls" class="hidden">
+                    <input type="file" id="importFileInput" accept=".xlsx,.xls" class="hidden"
+                        x-on:change="
+                            const file = $event.target.files[0];
+                            if (!file) return;
+                            uploading = true;
+                            const reader = new FileReader();
+                            reader.onload = (e) => {
+                                const base64 = e.target.result.split(',')[1];
+                                $wire.receiveFile(file.name, base64).then(() => { uploading = false; });
+                            };
+                            reader.readAsDataURL(file);
+                        ">
                 </div>
-            </div>
 
-            {{-- Shimmer loading state (while file is uploading to server) --}}
-            <div wire:loading wire:target="importFile" class="w-full shrink-0">
+            {{-- Shimmer loading state (while file is being read) --}}
+            <div x-show="uploading" class="w-full shrink-0" style="display:none;">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2 text-center">Choose File</p>
                 <div class="w-full border-2 border-dashed border-[#2563EB] rounded-xl p-8 flex flex-col items-center justify-center text-center"
                      style="background:linear-gradient(90deg,#eff6ff 25%,#dbeafe 50%,#eff6ff 75%);background-size:200% 100%;animation:regShimmer 1.2s infinite linear;">
                     <div class="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center" style="background:rgba(37,99,235,.15);">
                         <i class="fas fa-spinner animate-spin text-2xl" style="color:#1D4ED8;"></i>
                     </div>
-                    <p class="font-semibold text-base" style="color:#1D4ED8;">Uploading file...</p>
-                    <p class="text-sm mt-1" style="color:#2563EB;">Please wait while we upload your file</p>
+                    <p class="font-semibold text-base" style="color:#1D4ED8;">Reading file...</p>
+                    <p class="text-sm mt-1" style="color:#2563EB;">Please wait while we read your file</p>
                 </div>
             </div>
+            </div>{{-- end x-data uploading --}}
 
             <button wire:click="closeImportModal"
                     wire:loading.attr="disabled" wire:target="closeImportModal"
