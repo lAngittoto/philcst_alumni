@@ -2087,7 +2087,10 @@ public function closeImportModal(): void
                             const reader = new FileReader();
                             reader.onload = (e) => {
                                 const base64 = e.target.result.split(',')[1];
-                                $wire.receiveFile(file.name, base64).then(() => { uploading = false; });
+                                $wire.receiveFile(file.name, base64).then(() => {
+                                    uploading = false;
+                                    $wire.processImport();
+                                });
                             };
                             reader.readAsDataURL(file);
                         ">
@@ -2122,7 +2125,7 @@ public function closeImportModal(): void
             @elseif($importStep === 'processing')
 
             <div class="absolute inset-0 flex items-center justify-center p-5">
-            <div wire:init="processImport" class="py-8 text-center">
+            <div class="py-8 text-center">
                 <div class="relative w-24 h-24 mx-auto mb-6 flex items-center justify-center">
                     <span class="import-scan-ring"></span>
                     <span class="import-scan-ring import-scan-ring--delay1"></span>
