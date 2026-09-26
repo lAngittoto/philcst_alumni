@@ -495,11 +495,22 @@ new #[Layout('app')] class extends Component {
 
         try {
             // Generate the OTP token (stores it hashed in the DB; also sets a
-            // provisional otp_expires_at that we overwrite below AFTER the
-            // mail actually goes out — so the visible 10-minute countdown
-            // always starts from the moment the email is sent, never from
-            // when generateOtp() was called).
+            // provisional otp_expires_at that we overwrite below — see the
+            // timing note just above the Mail::send() call for why the
+            // exact expiry is now locked in BEFORE the email is sent rather
+            // than after).
             $otp = $alumni->generateOtp();
+
+            // ── FIX: timer always starts at exactly 10:00 ─────────────────
+            // Previously this was computed AFTER Mail::send() returned. That
+            // was fine as long as the send was instant, but once the retry
+            // logic below was added, a slow/timed-out first attempt could
+            // burn several seconds (or longer) before this line ran — so the
+            // user would see 10:20 or more instead of a true 10:00. Locking
+            // in the expiry right here, before any network call, means the
+            // visible countdown always reflects the moment the user clicked
+            // "Send", never however long the send itself took.
+            $exactExpiry = now()->addMinutes(10);
 
             // ── FIX: mail errors are now surfaced to the user ─────────────
             // Previously this was wrapped in its own silent try-catch that
@@ -527,16 +538,13 @@ new #[Layout('app')] class extends Component {
             // RESEND_LOCK_MINUTES (24 h) so it resets naturally.
             cache()->put($resendAttemptsKey, $sendAttempts + 1, now()->addMinutes(self::RESEND_LOCK_MINUTES));
 
-            // ── FIX: timer always starts at exactly 10:00 ─────────────────
             // generateOtp() internally saves otp_expires_at to the DB
             // (possibly with a small extra buffer like +20 s).  Using
             // $alumni->update() can fail to overwrite that value due to
             // Eloquent dirty-tracking after generateOtp()'s own save().
             // DB::table() bypasses the model layer entirely, guaranteeing
-            // the expiry is reset to exactly now() + 10 min *after* the
-            // email has been sent — so the countdown the user sees is always
-            // a true 10:00, never 10:20 or shorter.
-            $exactExpiry = now()->addMinutes(10);
+            // the expiry is reset to the exact timestamp captured above
+            // (before the send attempt), regardless of how long the send took.
             DB::table('alumni')->where('id', $alumni->id)->update([
                 'otp_expires_at' => $exactExpiry,
             ]);
