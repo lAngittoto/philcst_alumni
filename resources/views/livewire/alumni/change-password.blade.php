@@ -508,7 +508,19 @@ new #[Layout('app')] class extends Component {
             // let the exception bubble up to the outer try-catch below, which
             // shows a visible error message and stops the wizard from
             // advancing to Step 2.
-            Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+            //
+            // FIX: retry once on a transient SMTP failure. In production
+            // (Railway → external SMTP host such as Brevo), the very FIRST
+            // connection attempt to the mail server can time out (cold
+            // DNS/TLS handshake) even though the credentials and config are
+            // correct — retrying immediately almost always succeeds. This
+            // spares the user from having to manually refresh/resubmit.
+            try {
+                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+            } catch (\Exception $mailException) {
+                Log::warning("_sendOtp first attempt failed, retrying: " . $mailException->getMessage());
+                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+            }
             Log::info("Alumni OTP sent to: {$targetEmail}");
 
             // Count the successful send attempt. Counter lives for
