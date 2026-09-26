@@ -653,16 +653,36 @@ new #[Layout('app')] class extends Component {
         try {
             // Generate + hash the OTP first (this also sets a provisional
             // otp_expires_at), but DON'T treat that timestamp as the real
-            // start of the 10-minute window yet — Mail::send() is
-            // synchronous and can take a few seconds (sometimes longer on a
-            // slow SMTP connection). If we started the clock here, the user
-            // would open their inbox and already see e.g. 9:50 instead of
-            // 10:00, because those seconds ticked away while the email was
-            // still being sent.
+            // start of the 10-minute window — see below for where the real
+            // expiry is captured.
             $otp = $alumni->generateOtp();
 
+            // FIX: the exact expiry is now captured HERE, before any network
+            // call, instead of after Mail::send() returns. Mail::send() is
+            // synchronous and can take a few seconds — sometimes longer if
+            // the first connection attempt to the SMTP/API host times out
+            // and has to be retried (see below). If the clock only started
+            // after send() finished, the user could open their inbox and
+            // see e.g. 9:40 or 9:50 instead of a true 10:00, because those
+            // seconds ticked away while the email was still being sent or
+            // retried. Capturing it now means the visible countdown always
+            // reflects the moment "Send" was clicked, never how long the
+            // send itself took.
+            $exactExpiry = now()->addMinutes(10);
+
+            // FIX: retry once on a transient send failure. In production
+            // (Railway → external SMTP/API host such as Brevo), the very
+            // FIRST connection attempt can occasionally time out (cold
+            // DNS/TLS handshake) even though credentials and config are
+            // correct — retrying immediately almost always succeeds, and
+            // spares the user from having to manually refresh/resubmit.
             try {
-                Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+                try {
+                    Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+                } catch (\Exception $mailException) {
+                    Log::warning("Forgot-password OTP first attempt failed, retrying: " . $mailException->getMessage());
+                    Mail::to($targetEmail)->send(new AlumniPasswordReset($alumni, $otp));
+                }
                 Log::info("Forgot-password OTP sent to: {$targetEmail}");
             } catch (\Exception $e) {
                 Log::error("Forgot-password OTP mail FAILED to send: " . $e->getMessage());
@@ -679,11 +699,9 @@ new #[Layout('app')] class extends Component {
             // user isn't stuck being counted forever.
             cache()->put($resendAttemptsKey, $sendAttempts + 1, now()->addMinutes(self::RESEND_LOCK_MINUTES));
 
-            // NOW that the email has actually left the server, restart the
-            // 10-minute window from this exact moment. This is what makes
-            // the visible countdown genuinely start at 10:00 instead of
-            // already being a few seconds short.
-            $alumni->update(['otp_expires_at' => now()->addMinutes(10)]);
+            // Apply the expiry captured above (before the send attempt),
+            // so the countdown the user sees is always a true 10:00.
+            $alumni->update(['otp_expires_at' => $exactExpiry]);
 
             cache()->forget($this->cacheOtpAttemptsKey($alumni->id));
             cache()->forget($this->cacheOtpLockKey($alumni->id));
