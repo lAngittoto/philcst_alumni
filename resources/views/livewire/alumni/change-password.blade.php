@@ -566,6 +566,7 @@ new #[Layout('app')] class extends Component {
             $this->otpLocked      = false;
             $this->otp            = '';
             $this->syncOtpExpiry($alumni);
+            Log::info("DEBUG otp timer: now=" . now()->toDateTimeString() . " expires_at=" . $alumni->otp_expires_at->toDateTimeString() . " diff_seconds=" . now()->diffInSeconds($alumni->otp_expires_at, false));
             $this->successMessage = "Verification code sent to {$this->maskedEmail}. Please check your inbox.";
 
         } catch (\Exception $e) {
