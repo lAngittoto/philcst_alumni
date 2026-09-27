@@ -941,21 +941,51 @@ new class extends Component {
      */
     public function receiveAlumniPhoto(string $filename, string $base64): void
     {
-        if (!$this->viewingProfileId) return;
+        \Illuminate\Support\Facades\Log::info('receiveAlumniPhoto: CALLED', [
+            'viewingProfileId' => $this->viewingProfileId,
+            'filename'         => $filename,
+            'base64_length'    => strlen($base64),
+        ]);
+
+        if (!$this->viewingProfileId) {
+            \Illuminate\Support\Facades\Log::warning('receiveAlumniPhoto: no viewingProfileId, aborting');
+            $this->dispatch('flash-message', type: 'error', message: 'No profile selected.');
+            $this->dispatch('photo-saved');
+            return;
+        }
 
         try {
             $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
             if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                \Illuminate\Support\Facades\Log::warning('receiveAlumniPhoto: invalid extension', ['ext' => $ext]);
                 $this->dispatch('flash-message', type: 'error', message: 'Invalid file type.');
+                $this->dispatch('photo-saved');
                 return;
             }
 
             $alumni = Alumni::findOrFail($this->viewingProfileId);
+            \Illuminate\Support\Facades\Log::info('receiveAlumniPhoto: alumni found', ['id' => $alumni->id]);
+
+            // Check Cloudinary config is actually present before attempting upload
+            $cloudinaryUrlEnv = env('CLOUDINARY_URL');
+            \Illuminate\Support\Facades\Log::info('receiveAlumniPhoto: cloudinary env check', [
+                'CLOUDINARY_URL_set' => !empty($cloudinaryUrlEnv),
+            ]);
 
             // Delete old photo from Cloudinary if exists
             if ($alumni->profile_photo_public_id) {
-                cloudinary()->uploadApi()->destroy($alumni->profile_photo_public_id);
+                try {
+                    cloudinary()->uploadApi()->destroy($alumni->profile_photo_public_id);
+                    \Illuminate\Support\Facades\Log::info('receiveAlumniPhoto: old photo destroyed');
+                } catch (\Throwable $destroyError) {
+                    // Don't let a failed delete of the OLD photo block uploading the NEW one
+                    \Illuminate\Support\Facades\Log::warning('receiveAlumniPhoto: failed to destroy old photo, continuing anyway', [
+                        'error' => $destroyError->getMessage(),
+                    ]);
+                }
             }
+
+            \Illuminate\Support\Facades\Log::info('receiveAlumniPhoto: starting cloudinary upload...');
 
             // Upload to Cloudinary via base64
             $uploadResult = cloudinary()->uploadApi()->upload(
@@ -968,6 +998,10 @@ new class extends Component {
                 ]
             );
 
+            \Illuminate\Support\Facades\Log::info('receiveAlumniPhoto: cloudinary upload SUCCESS', [
+                'url' => $uploadResult['secure_url'] ?? null,
+            ]);
+
             $cloudinaryUrl      = $uploadResult['secure_url'];
             $cloudinaryPublicId = $uploadResult['public_id'];
 
@@ -976,13 +1010,26 @@ new class extends Component {
                 'profile_photo_public_id' => $cloudinaryPublicId,
             ]);
 
+            \Illuminate\Support\Facades\Log::info('receiveAlumniPhoto: DB updated successfully');
+
             $this->viewingProfile['profile_photo'] = $cloudinaryUrl;
 
             $this->dispatch('flash-message', type: 'success', message: 'Profile photo updated successfully.');
             $this->dispatch('photo-saved', newSrc: $cloudinaryUrl);
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('receiveAlumniPhoto: FAILED', [
+                'alumni_id' => $this->viewingProfileId,
+                'error'     => $e->getMessage(),
+                'file'      => $e->getFile(),
+                'line'      => $e->getLine(),
+                'trace'     => $e->getTraceAsString(),
+            ]);
+            // ALWAYS dispatch photo-saved (even on failure) so the spinner
+            // in the browser is guaranteed to stop — this is what was
+            // causing the infinite loading before.
             $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo: ' . $e->getMessage());
+            $this->dispatch('photo-saved');
         }
     }
 
