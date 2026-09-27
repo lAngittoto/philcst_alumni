@@ -2076,32 +2076,25 @@ public function closeImportModal(): void
                 </div>
 
                 @php
-                    // Recent (new graduates) — only these are truly required;
-                    // middle_name and suffix are optional and can be left blank.
-                    $recentRequiredCols = ['first_name', 'last_name', 'student_id', 'programs', 'batch', 'email'];
-                    $recentOptionalCols = ['middle_name', 'suffix'];
-
-                    // Old (existing alumni) — only these are truly required; the
-                    // rest (pulled straight from the Alumni Information profile
-                    // fields) are optional and can be left blank in the sheet.
-                    $oldRequiredCols = ['first_name', 'last_name', 'student_id', 'programs', 'batch'];
-                    $oldOptionalCols = [
-                        'middle_name', 'suffix', 'email', 'motto',
+                    // Display order: student_id → last_name → first_name → middle_name → suffix → rest
+                    // Recent: middle_name & suffix optional; Old: middle_name, suffix, email & everything else optional.
+                    $recentDisplayCols = [
+                        'student_id', 'last_name', 'first_name', 'middle_name', 'suffix',
+                        'programs', 'batch', 'email',
+                    ];
+                    $oldDisplayCols = [
+                        'student_id', 'last_name', 'first_name', 'middle_name', 'suffix',
+                        'programs', 'batch', 'email', 'motto',
                         'sex', 'birthdate',
                         'father_last_name', 'father_given_name', 'father_middle_name',
                         'mother_last_name', 'mother_given_name', 'mother_middle_name',
                         'dswd_household_no', 'disability', 'contact_number',
                         'address_street', 'address_barangay', 'address_municipality', 'address_province',
                     ];
-
-                    $requiredCols = $importAlumniType === 'old' ? $oldRequiredCols : $recentRequiredCols;
-                    $optionalCols = $importAlumniType === 'old' ? $oldOptionalCols : $recentOptionalCols;
+                    $displayCols = $importAlumniType === 'old' ? $oldDisplayCols : $recentDisplayCols;
                 @endphp
                 <div class="req-col-chips">
-                    @foreach($requiredCols as $col)
-                        <span class="req-col-chip">{{ $col }}</span>
-                    @endforeach
-                    @foreach($optionalCols as $col)
+                    @foreach($displayCols as $col)
                         <span class="req-col-chip">{{ $col }}</span>
                     @endforeach
                 </div>
