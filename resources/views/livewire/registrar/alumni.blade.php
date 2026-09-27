@@ -2968,7 +2968,7 @@ compressImage(file, maxW, maxH, quality) {
                             <p class="ar-field-value">{{ $up($viewingProfile['middle_initial'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
-                            <p class="ar-field-label">Ext.</p>
+                            <p class="ar-field-label">Suffix</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['suffix'] ?? '') ?: '—' }}</p>
                         </div>
                     </div>
@@ -3138,7 +3138,7 @@ compressImage(file, maxW, maxH, quality) {
                                 @if($isWorking)
                                     @if(!empty($emp['company_name']))
                                     <div class="ar-cell">
-                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Employer' }}</p>
+                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company/Organization' }}</p>
                                         <p class="ar-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p>
                                     </div>
                                     @endif

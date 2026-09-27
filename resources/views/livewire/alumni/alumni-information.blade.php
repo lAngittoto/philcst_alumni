@@ -1835,7 +1835,7 @@ function phAddress(initial) {
                                 @if($middle_initial)<p class="field-value">{{ strtoupper($middle_initial) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
                             <div class="ai-cell">
-                                <p class="field-label">Ext.</p>
+                                <p class="field-label">Suffix</p>
                                 @if($suffix)<p class="field-value">{{ strtoupper($suffix) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
                         </div>
@@ -2218,7 +2218,7 @@ function phAddress(initial) {
                                             <p class="field-value">{{ $currentRecord['work_location'] ?: '—' }}</p>
                                         </div>
                                         <div class="ai-cell">
-                                            <p class="field-label">Employer</p>
+                                            <p class="field-label">Company/Organization</p>
                                             <p class="field-value">{{ strtoupper($currentRecord['company_name']) ?: '—' }}</p>
                                         </div>
                                         <div class="ai-cell">
@@ -2364,17 +2364,22 @@ function phAddress(initial) {
 
                 {{-- Column 1: Status + Education + Unemployment (always present, compact) --}}
                 <div class="flex flex-col gap-3">
-                    <div class="emp-card" id="emp-status-card">
+                    <div class="emp-card" id="emp-status-card"
+                         wire:loading.class="opacity-60 pointer-events-none"
+                         wire:target="employment_status">
                         <div class="emp-card-title">Employment Status</div>
                         <div class="emp-card-body">
                             <label class="emp-label-sm">Current Status <span class="text-red-500">*</span></label>
                             <div class="flex flex-wrap gap-2">
                                 @foreach(['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'] as $val=>$lbl)
                                 <label class="emp-radio-tile">
-                                    <input wire:model.live="employment_status" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
+                                    <input wire:model.live="employment_status" wire:loading.attr="disabled" wire:target="employment_status" type="radio" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
                                     <span>{{ $lbl }}</span>
                                 </label>
                                 @endforeach
+                                <span wire:loading wire:target="employment_status" class="inline-flex items-center gap-1.5 text-[12.5px] text-[#7a3f91] font-medium">
+                                    <i class="fas fa-spinner fa-spin"></i> Updating...
+                                </span>
                             </div>
                             @error('employment_status') <p class="text-[12.5px] text-red-500 mt-1.5">{{ $message }}</p> @enderror
                         </div>
@@ -2431,7 +2436,7 @@ function phAddress(initial) {
                         <div class="emp-card-title">Employment Details</div>
                         <div class="emp-card-body flex flex-col gap-3">
                             <div>
-                                <label class="emp-label-sm">{{ $isSelf ? 'Business Name' : 'Employer' }} <span class="text-red-500">*</span></label>
+                                <label class="emp-label-sm">{{ $isSelf ? 'Business Name' : 'Company/Organization' }} <span class="text-red-500">*</span></label>
                                 <input wire:model.live.debounce.400ms="company_name" type="text"
                                        oninput="this.value=this.value.toUpperCase()"
                                        class="emp-input-sm uppercase {{ $errors->has('company_name') ? 'field-error' : '' }}">
