@@ -439,6 +439,15 @@ public function closeImportModal(): void
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
+            // ── Duplicate column check ─────────────────────────────────
+            // A repeated header (e.g. two "email" columns) would silently
+            // collide in array_combine() further down, so reject it up
+            // front with a clear message instead of failing confusingly.
+            $headerCounts = array_count_values(array_filter($header, fn($h) => $h !== ''));
+            foreach ($headerCounts as $col => $count)
+                if ($count > 1)
+                    throw new \Exception("Duplicate column in file: \"{$col}\".");
+
             $hasProgram      = in_array('program', $header, true);
             $hasProgramsPlur = in_array('programs', $header, true);
             $hasProgramCode  = in_array('program_code', $header, true);
@@ -463,33 +472,47 @@ public function closeImportModal(): void
                 ? ['first_name', 'last_name', 'student_id', 'course', 'batch']
                 : ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
 
-            // Display versions of the required columns (so the "course" internal
-            // alias — which was normalized above from program/programs/program_code —
-            // shows back to the user as "programs", matching the template).
-            $displayNames = [
-                'first_name'  => 'first_name',
-                'last_name'   => 'last_name',
-                'middle_name' => 'middle_name',
-                'student_id'  => 'student_id',
-                'course'      => 'programs',
-                'batch'       => 'batch',
-                'email'       => 'email',
-            ];
+            // ── Exact column-set check ──────────────────────────────────
+            // "programs"/"program"/"program_code" was already normalized to
+            // "course" above, so it's compared against the "course" entry
+            // in $required/$allowed below, not the raw sheet spelling.
+            //
+            // New (recent): the sheet's columns must match the required set
+            // exactly — nothing missing, nothing extra.
+            //
+            // Old: the sheet's columns must all be members of (required +
+            // optional) — nothing outside that combined set is accepted —
+            // and every required column must still be present.
+            if ($isOld) {
+                $optional = [
+                    'middle_name', 'suffix', 'email', 'motto',
+                    'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
+                    'mother_last_name', 'mother_given_name', 'mother_middle_name',
+                    'dswd_household_no',
+                    'address_street', 'address_barangay', 'address_municipality', 'address_province',
+                ];
+                $allowed = array_merge($required, $optional);
 
-            $missing = [];
-            foreach ($required as $col)
-                if (!in_array($col, $header, true))
-                    $missing[] = $displayNames[$col] ?? $col;
+                foreach ($header as $col)
+                    if ($col !== '' && !in_array($col, $allowed, true))
+                        throw new \Exception("Unrecognized column: \"{$col}\".");
 
-            if (!empty($missing)) {
-                $typeLabel  = $isOld ? 'Old - Existing alumni' : 'Recent - New graduates';
-                $allNeeded  = implode(', ', array_map(fn ($c) => $displayNames[$c] ?? $c, $required));
-                $missingStr = implode(', ', $missing);
+                foreach ($required as $col)
+                    if (!in_array($col, $header, true))
+                        throw new \Exception("Missing required column: \"{$col}\".");
+            } else {
+                $headerNonEmpty = array_values(array_filter($header, fn($h) => $h !== ''));
 
-                throw new \Exception(
-                    "Wrong template for \"{$typeLabel}\". Missing column(s): {$missingStr}. " .
-                    "Required columns for {$typeLabel}: {$allNeeded}."
-                );
+                foreach ($headerNonEmpty as $col)
+                    if (!in_array($col, $required, true))
+                        throw new \Exception("Unrecognized column: \"{$col}\".");
+
+                foreach ($required as $col)
+                    if (!in_array($col, $header, true))
+                        throw new \Exception("Missing required column: \"{$col}\".");
+
+                if (count($headerNonEmpty) !== count($required))
+                    throw new \Exception('Columns do not match the required set exactly — check for missing or extra columns.');
             }
 
             $this->importTotal = count($rows) - 1;
@@ -2003,7 +2026,7 @@ public function closeImportModal(): void
             {{-- Step Indicator (3 steps only: Upload → Importing → Done) — hidden during
                  processing so the loading spinner can truly center in the modal --}}
             @php
-                $stepMap     = ['upload' => 0, 'processing' => 1, 'blocked' => 0, 'done' => 2];
+                $stepMap     = ['upload' => 0, 'processing' => 1, 'blocked' => 1, 'done' => 2];
                 $currentStep = $stepMap[$importStep] ?? 0;
                 $stepDefs    = [[0,'1','Upload'],[1,'2','Importing'],[2,'3','Done']];
             @endphp
