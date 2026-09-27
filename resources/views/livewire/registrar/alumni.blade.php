@@ -3150,14 +3150,6 @@ compressImage(file, maxW, maxH, quality) {
                                     </div>
                                     @endif
 
-                                    @if(count($careerPath))
-                                    <div class="ar-cell">
-                                        <p class="ar-field-label">Career Path</p>
-                                        <p class="ar-field-value">
-                                            {{ implode(', ', array_map(fn($k) => $cpLabels[$k] ?? $k, $careerPath)) }}
-                                        </p>
-                                    </div>
-                                    @endif
                                 @endif
 
                         </div>

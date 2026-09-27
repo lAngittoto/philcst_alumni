@@ -83,7 +83,6 @@ new class extends Component {
     public string $custom_job_title    = '';
     public string $employment_type     = '';
     public string $work_location       = '';
-    public array  $career_path         = [];
     public string $course_relevance    = '';
     public string $unemployment_status = '';
     public string $unemployment_reason = '';
@@ -92,7 +91,7 @@ new class extends Component {
 
     private const EMP_SNAP_KEYS = [
         'employment_status', 'company_name', 'job_title', 'custom_job_title',
-        'employment_type', 'work_location', 'career_path',
+        'employment_type', 'work_location',
         'course_relevance', 'unemployment_status', 'unemployment_reason',
     ];
 
@@ -779,9 +778,8 @@ new class extends Component {
 
     protected function loadEmploymentRecord(): void
     {
-        $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based','internship'=>'Internship'];
+        $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based'];
         $workLocLabels= ['local'=>'Local / PH','abroad'=>'OFW / Abroad'];
-        $careerLabels = ['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Professional'];
         $relLabels    = ['yes'=>'Related to Program','no'=>'Not Related','partially'=>'Partially Related'];
         $unLabels     = ['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'];
         $statusLabels = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'];
@@ -793,7 +791,6 @@ new class extends Component {
             ->first();
 
         if ($current) {
-            $cp = $current->career_path ? json_decode($current->career_path, true) : [];
             $this->currentRecord = [
                 'employment_status'     => $statusLabels[$current->employment_status ?? ''] ?? ucfirst($current->employment_status ?? ''),
                 'employment_status_raw' => $current->employment_status ?? '',
@@ -802,7 +799,6 @@ new class extends Component {
                 'job_title'             => $current->job_title ?? '',
                 'employment_type'       => $typeLabels[$current->employment_type ?? ''] ?? '',
                 'work_location'         => $workLocLabels[$current->work_location ?? ''] ?? ucfirst($current->work_location ?? ''),
-                'career_path_labels'    => array_values(array_filter(array_map(fn($v) => $careerLabels[$v] ?? null, $cp))),
                 'course_relevance'      => $relLabels[$current->course_relevance ?? ''] ?? '',
                 'unemployment_status'   => $unLabels[$current->unemployment_status ?? ''] ?? '',
                 'unemployment_reason'   => $current->unemployment_reason ?? '',
@@ -815,7 +811,6 @@ new class extends Component {
             $this->company_name           = $current->company_name        ?? '';
             $this->employment_type        = $current->employment_type     ?? '';
             $this->work_location          = $current->work_location       ?? '';
-            $this->career_path            = $current->career_path ? json_decode($current->career_path, true) : [];
             $this->course_relevance       = $current->course_relevance    ?? '';
             $this->unemployment_status    = $current->unemployment_status ?? '';
             $this->unemployment_reason    = $current->unemployment_reason ?? '';
@@ -871,19 +866,9 @@ new class extends Component {
         if ($this->employment_status === 'unemployed') {
             $this->company_name = $this->job_title = $this->employment_type =
             $this->work_location = $this->course_relevance = $this->custom_job_title = '';
-            $this->career_path = [];
         } else {
             $this->unemployment_reason = '';
             $this->unemployment_status = '';
-            // "Internship" isn't a valid employment type for a business/
-            // self-employed alumnus — clear it if they had it selected
-            // before switching from Employed to Self-Employed.
-            if ($this->employment_status === 'self_employed' && $this->employment_type === 'internship') {
-                $this->employment_type = '';
-            }
-            // Always reset company/business name, job title, custom job title,
-            // and course relevance on every status switch (Employed ↔ Self-Employed)
-            // so the user starts fresh — no stale values carried over.
             $this->company_name     = '';
             $this->job_title        = '';
             $this->custom_job_title = '';
@@ -934,7 +919,6 @@ new class extends Component {
             'job_title'           => $finalJob,
             'employment_type'     => $this->employment_type,
             'work_location'       => $this->work_location,
-            'career_path'         => $this->career_path,
             'course_relevance'    => $this->course_relevance,
             'unemployment_status' => $this->unemployment_status,
             'unemployment_reason' => trim($this->unemployment_reason),
@@ -945,13 +929,10 @@ new class extends Component {
             'job_title'           => $snapJob,
             'employment_type'     => $this->employmentSnapshot['employment_type']     ?? '',
             'work_location'       => $this->employmentSnapshot['work_location']       ?? '',
-            'career_path'         => $this->employmentSnapshot['career_path']         ?? [],
             'course_relevance'    => $this->employmentSnapshot['course_relevance']    ?? '',
             'unemployment_status' => $this->employmentSnapshot['unemployment_status'] ?? '',
             'unemployment_reason' => trim($this->employmentSnapshot['unemployment_reason'] ?? ''),
         ];
-        sort($current['career_path']);
-        sort($snap['career_path']);
         return $current !== $snap;
     }
 
@@ -1019,10 +1000,7 @@ new class extends Component {
         $msgs = [
             'employment_status.required' => 'Please select your employment status.',
         ];
-        $isSelfEmployed = $this->employment_status === 'self_employed';
-        $employmentTypeOptions = $isSelfEmployed
-            ? 'full_time,part_time,contractual,project_based'
-            : 'full_time,part_time,contractual,project_based,internship';
+        $employmentTypeOptions = 'full_time,part_time,contractual,project_based';
 
         if ($working) {
             $rules += [
@@ -1077,7 +1055,6 @@ new class extends Component {
                 'employment_type'     => $working ? ($this->employment_type ?: null) : null,
                 'work_location'       => $working ? ($this->work_location ?: null) : null,
                 'date_hired'          => null,
-                'career_path'         => $working && count($this->career_path) ? json_encode(array_values($this->career_path)) : null,
                 'course_relevance'    => $finalRelevance,
                 'unemployment_status' => $this->employment_status === 'unemployed' ? ($this->unemployment_status ?: null) : null,
                 'unemployment_reason' => ($this->employment_status === 'unemployed' && $this->unemployment_status === 'not_looking')
@@ -2229,12 +2206,6 @@ function phAddress(initial) {
                                             <p class="field-label">Course Relevance</p>
                                             <p class="field-value">{{ $currentRecord['course_relevance'] ?: '—' }}</p>
                                         </div>
-                                        @if(!empty($currentRecord['career_path_labels']))
-                                        <div class="ai-cell">
-                                            <p class="field-label">Career Path</p>
-                                            <p class="field-value">{{ implode(', ', $currentRecord['career_path_labels']) }}</p>
-                                        </div>
-                                        @endif
                                     @else
                                         <div class="ai-cell">
                                             <p class="field-label">Job Search Status</p>
@@ -2482,7 +2453,7 @@ function phAddress(initial) {
                     </div>
                 </div>
 
-                {{-- Column 3: Type, Location, Career Path --}}
+                {{-- Column 3: Type, Location --}}
                 <div class="flex flex-col gap-3">
                     <div class="emp-card">
                         <div class="emp-card-title">Type &amp; Location</div>
@@ -2492,7 +2463,6 @@ function phAddress(initial) {
                                 <div class="flex flex-wrap gap-2">
                                     @php
                                         $empTypeOptions = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based'];
-                                        if (!$isSelf) { $empTypeOptions['internship'] = 'Internship'; }
                                     @endphp
                                     @foreach($empTypeOptions as $val=>$lbl)
                                     <label class="emp-radio-tile">
@@ -2514,17 +2484,6 @@ function phAddress(initial) {
                                     @endforeach
                                 </div>
                                 @error('work_location') <p class="text-[12.5px] text-red-500 mt-1.5">{{ $message }}</p> @enderror
-                            </div>
-                            <div>
-                                <label class="emp-label-sm">Career Path <span class="normal-case font-normal text-[#333333]">(optional)</span></label>
-                                <div class="flex flex-wrap gap-2">
-                                    @foreach(['ofw'=>'OFW','freelancer'=>'Freelancer','entrepreneur'=>'Entrepreneur','career_shifter'=>'Career Shifter','industry_professional'=>'Industry Pro'] as $val=>$lbl)
-                                    <label class="emp-radio-tile">
-                                        <input wire:model.live="career_path" type="checkbox" value="{{ $val }}" class="w-3.5 h-3.5 accent-[#7a3f91] cursor-pointer">
-                                        <span>{{ $lbl }}</span>
-                                    </label>
-                                    @endforeach
-                                </div>
                             </div>
                         </div>
                     </div>
