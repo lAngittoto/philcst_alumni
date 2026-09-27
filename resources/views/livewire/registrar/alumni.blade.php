@@ -3093,7 +3093,7 @@ compressImage(file, maxW, maxH, quality) {
                             </div>
                         </div>
                     @else
-                        <div class="p-2 grid grid-cols-4 gap-1.5">
+                        <div class="p-2 grid grid-cols-3 gap-1.5">
 
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Status</p>
@@ -3112,6 +3112,29 @@ compressImage(file, maxW, maxH, quality) {
                                     <p class="ar-field-label">Work Location</p>
                                     <p class="ar-field-value">{{ $workLocMap[$emp['work_location']] ?? ucfirst($emp['work_location']) }}</p>
                                 </div>
+                                @endif
+
+                                @if($isWorking)
+                                    @if(!empty($emp['company_name']))
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company/Organization' }}</p>
+                                        <p class="ar-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p>
+                                    </div>
+                                    @endif
+
+                                    @if(!empty($emp['job_title']))
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">Job Title</p>
+                                        <p class="ar-field-value">{{ $emp['job_title'] }}</p>
+                                    </div>
+                                    @endif
+
+                                    @if(!empty($emp['course_relevance']) && isset($relevanceMap[$emp['course_relevance']]))
+                                    <div class="ar-cell">
+                                        <p class="ar-field-label">Course Relevance</p>
+                                        <p class="ar-field-value">{{ $relevanceMap[$emp['course_relevance']] }}</p>
+                                    </div>
+                                    @endif
                                 @endif
 
                                 @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']))
@@ -3133,23 +3156,6 @@ compressImage(file, maxW, maxH, quality) {
                                     <p class="ar-field-label">Further Studies</p>
                                     <p class="ar-field-value">{{ $eduMap[$emp['education_status']] }}</p>
                                 </div>
-                                @endif
-
-                                @if($isWorking)
-                                    @if(!empty($emp['company_name']))
-                                    <div class="ar-cell">
-                                        <p class="ar-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company/Organization' }}</p>
-                                        <p class="ar-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p>
-                                    </div>
-                                    @endif
-
-                                    @if(!empty($emp['course_relevance']) && isset($relevanceMap[$emp['course_relevance']]))
-                                    <div class="ar-cell">
-                                        <p class="ar-field-label">Course Relevance</p>
-                                        <p class="ar-field-value">{{ $relevanceMap[$emp['course_relevance']] }}</p>
-                                    </div>
-                                    @endif
-
                                 @endif
 
                         </div>
