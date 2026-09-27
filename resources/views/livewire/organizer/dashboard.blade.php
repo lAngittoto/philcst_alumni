@@ -92,6 +92,12 @@ new class extends Component {
         return Auth::user()?->organizer?->id;
     }
 
+    #[Computed]
+    public function organizerTeacherId(): string
+    {
+        return Auth::user()?->organizer?->id_number ?? '';
+    }
+
     /**
      * ── Self-service email update (organizer/coordinator) ──
      * Lets the logged-in organizer/coordinator update their own contact
@@ -553,6 +559,13 @@ new class extends Component {
                 <div class="org-info-row">
                     <span class="org-info-label">Name</span>
                     <span class="org-info-value">{{ $this->organizerName }}</span>
+                </div>
+
+                <div class="org-info-row">
+                    <span class="org-info-label">Teacher ID</span>
+                    <span class="org-info-value font-mono tracking-widest text-[#7A3F91]">
+                        {{ $this->organizerTeacherId ?: '—' }}
+                    </span>
                 </div>
 
                 <div class="org-info-row" style="align-items:flex-start;" x-data="{ toast: false }" @email-updated.window="toast = true; setTimeout(() => toast = false, 2500)">

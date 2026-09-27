@@ -75,20 +75,77 @@ new class extends Component {
      *  no-changes gate only applies to editing a PENDING event. */
     public ?array $originalFormSnapshot = null;
 
-    public $photo                    = null;
-    public ?string $existingPhotoUrl = null;
-    public bool   $removePhoto       = false;
+    // ── Event photo — uploaded straight to Cloudinary via base64, same
+    //    approach as the Alumni profile photo (see receiveAlumniPhoto() in
+    //    alumni-records). $photo is NO LONGER a Livewire wire:model temp
+    //    upload — the old wire:model="photo" TemporaryUploadedFile flow was
+    //    saving to local disk storage, which doesn't survive Railway
+    //    deploys/restarts, so the event always fell back to the default
+    //    photo after a redeploy. $photo now just holds the Cloudinary
+    //    secure_url string once uploaded (or null). ──
+    public ?string $photo                 = null;
+    public ?string $photoPublicId         = null;
+    public ?string $existingPhotoUrl      = null;
+    public ?string $existingPhotoPublicId = null;
+    public bool   $removePhoto            = false;
 
-    /** Livewire hook that fires as part of the SAME request that finishes
-     *  setting $photo (unlike the raw JS upload event, which completes
-     *  slightly before that request's response — and its HTML — actually
-     *  lands). Doing nothing here is fine; its only job is to give
-     *  wire:loading a target that stays "loading" for the full round trip,
-     *  so the overlay in the Blade view doesn't disappear a beat early and
-     *  flash the old/default photo before the new one swaps in. */
-    public function updatedPhoto(): void
+    /**
+     * Receives the event photo as base64 from JS FileReader — uploads to
+     * Cloudinary for persistent storage across Railway deploys. Mirrors
+     * Alumni's receiveAlumniPhoto() exactly. #[Renderless] keeps this a
+     * background call with no full component re-render, matching the
+     * alumni photo UX (Alpine drives the preview, not a Livewire repaint).
+     */
+    #[\Livewire\Attributes\Renderless]
+    public function receiveEventPhoto(string $filename, string $base64): void
     {
-        //
+        try {
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                $this->dispatch('flash-message', type: 'error', message: 'Invalid file type.');
+                return;
+            }
+
+            // Delete the previous NEWLY-STAGED (not-yet-saved) upload from
+            // Cloudinary if the organizer picked a photo, then picked a
+            // different one before hitting Save — otherwise every swap
+            // leaves an orphaned file behind in the Cloudinary account.
+            if ($this->photoPublicId) {
+                cloudinary()->uploadApi()->destroy($this->photoPublicId);
+            }
+
+            $uploadResult = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'event-photos',
+                    'public_id'     => 'event_' . ($this->editingEventId ?: 'new') . '_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            $this->photo         = $uploadResult['secure_url'];
+            $this->photoPublicId = $uploadResult['public_id'];
+            $this->removePhoto   = false;
+
+            $this->dispatch('event-photo-saved', newSrc: $this->photo);
+
+        } catch (\Exception $e) {
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo: ' . $e->getMessage());
+        }
+    }
+
+    /** Undo a just-staged (not-yet-saved) photo pick — deletes it from
+     *  Cloudinary immediately rather than leaving it orphaned, since it
+     *  was never attached to a saved event. */
+    #[\Livewire\Attributes\Renderless]
+    public function cancelStagedEventPhoto(): void
+    {
+        if ($this->photoPublicId) {
+            try { cloudinary()->uploadApi()->destroy($this->photoPublicId); } catch (\Throwable) {}
+        }
+        $this->photo         = null;
+        $this->photoPublicId = null;
     }
 
     public array  $formErrors = [];
@@ -551,10 +608,12 @@ public function openCreateModal(): void
         $this->contact_email    = $this->organizerEmail;
         $this->contact_phone    = $event->contact_phone  ?? '';
         $this->notes            = $event->notes ?? '';
-        $this->existingPhotoUrl = $event->photo_url;
-        $this->removePhoto      = false;
-        $this->photo            = null;
-        $this->formErrors       = [];
+        $this->existingPhotoUrl      = $event->photo_url;
+        $this->existingPhotoPublicId = $event->photo_public_id ?? null;
+        $this->removePhoto           = false;
+        $this->photo                 = null;
+        $this->photoPublicId         = null;
+        $this->formErrors            = [];
 
         $tp    = $event->target_participants ?? '';
         $parts = explode(' · Batch ', $tp, 2);
@@ -802,6 +861,13 @@ public function closeFormModal(): void
         }
     }
     $this->viaNotifOrDeepLink = false;
+
+    // A photo picked-and-uploaded this session but never actually saved
+    // (organizer closed the form instead of clicking Save) would otherwise
+    // sit in Cloudinary forever, unattached to any event.
+    if ($this->photoPublicId) {
+        try { cloudinary()->uploadApi()->destroy($this->photoPublicId); } catch (\Throwable) {}
+    }
 
     $this->showFormModal = false;
     $this->resetFormFields();
@@ -1059,8 +1125,17 @@ public function closeFormModal(): void
             $data['reviewed_at']    = null;
         }
 
-        $ctrl  = app(OrganizerEventController::class);
-        $photo = $this->photo;
+        $ctrl = app(OrganizerEventController::class);
+
+        // $this->photo is now a Cloudinary secure_url string (or null) —
+        // the upload itself already happened in receiveEventPhoto() before
+        // Save was ever clicked, exactly like the Alumni photo flow. There
+        // is no TemporaryUploadedFile to hand off to the controller
+        // anymore, so $data['photo'] / $data['photo_public_id'] are set
+        // directly and createEvent()/updateEvent() are called WITHOUT a
+        // file argument.
+        $photo         = $this->photo;
+        $photoPublicId = $this->photoPublicId;
 
         // ── Determine which actions dispatch a notif ──
         // ONLY 'updated' and 'resubmitted' dispatch — NOT 'created'
@@ -1084,10 +1159,16 @@ public function closeFormModal(): void
             ];
 
             if ($this->removePhoto && !$photo) {
-                if ($event->photo && $event->photo !== OrganizerEvent::DEFAULT_PHOTO) {
+                // Delete the CURRENT saved Cloudinary photo (if any, and
+                // not already the default) before clearing the columns.
+                if ($event->photo_public_id) {
+                    try { cloudinary()->uploadApi()->destroy($event->photo_public_id); } catch (\Throwable) {}
+                } elseif ($event->photo && $event->photo !== OrganizerEvent::DEFAULT_PHOTO && !str_starts_with($event->photo, 'http')) {
+                    // Legacy local-disk photo from before this Cloudinary migration.
                     Storage::disk('public')->delete($event->photo);
                 }
-                $data['photo'] = null;
+                $data['photo']           = null;
+                $data['photo_public_id'] = null;
                 $event->update(array_merge($data, [
                     'updated_by'      => auth()->user()?->name,
                     'updated_by_role' => 'organizer',
@@ -1101,7 +1182,19 @@ public function closeFormModal(): void
                     ]);
                     unset($data['status'], $data['review_remarks'], $data['reviewed_at']);
                 }
-                $ctrl->updateEvent($this->editingEventId, $data, $photo ?: null);
+
+                if ($photo) {
+                    // A NEW photo was uploaded this session — swap it in
+                    // and clean up whatever Cloudinary asset it replaces.
+                    if ($event->photo_public_id && $event->photo_public_id !== $photoPublicId) {
+                        try { cloudinary()->uploadApi()->destroy($event->photo_public_id); } catch (\Throwable) {}
+                    }
+                    $data['photo']           = $photo;
+                    $data['photo_public_id'] = $photoPublicId;
+                }
+                // else: no photo change this save — leave existing photo/photo_public_id untouched.
+
+                $ctrl->updateEvent($this->editingEventId, $data);
             }
 
             if ($this->isResubmitting) {
@@ -1144,7 +1237,11 @@ public function closeFormModal(): void
             $this->dispatch('flash-message', type: 'success', message: $msg);
         } else {
             // CREATE — no notif dispatch
-            $ctrl->createEvent($data, $photo ?: null);
+            if ($photo) {
+                $data['photo']           = $photo;
+                $data['photo_public_id'] = $photoPublicId;
+            }
+            $ctrl->createEvent($data);
 
             try {
                 AuditLog::create([
@@ -1617,9 +1714,11 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->batchYearTo    = '';
         $this->allAlumniChosen = false;
         $this->selectedCourses = [];
-        $this->photo          = null;
-        $this->existingPhotoUrl = null;
-        $this->removePhoto    = false;
+        $this->photo                 = null;
+        $this->photoPublicId         = null;
+        $this->existingPhotoUrl      = null;
+        $this->existingPhotoPublicId = null;
+        $this->removePhoto           = false;
         $this->formErrors     = [];
         $this->editingEventId = null;
         $this->isEditing      = false;
@@ -2641,94 +2740,127 @@ select.tw-select-arrow {
              style="scrollbar-width:thin;">
             <div class="p-3 space-y-3">
 
-                {{-- Event Photo — with live preview, fully white background.
-                     Default state shows the actual default event photo from
+                {{-- Event Photo — uploaded straight to Cloudinary via base64,
+                     same reliable pattern as the Alumni profile photo. This
+                     replaces the old wire:model="photo" Livewire temp-upload
+                     flow, which saved to local disk storage and lost every
+                     uploaded event photo on Railway redeploys (always
+                     falling back to the default photo). Default state shows
+                     the real default event photo from
                      public/storage/event/default-photo-event.jpg, verified
-                     server-side with file_exists() so it only renders the
-                     <img> when the file is truly there — falling back to an
-                     inline SVG placeholder (not a separate image file) if
-                     it's ever missing, so something always displays. ── --}}
+                     server-side with file_exists(), falling back to an
+                     inline SVG placeholder if that file is ever missing. ── --}}
                 @php
                     $defaultPhotoRelPath = 'storage/event/default-photo-event.jpg';
                     $defaultPhotoExists  = file_exists(public_path($defaultPhotoRelPath));
+                    $defaultPhotoAsset   = $defaultPhotoExists ? asset($defaultPhotoRelPath) : '';
                 @endphp
                 <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Event Photo
                         <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— Preview</span>
                     </div>
-                    <div class="p-2.5 bg-white">
-                        <div x-data="{
-                                isDragging:false,
-                                localPreviewUrl: null,
-                                onFileChosen(e) {
-                                    // ── Instant local preview via FileReader ──
-                                    // Renders the picked image IMMEDIATELY from the
-                                    // browser's own copy of the file, without waiting
-                                    // for Livewire's upload roundtrip. Livewire still
-                                    // uploads photo in the background via wire:model
-                                    // (unchanged) for the actual save — this only
-                                    // affects what's shown on screen while that happens,
-                                    // so there's no more delay/flash before the new
-                                    // photo appears.
-                                    const file = e.target.files && e.target.files[0];
-                                    if (!file) { this.localPreviewUrl = null; return; }
-                                    const reader = new FileReader();
-                                    reader.onload = (ev) => { this.localPreviewUrl = ev.target.result; };
-                                    reader.readAsDataURL(file);
-                                }
-                             }"
-                             @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false"
-                             class="relative border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
-                             :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':'{{ ($photo||($existingPhotoUrl&&!$removePhoto))?'border-[#7a3f91] border-solid bg-white':'border-dashed border-gray-300 hover:border-[#7a3f91] hover:bg-white' }}'">
+                    <div class="p-2.5 bg-white"
+                         x-data="{
+                             isDragging: false,
+                             saving: false,
+                             previewSrc: {{ \Illuminate\Support\Js::from($photo ?: (($existingPhotoUrl && !$removePhoto) ? $existingPhotoUrl : ($defaultPhotoAsset ?: null))) }},
+                             defaultSrc: {{ \Illuminate\Support\Js::from($defaultPhotoAsset ?: null) }},
+                             hasCurrentOrNew: {{ ($photo || ($existingPhotoUrl && !$removePhoto)) ? 'true' : 'false' }},
+                             init() {
+                                 $wire.$on('event-photo-saved', (event) => {
+                                     this.saving = false;
+                                     this.hasCurrentOrNew = true;
+                                     if (event && event.newSrc) {
+                                         this.previewSrc = event.newSrc + '?t=' + Date.now();
+                                     }
+                                     if (this.$refs.eventPhotoInput) this.$refs.eventPhotoInput.value = '';
+                                 });
+                             },
+                             compressImage(file, maxW, maxH, quality) {
+                                 return new Promise((resolve, reject) => {
+                                     const img = new Image();
+                                     const reader = new FileReader();
+                                     reader.onload = (e) => {
+                                         img.onload = () => {
+                                             let w = img.width, h = img.height;
+                                             if (w > maxW || h > maxH) {
+                                                 const ratio = Math.min(maxW / w, maxH / h);
+                                                 w = Math.round(w * ratio);
+                                                 h = Math.round(h * ratio);
+                                             }
+                                             const canvas = document.createElement('canvas');
+                                             canvas.width = w; canvas.height = h;
+                                             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                                             canvas.toBlob((blob) => {
+                                                 if (!blob) return reject(new Error('compress failed'));
+                                                 resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+                                             }, 'image/jpeg', quality);
+                                         };
+                                         img.onerror = reject;
+                                         img.src = e.target.result;
+                                     };
+                                     reader.onerror = reject;
+                                     reader.readAsDataURL(file);
+                                 });
+                             },
+                             async onFileChosen(e) {
+                                 const file = e.target.files && e.target.files[0];
+                                 if (!file) return;
+
+                                 // Instant local preview while the Cloudinary
+                                 // upload happens in the background.
+                                 let toUpload = file;
+                                 try {
+                                     toUpload = await this.compressImage(file, 1000, 1000, 0.8);
+                                 } catch (err) {
+                                     toUpload = file;
+                                 }
+
+                                 const localReader = new FileReader();
+                                 localReader.onload = (ev) => { this.previewSrc = ev.target.result; };
+                                 localReader.readAsDataURL(toUpload);
+
+                                 this.saving = true;
+                                 const uploadReader = new FileReader();
+                                 uploadReader.onload = (ev) => {
+                                     const base64 = ev.target.result.split(',')[1];
+                                     $wire.receiveEventPhoto(toUpload.name, base64)
+                                         .catch(() => {
+                                             this.saving = false;
+                                             this.previewSrc = this.hasCurrentOrNew
+                                                 ? this.previewSrc
+                                                 : (this.defaultSrc || this.previewSrc);
+                                             if (this.$refs.eventPhotoInput) this.$refs.eventPhotoInput.value = '';
+                                         });
+                                 };
+                                 uploadReader.onerror = () => { this.saving = false; };
+                                 uploadReader.readAsDataURL(toUpload);
+                             }
+                         }"
+                         @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false">
+                        <div class="relative border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
+                             :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':(hasCurrentOrNew?'border-[#7a3f91] border-solid bg-white':'border-dashed border-gray-300 hover:border-[#7a3f91] hover:bg-white')">
                             <label class="cursor-pointer block p-2.5">
-                                <input type="file" wire:model="photo" accept="image/*" class="hidden" @change="onFileChosen($event)">
-                                {{-- Local (Alpine) preview shows the instant the file is
-                                     picked — takes priority over every server-rendered
-                                     branch below while present, so the chosen image is
-                                     always what's on screen, with zero delay and no flash
-                                     of the old/default photo in between. --}}
-                                <template x-if="localPreviewUrl">
+                                <input type="file" x-ref="eventPhotoInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" @change="onFileChosen($event)">
+
+                                <template x-if="previewSrc">
                                     <div class="flex flex-col items-center gap-1">
-                                        <div class="w-full rounded-lg overflow-hidden border border-purple-200 bg-white flex items-center justify-center" style="height:150px;">
-                                            <img :src="localPreviewUrl" class="w-full h-full object-contain">
+                                        <div class="relative w-full rounded-lg overflow-hidden border flex items-center justify-center"
+                                             :class="hasCurrentOrNew ? 'border-purple-200' : 'border-gray-200'" style="height:150px;">
+                                            <img :src="previewSrc" class="w-full h-full object-contain" :class="saving ? 'opacity-50' : ''">
+                                            <div x-show="saving" x-cloak class="absolute inset-0 flex items-center justify-center bg-white/40">
+                                                <i class="fas fa-spinner fa-spin text-[#7a3f91] text-lg"></i>
+                                            </div>
                                         </div>
-                                        <p class="text-sm font-semibold text-[#7a3f91]"><i class="fas fa-check-circle mr-1 text-xs"></i>New photo selected — click to change</p>
+                                        <p class="text-sm font-semibold" :class="saving ? 'text-[#7a3f91]' : 'text-[#7a3f91]'">
+                                            <i class="fas fa-check-circle mr-1 text-xs" x-show="!saving"></i>
+                                            <span x-text="saving ? 'Uploading…' : 'Click photo to change'"></span>
+                                        </p>
                                     </div>
                                 </template>
-                                <template x-if="!localPreviewUrl">
-                                <div>
-                                @if($photo)
-                                    {{-- User just selected a new photo — always visible immediately via temporaryUrl() --}}
-                                    <div class="flex flex-col items-center gap-1">
-                                        <div class="w-full rounded-lg overflow-hidden border border-purple-200 bg-white flex items-center justify-center" style="height:150px;">
-                                            <img src="{{ $photo->temporaryUrl() }}" class="w-full h-full object-contain">
-                                        </div>
-                                        <p class="text-sm font-semibold text-[#7a3f91]"><i class="fas fa-check-circle mr-1 text-xs"></i>New photo selected — click to change</p>
-                                    </div>
-                                @elseif($existingPhotoUrl&&!$removePhoto)
-                                    {{-- Editing an event that already has a saved photo — always visible --}}
-                                    <div class="flex flex-col items-center gap-1">
-                                        <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:150px;">
-                                            <img src="{{ $existingPhotoUrl }}" class="w-full h-full object-contain">
-                                        </div>
-                                        <p class="text-sm font-semibold mt-1" style="color:#111111;">Current photo. Click photo to update.</p>
-                                    </div>
-                                @elseif($defaultPhotoExists)
-                                    {{-- New event, no upload yet — show the real default event photo
-                                         from public/storage/event/default-photo-event.jpg (confirmed
-                                         to exist server-side, so it renders reliably) --}}
-                                    <div class="flex flex-col items-center gap-1.5 py-2">
-                                        <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-white flex items-center justify-center" style="height:120px;">
-                                            <img src="{{ asset($defaultPhotoRelPath) }}" alt="Default event photo" class="w-full h-full object-contain">
-                                        </div>
-                                        <p class="font-semibold text-sm mt-1" style="color:#111111;">JPG, PNG, WEBP — max 5 MB</p>
-                                        <p class="text-xs mt-0.5 text-center font-medium" style="color:#111111;">The default photo above is used automatically if you don't upload one. Click photo to update.</p>
-                                    </div>
-                                @else
-                                    {{-- New event, no upload yet, AND default-photo-event.jpg is
-                                         missing — inline SVG placeholder, always renders regardless
-                                         of any file on the server --}}
+
+                                <template x-if="!previewSrc">
                                     <div class="flex flex-col items-center gap-1.5 py-2">
                                         <div class="w-full rounded-lg overflow-hidden border border-gray-200 bg-gradient-to-br from-purple-50 to-white flex items-center justify-center" style="height:120px;">
                                             <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2739,15 +2871,13 @@ select.tw-select-arrow {
                                             </svg>
                                         </div>
                                         <p class="font-semibold text-sm mt-1" style="color:#111111;">Click to upload or drag &amp; drop</p>
-                                        <p class="text-xs text-center font-medium" style="color:#111111;">JPG, PNG, WEBP — max 5 MB. Click photo to update.</p>
+                                        <p class="text-xs text-center font-medium" style="color:#111111;">JPG, PNG, WEBP — max 5 MB</p>
                                     </div>
-                                @endif
-                                </div>
                                 </template>
                             </label>
                         </div>
-                        @if($existingPhotoUrl&&!$removePhoto&&!$photo)
-                            <button type="button" wire:click="$set('removePhoto',true)"
+                        @if($existingPhotoUrl && !$removePhoto)
+                            <button type="button" wire:click="$set('removePhoto', true)" x-show="!saving"
                                     class="mt-1.5 text-sm text-red-600 hover:text-red-700 font-semibold flex items-center gap-1 px-2 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition">
                                 <i class="fas fa-trash text-xs"></i> Remove photo
                             </button>
@@ -2755,7 +2885,7 @@ select.tw-select-arrow {
                         @if($removePhoto)
                             <div class="mt-1.5 flex items-center gap-2">
                                 <span class="text-sm text-amber-700 font-semibold"><i class="fas fa-exclamation-circle mr-1 text-xs"></i>Photo removed on save</span>
-                                <button type="button" wire:click="$set('removePhoto',false)" class="text-sm text-blue-600 underline">Undo</button>
+                                <button type="button" wire:click="$set('removePhoto', false)" class="text-sm text-blue-600 underline">Undo</button>
                             </div>
                         @endif
                     </div>
