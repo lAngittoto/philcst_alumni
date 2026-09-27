@@ -439,15 +439,6 @@ public function closeImportModal(): void
 
             $header = array_map('trim', array_map('strtolower', $rows[0]));
 
-            // ── Duplicate column check ─────────────────────────────────
-            // A repeated header (e.g. two "email" columns) would silently
-            // collide in array_combine() further down, so reject it up
-            // front with a clear message instead of failing confusingly.
-            $headerCounts = array_count_values(array_filter($header, fn($h) => $h !== ''));
-            foreach ($headerCounts as $col => $count)
-                if ($count > 1)
-                    throw new \Exception("Duplicate column in file: \"{$col}\".");
-
             $hasProgram      = in_array('program', $header, true);
             $hasProgramsPlur = in_array('programs', $header, true);
             $hasProgramCode  = in_array('program_code', $header, true);
@@ -463,56 +454,42 @@ public function closeImportModal(): void
 
             $isOld = $this->importAlumniType === 'old';
 
-            // Recent (new graduates) — unchanged, everything below is required.
+            // Recent (new graduates) — only the identifying + contact columns
+            // are required; middle_name and suffix are optional.
             // Old (existing alumni) — only the minimum identifying columns are
             // required; everything else (middle_name, suffix, email, motto,
-            // father's/mother's name, dswd, address) is optional since older
-            // records are often incomplete or missing entirely.
+            // sex, birthdate, father's/mother's name, dswd, disability,
+            // contact number, address) is optional since older records are
+            // often incomplete or missing entirely.
             $required = $isOld
                 ? ['first_name', 'last_name', 'student_id', 'course', 'batch']
-                : ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
+                : ['first_name', 'last_name', 'student_id', 'course', 'batch', 'email'];
 
-            // ── Exact column-set check ──────────────────────────────────
-            // "programs"/"program"/"program_code" was already normalized to
-            // "course" above, so it's compared against the "course" entry
-            // in $required/$allowed below, not the raw sheet spelling.
-            //
-            // New (recent): the sheet's columns must match the required set
-            // exactly — nothing missing, nothing extra.
-            //
-            // Old: the sheet's columns must all be members of (required +
-            // optional) — nothing outside that combined set is accepted —
-            // and every required column must still be present.
-            if ($isOld) {
-                $optional = [
+            $optional = $isOld
+                ? [
                     'middle_name', 'suffix', 'email', 'motto',
-                    'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
+                    'sex', 'birthdate',
+                    'father_last_name', 'father_given_name', 'father_middle_name',
                     'mother_last_name', 'mother_given_name', 'mother_middle_name',
-                    'dswd_household_no',
+                    'dswd_household_no', 'disability', 'contact_number',
                     'address_street', 'address_barangay', 'address_municipality', 'address_province',
-                ];
-                $allowed = array_merge($required, $optional);
+                  ]
+                : ['middle_name', 'suffix'];
 
-                foreach ($header as $col)
-                    if ($col !== '' && !in_array($col, $allowed, true))
-                        throw new \Exception("Unrecognized column: \"{$col}\".");
+            foreach ($required as $col)
+                if (!in_array($col, $header, true))
+                    throw new \Exception("Missing required column: \"{$col}\".");
 
-                foreach ($required as $col)
-                    if (!in_array($col, $header, true))
-                        throw new \Exception("Missing required column: \"{$col}\".");
-            } else {
-                $headerNonEmpty = array_values(array_filter($header, fn($h) => $h !== ''));
-
-                foreach ($headerNonEmpty as $col)
-                    if (!in_array($col, $required, true))
-                        throw new \Exception("Unrecognized column: \"{$col}\".");
-
-                foreach ($required as $col)
-                    if (!in_array($col, $header, true))
-                        throw new \Exception("Missing required column: \"{$col}\".");
-
-                if (count($headerNonEmpty) !== count($required))
-                    throw new \Exception('Columns do not match the required set exactly — check for missing or extra columns.');
+            // Strict column set — any column in the sheet that isn't part of
+            // this type's required or optional list is rejected up front,
+            // before any row is processed, so the whole import is cancelled
+            // rather than silently importing with a stray/misspelled column.
+            $allowedCols = array_merge($required, $optional);
+            foreach ($header as $col) {
+                if (!in_array($col, $allowedCols, true)) {
+                    $label = $isOld ? 'Old - Existing alumni' : 'Recent - New graduates';
+                    throw new \Exception("Unexpected column: \"{$col}\" is not a valid column for \"{$label}\" import.");
+                }
             }
 
             $this->importTotal = count($rows) - 1;
@@ -612,20 +589,48 @@ public function closeImportModal(): void
                 $fatherLastName      = $isOld ? trim($row['father_last_name']     ?? '') : '';
                 $fatherGivenName     = $isOld ? trim($row['father_given_name']    ?? '') : '';
                 $fatherMiddleName    = $isOld ? trim($row['father_middle_name']   ?? '') : '';
-                $fatherSuffix        = $isOld ? trim($row['father_suffix']        ?? '') : '';
                 $motherLastName      = $isOld ? trim($row['mother_last_name']     ?? '') : '';
                 $motherGivenName     = $isOld ? trim($row['mother_given_name']    ?? '') : '';
                 $motherMiddleName    = $isOld ? trim($row['mother_middle_name']   ?? '') : '';
                 $dswdHouseholdNo     = $isOld ? trim($row['dswd_household_no']    ?? '') : '';
+                $disability          = $isOld ? trim($row['disability']           ?? '') : '';
+                $contactNumber       = $isOld ? trim($row['contact_number']       ?? '') : '';
                 $addressStreet       = $isOld ? trim($row['address_street']       ?? '') : '';
                 $addressBarangay     = $isOld ? trim($row['address_barangay']     ?? '') : '';
                 $addressMunicipality = $isOld ? trim($row['address_municipality'] ?? '') : '';
                 $addressProvince     = $isOld ? trim($row['address_province']     ?? '') : '';
 
+                // Sex — optional, lenient input (Male/Female/M/F, any case),
+                // normalized to "Male"/"Female" for the profile display.
+                $sex = '';
+                if ($isOld) {
+                    $sexRaw = strtolower(trim($row['sex'] ?? ''));
+                    if (in_array($sexRaw, ['m', 'male'], true))      $sex = 'Male';
+                    elseif (in_array($sexRaw, ['f', 'female'], true)) $sex = 'Female';
+                    elseif ($sexRaw !== '') { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Sex \"{$row['sex']}\" must be Male or Female."); continue; }
+                }
+
+                // Birthdate — optional, accepts common sheet formats
+                // (Excel serial date, YYYY-MM-DD, MM/DD/YYYY, etc.).
+                $birthdate = '';
+                if ($isOld) {
+                    $birthRaw = trim((string)($row['birthdate'] ?? ''));
+                    if ($birthRaw !== '') {
+                        try {
+                            $birthdate = is_numeric($birthRaw)
+                                ? \PhpOffice\PhpSpreadsheet\Shared\Date::excelToDateTimeObject($birthRaw)->format('Y-m-d')
+                                : \Carbon\Carbon::parse($birthRaw)->format('Y-m-d');
+                        } catch (\Exception $e) {
+                            $this->appendImportError($validationErrors, $maxErrors, "{$label}: Birthdate \"{$birthRaw}\" is invalid."); continue;
+                        }
+                    }
+                }
+
                 $jobs[] = compact(
                     'fullName','firstName','mid','lastName','suffix','email','sid','batchYear',
-                    'motto','fatherLastName','fatherGivenName','fatherMiddleName','fatherSuffix',
+                    'motto','fatherLastName','fatherGivenName','fatherMiddleName',
                     'motherLastName','motherGivenName','motherMiddleName','dswdHouseholdNo',
+                    'disability','contactNumber','sex','birthdate',
                     'addressStreet','addressBarangay','addressMunicipality','addressProvince'
                 ) + ['code' => $courseMatch->code, 'courseName' => $courseMatch->name];
                 $seenIds[$sid] = true;
@@ -693,16 +698,15 @@ public function closeImportModal(): void
                             'password_changed_at'  => $now,
                             'profile_photo'        => null,
                             'profile_completed'    => 0,
-                            'gender'               => null,
-                            'date_of_birth'        => null,
-                            'contact_number'       => null,
-                            'disability'           => null,
+                            'gender'               => $job['sex'] ?: null,
+                            'date_of_birth'        => $job['birthdate'] ?: null,
+                            'contact_number'       => $job['contactNumber'] ?: null,
+                            'disability'           => $job['disability'] ?: null,
                             'motto'                => $job['motto'] ?: null,
                             'dswd_household_no'    => $job['dswdHouseholdNo'] ?: null,
                             'father_last_name'     => $job['fatherLastName'] ?: null,
                             'father_given_name'    => $job['fatherGivenName'] ?: null,
                             'father_middle_name'   => $job['fatherMiddleName'] ?: null,
-                            'father_suffix'        => $job['fatherSuffix'] ?: null,
                             'mother_last_name'     => $job['motherLastName'] ?: null,
                             'mother_given_name'    => $job['motherGivenName'] ?: null,
                             'mother_middle_name'   => $job['motherMiddleName'] ?: null,
@@ -2067,43 +2071,47 @@ public function closeImportModal(): void
                         <i class="fas fa-table-columns text-white" style="font-size:.6rem;"></i>
                     </div>
                     <p class="font-bold text-blue-900 text-sm">
-                        {{ $importAlumniType === 'old' ? 'Excel Columns' : 'Required Excel Columns' }}
+                        Excel Columns
                     </p>
                 </div>
 
                 @php
-                    // Recent — unchanged, everything listed is required.
-                    $recentCols = [
-                        'first_name', 'last_name', 'middle_name', 'suffix',
-                        'student_id', 'programs',   'batch',       'email',
-                    ];
+                    // Recent (new graduates) — only these are truly required;
+                    // middle_name and suffix are optional and can be left blank.
+                    $recentRequiredCols = ['first_name', 'last_name', 'student_id', 'programs', 'batch', 'email'];
+                    $recentOptionalCols = ['middle_name', 'suffix'];
 
-                    // Old — only these are truly required; the rest (pulled
-                    // straight from the Alumni Information profile fields)
-                    // are optional and can be left blank in the sheet.
+                    // Old (existing alumni) — only these are truly required; the
+                    // rest (pulled straight from the Alumni Information profile
+                    // fields) are optional and can be left blank in the sheet.
                     $oldRequiredCols = ['first_name', 'last_name', 'student_id', 'programs', 'batch'];
                     $oldOptionalCols = [
                         'middle_name', 'suffix', 'email', 'motto',
-                        'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
+                        'sex', 'birthdate',
+                        'father_last_name', 'father_given_name', 'father_middle_name',
                         'mother_last_name', 'mother_given_name', 'mother_middle_name',
-                        'dswd_household_no',
+                        'dswd_household_no', 'disability', 'contact_number',
                         'address_street', 'address_barangay', 'address_municipality', 'address_province',
                     ];
+
+                    $requiredCols = $importAlumniType === 'old' ? $oldRequiredCols : $recentRequiredCols;
+                    $optionalCols = $importAlumniType === 'old' ? $oldOptionalCols : $recentOptionalCols;
                 @endphp
                 <div class="req-col-chips">
-                    @if($importAlumniType === 'old')
-                        @foreach($oldRequiredCols as $col)
-                            <span class="req-col-chip">{{ $col }}</span>
-                        @endforeach
-                        @foreach($oldOptionalCols as $col)
-                            <span class="req-col-chip">{{ $col }}</span>
-                        @endforeach
-                    @else
-                        @foreach($recentCols as $col)
-                            <span class="req-col-chip">{{ $col }}</span>
-                        @endforeach
-                    @endif
+                    @foreach($requiredCols as $col)
+                        <span class="req-col-chip">{{ $col }}</span>
+                    @endforeach
+                    @foreach($optionalCols as $col)
+                        <span class="req-col-chip">{{ $col }}</span>
+                    @endforeach
                 </div>
+
+                <p class="text-xs text-blue-700 px-4 pb-3">
+                    Only these columns are accepted for
+                    <strong>{{ $importAlumniType === 'old' ? 'Old - Existing alumni' : 'Recent - New graduates' }}</strong> imports —
+                    any other column in the sheet will cancel the import with an error.
+                    Columns beyond <strong>{{ implode(', ', $requiredCols) }}</strong> are optional and may be left blank.
+                </p>
             </div>
 
             @if($importStatus === 'invalid_type')
