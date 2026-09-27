@@ -510,7 +510,7 @@ new class extends Component {
 .yb-search-input::placeholder { color: #999999; font-weight: 400; }
 .yb-search-input:hover  { border-color: #c4b5d4; }
 .yb-search-input:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
-.yb-search-input-active { background: #eef6fd; border-color: #bfe0f7; }
+.yb-search-input-active { background: #fff; border-color: #E8E0F0; }
 .yb-search-input-active:focus { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
 
 /* ── Dropdown button ────────────────────────────────────── */
