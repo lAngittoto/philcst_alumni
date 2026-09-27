@@ -45,15 +45,37 @@ new class extends Component {
     public function getProfilePhotoUrl(): string
     {
         $path = $this->alumniPhoto;
-        if (!$path || str_contains($path, 'default.png')) {
+
+        // Empty, literal "null", or default placeholder → show default avatar
+        if (!$path || $path === 'null' || str_contains($path, 'default.png')) {
             return asset('storage/alumni-photos/default.png');
         }
+
+        // Full HTTP(S) URL (Cloudinary, S3, etc.) — return as-is
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Standard stored paths: alumni-photos/xxx or organizers/xxx
         if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/')) {
             return Storage::disk('public')->exists($path)
                 ? asset('storage/' . $path)
                 : asset('storage/alumni-photos/default.png');
         }
-        return asset('storage/alumni-photos/default.png');
+
+        // Bare filename with no directory separator (e.g. "photo.jpg")
+        // — prepend the standard folder, same as yearbook does
+        if (!str_contains($path, '/')) {
+            $full = 'alumni-photos/' . $path;
+            return Storage::disk('public')->exists($full)
+                ? asset('storage/' . $full)
+                : asset('storage/alumni-photos/default.png');
+        }
+
+        // Any other prefixed path (custom subfolders, etc.)
+        return Storage::disk('public')->exists($path)
+            ? asset('storage/' . $path)
+            : asset('storage/alumni-photos/default.png');
     }
 
     public function mount(): void

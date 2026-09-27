@@ -1176,17 +1176,12 @@ select.filter-input:hover { cursor: default !important; }
                         @if($search || $filterStatus !== '') No events match your filters
                         @else No events found @endif
                     </p>
+                    @if(!$search && $filterStatus === '')
                     <p class="text-sm mt-1 text-gray-500">
-                        @if($search || $filterStatus !== '') Try clearing your filters to see all available events.
-                        @else Check back soon — new events will appear here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>. @endif
+                        Check back soon — new events will appear here for <span class="font-medium">{{ $alumniCollege ?: 'your college' }}</span>.
                     </p>
+                    @endif
                 </div>
-                @if($search || $filterStatus !== '')
-                <button wire:click="resetFilters"
-                        class="px-4 py-2 rounded-xl text-sm font-semibold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                    Clear Filters
-                </button>
-                @endif
             </div>
             @endif
         </div>

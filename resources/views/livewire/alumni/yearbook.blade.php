@@ -230,6 +230,10 @@ new class extends Component {
         if (strpos($path, 'default.png') !== false) {
             return asset('storage/alumni-photos/default.png');
         }
+        // Full HTTP(S) URL (Cloudinary, S3, etc.) — return as-is
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
         if (str_starts_with($path, 'alumni-photos/')) {
             return asset('storage/' . $path);
         }
@@ -253,17 +257,48 @@ new class extends Component {
         try {
             $alumni = Alumni::findOrFail($this->myAlumniId);
 
+            // Delete old photo — Cloudinary or local storage
             if ($alumni->profile_photo && !str_contains($alumni->profile_photo, 'default.png')) {
-                Storage::disk('public')->delete($alumni->profile_photo);
+                if (str_starts_with($alumni->profile_photo, 'http')) {
+                    // Old photo is a Cloudinary URL — destroy via public_id
+                    if ($alumni->profile_photo_public_id) {
+                        try {
+                            cloudinary()->uploadApi()->destroy($alumni->profile_photo_public_id);
+                        } catch (\Exception $e) {
+                            // Non-fatal: continue even if Cloudinary delete fails
+                        }
+                    }
+                } else {
+                    Storage::disk('public')->delete($alumni->profile_photo);
+                }
             }
 
-            $path = $this->newYearbookPhoto->store('alumni-photos', 'public');
-            $alumni->update(['profile_photo' => $path]);
+            // Upload new photo to Cloudinary (persists across Railway deploys)
+            $ext    = strtolower($this->newYearbookPhoto->getClientOriginalExtension() ?: 'jpg');
+            $base64 = base64_encode(file_get_contents($this->newYearbookPhoto->getRealPath()));
+
+            $uploadResult = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'alumni-photos',
+                    'public_id'     => 'alumni_' . $this->myAlumniId . '_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            $cloudinaryUrl      = $uploadResult['secure_url'];
+            $cloudinaryPublicId = $uploadResult['public_id'];
+
+            $alumni->update([
+                'profile_photo'           => $cloudinaryUrl,
+                'profile_photo_public_id' => $cloudinaryPublicId,
+            ]);
 
             $this->newYearbookPhoto = null;
 
             $this->dispatch('flash-message', type: 'success', message: 'Yearbook photo updated successfully.');
-            $this->dispatch('yb-photo-saved', url: $this->getPhotoUrl($path));
+            $this->dispatch('yb-photo-saved', url: $cloudinaryUrl);
         } catch (\Exception $e) {
             $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo.');
         }
