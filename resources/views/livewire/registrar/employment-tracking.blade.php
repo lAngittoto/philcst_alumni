@@ -1097,7 +1097,7 @@ new class extends Component {
 ?>
 
 <div @open-emp-modal.window="$wire.openModal($event.detail.filter, $event.detail.batch ?? null, $event.detail.course ?? '', $event.detail.status ?? '')"
-     class="emp-dashboard-root {{ (count($filterCourse) > 0 || $filterBatchFrom !== '' || $filterBatchTo !== '') ? 'emp-filter-on' : '' }}">
+     class="emp-dashboard-root">
 
 {{-- ══ FLASH TOAST — mirrors Alumni Records' toast, shows the "Generating
      your PDF/Excel/print view… this only takes a moment" info message
@@ -1229,41 +1229,6 @@ new class extends Component {
 
     /* Lock View All button while any stat card / chart is loading */
     .emp-dashboard-root.emp-busy [data-viewall-btn] {
-        pointer-events: none !important;
-        cursor: default !important;
-        opacity: 0.35 !important;
-    }
-
-    /* ── Filter-active lock — when any Program or Batch filter is set,
-       ALL clickable widgets (stat cards, View Local/Abroad, donut, batch bar,
-       top programs, View All button) are made inert. The registrar is in
-       "scoped view" mode; modals/nav that open from unfiltered state would
-       show wrong context. Cleared by Blade on every Livewire re-render the
-       moment filters are cleared. ── */
-    .emp-dashboard-root.emp-filter-on .emp-clickable,
-    .emp-dashboard-root.emp-filter-on .stat-card,
-    .emp-dashboard-root.emp-filter-on a.stat-card,
-    .emp-dashboard-root.emp-filter-on .chart-clickable {
-        pointer-events: none !important;
-        cursor: default !important;
-        user-select: none;
-    }
-    .emp-dashboard-root.emp-filter-on .stat-card:hover,
-    .emp-dashboard-root.emp-filter-on .emp-clickable:hover {
-        box-shadow: none !important;
-        border-color: #E8E0F0 !important;
-        opacity: 1 !important;
-        filter: none !important;
-    }
-    /* View Local / View Abroad buttons inside the work location card */
-    .emp-dashboard-root.emp-filter-on button[onclick*="empOpenModal"] {
-        pointer-events: none !important;
-        cursor: default !important;
-        opacity: 0.45 !important;
-    }
-    /* View All button */
-    .emp-dashboard-root.emp-filter-on .ar-report-btn-viewall,
-    .emp-dashboard-root.emp-filter-on [data-viewall-btn] {
         pointer-events: none !important;
         cursor: default !important;
         opacity: 0.35 !important;
