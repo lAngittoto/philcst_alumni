@@ -246,7 +246,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height yb-no-select"
+<div class="flex flex-col gap-2 sm:gap-3 px-2 sm:px-5 lg:px-10 pt-2 sm:pt-4 pb-1 sm:pb-4 max-w-screen-2xl mx-auto w-full yb-root-height yb-no-select"
      oncontextmenu="return false;"
      x-data="{
         activeFilter: null,
@@ -299,11 +299,15 @@ new class extends Component {
     background: #fff;
     display: flex;
     flex-direction: column;
-    height: 370px;
+    min-height: 320px;
+    height: auto;
     cursor: default;
 }
-@media (max-width: 640px) {
-    .yb-card { height: 290px; }
+@media (min-width: 641px) {
+    .yb-card { min-height: 370px; }
+}
+@media (max-width: 400px) {
+    .yb-card { min-height: 260px; }
 }
 .yb-card:hover {
     box-shadow: 0 6px 22px rgba(0,0,0,.12);
@@ -319,15 +323,18 @@ new class extends Component {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 18px 0 14px;
-    min-height: 160px;
+    padding: 14px 0 12px;
+    min-height: 140px;
+}
+@media (min-width: 480px) {
+    .yb-card-photo-wrap { padding: 18px 0 14px; min-height: 160px; }
 }
 @media (min-width: 641px) {
     .yb-card-photo-wrap { padding: 22px 0 18px; min-height: 190px; }
 }
 .yb-card-photo {
-    width: 100px;
-    height: 100px;
+    width: 76px;
+    height: 76px;
     object-fit: cover;
     object-position: top center;
     display: block;
@@ -336,7 +343,13 @@ new class extends Component {
     box-shadow: 0 4px 16px rgba(0,0,0,.3);
     flex-shrink: 0;
 }
+@media (min-width: 480px) {
+    .yb-card-photo { width: 90px; height: 90px; }
+}
 @media (min-width: 641px) {
+    .yb-card-photo { width: 110px; height: 110px; border-width: 4px; }
+}
+@media (min-width: 1024px) {
     .yb-card-photo { width: 120px; height: 120px; border-width: 4px; }
 }
 
@@ -352,10 +365,16 @@ new class extends Component {
 /* ── Purple name ribbon ───────────────────────────────────── */
 .yb-card-name-band {
     background: #7A3F91;
-    padding: 8px 36px 8px 13px;
+    padding: 6px 30px 6px 10px;
     position: relative;
     overflow: hidden;
     flex-shrink: 0;
+}
+@media (min-width: 480px) {
+    .yb-card-name-band { padding: 7px 33px 7px 12px; }
+}
+@media (min-width: 641px) {
+    .yb-card-name-band { padding: 8px 36px 8px 13px; }
 }
 .yb-card-name-band::before {
     content: '';
@@ -378,7 +397,7 @@ new class extends Component {
     pointer-events: none;
 }
 .yb-card-name {
-    font-size: 13px; font-weight: 800;
+    font-size: 11px; font-weight: 800;
     color: #FFFFFF; line-height: 1.2;
     text-transform: uppercase;
     letter-spacing: .01em;
@@ -388,45 +407,60 @@ new class extends Component {
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+@media (min-width: 480px) {
+    .yb-card-name { font-size: 12px; }
+}
 @media (min-width: 641px) {
-    .yb-card-name { font-size: 15px; }
+    .yb-card-name { font-size: 14px; }
 }
 
 /* ── Card info body — white ───────────────────────────────── */
 .yb-card-text {
-    padding: 8px 10px 10px;
+    padding: 6px 8px 8px;
     flex: 1;
     display: flex; flex-direction: column; gap: 2px;
     background: #fff;
     overflow: hidden;
 }
+@media (min-width: 480px) {
+    .yb-card-text { padding: 8px 10px 10px; }
+}
 @media (min-width: 641px) {
     .yb-card-text { padding: 10px 13px 12px; gap: 3px; }
 }
 .yb-card-line {
-    font-size: 12px; color: #1a1a1a; line-height: 1.35; font-weight: 600;
+    font-size: 10px; color: #1a1a1a; line-height: 1.35; font-weight: 600;
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 1;
     -webkit-box-orient: vertical;
 }
+@media (min-width: 480px) {
+    .yb-card-line { font-size: 11px; }
+}
 @media (min-width: 641px) {
     .yb-card-line { font-size: 13px; -webkit-line-clamp: 2; line-height: 1.4; }
 }
 .yb-card-motto {
-    font-size: 11px; font-weight: 700;
-    color: #5A1A8A; margin-top: 3px;
+    font-size: 10px; font-weight: 700;
+    color: #5A1A8A; margin-top: 2px;
+}
+@media (min-width: 480px) {
+    .yb-card-motto { font-size: 11px; margin-top: 3px; }
 }
 @media (min-width: 641px) {
     .yb-card-motto { font-size: 13px; margin-top: 4px; }
 }
 .yb-card-motto-text {
-    font-size: 11px; font-style: italic; font-weight: 600;
+    font-size: 10px; font-style: italic; font-weight: 600;
     color: #1a1a1a; line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+@media (min-width: 480px) {
+    .yb-card-motto-text { font-size: 11px; }
 }
 @media (min-width: 641px) {
     .yb-card-motto-text { font-size: 13px; -webkit-line-clamp: 3; line-height: 1.4; }
@@ -439,9 +473,16 @@ new class extends Component {
 .yb-section-badge {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 14px 4px 12px; border-radius: 6px;
-    font-size: 15px; font-weight: 700; letter-spacing: .02em;
+    font-size: 12px; font-weight: 700; letter-spacing: .02em;
     background: rgba(122,63,145,.07); color: #7A3F91;
     border: none; border-left: 4px solid #7A3F91;
+    word-break: break-word; white-space: normal; line-height: 1.3;
+}
+@media (min-width: 641px) {
+    .yb-section-badge { font-size: 14px; }
+}
+@media (min-width: 1024px) {
+    .yb-section-badge { font-size: 15px; }
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
@@ -521,26 +562,38 @@ new class extends Component {
     align-self: stretch;
     overflow: clip;
 }
+@media (max-width: 640px) {
+    .yb-table-block { border-radius: 0.75rem; }
+}
 .yb-filter-bar {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
-    padding: 0.6rem 0.875rem; flex-shrink: 0;
+    padding: 0.5rem 0.75rem; flex-shrink: 0;
     position: relative; z-index: 50; overflow: visible;
+}
+@media (min-width: 641px) {
+    .yb-filter-bar { padding: 0.6rem 0.875rem; }
 }
 .yb-pagination-bar {
     flex-shrink: 0;
     background: #7A3F91;
-    padding: 0 1rem; min-height: 48px;
+    padding: 0 0.75rem; min-height: 44px;
     display: flex; align-items: center;
-    justify-content: space-between; gap: 0.5rem;
+    justify-content: space-between; gap: 0.375rem;
     flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,.15);
     position: sticky;
     bottom: 0;
     z-index: 30;
 }
+@media (min-width: 641px) {
+    .yb-pagination-bar { padding: 0 1rem; min-height: 48px; gap: 0.5rem; }
+}
 .yb-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    min-width: 32px; height: 32px; padding: 0 10px;
-    border-radius: 8px; font-size: 12px; font-weight: 700; transition: all .15s;
+    min-width: 28px; height: 28px; padding: 0 8px;
+    border-radius: 7px; font-size: 11px; font-weight: 700; transition: all .15s;
+}
+@media (min-width: 641px) {
+    .yb-pg-btn { min-width: 32px; height: 32px; padding: 0 10px; font-size: 12px; border-radius: 8px; }
 }
 .yb-pg-active { background: #fff; color: #7a3f91; }
 .yb-pg-nav    { background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.25); }
@@ -554,40 +607,49 @@ new class extends Component {
     align-items: center;
     gap: 0;
     overflow: hidden;
-    border-radius: 14px;
+    border-radius: 12px;
     border: 2px solid #7A3F91;
     box-shadow: 0 2px 16px rgba(122,63,145,.18), 0 0 0 4px rgba(122,63,145,.07);
     background: #fff;
     padding: 0;
     animation: ybFadeUp .3s cubic-bezier(.4,0,.2,1) both;
 }
+@media (min-width: 641px) {
+    .yb-batch-banner { border-radius: 14px; }
+}
 .yb-batch-banner-label {
     background: #7A3F91;
     color: #fff;
-    font-size: 10px;
+    font-size: 8px;
     font-weight: 800;
     letter-spacing: .12em;
     text-transform: uppercase;
-    padding: 0 10px;
-    height: 38px;
+    padding: 0 8px;
+    height: 32px;
     display: flex;
     align-items: center;
     white-space: nowrap;
     flex-shrink: 0;
 }
+@media (min-width: 641px) {
+    .yb-batch-banner-label { font-size: 10px; padding: 0 10px; height: 38px; }
+}
 .yb-batch-banner-year {
     color: #7A3F91;
-    font-size: clamp(1.15rem, 2.2vw, 1.55rem);
+    font-size: clamp(1rem, 2.2vw, 1.55rem);
     font-weight: 900;
     letter-spacing: .06em;
     text-transform: uppercase;
-    padding: 0 18px 0 14px;
-    height: 38px;
+    padding: 0 14px 0 10px;
+    height: 32px;
     display: flex;
     align-items: center;
     white-space: nowrap;
     background: #fff;
     line-height: 1;
+}
+@media (min-width: 641px) {
+    .yb-batch-banner-year { padding: 0 18px 0 14px; height: 38px; }
 }
 
 /* ── "My card" highlight ─────────────────────────────────── */
@@ -612,9 +674,15 @@ new class extends Component {
 
 /* ── Root height ─────────────────────────────────────────── */
 .yb-root-height {
-    height: calc(100vh - 180px);
-    max-height: calc(100vh - 180px);
+    height: calc(100vh - 160px);
+    max-height: calc(100vh - 160px);
     overflow: hidden;
+}
+@media (min-width: 641px) {
+    .yb-root-height {
+        height: calc(100vh - 180px);
+        max-height: calc(100vh - 180px);
+    }
 }
 
 /* Privacy notice pill */
@@ -629,9 +697,17 @@ new class extends Component {
 
 /* ── Mobile responsiveness ──────────────────────────────── */
 @media (max-width: 640px) {
-    .yb-batch-banner-year { font-size: 1.1rem; padding: 0 12px 0 10px; }
-    .yb-batch-banner-label { font-size: 9px; padding: 0 8px; }
-    .yb-filter-bar { gap: 8px; }
+    .yb-filter-bar { gap: 6px; }
+    /* Search takes full row on mobile */
+    .yb-filter-bar > .relative.flex-1 { min-width: 0; }
+}
+
+/* Extra-small phones */
+@media (max-width: 400px) {
+    .yb-filter-bar { flex-wrap: wrap; }
+    .yb-filter-bar > .relative.flex-1 { width: 100%; flex: 1 1 100%; }
+    .yb-dd-btn { font-size: 0.78rem; padding-left: 0.6rem; padding-right: 1.9rem; }
+    .yb-card-name-band { padding: 6px 28px 6px 10px; }
 }
 
 @media (max-width: 767px) {
@@ -644,24 +720,24 @@ new class extends Component {
     }
 
     .yb-mobile-subtitle { display: none; }
-    .yb-mobile-header-icon { width: 2.25rem !important; height: 2.25rem !important; }
-    .yb-mobile-title { font-size: 1rem !important; }
+    .yb-mobile-header-icon { width: 2rem !important; height: 2rem !important; }
+    .yb-mobile-title { font-size: 0.95rem !important; }
 
-    .yb-filter-bar { padding: 0.45rem 0.65rem; }
-    .yb-dd-btn, .yb-search-input { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+    .yb-filter-bar { padding: 0.4rem 0.6rem; }
+    .yb-dd-btn, .yb-search-input { padding-top: 0.38rem; padding-bottom: 0.38rem; font-size: 0.8rem; }
 
-    .yb-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
-    .yb-pagination-bar p { font-size: 11px; }
+    .yb-pagination-bar { min-height: 38px; padding: 4px 0.65rem; }
+    .yb-pagination-bar p { font-size: 10px; }
 
     .yb-pagination-bar {
         position: fixed !important;
         bottom: 0; left: 0; right: 0;
-        padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
         z-index: 200;
         border-radius: 0;
     }
     #yb-scroll {
-        padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
+        padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px)) !important;
     }
 }
 
@@ -670,30 +746,60 @@ new class extends Component {
     position: relative;
     background-color: #ffffff;
 }
+
+/* ── Extra-small: single column on phones < 380px ───────── */
+@media (max-width: 380px) {
+    .grid-cols-2 { grid-template-columns: repeat(1, minmax(0, 1fr)) !important; }
+    .yb-card { min-height: 220px; }
+    .yb-card-photo-wrap { min-height: 120px; padding: 12px 0 10px; }
+    .yb-card-photo { width: 68px; height: 68px; }
+    .yb-search-input, .yb-dd-btn { font-size: 0.78rem; }
+}
+
+/* ── Smooth card grid on all breakpoints ─────────────────── */
+@media (min-width: 381px) and (max-width: 479px) {
+    .yb-card { min-height: 250px; }
+}
+
+/* ── Prevent dd panel from overflowing viewport ─────────── */
+@media (max-width: 640px) {
+    .yb-dd-panel {
+        left: auto;
+        right: 0;
+        max-width: calc(100vw - 1.5rem);
+    }
+}
+
+/* ── Scroll area on mobile: smoother iOS-style ───────────── */
+@media (max-width: 767px) {
+    #yb-scroll {
+        -webkit-overflow-scrolling: touch;
+    }
+}
 </style>
 
     {{-- PAGE HEADER --}}
-    <div class="flex flex-col gap-3 flex-shrink-0">
+    <div class="flex flex-col gap-2 flex-shrink-0">
 
-        <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-4">
-                <div class="yb-mobile-header-icon w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-[#7A3F91]">
-                    <i class="fas fa-book-open text-white text-lg"></i>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2 sm:gap-4 min-w-0">
+                <div class="yb-mobile-header-icon w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-[#7A3F91]">
+                    <i class="fas fa-book-open text-white text-base sm:text-lg"></i>
                 </div>
-                <div>
-                    <h1 class="yb-mobile-title text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Digital Alumni Yearbook</h1>
-                    <p class="yb-mobile-subtitle text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+                <div class="min-w-0">
+                    <h1 class="yb-mobile-title text-base sm:text-xl font-semibold tracking-tight text-gray-900 truncate" style="user-select:none;-webkit-user-select:none;">Digital Alumni Yearbook</h1>
+                    <p class="yb-mobile-subtitle text-xs sm:text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
                         GRADUATES {{ $myBatch !== '' ? $myBatch : '' }}
                     </p>
                 </div>
             </div>
 
-            <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex items-center gap-2 flex-shrink-0">
                 @if($myBatch !== '')
                 <div class="yb-batch-banner" aria-label="Batch {{ $myBatch }}">
                     <span class="yb-batch-banner-label">
-                        <i class="fas fa-graduation-cap mr-1.5" style="font-size:9px;"></i>
-                        The Pillars
+                        <i class="fas fa-graduation-cap mr-1 sm:mr-1.5" style="font-size:8px;"></i>
+                        <span class="hidden xs:inline">The </span>Pillars
                     </span>
                     <span class="yb-batch-banner-year">{{ $myBatch }}</span>
                 </div>
@@ -709,12 +815,12 @@ new class extends Component {
         {{-- FILTER BAR --}}
         <div class="yb-filter-bar flex flex-wrap gap-2 items-center">
 
-            <div class="flex items-center gap-2 px-1 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+            <div class="flex items-center gap-2 px-1 h-[32px] sm:h-[38px] rounded-xl shrink-0 font-semibold text-xs sm:text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">
                 Filters
             </div>
 
-            <div class="relative flex-1 min-w-[150px] max-w-xs" wire:ignore
+            <div class="relative flex-1 min-w-[100px] max-w-xs" wire:ignore
                  x-data="{
                     q: @js($search),
                     init() {
@@ -753,7 +859,7 @@ new class extends Component {
                      x-transition:leave-start="opacity-100 scale-100"
                      x-transition:leave-end="opacity-0 scale-95"
                      class="yb-dd-panel"
-                     style="display:none; min-width:280px;">
+                     style="display:none; min-width:220px;">
                     <button type="button"
                             :disabled="courseBusy"
                             :class="{ 'sel': $wire.course === '', 'opacity-50 cursor-not-allowed': courseBusy }"
@@ -789,16 +895,16 @@ new class extends Component {
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
                     @disabled(!$hasActiveFilters)
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           border transition active:scale-95
+                    class="ml-auto inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold
+                           border transition active:scale-95 whitespace-nowrap flex-shrink-0
                            {{ $hasActiveFilters
                                 ? 'bg-white border-[#E8E0F0] text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
                                 : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
                 <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm"></i>
+                    <i class="fas fa-rotate-left text-xs sm:text-sm"></i>
                 </span>
                 <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7A3F91;"></i>
+                    <i class="fas fa-spinner fa-spin text-xs sm:text-sm" style="color:#7A3F91;"></i>
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
@@ -817,7 +923,7 @@ new class extends Component {
 
             <div id="yb-scroll"
                  @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-3 sm:p-4 pb-6 transition-opacity duration-200"
+                 class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 lg:p-4 pb-4 sm:pb-6 transition-opacity duration-200"
                  style="z-index: 1;"
                  wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
@@ -834,7 +940,7 @@ new class extends Component {
                                     <div class="flex-1 h-px" style="background:#D8B4FE;"></div>
                                 </div>
 
-                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3" style="--tw-gap: 0.5rem;">
                                     @foreach($group as $alumni)
                                         @php
                                             $isMe = ($myAlumniId > 0 && $alumni->id === $myAlumniId);
