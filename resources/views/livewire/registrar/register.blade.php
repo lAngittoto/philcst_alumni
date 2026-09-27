@@ -463,9 +463,34 @@ public function closeImportModal(): void
                 ? ['first_name', 'last_name', 'student_id', 'course', 'batch']
                 : ['first_name', 'last_name', 'middle_name', 'student_id', 'course', 'batch', 'email'];
 
+            // Display versions of the required columns (so the "course" internal
+            // alias — which was normalized above from program/programs/program_code —
+            // shows back to the user as "programs", matching the template).
+            $displayNames = [
+                'first_name'  => 'first_name',
+                'last_name'   => 'last_name',
+                'middle_name' => 'middle_name',
+                'student_id'  => 'student_id',
+                'course'      => 'programs',
+                'batch'       => 'batch',
+                'email'       => 'email',
+            ];
+
+            $missing = [];
             foreach ($required as $col)
                 if (!in_array($col, $header, true))
-                    throw new \Exception("Missing required column: \"{$col}\".");
+                    $missing[] = $displayNames[$col] ?? $col;
+
+            if (!empty($missing)) {
+                $typeLabel  = $isOld ? 'Old - Existing alumni' : 'Recent - New graduates';
+                $allNeeded  = implode(', ', array_map(fn ($c) => $displayNames[$c] ?? $c, $required));
+                $missingStr = implode(', ', $missing);
+
+                throw new \Exception(
+                    "Wrong template for \"{$typeLabel}\". Missing column(s): {$missingStr}. " .
+                    "Required columns for {$typeLabel}: {$allNeeded}."
+                );
+            }
 
             $this->importTotal = count($rows) - 1;
 
@@ -1978,7 +2003,7 @@ public function closeImportModal(): void
             {{-- Step Indicator (3 steps only: Upload → Importing → Done) — hidden during
                  processing so the loading spinner can truly center in the modal --}}
             @php
-                $stepMap     = ['upload' => 0, 'processing' => 1, 'blocked' => 1, 'done' => 2];
+                $stepMap     = ['upload' => 0, 'processing' => 1, 'blocked' => 0, 'done' => 2];
                 $currentStep = $stepMap[$importStep] ?? 0;
                 $stepDefs    = [[0,'1','Upload'],[1,'2','Importing'],[2,'3','Done']];
             @endphp
