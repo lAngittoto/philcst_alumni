@@ -938,39 +938,23 @@ new class extends Component {
     /**
      * Receives photo as base64 from JS FileReader — uploads to Cloudinary
      * for persistent storage across Railway deploys.
-     *
-     * TEMP DEBUG MODE: every error is shown directly in the UI toast
-     * (full exception message + file + line) instead of only going to
-     * the log file, since Railway's Deploy Logs don't capture Laravel's
-     * storage/logs output by default. Remove the verbose message once
-     * the real cause is found.
      */
     public function receiveAlumniPhoto(string $filename, string $base64): void
     {
-        if (!$this->viewingProfileId) {
-            $this->dispatch('flash-message', type: 'error', message: 'DEBUG: no viewingProfileId set.');
-            $this->dispatch('photo-saved');
-            return;
-        }
+        if (!$this->viewingProfileId) return;
 
         try {
             $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
             if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
-                $this->dispatch('flash-message', type: 'error', message: 'DEBUG: invalid extension "' . $ext . '".');
-                $this->dispatch('photo-saved');
+                $this->dispatch('flash-message', type: 'error', message: 'Invalid file type.');
                 return;
             }
 
             $alumni = Alumni::findOrFail($this->viewingProfileId);
 
-            // Delete old photo from Cloudinary if exists — failure here must
-            // NEVER block the new upload.
+            // Delete old photo from Cloudinary if exists
             if ($alumni->profile_photo_public_id) {
-                try {
-                    cloudinary()->uploadApi()->destroy($alumni->profile_photo_public_id);
-                } catch (\Throwable $destroyError) {
-                    // swallow — deleting the old photo is best-effort only
-                }
+                cloudinary()->uploadApi()->destroy($alumni->profile_photo_public_id);
             }
 
             // Upload to Cloudinary via base64
@@ -984,14 +968,8 @@ new class extends Component {
                 ]
             );
 
-            $cloudinaryUrl      = $uploadResult['secure_url'] ?? null;
-            $cloudinaryPublicId = $uploadResult['public_id'] ?? null;
-
-            if (!$cloudinaryUrl) {
-                $this->dispatch('flash-message', type: 'error', message: 'DEBUG: Cloudinary returned no secure_url. Raw response: ' . json_encode($uploadResult));
-                $this->dispatch('photo-saved');
-                return;
-            }
+            $cloudinaryUrl      = $uploadResult['secure_url'];
+            $cloudinaryPublicId = $uploadResult['public_id'];
 
             $alumni->update([
                 'profile_photo'           => $cloudinaryUrl,
@@ -1003,20 +981,8 @@ new class extends Component {
             $this->dispatch('flash-message', type: 'success', message: 'Profile photo updated successfully.');
             $this->dispatch('photo-saved', newSrc: $cloudinaryUrl);
 
-        } catch (\Throwable $e) {
-            // DEBUG: full detail shown directly in the toast so we can see
-            // it without needing Railway's application log output.
-            $debugMsg = sprintf(
-                'DEBUG ERROR: %s | File: %s:%d',
-                $e->getMessage(),
-                basename($e->getFile()),
-                $e->getLine()
-            );
-            $this->dispatch('flash-message', type: 'error', message: $debugMsg);
-            // ALWAYS dispatch photo-saved (even on failure) so the spinner
-            // in the browser is guaranteed to stop — this is what was
-            // causing the infinite loading before.
-            $this->dispatch('photo-saved');
+        } catch (\Exception $e) {
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo: ' . $e->getMessage());
         }
     }
 
