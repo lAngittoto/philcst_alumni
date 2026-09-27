@@ -2105,13 +2105,6 @@ public function closeImportModal(): void
                         <span class="req-col-chip">{{ $col }}</span>
                     @endforeach
                 </div>
-
-                <p class="text-xs text-blue-700 px-4 pb-3">
-                    Only these columns are accepted for
-                    <strong>{{ $importAlumniType === 'old' ? 'Old - Existing alumni' : 'Recent - New graduates' }}</strong> imports —
-                    any other column in the sheet will cancel the import with an error.
-                    Columns beyond <strong>{{ implode(', ', $requiredCols) }}</strong> are optional and may be left blank.
-                </p>
             </div>
 
             @if($importStatus === 'invalid_type')
