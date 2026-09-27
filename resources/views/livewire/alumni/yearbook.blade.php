@@ -2,24 +2,15 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
-use Livewire\Attributes\Renderless;
 use Livewire\WithPagination;
 use Livewire\WithoutUrlPagination;
-use Livewire\WithFileUploads;
 use App\Models\Alumni;
 use App\Models\Course;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 new class extends Component {
-    // WithoutUrlPagination keeps previousPage()/nextPage()/gotoPage()
-    // working exactly the same, but stops Livewire from writing ?page=N
-    // into the browser's address bar — the URL stays clean on every
-    // page, not just page 1. Trade-off: the current page no longer
-    // survives a manual browser refresh (it resets to page 1), since
-    // nothing in the URL remembers it anymore.
-    use WithPagination, WithoutUrlPagination, WithFileUploads;
+    use WithPagination, WithoutUrlPagination;
 
     public string $search = '';
     public string $course = '';
@@ -44,7 +35,6 @@ new class extends Component {
                 $this->myCourseName = (string) ($alumni->course_name ?? '');
                 $this->myAlumniId   = (int)    ($alumni->id          ?? 0);
 
-                // Get the REAL college this course belongs to (from Course.college column)
                 if ($this->myCourseCode !== '') {
                     $this->myCollege = (string) (Course::where('code', $this->myCourseCode)->value('college') ?? '');
                 }
@@ -55,11 +45,6 @@ new class extends Component {
     public function updatingCourse() { $this->resetPage(); }
     public function updatingSearch() { $this->resetPage(); }
 
-    /**
-     * Course selection is handled by explicit server-side methods
-     * (not by setting the property directly from Alpine/JS), so every
-     * click is a clean, deterministic round-trip to the server.
-     */
     public function setCourse(string $code): void
     {
         $this->course = $code;
@@ -72,13 +57,6 @@ new class extends Component {
         $this->resetPage();
     }
 
-    /**
-     * Course dropdown options — ONLY courses that actually have alumni
-     * in the SAME BATCH as the logged-in user. No caching here on
-     * purpose: some environments run CACHE_STORE=array, which silently
-     * drops cached data between requests and would serve stale options.
-     * This is a small, batch-scoped query so recomputing every time is cheap.
-     */
     #[Computed]
     public function courses()
     {
@@ -98,16 +76,6 @@ new class extends Component {
             ->get(['id', 'code', 'name']);
     }
 
-    /**
-     * Privacy rule: only alumni from the SAME BATCH as the logged-in user.
-     * Within that batch, ALL courses are visible (no college restriction).
-     * Optional: filter by specific course or search term.
-     *
-     * Sort priority (uses the REAL Course.college column via Eloquent):
-     *   1) Your own course shows FIRST
-     *   2) Then other courses in your SAME COLLEGE (grouped together)
-     *   3) Then the rest, grouped by their own college, then course name, then name
-     */
     #[Computed]
     public function alumniRecords()
     {
@@ -119,12 +87,10 @@ new class extends Component {
                       'mother_last_name', 'mother_given_name', 'mother_middle_name',
                       'motto']);
 
-        // ── PRIVACY: locked to same batch only ──
         if ($this->myBatch !== '') {
             $q->where('batch', $this->myBatch);
         }
 
-        // ── Optional search (name / student ID / email) ──
         if (trim($this->search) !== '') {
             $s = trim($this->search);
             $q->where(function ($sub) use ($s) {
@@ -134,18 +100,15 @@ new class extends Component {
             });
         }
 
-        // ── Optional course filter ──
         if ($this->course !== '') {
             $q->where('course_code', $this->course);
         }
 
-        // Pull a real course_code -> college map (Eloquent, no raw table names)
         $collegeMap = Course::pluck('college', 'code')->toArray();
 
         $myCourseCode = $this->myCourseCode;
         $myCollege    = $this->myCollege;
 
-        // Sort entirely in PHP using the real college map — safest & always correct
         $all = $q->get()->sortBy(function ($alumni) use ($collegeMap, $myCourseCode, $myCollege) {
             $college = $collegeMap[$alumni->course_code] ?? '';
 
@@ -162,30 +125,6 @@ new class extends Component {
             );
         })->values();
 
-        // Manual pagination over the sorted collection.
-        //
-        // BUG THAT WAS HERE: this used to read $this->page directly, but
-        // WithPagination doesn't expose a plain public $page property —
-        // that silently evaluated to null every time, so this computed
-        // always rebuilt page 1 no matter what page Livewire's internal
-        // state said you were on. Next/Prev/page-number clicks DID
-        // update Livewire's pagination state correctly; this query just
-        // never looked at it.
-        //
-        // A later attempt used $this->getPage('page') instead — but
-        // Livewire's WithPagination trait has no public getPage() method
-        // at all, so that call throws "Call to undefined method", which
-        // is exactly the "clicked > and got 'No alumni found'" symptom:
-        // the request errors out instead of rendering page 2.
-        //
-        // The trait's real, documented mechanism (used internally by
-        // Model::paginate() itself) is Paginator::currentPageResolver(),
-        // which WithPagination::initializeWithPagination() already wires
-        // up automatically before mount() ever runs. Reading through
-        // LengthAwarePaginator::resolveCurrentPage() taps into that same
-        // resolver, so it always matches whatever page previousPage(),
-        // nextPage(), or gotoPage() last set — no separate getPage() call
-        // needed.
         $perPage = 100;
         $page    = (int) \Illuminate\Pagination\LengthAwarePaginator::resolveCurrentPage('page');
         $page    = $page > 0 ? $page : 1;
@@ -200,10 +139,6 @@ new class extends Component {
         );
     }
 
-    /**
-     * Groups the CURRENT page of alumniRecords by course name, preserving
-     * the sort order already applied above (own course first, etc).
-     */
     #[Computed]
     public function groupedAlumni()
     {
@@ -224,7 +159,6 @@ new class extends Component {
         if (strpos($path, 'default.png') !== false) {
             return asset('storage/alumni-photos/default.png');
         }
-        // Full HTTP(S) URL (Cloudinary, S3, etc.) — return as-is
         if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
             return $path;
         }
@@ -257,8 +191,8 @@ new class extends Component {
             return $parts[0] . ($suffix !== '' ? ' ' . $suffix : '');
         }
 
-        $lastName   = $parts[$count - 1];
-        $firstName  = $parts[0];
+        $lastName       = $parts[$count - 1];
+        $firstName      = $parts[0];
         $middleInitials = '';
 
         for ($i = 1; $i < $count - 1; $i++) {
@@ -267,7 +201,6 @@ new class extends Component {
 
         $middleInitials = rtrim($middleInitials);
 
-        // "Last, First M. [Suffix]"
         $formatted = $lastName . ', ' . $firstName;
         if ($middleInitials !== '') $formatted .= ' ' . $middleInitials;
         if ($suffix !== '')        $formatted .= ' ' . $suffix;
@@ -316,21 +249,7 @@ new class extends Component {
 <div class="flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height yb-no-select"
      oncontextmenu="return false;"
      x-data="{
-        // ── One-filter-at-a-time lock ──────────────────────────────
-        // 'search' | 'course' | null — whichever filter currently has
-        // something typed/selected owns the lock. While one is active,
-        // the other control is disabled (search input can't be typed
-        // into, dropdown button can't be opened) so they can't collide.
         activeFilter: null,
-        // True while a setCourse/clearCourse request is in flight.
-        // Needed on top of activeFilter: the click handlers used to
-        // toggle purely client-side (instant), so a fast double-click
-        // on the dropdown could fire a second wire:click before the
-        // first request's response came back and actually applied the
-        // filter — the two commits raced each other. Blocking input
-        // while courseBusy is true forces 'wait for this filter to
-        // finish' before another click is accepted, same as the Reset
-        // button already does via wire:loading.attr='disabled'.
         courseBusy: false,
         setAvailHeight() {
             const rect = this.$el.getBoundingClientRect();
@@ -339,19 +258,14 @@ new class extends Component {
             this.$el.style.setProperty('--yb-avail-h', avail + 'px');
         },
         recalcHeight() {
-            // Small delay lets the browser finish resizing its chrome
-            // (address bar show/hide) before we sample innerHeight.
             setTimeout(() => this.setAvailHeight(), 80);
             setTimeout(() => this.setAvailHeight(), 300);
-        },
+        }
      }"
      x-init="
         setAvailHeight();
         window.addEventListener('resize', () => recalcHeight());
         window.addEventListener('orientationchange', () => recalcHeight());
-        // Recalc after every Livewire response (pagination, filter, etc.)
-        // so --yb-avail-h re-samples innerHeight after the browser chrome
-        // (address bar) has settled back into its post-scroll position.
         document.addEventListener('livewire:navigated', () => recalcHeight());
         if (typeof Livewire !== 'undefined') {
             Livewire.hook('commit', ({ component, commit, respond, succeed, fail }) => {
@@ -363,8 +277,8 @@ new class extends Component {
 <style>
 /* ── Block text selection/copy across the whole page ──────
    Inputs/textareas are explicitly exempted below so typing,
-   selecting-to-edit, and copy/paste inside the search box or
-   any form field still work normally. ────────────────────── */
+   selecting-to-edit, and copy/paste inside the search box
+   still work normally. ────────────────────────────────── */
 .yb-no-select, .yb-no-select * {
     -webkit-user-select: none;
     -moz-user-select: none;
@@ -385,7 +299,11 @@ new class extends Component {
     background: #fff;
     display: flex;
     flex-direction: column;
-    height: 420px; /* fixed card height */
+    height: 370px;
+    cursor: default;
+}
+@media (max-width: 640px) {
+    .yb-card { height: 290px; }
 }
 .yb-card:hover {
     box-shadow: 0 6px 22px rgba(0,0,0,.12);
@@ -395,32 +313,34 @@ new class extends Component {
 .yb-card-photo-wrap {
     width: 100%;
     flex-shrink: 0;
-    overflow: hidden;            /* clip to card edges — fixes cut-off circle */
+    overflow: hidden;
     position: relative;
     background: #7A3F91;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 22px 0 18px;
-    min-height: 190px;
+    padding: 18px 0 14px;
+    min-height: 160px;
+}
+@media (min-width: 641px) {
+    .yb-card-photo-wrap { padding: 22px 0 18px; min-height: 190px; }
 }
 .yb-card-photo {
-    width: 130px;
-    height: 130px;
+    width: 100px;
+    height: 100px;
     object-fit: cover;
     object-position: top center;
     display: block;
     border-radius: 50%;
-    border: 4px solid rgba(255,255,255,.9);
+    border: 3px solid rgba(255,255,255,.9);
     box-shadow: 0 4px 16px rgba(0,0,0,.3);
     flex-shrink: 0;
 }
-/* Purple border accent for "my card" — hidden, single ring for all */
-.yb-card-photo-me-ring {
-    display: none;
+@media (min-width: 641px) {
+    .yb-card-photo { width: 120px; height: 120px; border-width: 4px; }
 }
 
-/* ── Right column wrapper — kept for HTML compat ─────────── */
+/* ── Right column wrapper ─────────────────────────────── */
 .yb-card-right {
     flex: 1;
     min-width: 0;
@@ -458,7 +378,7 @@ new class extends Component {
     pointer-events: none;
 }
 .yb-card-name {
-    font-size: 15px; font-weight: 800;
+    font-size: 13px; font-weight: 800;
     color: #FFFFFF; line-height: 1.2;
     text-transform: uppercase;
     letter-spacing: .01em;
@@ -468,41 +388,52 @@ new class extends Component {
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
-.yb-card-name-me { /* no overrides needed, same as above */ }
+@media (min-width: 641px) {
+    .yb-card-name { font-size: 15px; }
+}
 
 /* ── Card info body — white ───────────────────────────────── */
 .yb-card-text {
-    padding: 10px 13px 12px;
+    padding: 8px 10px 10px;
     flex: 1;
-    display: flex; flex-direction: column; gap: 3px;
+    display: flex; flex-direction: column; gap: 2px;
     background: #fff;
     overflow: hidden;
 }
+@media (min-width: 641px) {
+    .yb-card-text { padding: 10px 13px 12px; gap: 3px; }
+}
 .yb-card-line {
-    font-size: 14px; color: #1a1a1a; line-height: 1.4; font-weight: 600;
+    font-size: 12px; color: #1a1a1a; line-height: 1.35; font-weight: 600;
     overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+}
+@media (min-width: 641px) {
+    .yb-card-line { font-size: 13px; -webkit-line-clamp: 2; line-height: 1.4; }
+}
+.yb-card-motto {
+    font-size: 11px; font-weight: 700;
+    color: #5A1A8A; margin-top: 3px;
+}
+@media (min-width: 641px) {
+    .yb-card-motto { font-size: 13px; margin-top: 4px; }
+}
+.yb-card-motto-text {
+    font-size: 11px; font-style: italic; font-weight: 600;
+    color: #1a1a1a; line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
-}
-.yb-card-dash {
-    display: block;
-    width: 20px; height: 2px;
-    background: #C8B8D8;
-    border-radius: 2px;
-    margin: 3px 0;
-}
-.yb-card-motto {
-    font-size: 13px; font-weight: 700;
-    color: #5A1A8A; margin-top: 4px; padding-top: 0;
-}
-.yb-card-motto-text {
-    font-size: 13px; font-style: italic; font-weight: 600;
-    color: #1a1a1a; line-height: 1.4;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
     overflow: hidden;
+}
+@media (min-width: 641px) {
+    .yb-card-motto-text { font-size: 13px; -webkit-line-clamp: 3; line-height: 1.4; }
+}
+/* Hide address & parents on mobile — birthday + motto lang */
+@media (max-width: 640px) {
+    .yb-card-hide-mobile { display: none !important; }
 }
 
 .yb-section-badge {
@@ -511,13 +442,6 @@ new class extends Component {
     font-size: 15px; font-weight: 700; letter-spacing: .02em;
     background: rgba(122,63,145,.07); color: #7A3F91;
     border: none; border-left: 4px solid #7A3F91;
-}
-.yb-chip {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 3px 12px; border-radius: 9999px;
-    font-size: 11px; font-weight: 700; letter-spacing: .04em;
-    background: rgba(122,63,145,.10); color: #7A3F91;
-    border: 1px solid rgba(122,63,145,.22); white-space: nowrap;
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
@@ -545,8 +469,6 @@ new class extends Component {
 .yb-search-input::placeholder { color: #999999; font-weight: 400; }
 .yb-search-input:hover  { border-color: #c4b5d4; }
 .yb-search-input:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
-/* Light-blue fill while a search term is active, so it's clear at a
-   glance a filter is applied — even before the field is focused. */
 .yb-search-input-active { background: #eef6fd; border-color: #bfe0f7; }
 .yb-search-input-active:focus { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
 
@@ -597,8 +519,6 @@ new class extends Component {
     flex: 1; min-height: 0;
     position: relative;
     align-self: stretch;
-    /* overflow:hidden removed — it breaks position:sticky on the pagination bar.
-       Border-radius clipping is handled by rounding the first and last children. */
     overflow: clip;
 }
 .yb-filter-bar {
@@ -613,9 +533,6 @@ new class extends Component {
     display: flex; align-items: center;
     justify-content: space-between; gap: 0.5rem;
     flex-wrap: wrap; border-top: 1px solid rgba(255,255,255,.15);
-    /* Safety net: always pinned to the bottom of the table block,
-       so it can never end up scrolled out of view, no matter how
-       tall the card area ends up being. */
     position: sticky;
     bottom: 0;
     z-index: 30;
@@ -679,10 +596,6 @@ new class extends Component {
     border-width: 2px !important;
     animation: ybMeGlowPulse 2.2s ease-in-out infinite;
 }
-.yb-card-me:hover {
-    animation: none;
-    box-shadow: 0 0 0 6px rgba(196,159,216,.30), 0 10px 28px rgba(122,63,145,.40) !important;
-}
 @keyframes ybMeGlowPulse {
     0%, 100% {
         box-shadow: 0 0 0 3px rgba(196,159,216,.20), 0 6px 18px rgba(90,26,138,.28);
@@ -697,15 +610,7 @@ new class extends Component {
     box-shadow: 0 3px 12px rgba(90,26,138,.18);
 }
 
-/* ── Root height ─────────────────────────────────────────
-   Desktop: reserve 180px for surrounding layout chrome.
-   Mobile: instead of guessing a fixed px offset for the
-   topbar (hamburger/bell), --yb-avail-h is measured live via
-   Alpine (window.innerHeight - element's actual top offset),
-   so the block always fits exactly under whatever topbar
-   height the layout actually has, on any device. Falls back
-   to the 100dvh calc if JS hasn't run yet.
-──────────────────────────────────────────────────────── */
+/* ── Root height ─────────────────────────────────────────── */
 .yb-root-height {
     height: calc(100vh - 180px);
     max-height: calc(100vh - 180px);
@@ -729,14 +634,6 @@ new class extends Component {
     .yb-filter-bar { gap: 8px; }
 }
 
-/*
-   Mobile pagination visibility fix:
-   Use the JS-measured --yb-avail-h custom property (falls back
-   to 100dvh if not yet set) so the block height always matches
-   the REAL visible space under the app's topbar. Combined with
-   the sticky pagination bar above, the page/pagination is now
-   guaranteed visible without needing to scroll the outer page.
-*/
 @media (max-width: 767px) {
     html, body { overflow: hidden !important; }
 
@@ -746,7 +643,6 @@ new class extends Component {
         overflow: hidden !important;
     }
 
-    /* Compact header on mobile to free up vertical space */
     .yb-mobile-subtitle { display: none; }
     .yb-mobile-header-icon { width: 2.25rem !important; height: 2.25rem !important; }
     .yb-mobile-title { font-size: 1rem !important; }
@@ -757,9 +653,6 @@ new class extends Component {
     .yb-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
     .yb-pagination-bar p { font-size: 11px; }
 
-    /* On mobile, pin the pagination bar to the bottom of the viewport
-       so it can never be pushed off-screen by browser chrome changes
-       (address bar appearing/disappearing after paginate round-trips). */
     .yb-pagination-bar {
         position: fixed !important;
         bottom: 0; left: 0; right: 0;
@@ -767,37 +660,15 @@ new class extends Component {
         z-index: 200;
         border-radius: 0;
     }
-    /* Add bottom padding to the scroll area so content isn't hidden
-       behind the fixed bar. 48px = bar min-height. */
     #yb-scroll {
         padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
     }
 }
 
-/* ── Scroll area background ───────────────────────────────────
-   Light purple tint behind the alumni cards. ─────────────────── */
+/* ── Scroll area background ─────────────────────────────── */
 .yb-bubble-bg {
     position: relative;
     background-color: #ffffff;
-}
-
-
-/* ── Mobile: name-only cards (equal height, no text clutter) ──── */
-@media (max-width: 639px) {
-    .yb-card {
-        height: 220px;
-    }
-    .yb-card-photo-wrap {
-        min-height: 150px;
-        padding: 14px 0 10px;
-    }
-    .yb-card-photo {
-        width: 100px;
-        height: 100px;
-    }
-    .yb-card-text {
-        display: none;
-    }
 }
 </style>
 
@@ -818,7 +689,6 @@ new class extends Component {
             </div>
 
             <div class="flex items-center gap-2 flex-wrap">
-                {{-- Big readable BATCH XXXX banner --}}
                 @if($myBatch !== '')
                 <div class="yb-batch-banner" aria-label="Batch {{ $myBatch }}">
                     <span class="yb-batch-banner-label">
@@ -844,31 +714,6 @@ new class extends Component {
                 Filters
             </div>
 
-            {{--
-                FIX (real bug, matched to registrar/alumni-records.blade.php):
-                Previously this input was driven by a locally-scoped Alpine
-                `liveSearch` variable that was seeded ONCE from `@js($search)`
-                and never synced again. That caused two problems:
-
-                1) The old manual setTimeout debounce could still race with
-                   a Livewire response repainting the wrapper (no wire:ignore),
-                   letting the server's older $search snapshot occasionally
-                   stomp on what the user was mid-typing.
-
-                2) If $search was ever changed from OUTSIDE the input itself
-                   — e.g. the "Reset" button calling resetFilters(), which
-                   resets $search server-side — the textbox never found out,
-                   so it kept showing stale/typed text even though the
-                   underlying filter had already been cleared.
-
-                Fix: wrap with wire:ignore so Livewire's morph never touches
-                this subtree at all (Alpine has full, uncontested ownership
-                of the input's value). Use Alpine's built-in
-                `@input.debounce.300ms` instead of a manual timer, and add
-                a `$wire.$watch('search', ...)` so any external change to
-                $search (Reset button, programmatic resets, etc.) syncs
-                back into the visible input automatically.
-            --}}
             <div class="relative flex-1 min-w-[150px] max-w-xs" wire:ignore
                  x-data="{
                     q: @js($search),
@@ -960,7 +805,7 @@ new class extends Component {
 
         </div>
 
-        {{-- LOADING SPINNER — centered inside the table block only --}}
+        {{-- LOADING SPINNER --}}
         <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
              wire:loading.flex wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
             <i class="fas fa-spinner fa-spin" style="font-size:36px;color:#7a3f91;"></i>
@@ -976,10 +821,6 @@ new class extends Component {
                  style="z-index: 1;"
                  wire:loading.class="opacity-40 pointer-events-none"
                  wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
-
-                {{-- Spinner is placed inside the scroll area HTML-wise but rendered
-                     via fixed positioning so it always sits dead-center in the
-                     viewport regardless of scroll position or parent transforms. --}}
 
                 @if($this->alumniRecords->count() > 0)
                     <div class="yb-grid-wrap space-y-2"
@@ -997,102 +838,62 @@ new class extends Component {
                                     @foreach($group as $alumni)
                                         @php
                                             $isMe = ($myAlumniId > 0 && $alumni->id === $myAlumniId);
-                                            // Birthday
-                                            $ybDob = !empty($alumni->date_of_birth)
-                                                ? \Carbon\Carbon::parse($alumni->date_of_birth)->format('F j, Y')
-                                                : null;
-                                            // Address — join non-empty parts
-                                            $ybAddr = implode(', ', array_filter([
+
+                                            $cardAddr = implode(', ', array_filter([
                                                 $alumni->address_street ?? '',
                                                 $alumni->address_barangay ?? '',
                                                 $alumni->address_municipality ?? '',
                                                 $alumni->address_province ?? '',
                                             ]));
-                                            // Parent — Mr. & Mrs. format (same as card)
+
                                             $fLast  = trim($alumni->father_last_name  ?? '');
-                                            $fFirst = trim($alumni->father_given_name ?? '');
-                                            $fMid   = trim($alumni->father_middle_name ?? '');
-                                            $mFirst = trim($alumni->mother_given_name ?? '');
                                             $mLast  = trim($alumni->mother_last_name  ?? '');
+                                            $fFirst = trim($alumni->father_given_name ?? '');
+                                            $mFirst = trim($alumni->mother_given_name ?? '');
+                                            $fMid   = trim($alumni->father_middle_name ?? '');
 
                                             if ($fFirst && $fLast) {
-                                                $fMidI = $fMid ? strtoupper(mb_substr($fMid,0,1)).'.' : '';
-                                                $ybParentName  = ($mFirst ? 'Mr. & Mrs. ' : 'Mr. ') . $fFirst . ($fMidI ? ' '.$fMidI : '') . ' ' . $fLast;
-                                                $ybParentLabel = 'Parents';
+                                                $fMiddleI = $fMid ? strtoupper(mb_substr($fMid,0,1)).'.' : '';
+                                                $cardParents = ($mFirst ? 'Mr. & Mrs. ' : 'Mr. ') . $fFirst . ($fMiddleI ? ' '.$fMiddleI : '') . ' ' . $fLast;
                                             } elseif ($mFirst && $mLast) {
-                                                $ybParentName  = 'Mrs. ' . $mFirst . ' ' . $mLast;
-                                                $ybParentLabel = 'Parents';
+                                                $cardParents = 'Mrs. ' . $mFirst . ' ' . $mLast;
                                             } else {
-                                                $ybParentName  = null;
-                                                $ybParentLabel = null;
+                                                $cardParents = null;
                                             }
                                         @endphp
-                                        <div class="relative">
+
                                         <div wire:key="alumni-{{ $alumni->id }}"
                                              class="yb-card {{ $isMe ? 'yb-card-me' : '' }} rounded-xl overflow-hidden border flex flex-col"
                                              style="border-color: #E2D6F0;">
 
-                                            {{-- Portrait photo — LEFT side --}}
+                                            {{-- Portrait photo --}}
                                             <div class="yb-card-photo-wrap">
                                                 <img src="{{ $this->getPhotoUrl($alumni->profile_photo) }}"
                                                      alt="{{ $alumni->name }}"
+                                                     class="yb-card-photo"
                                                      loading="lazy" decoding="async"
                                                      onerror="this.src='{{ asset('storage/alumni-photos/default.png') }}'">
-                                                @if($isMe)
-                                                <div class="yb-card-photo-me-ring"></div>
-                                                @endif
                                             </div>
 
-                                            {{-- RIGHT column: name ribbon + info --}}
+                                            {{-- Name ribbon + info --}}
                                             <div class="yb-card-right">
 
-                                                {{-- Purple name ribbon --}}
                                                 <div class="yb-card-name-band">
-                                                    <p class="yb-card-name {{ $isMe ? 'yb-card-name-me' : '' }}">{{ $this->formatAlumniNameYearbook($alumni->name) }}</p>
+                                                    <p class="yb-card-name">{{ $this->formatAlumniNameYearbook($alumni->name) }}</p>
                                                 </div>
 
-                                                {{-- Info body (white) --}}
                                                 <div class="yb-card-text">
 
-                                                    @php
-                                                        $cardAddr = implode(', ', array_filter([
-                                                            $alumni->address_street ?? '',
-                                                            $alumni->address_barangay ?? '',
-                                                            $alumni->address_municipality ?? '',
-                                                            $alumni->address_province ?? '',
-                                                        ]));
-
-                                                        $fLast  = trim($alumni->father_last_name  ?? '');
-                                                        $mLast  = trim($alumni->mother_last_name  ?? '');
-                                                        $fFirst = trim($alumni->father_given_name ?? '');
-                                                        $mFirst = trim($alumni->mother_given_name ?? '');
-                                                        $fMid   = trim($alumni->father_middle_name ?? '');
-
-                                                        if ($fFirst && $fLast) {
-                                                            $fMiddleI = $fMid ? strtoupper(mb_substr($fMid,0,1)).'.' : '';
-                                                            $cardParents = ($mFirst ? 'Mr. & Mrs. ' : 'Mr. ') . $fFirst . ($fMiddleI ? ' '.$fMiddleI : '') . ' ' . $fLast;
-                                                        } elseif ($mFirst && $mLast) {
-                                                            $cardParents = 'Mrs. ' . $mFirst . ' ' . $mLast;
-                                                        } else {
-                                                            $cardParents = null;
-                                                        }
-
-                                                        $filledCount = (int)(!empty($alumni->date_of_birth))
-                                                                     + (int)(!empty($cardAddr))
-                                                                     + (int)(!empty($cardParents));
-                                                        $dashCount   = max(0, 3 - $filledCount);
-                                                    @endphp
-
                                                     @if(!empty($alumni->date_of_birth))
-                                                    <p class="yb-card-line">{{ \Carbon\Carbon::parse($alumni->date_of_birth)->format('F j, Y') }}</p>
+                                                    <p class="yb-card-line">{{ \Carbon\Carbon::parse($alumni->date_of_birth)->format('M j, Y') }}</p>
                                                     @endif
 
                                                     @if(!empty($cardAddr))
-                                                    <p class="yb-card-line">{{ ucwords(mb_strtolower($cardAddr)) }}</p>
+                                                    <p class="yb-card-line yb-card-hide-mobile">{{ ucwords(mb_strtolower($cardAddr)) }}</p>
                                                     @endif
 
                                                     @if($cardParents)
-                                                    <p class="yb-card-line">{{ ucwords(mb_strtolower($cardParents)) }}</p>
+                                                    <p class="yb-card-line yb-card-hide-mobile">{{ ucwords(mb_strtolower($cardParents)) }}</p>
                                                     @endif
 
                                                     @if(!empty($alumni->motto))
@@ -1106,7 +907,7 @@ new class extends Component {
                                             </div>{{-- /yb-card-right --}}
 
                                         </div>{{-- /yb-card --}}
-                                        </div>{{-- /outer wrapper --}}
+                                    @endforeach
                                 </div>
                             </div>
                         @endforeach
@@ -1118,7 +919,6 @@ new class extends Component {
                         </div>
                         <p class="font-semibold text-base" style="color:#333333;">No alumni found.</p>
                         <p class="text-sm mt-1" style="color:#555555;">Try adjusting your filters.</p>
-
                     </div>
                 @endif
 
@@ -1134,7 +934,7 @@ new class extends Component {
 
         </div>{{-- /scroll wrapper --}}
 
-        {{-- PAGINATION (sticky — always visible, no extra scroll needed) --}}
+        {{-- PAGINATION --}}
         @php
             $total   = $this->alumniRecords->total();
             $pp      = $this->alumniRecords->perPage();
