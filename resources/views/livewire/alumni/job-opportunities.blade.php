@@ -1111,8 +1111,8 @@ select.filter-input option {
                                     </span>
                                     @endif
                                     @if($job->salary)
-                                    <span class="text-[13px] text-emerald-600 font-semibold flex items-center gap-1">
-                                        <i class="fas fa-money-bill-wave text-[12px]"></i>{{ $job->salary }}
+                                    <span class="text-[13px] text-gray-500 flex items-center gap-1">
+                                        <i class="fas fa-sack-dollar text-[12px] text-[#7a3f91]/60"></i>{{ $job->salary }}
                                     </span>
                                     @endif
                                 </div>
@@ -1318,11 +1318,14 @@ select.filter-input option {
                         <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
                         <p class="detail-side-value" style="color:#888;">
                             Posted {{ $postedPH->diffForHumans() }}
-                            @if($job->salary)
-                                &nbsp;·&nbsp;<span class="text-emerald-600 font-semibold">{{ $job->salary }}</span>
-                            @endif
                         </p>
                     </div>
+                    @if($job->salary)
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-sack-dollar"></i></span>
+                        <p class="detail-side-value">{{ $job->salary }}</p>
+                    </div>
+                    @endif
                 </div>
 
                 @if($isUrgent)
@@ -1516,12 +1519,17 @@ select.filter-input option {
                         <div class="min-w-0">
                             <p class="detail-side-value" style="color:#888;">
                                 Posted {{ $postedPH->diffForHumans() }}
-                                @if($job->salary)
-                                    &nbsp;·&nbsp;<span class="text-emerald-600 font-semibold">{{ $job->salary }}</span>
-                                @endif
                             </p>
                         </div>
                     </div>
+                    @if($job->salary)
+                    <div class="detail-side-item">
+                        <span class="detail-side-icon"><i class="fas fa-sack-dollar"></i></span>
+                        <div class="min-w-0">
+                            <p class="detail-side-value">{{ $job->salary }}</p>
+                        </div>
+                    </div>
+                    @endif
                 </div>
 
                 @if($isUrgent)
