@@ -2634,11 +2634,6 @@ new class extends Component {
         'career_shifter'        => 'Career Shifter',
         'industry_professional' => 'Industry Professional',
     ];
-    $eduMap = [
-        'pursuing_masteral'  => 'Pursuing Masteral',
-        'pursuing_doctorate' => 'Pursuing Doctorate',
-    ];
-
     $empStatus   = $emp['employment_status'] ?? null;
     $isWorking   = in_array($empStatus, ['employed', 'self_employed']);
     $empTypeLbl  = $empTypeMap[$emp['employment_type'] ?? ''] ?? null;
@@ -3148,13 +3143,6 @@ compressImage(file, maxW, maxH, quality) {
                                 <div class="ar-cell">
                                     <p class="ar-field-label">Reason</p>
                                     <p class="ar-field-value">{{ $emp['unemployment_reason'] }}</p>
-                                </div>
-                                @endif
-
-                                @if(!empty($emp['education_status']) && $emp['education_status'] !== 'none' && isset($eduMap[$emp['education_status']]))
-                                <div class="ar-cell">
-                                    <p class="ar-field-label">Further Studies</p>
-                                    <p class="ar-field-value">{{ $eduMap[$emp['education_status']] }}</p>
                                 </div>
                                 @endif
 
