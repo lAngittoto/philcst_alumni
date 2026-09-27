@@ -778,7 +778,7 @@ new class extends Component {
 
     protected function loadEmploymentRecord(): void
     {
-        $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based'];
+        $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contract','project_based'=>'Freelance'];
         $workLocLabels= ['local'=>'Local / PH','abroad'=>'OFW / Abroad'];
         $relLabels    = ['yes'=>'Related to Program','no'=>'Not Related','partially'=>'Partially Related'];
         $unLabels     = ['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'];
@@ -2462,7 +2462,7 @@ function phAddress(initial) {
                                 <label class="emp-label-sm">Employment Type <span class="text-red-500">*</span></label>
                                 <div class="flex flex-wrap gap-2">
                                     @php
-                                        $empTypeOptions = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Project-Based'];
+                                        $empTypeOptions = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contract','project_based'=>'Freelance'];
                                     @endphp
                                     @foreach($empTypeOptions as $val=>$lbl)
                                     <label class="emp-radio-tile">
