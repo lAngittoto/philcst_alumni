@@ -1243,7 +1243,6 @@ new class extends Component {
     .emp-dashboard-root.emp-filter-on .emp-clickable,
     .emp-dashboard-root.emp-filter-on .stat-card,
     .emp-dashboard-root.emp-filter-on a.stat-card,
-    .emp-dashboard-root.emp-filter-on [wire\:click],
     .emp-dashboard-root.emp-filter-on .chart-clickable {
         pointer-events: none !important;
         cursor: default !important;
