@@ -8,16 +8,20 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::table('organizer_events', function (Blueprint $table) {
-            $table->boolean('is_active')->default(true)->after('status')->index();
-        });
+        if (!Schema::hasColumn('events', 'is_active')) {
+            Schema::table('events', function (Blueprint $table) {
+                $table->boolean('is_active')->default(true)->after('status')->index();
+            });
+        }
     }
 
     public function down(): void
     {
-        Schema::table('organizer_events', function (Blueprint $table) {
-            $table->dropIndex(['is_active']);
-            $table->dropColumn('is_active');
-        });
+        if (Schema::hasColumn('events', 'is_active')) {
+            Schema::table('events', function (Blueprint $table) {
+                $table->dropIndex(['is_active']);
+                $table->dropColumn('is_active');
+            });
+        }
     }
 };
