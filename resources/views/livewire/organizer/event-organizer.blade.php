@@ -2135,6 +2135,64 @@ select.tw-select-arrow {
     background: transparent !important;
     color: #C9C9C9 !important;
 }
+
+/* ══ FILL-IN FIELDS: light purple bg on every input the user can type/select
+   in the Create / Edit / Resubmit event form (required AND optional), so
+   it's obvious which fields are meant to be filled up. Error fields keep
+   their red bg (bg-red-50), locked contact fields (name/email) stay white. ══ */
+.eo-form-modal {
+    --eo-fill:       #f3e8fb;
+    --eo-fill-hover: #ede0f8;
+    --eo-fill-focus: #ffffff;
+    --eo-fill-border:#d8c2ea;
+}
+.eo-form-modal input[type="text"]:not(.bg-red-50),
+.eo-form-modal input[type="date"]:not(.bg-red-50),
+.eo-form-modal textarea:not(.bg-red-50) {
+    background-color: var(--eo-fill) !important;
+    border-color: var(--eo-fill-border) !important;
+}
+.eo-form-modal input[type="text"]:not(.bg-red-50):hover,
+.eo-form-modal input[type="date"]:not(.bg-red-50):hover,
+.eo-form-modal textarea:not(.bg-red-50):hover {
+    background-color: var(--eo-fill-hover) !important;
+}
+.eo-form-modal input[type="text"]:not(.bg-red-50):focus,
+.eo-form-modal input[type="date"]:not(.bg-red-50):focus,
+.eo-form-modal textarea:not(.bg-red-50):focus {
+    background-color: var(--eo-fill-focus) !important;
+    border-color: #7a3f91 !important;
+}
+.eo-form-modal input::placeholder,
+.eo-form-modal textarea::placeholder { color: #9a86a8; }
+
+/* Start / End time pickers */
+.eo-form-modal .time-select-wrap:not(.bg-red-50) {
+    background-color: var(--eo-fill) !important;
+    border-color: var(--eo-fill-border) !important;
+}
+.eo-form-modal .time-select-wrap select,
+.eo-form-modal .time-select-wrap > span {
+    background-color: transparent !important;
+}
+.eo-form-modal .time-select-wrap:focus-within {
+    background-color: var(--eo-fill-focus) !important;
+    border-color: #7a3f91 !important;
+}
+.eo-form-modal .time-select-wrap select:focus { background: transparent !important; }
+
+/* Batch Year dropdown trigger (keeps its own "has-value" look once chosen) */
+.eo-form-modal .eo-batch-trigger:not(.has-value):not(.bg-red-50) {
+    background-color: var(--eo-fill) !important;
+    border-color: var(--eo-fill-border) !important;
+}
+.eo-form-modal .eo-batch-trigger:not(.bg-red-50):hover { background-color: var(--eo-fill-hover) !important; }
+
+/* Program checkboxes (unselected) */
+.eo-form-modal label.bg-white.cursor-pointer:not(.border-purple-300) {
+    background-color: var(--eo-fill) !important;
+    border-color: var(--eo-fill-border) !important;
+}
 </style>
 
 {{-- Hover tooltip (desktop only — hidden on mobile via CSS above) --}}
@@ -2708,7 +2766,7 @@ select.tw-select-arrow {
 
 {{-- ══ CREATE / EDIT / RESUBMIT — FULL SCREEN ══ --}}
 @if($showFormModal)
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+<div class="eo-form-modal fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeFormModal()">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 flex-shrink-0 shadow-lg"
