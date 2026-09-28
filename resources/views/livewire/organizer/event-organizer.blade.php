@@ -239,9 +239,10 @@ new class extends Component {
     public bool   $showSubmitConfirmModal = false;
 
     // ── Confirm modals ──
-    public bool   $showDeleteModal   = false;
-    public ?int   $pendingDeleteId   = null;
-    public string $pendingDeleteTitle = '';
+    public bool   $showToggleModal       = false;
+    public ?int   $pendingToggleId       = null;
+    public string $pendingToggleTitle    = '';
+    public bool   $pendingToggleActivate = false; // true = about to ACTIVATE, false = about to DEACTIVATE
 
     public bool   $showShareModal        = false;
     public ?int   $shareEventId          = null;
@@ -820,41 +821,43 @@ public function viewEvent(int $id): void
     $this->dispatch('close-sidebar');
 }
 
-    // ── Delete: open confirm modal ── allowed for PENDING and REJECTED ──
-    public function confirmDelete(int $id): void
+    // ── Activate / Deactivate: open confirm modal ── allowed for PENDING, APPROVED and REJECTED ──
+    public function confirmToggleActive(int $id): void
     {
         $event = OrganizerEvent::where('id', $id)
             ->where('organizer_id', $this->organizerId)
-            ->whereIn('status', ['PENDING', 'REJECTED'])
+            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED'])
             ->firstOrFail();
 
-        $this->pendingDeleteId    = $id;
-        $this->pendingDeleteTitle = $event->title;
-        $this->showDeleteModal    = true;
+        $this->pendingToggleId       = $id;
+        $this->pendingToggleTitle    = $event->title;
+        $this->pendingToggleActivate = !((bool) ($event->is_active ?? true));
+        $this->showToggleModal       = true;
     }
 
-    public function cancelDelete(): void
+    public function cancelToggle(): void
     {
-        $this->showDeleteModal    = false;
-        $this->pendingDeleteId    = null;
-        $this->pendingDeleteTitle = '';
+        $this->showToggleModal       = false;
+        $this->pendingToggleId       = null;
+        $this->pendingToggleTitle    = '';
+        $this->pendingToggleActivate = false;
     }
 
-    public function deleteEvent(): void
+    public function toggleActive(): void
     {
-        if (!$this->pendingDeleteId) return;
+        if (!$this->pendingToggleId) return;
 
-        $event = OrganizerEvent::where('id', $this->pendingDeleteId)
+        $event = OrganizerEvent::where('id', $this->pendingToggleId)
             ->where('organizer_id', $this->organizerId)
-            ->whereIn('status', ['PENDING', 'REJECTED'])
+            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED'])
             ->firstOrFail();
 
-        $user = Auth::user();
+        $activate = $this->pendingToggleActivate;
 
-        $event->update([
-            'status'          => 'ORGANIZER_DELETED',
-            'deleted_by'      => $user?->name,
-            'deleted_by_role' => $user?->role ?? 'organizer',
+        // Query-builder update so it works even if is_active is not in $fillable.
+        OrganizerEvent::where('id', $event->id)->update([
+            'is_active'  => $activate,
+            'updated_at' => now(),
         ]);
 
         try {
@@ -863,27 +866,23 @@ public function viewEvent(int $id): void
                 'user_name'     => Auth::user()?->name ?? 'Organizer',
                 'user_email'    => Auth::user()?->email,
                 'user_role'     => 'organizer',
-                'action'        => 'deleted',
+                'action'        => $activate ? 'activated' : 'deactivated',
                 'module'        => 'event',
-                'subject_id'    => $this->pendingDeleteId,
+                'subject_id'    => $event->id,
                 'subject_label' => $event->title,
-                'description'   => "Organizer deleted event: '{$event->title}'.",
+                'description'   => "Organizer " . ($activate ? 'activated' : 'deactivated') . " event: '{$event->title}'.",
                 'ip_address'    => request()->ip(),
                 'user_agent'    => request()->userAgent(),
-                'severity'      => 'warning',
+                'severity'      => 'info',
             ]);
         } catch (\Throwable) {}
 
-        // NO event-management-updated dispatch for delete — but DO fire the
-        // self-notification bubble (mirrors job-self-action) so the
-        // organizer sees "You Deleted an Event" in their own notif bell.
-        $this->dispatch('event-self-action', id: $event->id, title: $event->title, action: 'deleted');
+        $this->dispatch('flash-message', type: 'success', message: $activate ? 'Event activated.' : 'Event deactivated.');
 
-        $this->dispatch('flash-message', type: 'success', message: 'Event deleted.');
-
-        $this->showDeleteModal    = false;
-        $this->pendingDeleteId    = null;
-        $this->pendingDeleteTitle = '';
+        $this->showToggleModal       = false;
+        $this->pendingToggleId       = null;
+        $this->pendingToggleTitle    = '';
+        $this->pendingToggleActivate = false;
     }
 
     public function resetForm(): void
@@ -2080,19 +2079,19 @@ select.tw-select-arrow {
 .eo-batch-dropdown { position: relative; }
 .eo-batch-trigger {
     display: flex; align-items: center; gap: 6px; width: 100%;
-    padding: 8px 11px; border: 1.5px solid #E8E0F0; border-radius: 10px;
+    padding: 8px 11px; border: 1.5px solid #e5e7eb; border-radius: 10px;
     font-size: .875rem; font-weight: 600; background: #fff; color: #333;
     cursor: pointer; transition: border-color .15s, background .15s, color .15s;
     white-space: nowrap; user-select: none;
 }
-.eo-batch-trigger:hover { border-color: #c49ed8; }
-.eo-batch-trigger.has-value { border-color: #7a3f91; background: #F9F7FC; color: #7a3f91; }
+.eo-batch-trigger:hover { border-color: #d1d5db; }
+.eo-batch-trigger.has-value { border-color: #d1d5db; background: #F9F7FC; color: #7a3f91; }
 .eo-batch-trigger .eo-batch-chevron { transition: transform .18s; font-size: .65rem; opacity: .6; }
 .eo-batch-trigger.open .eo-batch-chevron { transform: rotate(180deg); }
 .eo-batch-menu {
     position: absolute; top: calc(100% + 4px); left: 0;
     min-width: 100%; max-height: 220px; overflow-y: auto;
-    background: #fff; border: 1.5px solid #E8E0F0;
+    background: #fff; border: 1.5px solid #e5e7eb;
     border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
     z-index: 500; padding: 4px;
     scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
@@ -2420,6 +2419,13 @@ select.tw-select-arrow {
                                         <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
                                     </span>
                                 @endif
+                                @if(!($event->is_active ?? true))
+                                    <div class="mt-1">
+                                        <span class="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-500 whitespace-nowrap">
+                                            <i class="fas fa-eye-slash text-[9px] mr-1"></i>Inactive
+                                        </span>
+                                    </div>
+                                @endif
                             </td>
 
                             <td class="px-4 py-2.5">
@@ -2442,18 +2448,21 @@ select.tw-select-arrow {
                                         </div>
                                     @endif
 
-                                    @if($isPending || $isRejected)
+                                    @if($isPending || $isApproved || $isRejected)
+                                        @php $isActiveRow = (bool) ($event->is_active ?? true); @endphp
                                         <div class="relative inline-flex group" data-eo-share>
                                             <button type="button"
-                                                    wire:click.stop="confirmDelete({{ $event->id }})"
-                                                    wire:loading.attr="disabled" wire:target="confirmDelete({{ $event->id }})"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
-                                                <i class="fas fa-trash-can" wire:loading.remove wire:target="confirmDelete({{ $event->id }})"></i>
-                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmDelete({{ $event->id }})"></i>
+                                                    wire:click.stop="confirmToggleActive({{ $event->id }})"
+                                                    wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $event->id }})"
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer disabled:opacity-60 disabled:cursor-wait
+                                                           {{ $isActiveRow
+                                                               ? 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 hover:border-gray-300'
+                                                               : 'bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400' }}">
+                                                <i class="fas {{ $isActiveRow ? 'fa-eye-slash' : 'fa-eye' }}" wire:loading.remove wire:target="confirmToggleActive({{ $event->id }})"></i>
+                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleActive({{ $event->id }})"></i>
                                             </button>
                                             <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                                                Delete
+                                                {{ $isActiveRow ? 'Deactivate' : 'Activate' }}
                                                 <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                             </div>
                                         </div>
@@ -2566,40 +2575,48 @@ select.tw-select-arrow {
 </div>
 
 
-{{-- ══ DELETE CONFIRM MODAL ══ --}}
-@if($showDeleteModal)
+{{-- ══ ACTIVATE / DEACTIVATE CONFIRM MODAL ══ --}}
+@if($showToggleModal)
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-     wire:keydown.escape.window="cancelDelete">
+     wire:keydown.escape.window="cancelToggle">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
-        <div class="px-6 py-4 border-b border-red-100 bg-red-50">
-            <h2 class="text-lg font-semibold text-red-800 flex items-center gap-2.5">
-                <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-trash-can text-red-500 text-base"></i>
+        <div class="px-6 py-4 border-b {{ $pendingToggleActivate ? 'border-emerald-100 bg-emerald-50' : 'border-gray-200 bg-gray-50' }}">
+            <h2 class="text-lg font-semibold {{ $pendingToggleActivate ? 'text-emerald-800' : 'text-[#333333]' }} flex items-center gap-2.5">
+                <div class="w-8 h-8 {{ $pendingToggleActivate ? 'bg-emerald-100' : 'bg-gray-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i class="fas {{ $pendingToggleActivate ? 'fa-eye text-emerald-500' : 'fa-eye-slash text-gray-500' }} text-base"></i>
                 </div>
-                Delete Event
+                {{ $pendingToggleActivate ? 'Activate Event' : 'Deactivate Event' }}
             </h2>
         </div>
         <div class="p-5 bg-white">
-            <p class="text-base text-[#555555] mb-1">Are you sure you want to delete:</p>
+            <p class="text-base text-[#555555] mb-1">Are you sure you want to {{ $pendingToggleActivate ? 'activate' : 'deactivate' }}:</p>
             <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
-                {{ $pendingDeleteTitle }}
+                {{ $pendingToggleTitle }}
             </p>
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
                 <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
-                <span class="text-sm text-amber-800">This action cannot be undone. The event will be permanently marked as deleted.</span>
+                <span class="text-sm text-amber-800">
+                    @if($pendingToggleActivate)
+                        The event will be visible to alumni again.
+                    @else
+                        The event will be hidden from alumni. You can activate it again anytime.
+                    @endif
+                </span>
             </div>
             <div class="flex gap-2">
-                <button wire:click="cancelDelete"
-                        wire:loading.attr="disabled" wire:target="deleteEvent"
+                <button wire:click="cancelToggle"
+                        wire:loading.attr="disabled" wire:target="toggleActive"
                         class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
                     <i class="fas fa-xmark mr-1 text-sm"></i>Cancel
                 </button>
-                <button wire:click="deleteEvent"
+                <button wire:click="toggleActive"
                         wire:loading.attr="disabled"
-                        wire:target="deleteEvent"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white bg-red-500 hover:bg-red-600 transition cursor-pointer disabled:opacity-60 disabled:cursor-wait">
-                    <span wire:loading wire:target="deleteEvent"><i class="fas fa-spinner fa-spin mr-1 text-sm"></i>Deleting…</span>
-                    <span wire:loading.remove wire:target="deleteEvent"><i class="fas fa-trash-can mr-1 text-sm"></i>Yes, Delete</span>
+                        wire:target="toggleActive"
+                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white transition cursor-pointer disabled:opacity-60 disabled:cursor-wait {{ $pendingToggleActivate ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-gray-600 hover:bg-gray-700' }}">
+                    <span wire:loading wire:target="toggleActive"><i class="fas fa-spinner fa-spin mr-1 text-sm"></i>Saving…</span>
+                    <span wire:loading.remove wire:target="toggleActive">
+                        <i class="fas {{ $pendingToggleActivate ? 'fa-eye' : 'fa-eye-slash' }} mr-1 text-sm"></i>{{ $pendingToggleActivate ? 'Yes, Activate' : 'Yes, Deactivate' }}
+                    </span>
                 </button>
             </div>
         </div>
@@ -2755,17 +2772,19 @@ select.tw-select-arrow {
                 </div>
             </div>
             <div class="relative inline-flex group">
-                <button wire:click="confirmDelete({{ $editingEventId }})" type="button"
-                        wire:loading.attr="disabled" wire:target="confirmDelete({{ $editingEventId }})"
+                @php $editRowActive = (bool) (\App\Models\OrganizerEvent::where('id', $editingEventId)->value('is_active') ?? true); @endphp
+                <button wire:click="confirmToggleActive({{ $editingEventId }})" type="button"
+                        wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $editingEventId }})"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
-                        aria-label="Delete event">
-                    <i class="fas fa-trash-can text-white text-base" wire:loading.remove wire:target="confirmDelete({{ $editingEventId }})"></i>
-                    <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="confirmDelete({{ $editingEventId }})"></i>
+                        aria-label="{{ $editRowActive ? 'Deactivate event' : 'Activate event' }}">
+                    <i class="fas {{ $editRowActive ? 'fa-eye-slash' : 'fa-eye' }} text-white text-base" wire:loading.remove wire:target="confirmToggleActive({{ $editingEventId }})"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="confirmToggleActive({{ $editingEventId }})"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-xs font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                    Delete
+                    {{ $editRowActive ? 'Deactivate' : 'Activate' }}
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
+            </div>
             </div>
             @endif
             <div class="relative inline-flex group">
@@ -2827,8 +2846,8 @@ select.tw-select-arrow {
                     $defaultPhotoExists  = file_exists(public_path($defaultPhotoRelPath));
                     $defaultPhotoAsset   = $defaultPhotoExists ? asset($defaultPhotoRelPath) : '';
                 @endphp
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="bg-white border-[1.5px] border-gray-200 rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-gray-200 flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Event Photo
                         <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— Preview</span>
                     </div>
@@ -2912,14 +2931,14 @@ select.tw-select-arrow {
                          }"
                          @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false">
                         <div class="relative border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
-                             :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':(hasCurrentOrNew?'border-[#7a3f91] border-solid bg-white':'border-dashed border-gray-300 hover:border-[#7a3f91] hover:bg-white')">
+                             :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':(hasCurrentOrNew?'border-gray-200 border-solid bg-white':'border-dashed border-gray-200 hover:border-[#7a3f91] hover:bg-white')">
                             <label class="cursor-pointer block p-2.5">
                                 <input type="file" x-ref="eventPhotoInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" @change="onFileChosen($event)">
 
                                 <template x-if="previewSrc">
                                     <div class="flex flex-col items-center gap-1">
                                         <div class="relative w-full rounded-lg overflow-hidden border flex items-center justify-center"
-                                             :class="hasCurrentOrNew ? 'border-purple-200' : 'border-gray-200'" style="height:150px;">
+                                             :class="hasCurrentOrNew ? 'border-gray-200' : 'border-gray-200'" style="height:150px;">
                                             <img :src="previewSrc" class="w-full h-full object-contain" :class="saving ? 'opacity-50' : ''">
                                             <div x-show="saving" x-cloak class="absolute inset-0 flex items-center justify-center bg-white/40">
                                                 <i class="fas fa-spinner fa-spin text-[#7a3f91] text-lg"></i>
@@ -2948,23 +2967,11 @@ select.tw-select-arrow {
                                 </template>
                             </label>
                         </div>
-                        @if($existingPhotoUrl && !$removePhoto)
-                            <button type="button" wire:click="$set('removePhoto', true)" x-show="!saving"
-                                    class="mt-1.5 text-sm text-red-600 hover:text-red-700 font-semibold flex items-center gap-1 px-2 py-1 rounded-lg border border-red-200 hover:bg-red-50 transition">
-                                <i class="fas fa-trash text-xs"></i> Remove photo
-                            </button>
-                        @endif
-                        @if($removePhoto)
-                            <div class="mt-1.5 flex items-center gap-2">
-                                <span class="text-sm text-amber-700 font-semibold"><i class="fas fa-exclamation-circle mr-1 text-xs"></i>Photo removed on save</span>
-                                <button type="button" wire:click="$set('removePhoto', false)" class="text-sm text-blue-600 underline">Undo</button>
-                            </div>
-                        @endif
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-visible">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest rounded-t-2xl">
+                <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-gray-200' }} rounded-2xl overflow-visible">
+                    <div class="px-3.5 py-2 bg-white border-b border-gray-200 flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest rounded-t-2xl">
                         Programs
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                         @if(count($selectedCourses) > 0)
@@ -2979,7 +2986,7 @@ select.tw-select-arrow {
                     </div>
                     <div class="p-2.5 space-y-2.5 bg-white">
 
-                        <div class="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1.5">
+                        <div class="flex items-center gap-2 bg-purple-50 border border-gray-200 rounded-lg px-2.5 py-1.5">
                             <i class="fas fa-building-columns text-purple-500 text-sm flex-shrink-0"></i>
                             <span class="text-sm font-semibold text-purple-800 truncate">{{ $this->organizerDepartment ?: 'Your College' }}</span>
                         </div>
@@ -3019,7 +3026,7 @@ select.tw-select-arrow {
                                 @foreach($this->availableCourses as $course)
                                     <label class="flex items-center gap-1 px-2 py-1 border rounded-lg cursor-pointer transition text-sm font-semibold
                                                   {{ in_array($course, $selectedCourses)
-                                                      ? 'border-purple-400 bg-purple-50 text-purple-700'
+                                                      ? 'border-gray-200 bg-purple-50 text-purple-700'
                                                       : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50/40 bg-white text-[#333333]' }}">
                                         <input type="checkbox" wire:model.live="selectedCourses" value="{{ $course }}"
                                                class="accent-purple-600 w-3 h-3 flex-shrink-0">
@@ -3210,7 +3217,7 @@ select.tw-select-arrow {
                                     <template x-if="view === 'range'">
                                         <div class="p-2" style="width:220px;">
                                             <div class="flex items-start gap-2">
-                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#e5e7eb;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                                     @foreach($this->batches as $b)
                                                     <button type="button" @click.stop="if(rangeTo!=='{{ $b }}') pickFrom('{{ $b }}')"
                                                             :disabled="rangeTo==='{{ $b }}'"
@@ -3218,7 +3225,7 @@ select.tw-select-arrow {
                                                             class="eo-batch-item eo-batch-range-item" style="border-radius:0;">{{ $b }}</button>
                                                     @endforeach
                                                 </div>
-                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#E8E0F0;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#e5e7eb;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                                     @foreach($this->batches as $b)
                                                     <button type="button" @click.stop="if(rangeFrom!=='{{ $b }}') pickTo('{{ $b }}')"
                                                             :disabled="rangeFrom==='{{ $b }}'"
@@ -3229,13 +3236,13 @@ select.tw-select-arrow {
                                             </div>
                                             <div class="flex items-center gap-2 mt-3 eo-batch-footer">
                                                 <button type="button" @click.stop="backToMenu()"
-                                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#E8E0F0]">
+                                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-gray-200">
                                                     Back
                                                 </button>
                                                 <button type="button" @click.stop="applyRange()"
                                                         :disabled="rangeFrom==='' || rangeTo===''"
                                                         class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
-                                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-[#E8E0F0] bg-[#F5F5F5] cursor-not-allowed' : 'border-[#E8E0F0] hover:bg-[#F5F0FA]'"
+                                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-gray-200 bg-[#F5F5F5] cursor-not-allowed' : 'border-gray-200 hover:bg-[#F5F0FA]'"
                                                         :style="(rangeFrom==='' || rangeTo==='') ? '' : 'color:#7a3f91;'">
                                                     Apply
                                                 </button>
@@ -3262,8 +3269,8 @@ select.tw-select-arrow {
         <div class="flex-1 min-w-0 flex flex-col overflow-visible lg:overflow-hidden border-b lg:border-b-0 lg:border-r border-gray-200 bg-gray-50">
             <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
-                <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="flex flex-col bg-white border-[1.5px] border-gray-200 rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
+                    <div class="px-3.5 py-2 bg-white border-b border-gray-200 flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest flex-shrink-0">
                         Event Details
                     </div>
                     <div class="flex flex-col flex-1 min-h-0 p-2.5 gap-3 bg-white">
@@ -3274,7 +3281,7 @@ select.tw-select-arrow {
                             </label>
                             <input wire:model.live.debounce.100ms="title" type="text"
                                    placeholder="e.g. PHILCST Alumni Homecoming 2026" maxlength="200"
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['title']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['title']) ? 'border-red-400 bg-red-50' : 'border-gray-200' }}">
                             @if(isset($formErrors['title']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['title'] }}</p>@endif
                         </div>
 
@@ -3284,7 +3291,7 @@ select.tw-select-arrow {
                             </label>
                             <textarea wire:model.live.debounce.100ms="description"
                                       placeholder="Describe the event, agenda, highlights…" maxlength="5000"
-                                      class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}"
+                                      class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-gray-200' }}"
                                       style="min-height: 80px;"></textarea>
                             @if(isset($formErrors['description']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['description'] }}</p>@endif
                         </div>
@@ -3298,7 +3305,7 @@ select.tw-select-arrow {
                                 <input wire:model="event_date" type="date"
                                        min="{{ now('Asia/Manila')->format('Y-m-d') }}"
                                        onclick="window.__eoOpenDatePicker(this)"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-gray-200' }}">
                                 @if(isset($formErrors['event_date']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['event_date'] }}</p>@endif
                             </div>
 
@@ -3329,7 +3336,7 @@ select.tw-select-arrow {
                                          }
                                      }"
                                      @reset-time-selects.window="h='6';m='00';p='PM';sync()"
-                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['start_time']) ? 'border-red-400 bg-red-50' : 'border-gray-300 focus-within:border-[#7a3f91]' }}">
+                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['start_time']) ? 'border-red-400 bg-red-50' : 'border-gray-200 focus-within:border-[#7a3f91]' }}">
                                     <span class="flex items-center justify-center px-2 bg-white border-r border-gray-200">
                                         <i class="fas fa-clock text-gray-300 text-sm"></i>
                                     </span>
@@ -3380,7 +3387,7 @@ select.tw-select-arrow {
                                          }
                                      }"
                                      @reset-time-selects.window="h='11';m='59';p='PM';sync()"
-                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['end_time']) ? 'border-red-400 bg-red-50' : 'border-gray-300 focus-within:border-[#7a3f91]' }}">
+                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['end_time']) ? 'border-red-400 bg-red-50' : 'border-gray-200 focus-within:border-[#7a3f91]' }}">
                                     <span class="flex items-center justify-center px-2 bg-white border-r border-gray-200">
                                         <i class="fas fa-clock text-gray-300 text-sm"></i>
                                     </span>
@@ -3412,7 +3419,7 @@ select.tw-select-arrow {
                                 </label>
                                 <input wire:model.live.debounce.100ms="venue" type="text"
                                        placeholder="e.g. PHILCST Main Gym" maxlength="200"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue']) ? 'border-red-400 bg-red-50' : 'border-gray-200' }}">
                                 @if(isset($formErrors['venue']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue'] }}</p>@endif
                             </div>
                             <div>
@@ -3421,7 +3428,7 @@ select.tw-select-arrow {
                                 </label>
                                 <input wire:model.live.debounce.100ms="venue_address" type="text"
                                        placeholder="e.g. Old Nalsian Road, Calasiao, Pangasinan" maxlength="200"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue_address']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue_address']) ? 'border-red-400 bg-red-50' : 'border-gray-200' }}">
                                 @if(isset($formErrors['venue_address']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue_address'] }}</p>@endif
                             </div>
                         </div>
@@ -3429,15 +3436,15 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
-                <div class="flex-shrink-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="flex-shrink-0 bg-white border-[1.5px] border-gray-200 rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-gray-200 flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Notes / Requirements
                         <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-2.5 bg-white">
                         <textarea wire:model.live.debounce.100ms="notes"
                                   placeholder="Dress code, special instructions, what to bring, parking info…" maxlength="3000"
-                                  class="w-full px-3 py-2 border-[1.5px] border-gray-300 rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
+                                  class="w-full px-3 py-2 border-[1.5px] border-gray-200 rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
                                   style="height: 200px;"></textarea>
                         <p class="text-xs mt-1.5 flex items-center gap-1 text-[#777777]">
                             <i class="fas fa-circle-info text-[11px]"></i>
@@ -3456,8 +3463,8 @@ select.tw-select-arrow {
                 {{-- Contact Person — Name & Email are always the organizer's own
                      account details and are NOT editable (read-only display).
                      Only Phone remains an actual input. ── --}}
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="bg-white border-[1.5px] border-gray-200 rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-gray-200 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         <span class="block leading-tight">Contact Person</span>
                         <span class="block font-normal normal-case tracking-normal text-xs text-[#777777] mt-0.5">from your account</span>
                     </div>
@@ -3494,14 +3501,14 @@ select.tw-select-arrow {
                                        if (d.length >= 2 && d.charAt(1) !== '9') { d = '09' + d.slice(2); }
                                        this.value = d.slice(0, 11);
                                    "
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_phone']) ? 'border-red-400 bg-red-50' : 'border-gray-300' }}">
+                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_phone']) ? 'border-red-400 bg-red-50' : 'border-gray-200' }}">
                             @if(isset($formErrors['contact_phone']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['contact_phone'] }}</p>@endif
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="bg-white border-[1.5px] border-gray-200 rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-gray-200 flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Submission Tips
                     </div>
                     <div class="p-2.5 bg-white">
@@ -3574,7 +3581,7 @@ select.tw-select-arrow {
                 </button>
                 <button type="button" wire:click="closeFormModal"
                         wire:loading.attr="disabled" wire:target="requestSaveEvent,saveEvent,closeFormModal"
-                        class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-300 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">
+                        class="w-full px-5 py-2 rounded-xl text-sm font-semibold bg-white border border-gray-200 hover:bg-gray-50 transition cursor-pointer text-[#333333] disabled:opacity-60 disabled:cursor-not-allowed">
                     <span wire:loading.remove wire:target="closeFormModal">
                         <i class="fas fa-xmark mr-1 text-xs"></i>Cancel
                     </span>
@@ -3603,6 +3610,7 @@ select.tw-select-arrow {
     $eventEndPH  = $ev->event_end_date?->setTimezone('Asia/Manila');
     $timeDisplay = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
     $createdPH   = \Carbon\Carbon::parse($ev->created_at)->setTimezone('Asia/Manila');
+    $updatedPH   = \Carbon\Carbon::parse($ev->updated_at ?? $ev->created_at)->setTimezone('Asia/Manila');
     $evPhotoUrl  = $this->eventPhotoUrl($ev);
     $hasPhoto    = !empty($evPhotoUrl);
     $tp          = $ev->target_participants ?? '';
@@ -3868,16 +3876,17 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             </div>
             @endif
 
-            @if(in_array($ev->status, ['PENDING', 'REJECTED']))
+            @if(in_array($ev->status, ['PENDING', 'APPROVED', 'REJECTED']))
+            @php $viewRowActive = (bool) ($ev->is_active ?? true); @endphp
             <div class="relative inline-flex group">
-                <button wire:click="confirmDelete({{ $ev->id }})" type="button"
-                        wire:loading.attr="disabled" wire:target="confirmDelete({{ $ev->id }})"
+                <button wire:click="confirmToggleActive({{ $ev->id }})" type="button"
+                        wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $ev->id }})"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait">
-                    <i class="fas fa-trash-can text-white text-sm" wire:loading.remove wire:target="confirmDelete({{ $ev->id }})"></i>
-                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmDelete({{ $ev->id }})"></i>
+                    <i class="fas {{ $viewRowActive ? 'fa-eye-slash' : 'fa-eye' }} text-white text-sm" wire:loading.remove wire:target="confirmToggleActive({{ $ev->id }})"></i>
+                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmToggleActive({{ $ev->id }})"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                    Delete<span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
+                    {{ $viewRowActive ? 'Deactivate' : 'Activate' }}<span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
             </div>
             @endif
@@ -4011,10 +4020,13 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                         </div>
                         <div class="eo-vd-info-cell">
                             <div class="eo-vd-cell-label">
-                                <i class="fas fa-clock-rotate-left"></i> POSTED
+                                <i class="fas fa-calendar-plus"></i> CREATED
                             </div>
-                            <p class="eo-vd-cell-main">{{ $createdPH->format('M d, Y') }}</p>
-                            <p class="eo-vd-cell-sub">{{ $createdPH->diffForHumans() }}</p>
+                            <p class="eo-vd-cell-main">{{ $createdPH->format('M d, Y g:i A') }}</p>
+                            <div class="eo-vd-cell-label" style="margin-top:10px;">
+                                <i class="fas fa-clock-rotate-left"></i> LAST UPDATED
+                            </div>
+                            <p class="eo-vd-cell-main">Updated {{ $updatedPH->format('m/d/Y g:i A') }}</p>
                         </div>
                     </div>
 
