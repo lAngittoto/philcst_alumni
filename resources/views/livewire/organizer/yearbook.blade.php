@@ -543,11 +543,6 @@ new class extends Component {
 .yb-grid-wrap { animation: ybFadeUp .22s cubic-bezier(.4,0,.2,1) both; }
 
 /* ── Search input ───────────────────────────────────────── */
-.yb-search-wrap {
-    flex: 1;
-    min-width: 140px;
-    max-width: 280px;
-}
 .yb-search-input {
     padding: 0.5rem 0.75rem 0.5rem 2.25rem;
     border: 1px solid #E8E0F0; border-radius: 0.5rem;
@@ -688,24 +683,10 @@ new class extends Component {
 /* ── Mobile responsiveness ──────────────────────────────── */
 @media (max-width: 640px) {
     .yb-filter-bar {
-        gap: 6px;
-        padding: 0.5rem 0.65rem;
-        flex-wrap: wrap;
-    }
-    /* FILTERS label hidden on very small screens to save space */
-    .yb-filter-label {
-        display: none;
-    }
-    /* Search takes full width on its own row below the dropdowns */
-    .yb-search-wrap {
-        flex: 1 1 100%;
-        max-width: 100%;
-        order: 10;
-    }
-    /* Dropdowns shrink but stay readable */
-    .yb-dd-btn {
-        font-size: 0.8125rem;
-        padding: 0.4rem 2rem 0.4rem 0.6rem;
+        gap: 8px;
+        background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
+        padding: 0.6rem 0.875rem; flex-shrink: 0;
+        position: relative; z-index: 5; overflow: visible;
     }
 }
 
@@ -780,9 +761,23 @@ new class extends Component {
                 }
              }">
 
-            <div class="yb-filter-label flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
                  style="color:#7a3f91;">
                 Filters
+            </div>
+
+            {{-- Search --}}
+            <div class="relative flex-1 min-w-[160px] max-w-xs"
+                 wire:ignore
+                 x-data="{ q: '', init() { this.q = $wire.search ?? ''; $wire.$watch('search', v => { if (v !== this.q) this.q = v; }); } }">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-xs"
+                   style="color:#555555; z-index:1;"></i>
+                <input type="text"
+                       x-model="q"
+                       @input.debounce.350ms="$wire.set('search', q)"
+                       placeholder="Search..."
+                       class="yb-search-input"
+                       autocomplete="off" spellcheck="false">
             </div>
 
             {{-- Batch dropdown ── --}}
@@ -855,35 +850,21 @@ new class extends Component {
                 </div>
             </div>
 
-            {{-- Search --}}
-            <div class="relative yb-search-wrap"
-                 wire:ignore
-                 x-data="{ q: '', init() { this.q = $wire.search ?? ''; $wire.$watch('search', v => { if (v !== this.q) this.q = v; }); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-xs"
-                   style="color:#555555; z-index:1;"></i>
-                <input type="text"
-                       x-model="q"
-                       @input.debounce.350ms="$wire.set('search', q)"
-                       placeholder="Search..."
-                       class="yb-search-input"
-                       autocomplete="off" spellcheck="false">
-            </div>
-
             {{-- Found count ── --}}
             <div class="flex items-center gap-2 ml-auto">
-                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase whitespace-nowrap"
+                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
                       style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
                     {{ number_format($this->totalFiltered) }} found
                 </span>
             </div>
 
-            {{-- Reset --}}
+            {{-- Reset — moved to the very end of the filter bar --}}
             <button wire:click="resetFilters"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
                     class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer shrink-0"
+                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
                     style="color:#333333;">
                 <span wire:loading.remove wire:target="resetFilters">
                     <i class="fas fa-rotate-left text-sm"></i>
