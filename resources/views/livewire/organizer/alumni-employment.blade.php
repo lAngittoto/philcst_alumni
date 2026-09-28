@@ -244,6 +244,50 @@ new class extends Component {
         return $out;
     }
 
+    // ── Resolves a stored profile_photo value into a displayable URL.
+    //    Mirrors resources/views/livewire/organizer/yearbook.blade.php's
+    //    getPhotoUrl(), so alumni photos (including ones stored on
+    //    Cloudinary) render the same way here as they do in the Yearbook
+    //    page instead of silently falling back to the default avatar. ──
+    public function getPhotoUrl(?string $path): string
+    {
+        // Empty / null / literal "null" → default
+        if (empty($path) || $path === 'null') {
+            return asset('storage/alumni-photos/default.png');
+        }
+
+        // Explicit default.png references → default
+        if (strpos($path, 'default.png') !== false) {
+            return asset('storage/alumni-photos/default.png');
+        }
+
+        // Already a full Cloudinary (or any http/https) URL → use as-is
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Cloudinary public_id stored without domain
+        // e.g. "alumni-photos/abc123" or "v1234567890/alumni-photos/abc123"
+        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'v1')) {
+            $cloudName = config('cloudinary.cloud_name')
+                      ?? config('cloudinary.cloud.cloud_name')
+                      ?? env('CLOUDINARY_CLOUD_NAME', '');
+            if ($cloudName) {
+                return 'https://res.cloudinary.com/' . $cloudName . '/image/upload/' . $path;
+            }
+        }
+
+        // Local storage paths
+        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/')) {
+            return asset('storage/' . $path);
+        }
+        if (!str_contains($path, '/')) {
+            return asset('storage/alumni-photos/' . $path);
+        }
+
+        return asset('storage/' . $path);
+    }
+
     // ── called by JS polling every 15s to check for new emp updates ──────
     public function checkEmploymentUpdates(): void
     {
@@ -1777,14 +1821,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                                     default         => 'fa-circle-question',
                                 };
 
-                                $photoPath = $row->profile_photo ?? null;
-                                $photoUrl  = (!$photoPath || str_contains($photoPath, 'default.png'))
-                                    ? asset('storage/alumni-photos/default.png')
-                                    : (
-                                        (str_starts_with($photoPath, 'alumni-photos/') || str_starts_with($photoPath, 'organizers/'))
-                                        ? asset('storage/' . $photoPath)
-                                        : asset('storage/alumni-photos/default.png')
-                                    );
+                                $photoUrl = $this->getPhotoUrl($row->profile_photo ?? null);
 
                             @endphp
 
@@ -1895,14 +1932,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                                 default         => 'fa-circle-question',
                             };
 
-                            $photoPath = $row->profile_photo ?? null;
-                            $photoUrl  = (!$photoPath || str_contains($photoPath, 'default.png'))
-                                ? asset('storage/alumni-photos/default.png')
-                                : (
-                                    (str_starts_with($photoPath, 'alumni-photos/') || str_starts_with($photoPath, 'organizers/'))
-                                    ? asset('storage/' . $photoPath)
-                                    : asset('storage/alumni-photos/default.png')
-                                );
+                            $photoUrl = $this->getPhotoUrl($row->profile_photo ?? null);
                         @endphp
 
                         <div class="cursor-pointer select-none bg-white border-b border-[#F5F5F5] px-3.5 py-3 flex items-center gap-2.5 transition-colors duration-100 active:bg-[#f5f0fa]"
@@ -2088,14 +2118,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     ];
     $relModal = $relModalMap[$md['course_relevance'] ?? ''] ?? null;
 
-    $modalPhotoPath = $md['profile_photo'] ?? null;
-    $modalPhotoUrl  = (!$modalPhotoPath || str_contains($modalPhotoPath, 'default.png'))
-        ? asset('storage/alumni-photos/default.png')
-        : (
-            (str_starts_with($modalPhotoPath, 'alumni-photos/') || str_starts_with($modalPhotoPath, 'organizers/'))
-            ? asset('storage/' . $modalPhotoPath)
-            : asset('storage/alumni-photos/default.png')
-        );
+    $modalPhotoUrl = $this->getPhotoUrl($md['profile_photo'] ?? null);
 @endphp
 {{-- MODAL POPUP — centered dialog with backdrop, no fullscreen, no scroll.
      Compact two-column layout so all info fits without scrolling on most screens.
@@ -2117,7 +2140,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px]" @click="closing()"></div>
 
     {{-- Modal panel --}}
-    <div class="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
+    <div class="relative z-10 w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
                 max-h-[90dvh] sm:max-h-[88dvh]"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95 translate-y-2"
@@ -2127,66 +2150,66 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
          x-transition:leave-end="opacity-0 scale-95">
 
         {{-- Header --}}
-        <div class="flex items-center justify-between px-5 py-3.5 flex-shrink-0 bg-[#7A3F91]">
-            <div class="flex items-center gap-3 min-w-0">
+        <div class="flex items-center justify-between px-6 py-4 flex-shrink-0 bg-[#7A3F91]">
+            <div class="flex items-center gap-3.5 min-w-0">
                 <img src="{{ $modalPhotoUrl }}"
                      alt="{{ $md['full_name'] ?? '' }}"
-                     class="w-9 h-9 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
-                <p class="font-semibold text-white text-base leading-snug uppercase truncate">
+                     class="w-12 h-12 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
+                <p class="font-semibold text-white text-xl leading-snug uppercase truncate">
                     {{ $md['full_name'] ?? '—' }}@if($md['suffix'] ?? null) {{ $md['suffix'] }}@endif
                 </p>
             </div>
             <button type="button"
                     @click="closing()"
                     :disabled="isClosing"
-                    class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white cursor-pointer disabled:cursor-wait flex-shrink-0 ml-3">
-                <i class="fa-solid fa-spinner fa-spin text-sm" x-show="isClosing" x-cloak></i>
-                <i class="fa-solid fa-xmark text-sm" x-show="!isClosing"></i>
+                    class="w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white cursor-pointer disabled:cursor-wait flex-shrink-0 ml-3">
+                <i class="fa-solid fa-spinner fa-spin text-base" x-show="isClosing" x-cloak></i>
+                <i class="fa-solid fa-xmark text-base" x-show="!isClosing"></i>
             </button>
         </div>
 
         {{-- Body — scrollable only if content overflows, otherwise fits naturally --}}
-        <div class="overflow-y-auto flex-1 min-h-0 p-4 sm:p-5 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
+        <div class="overflow-y-auto flex-1 min-h-0 p-5 sm:p-6 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
 
             {{-- Two-column grid on sm+: Student Info left, Employment right --}}
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
 
                 {{-- LEFT: Student Information --}}
-                <div class="border border-[#E8E0F0] rounded-xl p-3.5 bg-white">
-                    <p class="text-xs font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Student Information</p>
-                    <div class="space-y-2">
-                        <div class="grid grid-cols-2 gap-2">
-                            <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Program</p>
-                                <p class="text-base font-bold text-[#333]">{{ $md['course_code'] ?? '—' }}</p>
+                <div class="border border-[#E8E0F0] rounded-xl p-4 bg-white">
+                    <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest mb-3.5">Student Information</p>
+                    <div class="space-y-2.5">
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                                <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Program</p>
+                                <p class="text-lg font-bold text-[#333]">{{ $md['course_code'] ?? '—' }}</p>
                             </div>
-                            <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Batch</p>
-                                <p class="text-base font-bold text-[#333]">{{ $md['batch'] ?? '—' }}</p>
+                            <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                                <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Batch</p>
+                                <p class="text-lg font-bold text-[#333]">{{ $md['batch'] ?? '—' }}</p>
                             </div>
                         </div>
-                        <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Contact</p>
-                            <p class="text-base font-semibold text-[#333]">{{ $md['contact_number'] ?? '—' }}</p>
+                        <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                            <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Contact</p>
+                            <p class="text-lg font-semibold text-[#333]">{{ $md['contact_number'] ?? '—' }}</p>
                         </div>
-                        <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Email Address</p>
-                            <p class="text-base font-semibold text-[#333] break-all leading-snug">{{ $md['email'] ?? '—' }}</p>
+                        <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                            <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Email Address</p>
+                            <p class="text-lg font-semibold text-[#333] break-all leading-snug">{{ $md['email'] ?? '—' }}</p>
                         </div>
                     </div>
                 </div>
 
                 {{-- RIGHT: Employment Information --}}
-                <div class="border border-[#E8E0F0] rounded-xl p-3.5 bg-white">
-                    <p class="text-xs font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Employment Information</p>
+                <div class="border border-[#E8E0F0] rounded-xl p-4 bg-white">
+                    <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest mb-3.5">Employment Information</p>
 
                     {{-- Status + updated --}}
-                    <div class="flex items-center gap-2 mb-3 flex-wrap">
-                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-bold {{ $statusCls }}">
+                    <div class="flex items-center gap-2.5 mb-3.5 flex-wrap">
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-base font-bold {{ $statusCls }}">
                             {{ $statusLbl }}
                         </span>
                         @if($md['emp_updated_at'] ?? null)
-                            <span class="text-sm text-[#999999]">
+                            <span class="text-base text-[#999999]">
                                 <i class="fa-regular fa-clock mr-0.5"></i>
                                 {{ \Carbon\Carbon::parse($md['emp_updated_at'])->diffForHumans() }}
                             </span>
@@ -2194,41 +2217,41 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     </div>
 
                     @if($isEmp)
-                        <div class="space-y-2">
-                            <div class="grid grid-cols-2 gap-2">
-                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Employer</p>
-                                    <p class="text-base font-bold text-[#333] leading-snug">{{ $md['company_name'] ?? '—' }}</p>
+                        <div class="space-y-2.5">
+                            <div class="grid grid-cols-2 gap-2.5">
+                                <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                                    <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Employer</p>
+                                    <p class="text-lg font-bold text-[#333] leading-snug">{{ $md['company_name'] ?? '—' }}</p>
                                 </div>
-                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Title</p>
-                                    <p class="text-base font-bold text-[#333] leading-snug">{{ $md['job_title'] ?? '—' }}</p>
+                                <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                                    <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Job Title</p>
+                                    <p class="text-lg font-bold text-[#333] leading-snug">{{ $md['job_title'] ?? '—' }}</p>
                                 </div>
-                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Type</p>
-                                    <p class="text-base font-semibold text-[#333]">{{ $empTypeMap[$md['employment_type'] ?? ''] ?? '—' }}</p>
+                                <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                                    <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Type</p>
+                                    <p class="text-lg font-semibold text-[#333]">{{ $empTypeMap[$md['employment_type'] ?? ''] ?? '—' }}</p>
                                 </div>
-                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Location</p>
-                                    <p class="text-base font-semibold text-[#333]">{{ ucfirst($md['work_location'] ?? '—') }}</p>
+                                <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                                    <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Location</p>
+                                    <p class="text-lg font-semibold text-[#333]">{{ ucfirst($md['work_location'] ?? '—') }}</p>
                                 </div>
                             </div>
-                            <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Related to Program?</p>
+                            <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0]">
+                                <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Job Related to Program?</p>
                                 @if($relModal)
-                                    <p class="text-base font-semibold text-[#333]">{{ $relModal[0] }}</p>
+                                    <p class="text-lg font-semibold text-[#333]">{{ $relModal[0] }}</p>
                                 @else
-                                    <p class="text-base text-[#999]">— Not specified</p>
+                                    <p class="text-lg text-[#999]">— Not specified</p>
                                 @endif
                             </div>
                             @if(!empty($md['career_path_arr']))
                                 <div>
-                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-1.5">Career Path</p>
-                                    <div class="flex flex-wrap gap-1.5">
+                                    <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-2">Career Path</p>
+                                    <div class="flex flex-wrap gap-2">
                                         @foreach($md['career_path_arr'] as $cp)
                                             @if(isset($careerLabels[$cp]))
-                                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm font-semibold bg-gray-50 text-[#333] border border-[#E8E0F0]">
-                                                    <i class="fas {{ $careerLabels[$cp][0] }} text-[10px] text-[#7a3f91]"></i>
+                                                <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-base font-semibold bg-gray-50 text-[#333] border border-[#E8E0F0]">
+                                                    <i class="fas {{ $careerLabels[$cp][0] }} text-xs text-[#7a3f91]"></i>
                                                     {{ $careerLabels[$cp][1] }}
                                                 </span>
                                             @endif
@@ -2238,25 +2261,25 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                             @endif
                         </div>
                     @elseif(($md['employment_status'] ?? '') === 'unemployed')
-                        <div class="space-y-2">
-                            <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-2.5 py-2">
-                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Unemployment Status</p>
-                                <p class="text-base font-semibold text-[#333]">
+                        <div class="space-y-2.5">
+                            <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-3 py-2.5">
+                                <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Unemployment Status</p>
+                                <p class="text-lg font-semibold text-[#333]">
                                     {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
                                 </p>
                             </div>
                             @if(($md['unemployment_status'] ?? '') === 'not_looking' && !empty($md['unemployment_reason']))
-                            <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-2.5 py-2">
-                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Reason</p>
-                                <p class="text-base font-semibold text-[#333]">{{ $md['unemployment_reason'] }}</p>
+                            <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-3 py-2.5">
+                                <p class="text-xs font-bold uppercase tracking-widest text-[#888] mb-1">Reason</p>
+                                <p class="text-lg font-semibold text-[#333]">{{ $md['unemployment_reason'] }}</p>
                             </div>
                             @endif
                         </div>
                     @else
-                        <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-4 py-6 text-center">
-                            <i class="fas fa-file-circle-question text-2xl text-[#CCC] mb-2 block"></i>
-                            <p class="text-base font-semibold text-[#999]">No employment record yet.</p>
-                            <p class="text-sm text-[#CCC] mt-0.5">This alumni hasn't filled their employment info.</p>
+                        <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-4 py-7 text-center">
+                            <i class="fas fa-file-circle-question text-3xl text-[#CCC] mb-2.5 block"></i>
+                            <p class="text-lg font-semibold text-[#999]">No employment record yet.</p>
+                            <p class="text-base text-[#CCC] mt-1">This alumni hasn't filled their employment info.</p>
                         </div>
                     @endif
                 </div>
