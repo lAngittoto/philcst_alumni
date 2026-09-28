@@ -254,18 +254,40 @@ new class extends Component {
 
     public function getPhotoUrl(?string $path): string
     {
+        // Empty / null / literal "null" → default
         if (empty($path) || $path === 'null' || is_null($path)) {
             return asset('storage/alumni-photos/default.png');
         }
+
+        // Explicit default.png references → default
         if (strpos($path, 'default.png') !== false) {
             return asset('storage/alumni-photos/default.png');
         }
+
+        // Already a full Cloudinary (or any http/https) URL → use as-is
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Cloudinary public_id stored without domain
+        // e.g. "alumni-photos/abc123" or "v1234567890/alumni-photos/abc123"
+        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'v1')) {
+            $cloudName = config('cloudinary.cloud_name')
+                      ?? config('cloudinary.cloud.cloud_name')
+                      ?? env('CLOUDINARY_CLOUD_NAME', '');
+            if ($cloudName) {
+                return 'https://res.cloudinary.com/' . $cloudName . '/image/upload/' . $path;
+            }
+        }
+
+        // Local storage paths
         if (str_starts_with($path, 'alumni-photos/')) {
             return asset('storage/' . $path);
         }
         if (!str_contains($path, '/')) {
             return asset('storage/alumni-photos/' . $path);
         }
+
         return asset('storage/' . $path);
     }
 
@@ -761,11 +783,6 @@ new class extends Component {
                 }
              }">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
-                 style="color:#7a3f91;">
-                Filters
-            </div>
-
             {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
@@ -778,6 +795,11 @@ new class extends Component {
                        placeholder="Search..."
                        class="yb-search-input"
                        autocomplete="off" spellcheck="false">
+            </div>
+
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                 style="color:#7a3f91;">
+                Filters
             </div>
 
             {{-- Batch dropdown ── --}}
