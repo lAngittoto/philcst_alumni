@@ -57,8 +57,15 @@ new class extends Component {
     public array  $postTargetColleges               = [];
     public array  $postErrors                       = [];
 
-    public $postJobImage  = null;
-    public $editJobImage  = null;
+    // ── Job photos now live on Cloudinary (same as Event Management) instead of
+    //    the Railway container's local disk, which is wiped on every redeploy
+    //    and was why uploaded photos always fell back to the default photo.
+    //    postJobImage / editJobImage hold the Cloudinary secure_url once the
+    //    photo is uploaded (or null). ──
+    public ?string $postJobImage         = null;
+    public ?string $postJobImagePublicId = null;
+    public ?string $editJobImage         = null;
+    public ?string $editJobImagePublicId = null;
     public bool $postRemoveImage = false;
     public bool $editRemoveImage = false;
 
@@ -135,10 +142,9 @@ new class extends Component {
 
     protected function rules(): array
     {
-        return [
-            'postJobImage' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
-            'editJobImage' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
-        ];
+        // Photos are validated (type/size) in receiveJobPhoto() before they
+        // are sent to Cloudinary, so no file rules are needed here.
+        return [];
     }
 
     /**
@@ -163,6 +169,108 @@ new class extends Component {
     public function updatedPostJobImage(): void
     {
         $this->postRemoveImage = false;
+    }
+
+    /**
+     * Receives the job photo as base64 from JS FileReader and uploads it to
+     * Cloudinary for persistent storage across Railway deploys. Mirrors
+     * Event Management's receiveEventPhoto(). $context is 'post' or 'edit'.
+     * Returns true on success so the picker can release its "Uploading…" lock.
+     */
+    #[\Livewire\Attributes\Renderless]
+    public function receiveJobPhoto(string $context, string $filename, string $base64): bool
+    {
+        try {
+            if (! in_array($context, ['post', 'edit'], true)) return false;
+
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (! in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                $this->dispatch('flash-message', type: 'error', message: 'Invalid file type. Use JPG, PNG, or WebP.');
+                return false;
+            }
+
+            // ~5 MB decoded ceiling (JS already compresses well below this).
+            if (strlen($base64) > 7_000_000) {
+                $this->dispatch('flash-message', type: 'error', message: 'Image is too large. Please choose a smaller photo.');
+                return false;
+            }
+
+            // Delete the previously STAGED (not yet saved) upload if the
+            // organizer picks a different photo before saving.
+            $prevId = $context === 'post' ? $this->postJobImagePublicId : $this->editJobImagePublicId;
+            if ($prevId) {
+                try { cloudinary()->uploadApi()->destroy($prevId); } catch (\Throwable) {}
+            }
+
+            $result = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'job-photos',
+                    'public_id'     => 'job_' . ($context === 'edit' ? ($this->editingJobId ?: 'new') : 'new') . '_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            if ($context === 'post') {
+                $this->postJobImage         = $result['secure_url'];
+                $this->postJobImagePublicId = $result['public_id'];
+                $this->postRemoveImage      = false;
+            } else {
+                $this->editJobImage         = $result['secure_url'];
+                $this->editJobImagePublicId = $result['public_id'];
+                $this->editRemoveImage      = false;
+            }
+
+            return true;
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Job photo upload failed: ' . $e->getMessage());
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /** Undo a just-staged (not yet saved) photo pick — deletes it from Cloudinary. */
+    #[\Livewire\Attributes\Renderless]
+    public function cancelStagedJobPhoto(string $context): void
+    {
+        if ($context === 'post') {
+            if ($this->postJobImagePublicId) {
+                try { cloudinary()->uploadApi()->destroy($this->postJobImagePublicId); } catch (\Throwable) {}
+            }
+            $this->postJobImage = null;
+            $this->postJobImagePublicId = null;
+        } elseif ($context === 'edit') {
+            if ($this->editJobImagePublicId) {
+                try { cloudinary()->uploadApi()->destroy($this->editJobImagePublicId); } catch (\Throwable) {}
+            }
+            $this->editJobImage = null;
+            $this->editJobImagePublicId = null;
+        }
+    }
+
+    /** Cloudinary public_id from a delivery URL (null if it isn't one). */
+    private function cloudinaryPublicIdFromUrl(?string $url): ?string
+    {
+        if (! $url || ! str_contains($url, 'res.cloudinary.com')) return null;
+        if (preg_match('#/upload/(?:v\d+/)?(.+?)\.\w+(?:\?.*)?$#', $url, $m)) {
+            return $m[1];
+        }
+        return null;
+    }
+
+    /** Deletes a saved job photo — Cloudinary URL or a legacy local path. */
+    private function deleteJobImageFile(?string $path): void
+    {
+        if (! $path) return;
+        try {
+            if (preg_match('#^https?://#i', $path)) {
+                $publicId = $this->cloudinaryPublicIdFromUrl($path);
+                if ($publicId) cloudinary()->uploadApi()->destroy($publicId);
+            } elseif (Storage::disk('public')->exists($path)) {
+                Storage::disk('public')->delete($path);
+            }
+        } catch (\Throwable) {}
     }
 
     private function guardAuth(): void
@@ -515,80 +623,37 @@ new class extends Component {
     }
 
     /**
-     * Stores a newly-uploaded job image and returns its path.
+     * Returns the photo URL to save into job_image. The photo was already
+     * uploaded to Cloudinary by receiveJobPhoto(), so this only validates
+     * it and removes the job's previous photo when it is being replaced.
      *
-     * IMPORTANT: if $imageFile isn't a valid, still-existing temporary
-     * upload (e.g. the async $wire.upload() hadn't finished/failed before
-     * Save was clicked, or Livewire re-hydrated it as something else),
-     * this returns $existingPath UNCHANGED instead of null. Previously it
-     * returned null on any failure, which the caller then saved straight
-     * into job_image — silently wiping out the current photo and falling
-     * back to the default image even though the organizer never asked to
-     * remove it.
+     * @throws \RuntimeException if a new photo was expected but never
+     *         actually finished uploading.
      */
-    /**
-     * @throws \RuntimeException if a new image was supplied but never
-     *         actually landed on the server. Callers MUST catch this and
-     *         surface it as a validation error — silently falling back to
-     *         $existingPath here made "Save Changes" report success while
-     *         quietly discarding the organizer's new photo (the job just
-     *         kept whatever image it already had / the default).
-     */
-    private function storeJobImage($imageFile, string $existingPath = ''): ?string
+    private function storeJobImage($imageUrl, string $existingPath = ''): ?string
     {
-        // Check against the common parent class (Illuminate\Http\UploadedFile)
-        // instead of one specific Livewire namespace. Livewire v2's
-        // Livewire\TemporaryUploadedFile and v3's
-        // Livewire\Features\SupportFileUploads\TemporaryUploadedFile both
-        // extend Illuminate\Http\UploadedFile, but a strict instanceof
-        // against only the v3 path silently failed on anything else,
-        // treating every real upload as "no file provided" — which is
-        // exactly why an uploaded photo always fell back to the default
-        // no matter what, on both Post and Edit.
-        if ($imageFile instanceof \Illuminate\Http\UploadedFile) {
-            if (! $imageFile->exists()) {
-                // The client told us the upload finished (handleFile()'s
-                // $wire.upload success callback fired, unlocking Save),
-                // but the temp file isn't actually on disk server-side —
-                // e.g. it expired/was GC'd between upload and Save, or a
-                // Livewire re-render mid-upload left editJobImage pointing
-                // at a stale temp path. Treat this as a real failure
-                // instead of silently keeping the old photo.
-                throw new \RuntimeException('editJobImage temp file missing at save time');
-            }
-
-            try {
-                $path = $imageFile->store('job', 'public');
-                if (! $path) {
-                    throw new \RuntimeException('editJobImage store() returned empty path');
-                }
-
-                if ($existingPath && Storage::disk('public')->exists($existingPath)) {
-                    Storage::disk('public')->delete($existingPath);
-                }
-
-                return $path;
-            } catch (\RuntimeException $e) {
-                throw $e;
-            } catch (\Throwable $e) {
-                throw new \RuntimeException('editJobImage store failed: ' . $e->getMessage(), previous: $e);
-            }
+        if (! is_string($imageUrl) || ! preg_match('#^https?://#i', $imageUrl)) {
+            throw new \RuntimeException('job photo was not uploaded');
         }
 
-        return $existingPath ?: null;
+        if ($existingPath && $existingPath !== $imageUrl) {
+            $this->deleteJobImageFile($existingPath);
+        }
+
+        return $imageUrl;
     }
 
+    /**
+     * URL to DISPLAY for a job photo. A Cloudinary (http/https) URL saved in
+     * job_image is returned as-is; legacy local paths still resolve through
+     * storage/, and no photo falls back to the default photo.
+     */
     public static function jobImageUrl(?string $path): string
     {
-        // FIX: match the exact pattern OrganizerEvent::getPhotoUrlAttribute()
-        // already uses successfully — asset('storage/' . $path), not
-        // Storage::url($path). On this server the two can resolve
-        // differently (Storage::url() goes through the 'public' disk's
-        // own 'url' config key in filesystems.php, which can end up
-        // pointing somewhere else than plain asset() does), which is why
-        // event photos worked while job photos kept falling back to the
-        // default even with the exact same file/DB path shape.
         if ($path) {
+            if (preg_match('#^https?://#i', $path)) {
+                return $path;
+            }
             return asset('storage/' . $path);
         }
         return asset('storage/job/default-photo-job.jpg');
@@ -1086,13 +1151,6 @@ public function closePostModal(): void
         if (!trim($this->postQualifications))          $errors['postQualifications']          = 'Qualifications are required.';
         if (!trim($this->postApplicationInstructions)) $errors['postApplicationInstructions'] = 'Application instructions are required.';
 
-        if ($this->postJobImage) {
-            try {
-                $this->validateOnly('postJobImage');
-            } catch (\Livewire\Exceptions\ValidationException $e) {
-                $errors['postJobImage'] = 'Image must be JPG, PNG, or WebP and under 2MB.';
-            }
-        }
 
         if (empty($this->postTargetColleges)) {
             $errors['postTargetColleges'] = 'Your college has been auto-selected.';
@@ -1240,6 +1298,7 @@ public function closePostModal(): void
         $this->postTargetColleges = [];
         $this->postErrors = [];
         $this->postJobImage   = null;
+        $this->postJobImagePublicId = null;
         $this->postRemoveImage = false;
     }
 
@@ -1270,6 +1329,7 @@ public function viewJob(int $id): void
             : [$this->organizerCollege];
         $this->editCurrentImage = $job->job_image ?? '';
         $this->editJobImage     = null;
+        $this->editJobImagePublicId = null;
         $this->editRemoveImage  = false;
         $this->editErrors       = [];
         $this->showEditModal    = true;
@@ -1298,6 +1358,7 @@ public function viewJob(int $id): void
         : [$this->organizerCollege];
     $this->editCurrentImage = $job->job_image ?? '';
     $this->editJobImage     = null;
+    $this->editJobImagePublicId = null;
     $this->editRemoveImage  = false;
     $this->editErrors       = [];
     $this->showEditModal    = true;
@@ -1334,6 +1395,7 @@ public function openEditModal(int $id): void
         : [$this->organizerCollege];
     $this->editCurrentImage = $job->job_image ?? '';
     $this->editJobImage     = null;
+    $this->editJobImagePublicId = null;
     $this->editRemoveImage  = false;
     $this->editErrors       = [];
     $this->showViewModal    = false;
@@ -1390,13 +1452,6 @@ public function openEditModal(int $id): void
         if (!trim($this->editQualifications))          $errors['editQualifications']          = 'Qualifications are required.';
         if (!trim($this->editApplicationInstructions)) $errors['editApplicationInstructions'] = 'Application instructions are required.';
 
-        if ($this->editJobImage) {
-            try {
-                $this->validateOnly('editJobImage');
-            } catch (\Livewire\Exceptions\ValidationException $e) {
-                $errors['editJobImage'] = 'Image must be JPG, PNG, or WebP and under 2MB.';
-            }
-        }
 
         if (empty($this->editTargetColleges)) {
             $errors['editTargetColleges'] = 'Your college has been auto-selected.';
@@ -1435,8 +1490,9 @@ public function openEditModal(int $id): void
 
         $newImagePath = $job->job_image;
         if ($this->editRemoveImage) {
-            if ($job->job_image && Storage::disk('public')->exists($job->job_image)) {
-                Storage::disk('public')->delete($job->job_image);
+            $this->deleteJobImageFile($job->job_image);
+            if ($this->editJobImagePublicId) {
+                try { cloudinary()->uploadApi()->destroy($this->editJobImagePublicId); } catch (\Throwable) {}
             }
             $newImagePath = null;
         } elseif ($this->editJobImage) {
@@ -1544,6 +1600,7 @@ public function openEditModal(int $id): void
         $this->editErrors = [];
         $this->editCurrentImage = '';
         $this->editJobImage     = null;
+        $this->editJobImagePublicId = null;
         $this->editRemoveImage  = false;
         $this->originalEditFormSnapshot = null;
     }
@@ -2933,50 +2990,86 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                  uploading: false,
                                  uploadError: false,
                                  defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
-                                 handleFile(e) {
-                                     const f = e.target.files[0];
-                                     if (!f) return;
+                                 compressImage(file, maxW, maxH, quality) {
+                                     return new Promise((resolve, reject) => {
+                                         const img = new Image();
+                                         const reader = new FileReader();
+                                         reader.onload = (e) => {
+                                             img.onload = () => {
+                                                 let w = img.width, h = img.height;
+                                                 if (w > maxW || h > maxH) {
+                                                     const ratio = Math.min(maxW / w, maxH / h);
+                                                     w = Math.round(w * ratio);
+                                                     h = Math.round(h * ratio);
+                                                 }
+                                                 const canvas = document.createElement('canvas');
+                                                 canvas.width = w; canvas.height = h;
+                                                 canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                                                 canvas.toBlob((blob) => {
+                                                     if (!blob) return reject(new Error('compress failed'));
+                                                     resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+                                                 }, 'image/jpeg', quality);
+                                             };
+                                             img.onerror = reject;
+                                             img.src = e.target.result;
+                                         };
+                                         reader.onerror = reject;
+                                         reader.readAsDataURL(file);
+                                     });
+                                 },
+                                 async handleFile(e) {
+                                     const file = e.target.files && e.target.files[0];
+                                     if (!file) return;
                                      this.uploadError = false;
-                                     const r = new FileReader();
-                                     r.onload = ev => { this.preview = ev.target.result; };
-                                     r.readAsDataURL(f);
+                                     if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) {
+                                         this.uploadError = true;
+                                         e.target.value = '';
+                                         return;
+                                     }
+
+                                     let toUpload = file;
+                                     try { toUpload = await this.compressImage(file, 1000, 1000, 0.8); } catch (err) { toUpload = file; }
+
+                                     // Instant local preview while Cloudinary upload runs in the background.
+                                     const pr = new FileReader();
+                                     pr.onload = ev => { this.preview = ev.target.result; };
+                                     pr.readAsDataURL(toUpload);
 
                                      this.uploading = true;
-                                     // Reactive flag (see Alpine.store('eoPostPhoto') registered
-                                     // near the top of this file) so the Post Job button, which
-                                     // lives in a separate Alpine scope outside this wire:ignore
-                                     // block, correctly re-renders while this is true.
                                      Alpine.store('eoPostPhoto').uploading = true;
-                                     // Safety net: if neither $wire.upload callback ever fires
-                                     // (e.g. connection drops mid-upload), don't leave Post Job
-                                     // permanently disabled — release the lock after 30s.
+                                     // Safety net: never leave the save button locked forever.
                                      clearTimeout(this._eoUploadTimeout);
                                      this._eoUploadTimeout = setTimeout(() => {
                                          this.uploading = false;
                                          this.uploadError = true;
                                          Alpine.store('eoPostPhoto').uploading = false;
-                                     }, 30000);
-                                     $wire.upload('postJobImage', f,
-                                         () => {
-                                             clearTimeout(this._eoUploadTimeout);
-                                             this.uploading = false;
-                                             Alpine.store('eoPostPhoto').uploading = false;
-                                         },
-                                         () => {
-                                             clearTimeout(this._eoUploadTimeout);
-                                             this.uploading = false;
-                                             this.uploadError = true;
-                                             Alpine.store('eoPostPhoto').uploading = false;
-                                         }
-                                     );
+                                     }, 60000);
+
+                                     const release = (ok) => {
+                                         clearTimeout(this._eoUploadTimeout);
+                                         this.uploading = false;
+                                         Alpine.store('eoPostPhoto').uploading = false;
+                                         if (!ok) { this.uploadError = true; this.preview = null; }
+                                         else { $wire.$refresh(); }
+                                     };
+
+                                     const ur = new FileReader();
+                                     ur.onload = ev => {
+                                         const base64 = ev.target.result.split(',')[1];
+                                         $wire.receiveJobPhoto('post', toUpload.name, base64)
+                                             .then(ok => release(!!ok))
+                                             .catch(() => release(false));
+                                     };
+                                     ur.onerror = () => release(false);
+                                     ur.readAsDataURL(toUpload);
                                  },
                                  clear() {
                                      this.preview = null;
                                      this.uploading = false;
                                      this.uploadError = false;
                                      Alpine.store('eoPostPhoto').uploading = false;
-                                     this.$refs.fileInput.value = '';
-                                     $wire.set('postJobImage', null);
+                                     if (this.$refs.fileInput) this.$refs.fileInput.value = '';
+                                     $wire.cancelStagedJobPhoto('post');
                                  }
                              }">
                             <div class="img-upload-zone" :class="preview ? 'has-image' : ''">
@@ -2998,7 +3091,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                             <span class="opacity-0 group-hover/uploadlbl:opacity-100 transition flex flex-col items-center gap-1.5 bg-white/90 rounded-xl px-4 py-3">
                                                 <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
                                                 <p class="font-semibold text-sm text-[#333333]">Click to upload a photo</p>
-                                                <p class="text-sm text-[#555555]">JPG, PNG, WebP — max 2MB</p>
+                                                <p class="text-sm text-[#555555]">JPG, PNG, WebP</p>
                                             </span>
                                             <input x-ref="fileInput" type="file" class="hidden" accept="image/jpeg,image/png,image/webp"
                                                    @change="handleFile($event)">
@@ -3548,7 +3641,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                  right after Save, making a successful replace look like nothing
                                  changed. --}}
                             @php $editViewImgUrl = $this::jobImageUrl($editingJob->job_image ?? null);
-                                 $editViewImgUrl .= (str_contains($editViewImgUrl, '?') ? '&' : '?') . 'v=' . $editingJob->updated_at?->timestamp;
+                                 if (! preg_match('#^https?://#i', (string) ($editingJob->job_image ?? ''))) {
+                                     $editViewImgUrl .= (str_contains($editViewImgUrl, '?') ? '&' : '?') . 'v=' . $editingJob->updated_at?->timestamp;
+                                 }
                             @endphp
                             <div class="rounded-xl overflow-hidden" style="height:110px; background:#f3f0f6;">
                                 <img src="{{ $editViewImgUrl }}" alt="{{ $editingJob->job_title }}"
@@ -3577,81 +3672,93 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                              wire:key="edit-photo-picker-{{ $editingJobId }}-{{ $editCurrentImage }}"
                              x-data="{
                                  preview: null,
-                                 existing: @js($editCurrentImage ? asset('storage/' . $editCurrentImage) . '?v=' . now()->timestamp : ''),
+                                 existing: @js($editCurrentImage ? (preg_match('#^https?://#i', $editCurrentImage) ? $editCurrentImage : asset('storage/' . $editCurrentImage) . '?v=' . now()->timestamp) : ''),
                                  defaultUrl: @js(asset('storage/job/default-photo-job.jpg')),
                                  removed: false,
                                  uploading: false,
                                  uploadError: false,
-                                 handleFile(e) {
-                                     const f = e.target.files[0];
-                                     if (!f) return;
-                                     this.removed = false;
+                                 compressImage(file, maxW, maxH, quality) {
+                                     return new Promise((resolve, reject) => {
+                                         const img = new Image();
+                                         const reader = new FileReader();
+                                         reader.onload = (e) => {
+                                             img.onload = () => {
+                                                 let w = img.width, h = img.height;
+                                                 if (w > maxW || h > maxH) {
+                                                     const ratio = Math.min(maxW / w, maxH / h);
+                                                     w = Math.round(w * ratio);
+                                                     h = Math.round(h * ratio);
+                                                 }
+                                                 const canvas = document.createElement('canvas');
+                                                 canvas.width = w; canvas.height = h;
+                                                 canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                                                 canvas.toBlob((blob) => {
+                                                     if (!blob) return reject(new Error('compress failed'));
+                                                     resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+                                                 }, 'image/jpeg', quality);
+                                             };
+                                             img.onerror = reject;
+                                             img.src = e.target.result;
+                                         };
+                                         reader.onerror = reject;
+                                         reader.readAsDataURL(file);
+                                     });
+                                 },
+                                 async handleFile(e) {
+                                     const file = e.target.files && e.target.files[0];
+                                     if (!file) return;
                                      this.uploadError = false;
-                                     $wire.set('editRemoveImage', false);
-                                     const r = new FileReader();
-                                     r.onload = ev => { this.preview = ev.target.result; };
-                                     r.readAsDataURL(f);
+                                     if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 10 * 1024 * 1024) {
+                                         this.uploadError = true;
+                                         e.target.value = '';
+                                         return;
+                                     }
+                                     this.removed = false;
+
+                                     let toUpload = file;
+                                     try { toUpload = await this.compressImage(file, 1000, 1000, 0.8); } catch (err) { toUpload = file; }
+
+                                     // Instant local preview while Cloudinary upload runs in the background.
+                                     const pr = new FileReader();
+                                     pr.onload = ev => { this.preview = ev.target.result; };
+                                     pr.readAsDataURL(toUpload);
 
                                      this.uploading = true;
-                                     // Reactive flag (see Alpine.store('eoEditPhoto') registered
-                                     // near the top of this file) so the Save Changes button,
-                                     // which lives in a separate Alpine scope outside this
-                                     // wire:ignore block, correctly re-renders while this is true.
                                      Alpine.store('eoEditPhoto').uploading = true;
-                                     // Safety net: if neither $wire.upload callback ever fires
-                                     // (e.g. connection drops mid-upload), don't leave Save
-                                     // permanently disabled — release the lock after 30s.
+                                     // Safety net: never leave the save button locked forever.
                                      clearTimeout(this._eoUploadTimeout);
                                      this._eoUploadTimeout = setTimeout(() => {
                                          this.uploading = false;
                                          this.uploadError = true;
                                          Alpine.store('eoEditPhoto').uploading = false;
-                                     }, 30000);
-                                     // FIX: both $wire.upload() callbacks used to touch
-                                     // this.$refs.fileInput directly (via clearNew()), and one
-                                     // of the two file inputs that call handleFile() was
-                                     // missing the x-ref attribute entirely. When that input was
-                                     // the one used, any code path touching $refs.fileInput threw,
-                                     // which could abort a callback mid-run and leave uploading
-                                     // (and the shared Alpine.store lock disabling Save Changes)
-                                     // stuck at true forever — the Uploading-photo button that
-                                     // never clears. Wrapping the callbacks so a thrown error
-                                     // still always releases the lock, on top of fixing the
-                                     // missing ref at its source below.
-                                     $wire.upload('editJobImage', f,
-                                         () => {
-                                             clearTimeout(this._eoUploadTimeout);
-                                             this.uploading = false;
-                                             Alpine.store('eoEditPhoto').uploading = false;
-                                             // Confirms the upload actually finished AND that
-                                             // Livewire's own success callback fired — if
-                                             // Save Changes still stays disabled/no changes
-                                             // after this logs, the break is server-side
-                                             // (check updatedEditJobImage() in the PHP class);
-                                             // if this NEVER logs after picking a file, the
-                                             // break is client-side (upload never completed).
-                                             console.debug('[job-photo] editJobImage upload finished');
-                                         },
-                                         () => {
-                                             clearTimeout(this._eoUploadTimeout);
-                                             this.uploading = false;
-                                             this.uploadError = true;
-                                             Alpine.store('eoEditPhoto').uploading = false;
-                                             console.debug('[job-photo] editJobImage upload FAILED');
-                                         }
-                                     );
+                                     }, 60000);
+
+                                     const release = (ok) => {
+                                         clearTimeout(this._eoUploadTimeout);
+                                         this.uploading = false;
+                                         Alpine.store('eoEditPhoto').uploading = false;
+                                         if (!ok) { this.uploadError = true; this.preview = null; }
+                                         else { $wire.$refresh(); }
+                                     };
+
+                                     const ur = new FileReader();
+                                     ur.onload = ev => {
+                                         const base64 = ev.target.result.split(',')[1];
+                                         $wire.receiveJobPhoto('edit', toUpload.name, base64)
+                                             .then(ok => release(!!ok))
+                                             .catch(() => release(false));
+                                     };
+                                     ur.onerror = () => release(false);
+                                     ur.readAsDataURL(toUpload);
                                  },
                                  clearNew() {
                                      this.preview = null;
                                      this.uploading = false;
                                      this.uploadError = false;
                                      Alpine.store('eoEditPhoto').uploading = false;
-                                     // FIX: was $refs.fileInput, ambiguous now that each
-                                     // input has its own unique ref (see markup below) —
-                                     // clear whichever one(s) actually exist.
                                      if (this.$refs.fileInputDefault) this.$refs.fileInputDefault.value = '';
                                      if (this.$refs.fileInputReplace) this.$refs.fileInputReplace.value = '';
-                                     $wire.set('editJobImage', null);
+                                     $wire.cancelStagedJobPhoto('edit');
                                  },
                                  removeExisting() {
                                      this.existing = '';
@@ -3663,7 +3770,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                      $wire.set('editRemoveImage', true);
                                      if (this.$refs.fileInputDefault) this.$refs.fileInputDefault.value = '';
                                      if (this.$refs.fileInputReplace) this.$refs.fileInputReplace.value = '';
-                                     $wire.set('editJobImage', null);
+                                     $wire.cancelStagedJobPhoto('edit');
                                  }
                              }">
 
@@ -3699,7 +3806,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                             <span class="opacity-0 group-hover/uploadlbl2:opacity-100 transition flex flex-col items-center gap-1 bg-white/90 rounded-xl px-3 py-2">
                                                 <i class="fas fa-cloud-arrow-up text-2xl text-[#7a3f91]"></i>
                                                 <p class="font-semibold text-xs text-[#333333]">Upload photo</p>
-                                                <p class="text-[10px] text-[#555555]">JPG, PNG, WebP · max 2MB</p>
+                                                <p class="text-[10px] text-[#555555]">JPG, PNG, WebP</p>
                                             </span>
                                             {{-- FIX: this input previously shared x-ref="fileInput"
                                                  with the "Replace photo" input below (line ~3279).

@@ -70,7 +70,15 @@
             padding: 6px;
             margin: 0;
             cursor: pointer;
-            position: relative;
+            position: absolute;
+            top: 12px;
+            right: 16px;
+            z-index: 40;
+            width: 48px;
+            height: 48px;
+            border-radius: 9999px;
+            background: #FFFFFF !important;
+            box-shadow: 0 2px 10px rgba(122,63,145,0.14) !important;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -413,48 +421,22 @@
            overlay indicates the loading state. ── */
 
         /* ── Nav link click spinner ──────────────────────────────
-           Expanded sidebar: sits at the end of the row (where the
-           active dot sits), icon stays visible. Collapsed sidebar /
-           mobile: centered on top of the icon chip, icon hidden. ── */
+           ONE spinner only: it replaces the icon inside the icon chip,
+           on every screen size and in both expanded/collapsed states.
+           (Previously a second spinner also rendered at the end of the
+           row, so two circles appeared at once while loading.) ── */
+        .coord-nav-icon { position: relative; }
         .coord-nav-spinner {
-            flex-shrink: 0;
-            margin-left: auto;
-            font-size: 13px;
+            font-size: 16px;
             color: #7A3F91;
             line-height: 1;
         }
-        .coord-nav-spinner-icon-anchored { display: none; }
-        .coord-nav-icon { position: relative; }
-
-        .coord-sidebar.is-collapsed .coord-nav-link.is-navigating > .coord-nav-spinner,
-        .coord-nav-link.is-navigating > .coord-nav-spinner {
-            display: none !important;
-        }
-        .coord-sidebar.is-collapsed .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored,
-        .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored {
-            display: flex !important;
+        .coord-nav-spinner-icon-anchored {
+            position: absolute;
+            inset: 0;
+            display: flex;
             align-items: center;
             justify-content: center;
-            position: absolute !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate(-50%, -50%) !important;
-            font-size: 16px !important;
-        }
-        .coord-nav-spinner-icon-anchored .coord-nav-spinner {
-            margin-left: 0;
-        }
-
-        @media (min-width: 1024px) {
-            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating > .coord-nav-spinner {
-                display: inline-block !important;
-            }
-            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored {
-                display: none !important;
-            }
-            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating .coord-nav-icon i.fa-solid {
-                display: none !important;
-            }
         }
 
         /* ── Bell "wave" alert — soft expanding ring pulse behind the bell,
@@ -2181,7 +2163,7 @@
                     <div class="coord-nav-icon {{ $link['color'] }} w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
                          style="box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
-                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
+                           x-show="navClickedRoute !== '{{ $link['route'] }}'"></i>
                         <template x-if="navClickedRoute === '{{ $link['route'] }}'">
                             <span class="coord-nav-spinner-icon-anchored">
                                 <i class="fas fa-spinner fa-spin coord-nav-spinner"></i>
@@ -2193,10 +2175,6 @@
                                  {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
-
-                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                        <i class="fas fa-spinner fa-spin coord-nav-spinner"></i>
-                    </template>
 
                     @if($isActive)
                         <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
@@ -2281,10 +2259,13 @@
              style="background:transparent;pointer-events:all;"
              @click.prevent @contextmenu.prevent></div>
 
-        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
-                       shrink-0 z-30">
+        {{-- White top bar removed: header is now a zero-height, transparent row so the
+             page content sits at the very top. The hamburger (mobile) and the bell
+             float over the top-left / top-right corners. --}}
+        <header class="relative flex items-start justify-between px-4 lg:px-8 h-0 bg-transparent
+                       shrink-0 z-30 overflow-visible">
             <button @click="open = !open"
-                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
+                    class="absolute top-3 left-3 z-40 bg-white shadow-sm border border-[#E8E0F0] text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
                     <span :class="open ? 'rotate-45 translate-y-2' : ''"
                           class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
@@ -2329,7 +2310,7 @@
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8"
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8 pt-16 lg:pt-6 lg:pr-24"
              style="min-height: 0; -webkit-overflow-scrolling: touch;">
             <div class="container mx-auto">
                 @yield('content')
