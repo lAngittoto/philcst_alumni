@@ -1289,6 +1289,22 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                  wire:loading.class="opacity-60" wire:loading.attr="data-ae-busy"
                  wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,applyFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,applyFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
 
+                {{-- Search — placed FIRST before the filter dropdowns.
+                     Text selection re-enabled so the person can still
+                     select/copy/edit what they type. --}}
+                <div class="relative min-w-[180px] max-w-xs"
+                     wire:ignore
+                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
+                    <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)"
+                           :class="q !== '' ? 'border-[#7a3f91] bg-white text-[#333333] font-semibold' : 'bg-white text-[#333333] font-medium'"
+                           placeholder="Search ..."
+                           style="-webkit-user-select:text;-moz-user-select:text;-ms-user-select:text;user-select:text;"
+                           onselectstart="event.stopPropagation(); return true;"
+                           class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
+                           autocomplete="off" maxlength="100" spellcheck="false">
+                </div>
+
                 <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
                     Filters
                 </div>
@@ -1646,22 +1662,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     </div>
                 @endif
 
-                {{-- Search — placed after filter dropdowns, pinned to the
-                     right side. Text selection re-enabled so the person can
-                     still select/copy/edit what they type. --}}
-                <div class="relative ml-auto min-w-[160px] max-w-xs"
-                     wire:ignore
-                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
-                    <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)"
-                           :class="q !== '' ? 'border-[#7a3f91] bg-white text-[#333333] font-semibold' : 'bg-white text-[#333333] font-medium'"
-                           placeholder="Search ..."
-                           style="-webkit-user-select:text;-moz-user-select:text;-ms-user-select:text;user-select:text;"
-                           onselectstart="event.stopPropagation(); return true;"
-                           class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
-                           autocomplete="off" maxlength="100" spellcheck="false">
-                </div>
-
                 {{-- Reset — automatically disabled whenever no filter/search
                      is currently active, so there's nothing to reset. --}}
                 @php
@@ -1746,12 +1746,12 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <table class="w-full bg-white border-collapse hidden md:table">
                         <thead class="sticky top-0 z-10 bg-white shadow-[0_1px_0_#E8E0F0]">
                             <tr>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Alumni</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Program</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[660px]:table-cell">Batch</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[860px]:table-cell">Job Title</th>
-                                <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[1120px]:table-cell">Email Address</th>
-                                <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest text-[#555555] hidden @[980px]:table-cell">Status</th>
+                                <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555]">Alumni</th>
+                                <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555]">Program</th>
+                                <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[660px]:table-cell">Batch</th>
+                                <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[860px]:table-cell">Job Title</th>
+                                <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[1120px]:table-cell">Email Address</th>
+                                <th class="px-4 py-3 text-center text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[980px]:table-cell">Status</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-[#F5F5F5]">
@@ -1802,7 +1802,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                                              alt="{{ $row->full_name }}"
                                              class="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                         <div class="min-w-0">
-                                            <p class="font-semibold text-sm leading-snug truncate uppercase text-[#333333]">{!! $this->highlight($row->full_name, $this->search) !!}</p>
+                                            <p class="font-semibold text-base leading-snug truncate uppercase text-[#333333]">{!! $this->highlight($row->full_name, $this->search) !!}</p>
 
                                             {{-- Compact inline row for info hidden at this container width.
                                                  Status badge and job title/unemployment note both collapse
@@ -1828,40 +1828,40 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                                 </td>
 
                                 <td class="px-4 py-3.5">
-                                    <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-100 uppercase">
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-sm font-semibold bg-purple-50 text-purple-700 border border-purple-100 uppercase">
                                         {{ $row->course_code ?? '—' }}
                                     </span>
                                 </td>
 
-                                <td class="px-4 py-3.5 text-sm font-semibold hidden @[660px]:table-cell text-[#333333]">
+                                <td class="px-4 py-3.5 text-base font-semibold hidden @[660px]:table-cell text-[#333333]">
                                     <span>{{ $row->batch ?? '—' }}</span>
                                 </td>
 
                                 <td class="px-4 py-3.5 hidden @[860px]:table-cell">
                                     @if($row->job_title)
-                                        <p class="font-semibold text-sm leading-snug uppercase text-[#333333]">{!! $this->highlight($row->job_title, $this->search) !!}</p>
+                                        <p class="font-semibold text-base leading-snug uppercase text-[#333333]">{!! $this->highlight($row->job_title, $this->search) !!}</p>
                                     @elseif($row->employment_status === 'unemployed')
-                                        <span class="text-sm italic text-[#999999]">
+                                        <span class="text-base italic text-[#999999]">
                                             {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '—' }}
                                         </span>
                                     @else
-                                        <span class="text-sm italic text-[#cccccc]">No data yet</span>
+                                        <span class="text-base italic text-[#cccccc]">No data yet</span>
                                     @endif
                                 </td>
 
                                 <td class="px-4 py-3.5 hidden @[1120px]:table-cell">
                                     @if($row->email ?? null)
-                                        <p class="text-sm font-medium truncate max-w-[200px] text-[#333333]" title="{{ $row->email }}">
+                                        <p class="text-base font-medium truncate max-w-[200px] text-[#333333]" title="{{ $row->email }}">
                                             {!! $this->highlight($row->email, $this->search) !!}
                                         </p>
                                     @else
-                                        <span class="text-sm text-[#cccccc]">—</span>
+                                        <span class="text-base text-[#cccccc]">—</span>
                                     @endif
                                 </td>
 
                                 <td class="px-4 py-3.5 text-center hidden @[980px]:table-cell">
-                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold border {{ $statusClass }} whitespace-nowrap">
-                                        <i class="fa-solid {{ $statusIcon }} text-[9px]"></i>
+                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-semibold border {{ $statusClass }} whitespace-nowrap">
+                                        <i class="fa-solid {{ $statusIcon }} text-[10px]"></i>
                                         {{ $statusLabel }}
                                     </span>
                                 </td>
@@ -2132,7 +2132,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                 <img src="{{ $modalPhotoUrl }}"
                      alt="{{ $md['full_name'] ?? '' }}"
                      class="w-9 h-9 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
-                <p class="font-semibold text-white text-sm leading-snug uppercase truncate">
+                <p class="font-semibold text-white text-base leading-snug uppercase truncate">
                     {{ $md['full_name'] ?? '—' }}@if($md['suffix'] ?? null) {{ $md['suffix'] }}@endif
                 </p>
             </div>
@@ -2153,40 +2153,40 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 
                 {{-- LEFT: Student Information --}}
                 <div class="border border-[#E8E0F0] rounded-xl p-3.5 bg-white">
-                    <p class="text-[10px] font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Student Information</p>
+                    <p class="text-xs font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Student Information</p>
                     <div class="space-y-2">
                         <div class="grid grid-cols-2 gap-2">
                             <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Program</p>
-                                <p class="text-sm font-bold text-[#333]">{{ $md['course_code'] ?? '—' }}</p>
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Program</p>
+                                <p class="text-base font-bold text-[#333]">{{ $md['course_code'] ?? '—' }}</p>
                             </div>
                             <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Batch</p>
-                                <p class="text-sm font-bold text-[#333]">{{ $md['batch'] ?? '—' }}</p>
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Batch</p>
+                                <p class="text-base font-bold text-[#333]">{{ $md['batch'] ?? '—' }}</p>
                             </div>
                         </div>
                         <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Contact</p>
-                            <p class="text-sm font-semibold text-[#333]">{{ $md['contact_number'] ?? '—' }}</p>
+                            <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Contact</p>
+                            <p class="text-base font-semibold text-[#333]">{{ $md['contact_number'] ?? '—' }}</p>
                         </div>
                         <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                            <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Email Address</p>
-                            <p class="text-sm font-semibold text-[#333] break-all leading-snug">{{ $md['email'] ?? '—' }}</p>
+                            <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Email Address</p>
+                            <p class="text-base font-semibold text-[#333] break-all leading-snug">{{ $md['email'] ?? '—' }}</p>
                         </div>
                     </div>
                 </div>
 
                 {{-- RIGHT: Employment Information --}}
                 <div class="border border-[#E8E0F0] rounded-xl p-3.5 bg-white">
-                    <p class="text-[10px] font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Employment Information</p>
+                    <p class="text-xs font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Employment Information</p>
 
                     {{-- Status + updated --}}
                     <div class="flex items-center gap-2 mb-3 flex-wrap">
-                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold {{ $statusCls }}">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-bold {{ $statusCls }}">
                             {{ $statusLbl }}
                         </span>
                         @if($md['emp_updated_at'] ?? null)
-                            <span class="text-xs text-[#999999]">
+                            <span class="text-sm text-[#999999]">
                                 <i class="fa-regular fa-clock mr-0.5"></i>
                                 {{ \Carbon\Carbon::parse($md['emp_updated_at'])->diffForHumans() }}
                             </span>
@@ -2197,38 +2197,38 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                         <div class="space-y-2">
                             <div class="grid grid-cols-2 gap-2">
                                 <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Employer</p>
-                                    <p class="text-sm font-bold text-[#333] leading-snug">{{ $md['company_name'] ?? '—' }}</p>
+                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Employer</p>
+                                    <p class="text-base font-bold text-[#333] leading-snug">{{ $md['company_name'] ?? '—' }}</p>
                                 </div>
                                 <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Title</p>
-                                    <p class="text-sm font-bold text-[#333] leading-snug">{{ $md['job_title'] ?? '—' }}</p>
+                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Title</p>
+                                    <p class="text-base font-bold text-[#333] leading-snug">{{ $md['job_title'] ?? '—' }}</p>
                                 </div>
                                 <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Type</p>
-                                    <p class="text-sm font-semibold text-[#333]">{{ $empTypeMap[$md['employment_type'] ?? ''] ?? '—' }}</p>
+                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Type</p>
+                                    <p class="text-base font-semibold text-[#333]">{{ $empTypeMap[$md['employment_type'] ?? ''] ?? '—' }}</p>
                                 </div>
                                 <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Location</p>
-                                    <p class="text-sm font-semibold text-[#333]">{{ ucfirst($md['work_location'] ?? '—') }}</p>
+                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Location</p>
+                                    <p class="text-base font-semibold text-[#333]">{{ ucfirst($md['work_location'] ?? '—') }}</p>
                                 </div>
                             </div>
                             <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
-                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Related to Program?</p>
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Related to Program?</p>
                                 @if($relModal)
-                                    <p class="text-sm font-semibold text-[#333]">{{ $relModal[0] }}</p>
+                                    <p class="text-base font-semibold text-[#333]">{{ $relModal[0] }}</p>
                                 @else
-                                    <p class="text-sm text-[#999]">— Not specified</p>
+                                    <p class="text-base text-[#999]">— Not specified</p>
                                 @endif
                             </div>
                             @if(!empty($md['career_path_arr']))
                                 <div>
-                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-1.5">Career Path</p>
+                                    <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-1.5">Career Path</p>
                                     <div class="flex flex-wrap gap-1.5">
                                         @foreach($md['career_path_arr'] as $cp)
                                             @if(isset($careerLabels[$cp]))
-                                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-gray-50 text-[#333] border border-[#E8E0F0]">
-                                                    <i class="fas {{ $careerLabels[$cp][0] }} text-[9px] text-[#7a3f91]"></i>
+                                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-sm font-semibold bg-gray-50 text-[#333] border border-[#E8E0F0]">
+                                                    <i class="fas {{ $careerLabels[$cp][0] }} text-[10px] text-[#7a3f91]"></i>
                                                     {{ $careerLabels[$cp][1] }}
                                                 </span>
                                             @endif
@@ -2240,23 +2240,23 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     @elseif(($md['employment_status'] ?? '') === 'unemployed')
                         <div class="space-y-2">
                             <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-2.5 py-2">
-                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Unemployment Status</p>
-                                <p class="text-sm font-semibold text-[#333]">
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Unemployment Status</p>
+                                <p class="text-base font-semibold text-[#333]">
                                     {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
                                 </p>
                             </div>
                             @if(($md['unemployment_status'] ?? '') === 'not_looking' && !empty($md['unemployment_reason']))
                             <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-2.5 py-2">
-                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Reason</p>
-                                <p class="text-sm font-semibold text-[#333]">{{ $md['unemployment_reason'] }}</p>
+                                <p class="text-[10px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Reason</p>
+                                <p class="text-base font-semibold text-[#333]">{{ $md['unemployment_reason'] }}</p>
                             </div>
                             @endif
                         </div>
                     @else
                         <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-4 py-6 text-center">
                             <i class="fas fa-file-circle-question text-2xl text-[#CCC] mb-2 block"></i>
-                            <p class="text-sm font-semibold text-[#999]">No employment record yet.</p>
-                            <p class="text-xs text-[#CCC] mt-0.5">This alumni hasn't filled their employment info.</p>
+                            <p class="text-base font-semibold text-[#999]">No employment record yet.</p>
+                            <p class="text-sm text-[#CCC] mt-0.5">This alumni hasn't filled their employment info.</p>
                         </div>
                     @endif
                 </div>

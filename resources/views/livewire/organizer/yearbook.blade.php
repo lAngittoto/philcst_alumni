@@ -353,10 +353,7 @@ new class extends Component {
      ">
 
 <style>
-/* ── Disable text selection/copy across the whole Alumni Yearbook page —
-     header, filters, section badges, cards, pagination, etc. The search
-     input explicitly opts back into normal text selection so typing
-     still works. ── */
+/* ── Disable text selection/copy across the whole Alumni Yearbook page ── */
 .yb-noselect {
     -webkit-user-select: none;
     -moz-user-select: none;
@@ -371,7 +368,9 @@ new class extends Component {
     user-select: text;
 }
 
-/* ── Base ──────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────
+   CARD — base (mobile-first: single col → grows via grid)
+───────────────────────────────────────────────────────── */
 .yb-card {
     transition: border-color .15s ease, box-shadow .15s ease;
     position: relative;
@@ -379,17 +378,14 @@ new class extends Component {
     background: #fff;
     display: flex;
     flex-direction: column;
-    height: 420px;
-    min-height: 420px;
-    max-height: 420px;
+    /* fluid height: enough room for photo + info on any screen */
+    height: 360px;
+    min-height: 360px;
+    max-height: 360px;
     align-self: stretch;
 }
-.yb-card:hover {
-    box-shadow: 0 6px 22px rgba(0,0,0,.12);
-}
-.yb-card:not(.yb-card-me) {
-    box-shadow: 0 3px 12px rgba(90,26,138,.18);
-}
+.yb-card:hover          { box-shadow: 0 6px 22px rgba(0,0,0,.12); }
+.yb-card:not(.yb-card-me) { box-shadow: 0 3px 12px rgba(90,26,138,.18); }
 
 /* ── Photo — top of card ─────────────────────────────────── */
 .yb-card-photo-wrap {
@@ -401,22 +397,22 @@ new class extends Component {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 22px 0 18px;
-    min-height: 190px;
+    padding: 16px 0 14px;
+    min-height: 160px;
 }
 .yb-card-photo {
-    width: 130px;
-    height: 130px;
+    width: 100px;
+    height: 100px;
     object-fit: cover;
     object-position: top center;
     display: block;
     border-radius: 50%;
-    border: 4px solid rgba(255,255,255,.9);
+    border: 3px solid rgba(255,255,255,.9);
     box-shadow: 0 4px 16px rgba(0,0,0,.3);
     flex-shrink: 0;
 }
 
-/* ── Right column wrapper ─────────────────────────────────── */
+/* ── Right column wrapper (info area below photo) ─────────── */
 .yb-card-right {
     flex: 1;
     min-width: 0;
@@ -428,7 +424,7 @@ new class extends Component {
 /* ── Purple name ribbon ───────────────────────────────────── */
 .yb-card-name-band {
     background: #7A3F91;
-    padding: 8px 36px 8px 13px;
+    padding: 7px 32px 7px 11px;
     position: relative;
     overflow: hidden;
     flex-shrink: 0;
@@ -437,8 +433,7 @@ new class extends Component {
     content: '';
     position: absolute;
     top: -10%; bottom: -10%;
-    right: 22px;
-    width: 18px;
+    right: 22px; width: 18px;
     background: rgba(255,255,255,.20);
     transform: skewX(-14deg);
     pointer-events: none;
@@ -447,14 +442,13 @@ new class extends Component {
     content: '';
     position: absolute;
     top: -10%; bottom: -10%;
-    right: 9px;
-    width: 8px;
+    right: 9px; width: 8px;
     background: rgba(255,255,255,.10);
     transform: skewX(-14deg);
     pointer-events: none;
 }
 .yb-card-name {
-    font-size: 15px; font-weight: 800;
+    font-size: 13px; font-weight: 800;
     color: #FFFFFF; line-height: 1.2;
     text-transform: uppercase;
     letter-spacing: .01em;
@@ -467,14 +461,14 @@ new class extends Component {
 
 /* ── Card info body ───────────────────────────────────────── */
 .yb-card-text {
-    padding: 10px 13px 12px;
+    padding: 8px 11px 10px;
     flex: 1;
-    display: flex; flex-direction: column; gap: 3px;
+    display: flex; flex-direction: column; gap: 2px;
     background: #fff;
     overflow: hidden;
 }
 .yb-card-line {
-    font-size: 14px; color: #1a1a1a; line-height: 1.4; font-weight: 600;
+    font-size: 12px; color: #1a1a1a; line-height: 1.35; font-weight: 600;
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -483,31 +477,64 @@ new class extends Component {
 .yb-card-dash {
     display: block;
     width: 20px; height: 2px;
-    background: #C8B8D8;
-    border-radius: 2px;
-    margin: 3px 0;
+    background: #C8B8D8; border-radius: 2px; margin: 2px 0;
 }
 .yb-card-motto {
-    font-size: 13px; font-weight: 700;
-    color: #5A1A8A; margin-top: 4px; padding-top: 0;
+    font-size: 11px; font-weight: 700;
+    color: #5A1A8A; margin-top: 3px;
 }
 .yb-card-motto-text {
-    font-size: 13px; font-style: italic; font-weight: 600;
-    color: #1a1a1a; line-height: 1.4;
+    font-size: 11px; font-style: italic; font-weight: 600;
+    color: #1a1a1a; line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
 
+/* ─────────────────────────────────────────────────────────
+   TABLET (≥640px) — larger photo & text
+───────────────────────────────────────────────────────── */
+@media (min-width: 640px) {
+    .yb-card {
+        height: 400px;
+        min-height: 400px;
+        max-height: 400px;
+    }
+    .yb-card-photo-wrap { padding: 20px 0 16px; min-height: 180px; }
+    .yb-card-photo      { width: 120px; height: 120px; border-width: 4px; }
+    .yb-card-name-band  { padding: 8px 36px 8px 13px; }
+    .yb-card-name       { font-size: 14px; }
+    .yb-card-text       { padding: 10px 13px 12px; gap: 3px; }
+    .yb-card-line       { font-size: 13px; }
+    .yb-card-motto      { font-size: 12px; }
+    .yb-card-motto-text { font-size: 12px; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   DESKTOP (≥1024px) — original full size
+───────────────────────────────────────────────────────── */
+@media (min-width: 1024px) {
+    .yb-card {
+        height: 420px;
+        min-height: 420px;
+        max-height: 420px;
+    }
+    .yb-card-photo-wrap { padding: 22px 0 18px; min-height: 190px; }
+    .yb-card-photo      { width: 130px; height: 130px; }
+    .yb-card-name       { font-size: 15px; }
+    .yb-card-line       { font-size: 14px; }
+    .yb-card-motto      { font-size: 13px; }
+    .yb-card-motto-text { font-size: 13px; }
+}
+
+/* ── Section / batch badges ───────────────────────────── */
 .yb-section-badge {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 14px; border-radius: 9999px;
     font-size: 12px; font-weight: 700; letter-spacing: .02em;
     background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
-    white-space: normal;
-    line-height: 1.3;
-    max-width: 100%;
+    white-space: normal; line-height: 1.3; max-width: 100%;
 }
 .yb-batch-badge {
     display: inline-flex; align-items: center; gap: 4px;
@@ -516,24 +543,18 @@ new class extends Component {
     background: #F3E8FF; color: #7A3F91; border: 1.5px solid #D8B4FE;
 }
 
-/* ── "My college" glowing section badge ──────────────────
-   Marks the batch group(s) that include at least one alumnus from the
-   organizer's own college among the full directory, so they can find
-   their own section at a glance. Glow lives on the badge only — the
-   cards underneath stay unstyled. ── */
+/* ── "My college" glowing section badge ────────────────── */
 .yb-section-badge-mine {
     border-color: #7A3F91 !important;
     border-width: 1.5px !important;
     animation: ybSectionGlowPulse 2.2s ease-in-out infinite;
 }
 @keyframes ybSectionGlowPulse {
-    0%, 100% {
-        box-shadow: 0 0 0 2px rgba(122,63,145,.18), 0 3px 10px rgba(122,63,145,.14);
-    }
-    50% {
-        box-shadow: 0 0 0 5px rgba(122,63,145,.30), 0 5px 16px rgba(122,63,145,.28);
-    }
+    0%, 100% { box-shadow: 0 0 0 2px rgba(122,63,145,.18), 0 3px 10px rgba(122,63,145,.14); }
+    50%       { box-shadow: 0 0 0 5px rgba(122,63,145,.30), 0 5px 16px rgba(122,63,145,.28); }
 }
+
+/* ── Alumni-count chip ──────────────────────────────────── */
 .yb-chip {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 3px 12px; border-radius: 9999px;
@@ -542,13 +563,10 @@ new class extends Component {
     border: 1px solid rgba(122,63,145,.22); white-space: nowrap;
 }
 
-/* ── Light-blue highlight on the search term matched in alumni names ── */
+/* ── Search highlight ───────────────────────────────────── */
 .yb-search-hl {
-    background: #dbeafe;   /* light blue */
-    color: #1e3a8a;        /* darker blue text for contrast */
-    border-radius: 3px;
-    padding: 0 2px;
-    font-weight: inherit;
+    background: #dbeafe; color: #1e3a8a;
+    border-radius: 3px; padding: 0 2px; font-weight: inherit;
 }
 
 /* ── Scrollbar ──────────────────────────────────────────── */
@@ -566,7 +584,7 @@ new class extends Component {
 
 /* ── Search input ───────────────────────────────────────── */
 .yb-search-input {
-    padding: 0.5rem 0.75rem 0.5rem 2.25rem;
+    padding: 0.4rem 0.75rem 0.4rem 2.25rem;
     border: 1px solid #E8E0F0; border-radius: 0.5rem;
     font-size: 0.875rem; font-weight: 500;
     background: #fff; color: #333333;
@@ -580,7 +598,7 @@ new class extends Component {
 /* ── Dropdown trigger ───────────────────────────────────── */
 .yb-dd-btn {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+    padding: 0.4rem 2.25rem 0.4rem 0.75rem;
     border: 1px solid #E8E0F0; border-radius: 0.5rem;
     font-size: 0.875rem; font-weight: 500;
     background: #fff; color: #333333;
@@ -624,19 +642,72 @@ new class extends Component {
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
     flex: 1; min-height: 0;
 }
+
+/* ─────────────────────────────────────────────────────────
+   FILTER BAR — two-row layout on mobile, single row ≥768px
+───────────────────────────────────────────────────────── */
 .yb-filter-bar {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
-    padding: 0.6rem 0.875rem; flex-shrink: 0;
+    padding: 0.5rem 0.75rem; flex-shrink: 0;
     position: relative; z-index: 50; overflow: visible;
     pointer-events: all !important;
     cursor: default !important;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
 }
 
-/* ── Keep filter controls always interactive during Livewire loading ──
-   Livewire sets cursor:wait on <body> during requests, which bleeds into
-   all children. These rules lock the filter bar, dropdowns, search input,
-   and reset button to their normal state so the user can keep changing
-   filters mid-flight without any blocked clicks or wrong cursor. ── */
+/* Row 1 on mobile: search fills the full width */
+.yb-filter-search-wrap {
+    flex: 1 1 100%;    /* full row on mobile */
+    min-width: 0;
+    max-width: 100%;
+    position: relative;
+}
+
+/* Row 2 on mobile: dropdowns + count + reset in one flex row */
+.yb-filter-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+
+/* FILTERS label hidden on small screens to save space */
+.yb-filter-label {
+    display: none;
+}
+
+/* "Found" count shrinks label on tight screens */
+.yb-found-count {
+    flex-shrink: 0;
+    margin-left: auto;
+}
+
+/* Tablet+: search + controls side by side */
+@media (min-width: 640px) {
+    .yb-filter-search-wrap {
+        flex: 1 1 160px;
+        max-width: 280px;
+    }
+    .yb-filter-controls {
+        width: auto;
+        flex: 1;
+    }
+    .yb-filter-label {
+        display: flex;
+    }
+}
+
+@media (min-width: 768px) {
+    .yb-filter-bar      { padding: 0.6rem 0.875rem; gap: 8px; }
+    .yb-filter-search-wrap { max-width: 320px; }
+}
+
+/* ── Keep filter controls always interactive during Livewire loading ── */
 .yb-filter-bar *,
 .yb-dd-btn,
 .yb-dd-panel,
@@ -648,14 +719,13 @@ new class extends Component {
 .yb-dd-item       { cursor: pointer !important; }
 .yb-search-input  { cursor: text !important; }
 
-/* ── Disabled dropdown button during Livewire loading ──
-   Overrides the pointer-events:all above so disabled buttons
-   are truly non-interactive and show default cursor. ── */
 .yb-dd-btn:disabled {
     pointer-events: none !important;
     cursor: default !important;
     opacity: 0.5;
 }
+
+/* ── Pagination bar ─────────────────────────────────────── */
 .yb-pagination-bar {
     flex-shrink: 0;
     background: linear-gradient(to right, #7a3f91, #9b59b6);
@@ -663,16 +733,11 @@ new class extends Component {
     display: flex; align-items: center;
     justify-content: space-between; gap: 0.5rem;
     flex-wrap: wrap; border-top: 1px solid rgba(122,63,145,.3);
-    /* Safety net: always pinned to the bottom of the table block,
-       so it can never end up scrolled out of view, no matter how
-       tall the card area ends up being. */
-    position: sticky;
-    bottom: 0;
-    z-index: 30;
+    position: sticky; bottom: 0; z-index: 30;
 }
 .yb-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    min-width: 32px; height: 32px; padding: 0 10px;
+    min-width: 30px; height: 30px; padding: 0 8px;
     border-radius: 8px; font-size: 12px; font-weight: 700; transition: all .15s;
 }
 .yb-pg-active { background: #fff; color: #7a3f91; }
@@ -680,46 +745,20 @@ new class extends Component {
 .yb-pg-nav:hover:not(:disabled) { background: rgba(255,255,255,.28); border-color: rgba(255,255,255,.5); }
 .yb-pg-nav:disabled { opacity: .35; cursor: not-allowed; }
 
-/* ── Root height ─────────────────────────────────────────
-   Desktop: reserve 180px for surrounding layout chrome.
-   Mobile: instead of guessing a fixed px offset for the
-   topbar (hamburger/bell), --yb-avail-h is measured live via
-   Alpine (window.innerHeight - element's actual top offset),
-   so the block always fits exactly under whatever topbar
-   height the layout actually has, on any device. Falls back
-   to the 100dvh calc if JS hasn't run yet.
-──────────────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────
+   ROOT HEIGHT — JS-measured available space
+───────────────────────────────────────────────────────── */
 .yb-root-height {
-    /* Fallback before Alpine measures real space (first paint). */
     height: calc(100vh - 180px);
     max-height: calc(100vh - 180px);
     overflow: hidden;
-    /* Once x-init's setAvailHeight() runs, this always wins on ANY
-       screen size (not just mobile) — fixes the pagination bar
-       getting pushed off-screen when the real topbar height differs
-       from the static 180px guess, before any resize/reflow happens. */
     height: var(--yb-avail-h, calc(100vh - 180px));
     max-height: var(--yb-avail-h, calc(100vh - 180px));
 }
 
-/* ── Mobile responsiveness ──────────────────────────────── */
-@media (max-width: 640px) {
-    .yb-filter-bar {
-        gap: 8px;
-        background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
-        padding: 0.6rem 0.875rem; flex-shrink: 0;
-        position: relative; z-index: 5; overflow: visible;
-    }
-}
-
-/*
-   Mobile pagination visibility fix:
-   Use the JS-measured --yb-avail-h custom property (falls back
-   to 100dvh if not yet set) so the block height always matches
-   the REAL visible space under the app's topbar. Combined with
-   the sticky pagination bar above, the page/pagination is now
-   guaranteed visible without needing to scroll the outer page.
-*/
+/* ─────────────────────────────────────────────────────────
+   MOBILE (<768px) — compact everything
+───────────────────────────────────────────────────────── */
 @media (max-width: 767px) {
     html, body { overflow: hidden !important; }
 
@@ -729,20 +768,31 @@ new class extends Component {
         overflow: hidden !important;
     }
 
-    /* Compact header on mobile to free up vertical space */
-    .yb-mobile-subtitle { display: none; }
-    .yb-mobile-header-icon { width: 2.25rem !important; height: 2.25rem !important; }
-    .yb-mobile-title { font-size: 1rem !important; }
+    /* Compact page header */
+    .yb-mobile-subtitle      { display: none; }
+    .yb-mobile-header-icon   { width: 2.25rem !important; height: 2.25rem !important; }
+    .yb-mobile-title         { font-size: 1rem !important; }
 
-    .yb-filter-bar { padding: 0.45rem 0.65rem; }
-    .yb-dd-btn, .yb-search-input { padding-top: 0.4rem; padding-bottom: 0.4rem; }
-
-    .yb-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
-    .yb-pagination-bar p { font-size: 11px; }
-
+    /* Compact pagination */
     .yb-pagination-bar {
+        min-height: 40px;
+        padding: 6px 0.75rem;
         padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
     }
+    .yb-pagination-bar p { font-size: 10px; }
+    .yb-pg-btn { min-width: 26px; height: 26px; padding: 0 6px; font-size: 11px; }
+
+    /* Truncate dropdown labels on very small screens */
+    .yb-dd-btn { font-size: 0.8rem; padding-right: 2rem; max-width: 110px; }
+    .yb-dd-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   EXTRA-SMALL (<400px) — very tight phones
+───────────────────────────────────────────────────────── */
+@media (max-width: 399px) {
+    .yb-dd-btn { max-width: 96px; font-size: 0.75rem; }
+    .yb-chip   { padding: 3px 8px; font-size: 10px; }
 }
 </style>
 
@@ -775,7 +825,7 @@ new class extends Component {
         {{-- openDd tracks which dropdown is currently open ('batch'|'course'|'').
              When one is open, the other button gets pointer-events:none + cursor:default
              so only one dropdown can be interacted with at a time. --}}
-        <div class="yb-filter-bar flex flex-wrap gap-2 items-center"
+        <div class="yb-filter-bar"
              x-data="{
                 openDd: '',
                 init() {
@@ -783,8 +833,8 @@ new class extends Component {
                 }
              }">
 
-            {{-- Search --}}
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
+            {{-- Row 1: Search (full width on mobile, inline on ≥sm) --}}
+            <div class="yb-filter-search-wrap"
                  wire:ignore
                  x-data="{ q: '', init() { this.q = $wire.search ?? ''; $wire.$watch('search', v => { if (v !== this.q) this.q = v; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-xs"
@@ -797,105 +847,111 @@ new class extends Component {
                        autocomplete="off" spellcheck="false">
             </div>
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
-                 style="color:#7a3f91;">
-                Filters
-            </div>
+            {{-- Row 2 (mobile) / inline (≥sm): Filters label + dropdowns + count + reset --}}
+            <div class="yb-filter-controls">
 
-            {{-- Batch dropdown ── --}}
-            <div class="relative" @click.outside="if(openDd==='batch') openDd=''">
-                <button type="button"
-                        @click="openDd = openDd === 'batch' ? '' : 'batch'"
-                        :class="{ 'active': $wire.batch !== '' }"
-                        :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
-                        wire:loading.attr="disabled"
-                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
-                        class="yb-dd-btn">
-                    <span x-text="$wire.batch !== '' ? 'Batch ' + $wire.batch : 'All Batches'"></span>
-                </button>
-                <div x-show="openDd === 'batch'"
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95"
-                     x-transition:enter-end="opacity-100 scale-100"
-                     x-transition:leave="transition ease-in duration-75"
-                     x-transition:leave-start="opacity-100 scale-100"
-                     x-transition:leave-end="opacity-0 scale-95"
-                     class="yb-dd-panel"
-                     style="display:none;">
-                    <button type="button"
-                            @click="$wire.set('batch', ''); openDd = ''"
-                            :class="{ 'sel': $wire.batch === '' }"
-                            class="yb-dd-item">All Batches</button>
-                    @foreach($this->batches as $b)
-                    <button type="button"
-                            @click="$wire.set('batch', '{{ $b }}'); openDd = ''"
-                            :class="{ 'sel': $wire.batch === '{{ $b }}' }"
-                            class="yb-dd-item">{{ $b }}</button>
-                    @endforeach
+                {{-- FILTERS label (hidden on mobile) --}}
+                <div class="yb-filter-label items-center gap-2 px-2 h-[34px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                     style="color:#7a3f91;">
+                    Filters
                 </div>
-            </div>
 
-            {{-- Program dropdown ── --}}
-            <div class="relative" @click.outside="if(openDd==='course') openDd=''">
-                <button type="button"
-                        @click="openDd = openDd === 'course' ? '' : 'course'"
-                        :class="{ 'active': $wire.course !== '' }"
-                        :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
-                        wire:loading.attr="disabled"
-                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
-                        class="yb-dd-btn">
-                    @if($course !== '')
-                        <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
-                    @else
-                        <span>All Programs</span>
-                    @endif
-                </button>
-                <div x-show="openDd === 'course'"
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95"
-                     x-transition:enter-end="opacity-100 scale-100"
-                     x-transition:leave="transition ease-in duration-75"
-                     x-transition:leave-start="opacity-100 scale-100"
-                     x-transition:leave-end="opacity-0 scale-95"
-                     class="yb-dd-panel"
-                     style="display:none; min-width:220px;">
+                {{-- Batch dropdown ── --}}
+                <div class="relative shrink-0" @click.outside="if(openDd==='batch') openDd=''">
                     <button type="button"
-                            @click="$wire.set('course', ''); openDd = ''"
-                            :class="{ 'sel': $wire.course === '' }"
-                            class="yb-dd-item">All Programs</button>
-                    @foreach($this->courses as $c)
-                    <button type="button"
-                            @click="$wire.set('course', '{{ $c->code }}'); openDd = ''"
-                            :class="{ 'sel': $wire.course === '{{ $c->code }}' }"
-                            class="yb-dd-item">{{ $c->name }}</button>
-                    @endforeach
+                            @click="openDd = openDd === 'batch' ? '' : 'batch'"
+                            :class="{ 'active': $wire.batch !== '' }"
+                            :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                            wire:loading.attr="disabled"
+                            wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
+                            class="yb-dd-btn">
+                        <span x-text="$wire.batch !== '' ? 'Batch ' + $wire.batch : 'All Batches'"></span>
+                    </button>
+                    <div x-show="openDd === 'batch'"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 scale-95"
+                         x-transition:enter-end="opacity-100 scale-100"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="opacity-100 scale-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="yb-dd-panel"
+                         style="display:none;">
+                        <button type="button"
+                                @click="$wire.set('batch', ''); openDd = ''"
+                                :class="{ 'sel': $wire.batch === '' }"
+                                class="yb-dd-item">All Batches</button>
+                        @foreach($this->batches as $b)
+                        <button type="button"
+                                @click="$wire.set('batch', '{{ $b }}'); openDd = ''"
+                                :class="{ 'sel': $wire.batch === '{{ $b }}' }"
+                                class="yb-dd-item">{{ $b }}</button>
+                        @endforeach
+                    </div>
                 </div>
-            </div>
 
-            {{-- Found count ── --}}
-            <div class="flex items-center gap-2 ml-auto">
-                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
-                      style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
-                    {{ number_format($this->totalFiltered) }} found
-                </span>
-            </div>
+                {{-- Program dropdown ── --}}
+                <div class="relative shrink-0" @click.outside="if(openDd==='course') openDd=''">
+                    <button type="button"
+                            @click="openDd = openDd === 'course' ? '' : 'course'"
+                            :class="{ 'active': $wire.course !== '' }"
+                            :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                            wire:loading.attr="disabled"
+                            wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
+                            class="yb-dd-btn">
+                        @if($course !== '')
+                            <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
+                        @else
+                            <span>All Programs</span>
+                        @endif
+                    </button>
+                    <div x-show="openDd === 'course'"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 scale-95"
+                         x-transition:enter-end="opacity-100 scale-100"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="opacity-100 scale-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="yb-dd-panel"
+                         style="display:none; min-width:200px;">
+                        <button type="button"
+                                @click="$wire.set('course', ''); openDd = ''"
+                                :class="{ 'sel': $wire.course === '' }"
+                                class="yb-dd-item">All Programs</button>
+                        @foreach($this->courses as $c)
+                        <button type="button"
+                                @click="$wire.set('course', '{{ $c->code }}'); openDd = ''"
+                                :class="{ 'sel': $wire.course === '{{ $c->code }}' }"
+                                class="yb-dd-item">{{ $c->name }}</button>
+                        @endforeach
+                    </div>
+                </div>
 
-            {{-- Reset — moved to the very end of the filter bar --}}
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
-                    style="color:#333333;">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7A3F91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
+                {{-- Found count ── --}}
+                <div class="yb-found-count flex items-center">
+                    <span class="text-xs font-bold px-2 py-1 rounded-full uppercase whitespace-nowrap"
+                          style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
+                        {{ number_format($this->totalFiltered) }} found
+                    </span>
+                </div>
+
+                {{-- Reset ── --}}
+                <button wire:click="resetFilters"
+                        wire:loading.attr="disabled"
+                        wire:loading.class="opacity-60 cursor-wait"
+                        wire:target="resetFilters"
+                        class="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-semibold
+                               bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none cursor-pointer"
+                        style="color:#333333;">
+                    <span wire:loading.remove wire:target="resetFilters">
+                        <i class="fas fa-rotate-left text-xs"></i>
+                    </span>
+                    <span wire:loading wire:target="resetFilters">
+                        <i class="fas fa-spinner fa-spin text-xs" style="color:#7A3F91;"></i>
+                    </span>
+                    <span class="hidden sm:inline text-xs">Reset</span>
+                </button>
+
+            </div>{{-- /yb-filter-controls --}}
         </div>
 
         {{-- ── SCROLLABLE CARDS AREA ── --}}
@@ -933,8 +989,8 @@ new class extends Component {
                             </span>
                         </div>
 
-                        {{-- Card grid — capped at 5 cols, equal-height rows --}}
-                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
+                        {{-- Card grid: 1 col <400px, 2 col sm, 3 col md, 4 col lg, 5 col xl --}}
+                        <div class="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 items-stretch">
                             @foreach($group['members'] as $alumni)
                             @php
                                 $cardName = $this->formatAlumniName(
