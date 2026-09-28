@@ -2506,7 +2506,23 @@ new class extends Component {
             $q = $m[1];
             $suggestions = [['id'=>0,'name'=>'everyone','type'=>'everyone']];
 
-            if (! $this->isStaffRoom && $this->room) {
+            if ($this->isStaffRoom) {
+                // ── Staff room: only suggest members of this specific staff room ──
+                // Directors and coordinators who are part of this internal room
+                $dirs = DB::table('director')->whereNull('deleted_at')
+                    ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
+                    ->limit(3)->get(['id','first_name','last_name'])
+                    ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'type'=>'director'])->toArray();
+
+                $coords = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at')
+                    ->where('department', $this->department)
+                    ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
+                    ->limit(3)->get(['id','first_name','last_name'])
+                    ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'type'=>'coordinator'])->toArray();
+
+                $this->mentionSuggestions = array_merge($suggestions, $dirs, $coords);
+            } elseif ($this->room) {
+                // ── Alumni room: only suggest members who actually belong to this room ──
                 if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
                     $alumniQ = DB::table('alumni')
                         ->whereIn('course_code', $this->deptCourseCodes)
@@ -2521,21 +2537,18 @@ new class extends Component {
                 }
                 $alumni = $alumniQ->limit(5)->get(['id','first_name','last_name'])
                     ->map(fn($a)=>['id'=>$a->id,'name'=>trim($a->first_name.' '.$a->last_name),'type'=>'alumni'])->toArray();
-                $suggestions = array_merge($suggestions, $alumni);
+
+                // Only coordinators in this same department can be mentioned in alumni rooms
+                $coords = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at')
+                    ->where('department', $this->department)
+                    ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
+                    ->limit(3)->get(['id','first_name','last_name'])
+                    ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'type'=>'coordinator'])->toArray();
+
+                $this->mentionSuggestions = array_merge($suggestions, $alumni, $coords);
             }
 
-            $dirs = DB::table('director')->whereNull('deleted_at')
-                ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
-                ->limit(3)->get(['id','first_name','last_name'])
-                ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'type'=>'director'])->toArray();
-
-            $coords = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at')
-                ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
-                ->limit(3)->get(['id','first_name','last_name'])
-                ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'type'=>'coordinator'])->toArray();
-
-            $this->mentionSuggestions = array_merge($suggestions, $dirs, $coords);
-            $this->showMentions       = true;
+            $this->showMentions = true;
         } else {
             $this->showMentions = false; $this->mentionSuggestions = [];
         }

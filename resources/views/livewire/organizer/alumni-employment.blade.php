@@ -1293,21 +1293,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     Filters
                 </div>
 
-                {{-- Search — text selection re-enabled here specifically so
-                     the person can still select/copy/edit what they type. --}}
-                <div class="relative flex-1 min-w-[160px] max-w-xs"
-                     wire:ignore
-                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
-                    <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)"
-                           :class="q !== '' ? 'border-[#7a3f91] bg-white text-[#333333] font-semibold' : 'bg-white text-[#333333] font-medium'"
-                           placeholder="Search ..."
-                           style="-webkit-user-select:text;-moz-user-select:text;-ms-user-select:text;user-select:text;"
-                           onselectstart="event.stopPropagation(); return true;"
-                           class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
-                           autocomplete="off" maxlength="100" spellcheck="false">
-                </div>
-
                 {{-- Status — MULTI-SELECT with real checkboxes, Clear/
                      Apply-gated: checking a box only edits a LOCAL Alpine
                      draft ("picked") while the panel is open — nothing
@@ -1661,8 +1646,23 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     </div>
                 @endif
 
-                {{-- Reset — pushed to the far right of the bar (ml-auto),
-                     and automatically disabled whenever no filter/search
+                {{-- Search — placed after filter dropdowns, pinned to the
+                     right side. Text selection re-enabled so the person can
+                     still select/copy/edit what they type. --}}
+                <div class="relative ml-auto min-w-[160px] max-w-xs"
+                     wire:ignore
+                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
+                    <input type="text" x-model="q" @input.debounce.200ms="$wire.set('search',q)"
+                           :class="q !== '' ? 'border-[#7a3f91] bg-white text-[#333333] font-semibold' : 'bg-white text-[#333333] font-medium'"
+                           placeholder="Search ..."
+                           style="-webkit-user-select:text;-moz-user-select:text;-ms-user-select:text;user-select:text;"
+                           onselectstart="event.stopPropagation(); return true;"
+                           class="w-full border border-[#E8E0F0] transition-[border-color,box-shadow] duration-150 text-sm py-2 pr-4 pl-9 rounded-lg placeholder:text-[#999999] placeholder:font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10"
+                           autocomplete="off" maxlength="100" spellcheck="false">
+                </div>
+
+                {{-- Reset — automatically disabled whenever no filter/search
                      is currently active, so there's nothing to reset. --}}
                 @php
                     $aeHasActiveFilters = $search !== '' || !empty($filterStatuses) || $filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses);
@@ -1672,7 +1672,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                         wire:loading.class="opacity-60 cursor-wait"
                         wire:target="clearFilters"
                         @disabled(!$aeHasActiveFilters)
-                        class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
                                bg-white border border-[#E8E0F0] transition active:scale-95
                                disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed
                                cursor-pointer text-[#333333]">
@@ -2097,142 +2097,174 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
             : asset('storage/alumni-photos/default.png')
         );
 @endphp
-{{-- Full-screen page (not a modal/dialog): no backdrop, no centering,
-     fills the entire viewport like the Edit Event page. Just an X button
-     top-right to go back. x-data still manages the open/closing
-     transition so closeModal() fires after the fade-out finishes. --}}
-<div class="fixed inset-0 bg-white z-50 flex flex-col"
+{{-- MODAL POPUP — centered dialog with backdrop, no fullscreen, no scroll.
+     Compact two-column layout so all info fits without scrolling on most screens.
+     Responsive: stacks to single column on mobile. --}}
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
      x-data="{ open: false, isClosing: false, closing(){ if (this.isClosing) return; this.isClosing = true; this.open = false; window.dispatchEvent(new CustomEvent('open-sidebar')); setTimeout(() => $wire.closeModal(), 180); } }"
      x-init="requestAnimationFrame(() => open = true)"
      x-show="open"
      x-transition:enter="transition ease-out duration-200"
-     x-transition:enter-start="opacity-0 scale-[0.99]"
-     x-transition:enter-end="opacity-100 scale-100"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
      x-transition:leave="transition ease-in duration-150"
      x-transition:leave-start="opacity-100"
      x-transition:leave-end="opacity-0"
-     @keydown.escape.window="closing()">
+     @keydown.escape.window="closing()"
+     style="display:none;">
 
-        <div class="flex items-center justify-between px-5 py-4 border-b border-[#E8E0F0] flex-shrink-0 bg-[#7A3F91]">
-            <p class="font-semibold text-white text-base leading-snug uppercase">
-                {{ $modalData['full_name'] ?? '—' }}
-                @if($modalData['suffix'] ?? null) {{ $modalData['suffix'] }}@endif
-            </p>
-            <button type="button"
-                    @click="closing()"
-                    :disabled="isClosing"
-                    class="relative group/close w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white cursor-pointer disabled:cursor-wait">
-                <i class="fa-solid fa-spinner fa-spin text-lg" x-show="isClosing" x-cloak></i>
-                <i class="fa-solid fa-xmark text-lg" x-show="!isClosing"></i>
-                <span class="pointer-events-none absolute top-full mt-1.5 left-1/2 -translate-x-1/2 bg-neutral-900 text-white text-xs font-semibold px-2 py-1 rounded-md whitespace-nowrap opacity-0 group-hover/close:opacity-100 transition-opacity duration-150">Close</span>
-            </button>
-        </div>
+    {{-- Backdrop --}}
+    <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px]" @click="closing()"></div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-8 space-y-5 max-w-3xl w-full mx-auto [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
+    {{-- Modal panel --}}
+    <div class="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
+                max-h-[90dvh] sm:max-h-[88dvh]"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+         x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100 scale-100"
+         x-transition:leave-end="opacity-0 scale-95">
 
-            <div class="flex flex-col items-center text-center gap-3 pb-2">
+        {{-- Header --}}
+        <div class="flex items-center justify-between px-5 py-3.5 flex-shrink-0 bg-[#7A3F91]">
+            <div class="flex items-center gap-3 min-w-0">
                 <img src="{{ $modalPhotoUrl }}"
                      alt="{{ $md['full_name'] ?? '' }}"
-                     class="w-24 h-24 rounded-2xl object-cover shadow-md ring-2 ring-[#E8E0F0]">
-                <p class="text-xl font-bold text-[#333333] uppercase leading-snug">
+                     class="w-9 h-9 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
+                <p class="font-semibold text-white text-sm leading-snug uppercase truncate">
                     {{ $md['full_name'] ?? '—' }}@if($md['suffix'] ?? null) {{ $md['suffix'] }}@endif
                 </p>
             </div>
+            <button type="button"
+                    @click="closing()"
+                    :disabled="isClosing"
+                    class="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white cursor-pointer disabled:cursor-wait flex-shrink-0 ml-3">
+                <i class="fa-solid fa-spinner fa-spin text-sm" x-show="isClosing" x-cloak></i>
+                <i class="fa-solid fa-xmark text-sm" x-show="!isClosing"></i>
+            </button>
+        </div>
 
-            <div class="border border-[#E8E0F0] rounded-2xl p-4 bg-white">
-                <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-3">Student Information</p>
-                <div class="grid grid-cols-3 gap-2 mb-2">
-                    @foreach([
-                        'Program' => $md['course_code']    ?? '—',
-                        'Batch'   => $md['batch']          ?? '—',
-                        'Contact' => $md['contact_number'] ?? '—',
-                    ] as $label => $value)
-                        <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $label }}</p>
-                            <p class="text-base font-semibold text-[#333333]">{{ $value ?: '—' }}</p>
-                        </div>
-                    @endforeach
-                </div>
-                <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                    <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Email Address</p>
-                    <p class="text-base font-semibold text-[#333333] break-all">{{ $md['email'] ?? '—' }}</p>
-                </div>
-            </div>
+        {{-- Body — scrollable only if content overflows, otherwise fits naturally --}}
+        <div class="overflow-y-auto flex-1 min-h-0 p-4 sm:p-5 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
 
-            <div class="border border-[#E8E0F0] rounded-2xl p-4 bg-white">
-                <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-3">Employment Information</p>
-                <div class="flex items-center gap-2 mb-4 flex-wrap">
-                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-semibold {{ $statusCls }}">
-                        {{ $statusLbl }}
-                    </span>
-                    @if($md['emp_updated_at'] ?? null)
-                        <span class="text-sm text-[#999999]">
-                            <i class="fa-regular fa-clock mr-1"></i>
-                            Updated {{ \Carbon\Carbon::parse($md['emp_updated_at'])->diffForHumans() }}
-                        </span>
-                    @endif
-                </div>
+            {{-- Two-column grid on sm+: Student Info left, Employment right --}}
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
-                @if($isEmp)
-                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        @foreach([
-                            ['Employer',         $md['company_name']  ?? '—'],
-                            ['Job Title',        $md['job_title']     ?? '—'],
-                            ['Employment Type',  $empTypeMap[$md['employment_type'] ?? ''] ?? '—'],
-                            ['Location',   ucfirst($md['work_location'] ?? '—')],
-                        ] as [$lbl, $val])
-                            <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">{{ $lbl }}</p>
-                                <p class="text-base font-semibold text-[#333333]">{{ $val }}</p>
+                {{-- LEFT: Student Information --}}
+                <div class="border border-[#E8E0F0] rounded-xl p-3.5 bg-white">
+                    <p class="text-[10px] font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Student Information</p>
+                    <div class="space-y-2">
+                        <div class="grid grid-cols-2 gap-2">
+                            <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Program</p>
+                                <p class="text-sm font-bold text-[#333]">{{ $md['course_code'] ?? '—' }}</p>
                             </div>
-                        @endforeach
-                        <div class="bg-gray-50 rounded-xl px-3 py-2.5 border border-[#E8E0F0] sm:col-span-3">
-                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-1.5">Job Related to Program?</p>
-                            @if($relModal)
-                                <p class="text-base font-semibold text-[#333333]">{{ $relModal[0] }}</p>
-                            @else
-                                <p class="text-base text-[#999999]">— Not specified</p>
-                            @endif
+                            <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Batch</p>
+                                <p class="text-sm font-bold text-[#333]">{{ $md['batch'] ?? '—' }}</p>
+                            </div>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                            <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Contact</p>
+                            <p class="text-sm font-semibold text-[#333]">{{ $md['contact_number'] ?? '—' }}</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                            <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Email Address</p>
+                            <p class="text-sm font-semibold text-[#333] break-all leading-snug">{{ $md['email'] ?? '—' }}</p>
                         </div>
                     </div>
-                    @if(!empty($md['career_path_arr']))
-                        <div class="mt-4">
-                            <p class="text-sm font-semibold text-[#333333] uppercase tracking-widest mb-2">Career Path</p>
-                            <div class="flex flex-wrap gap-2">
-                                @foreach($md['career_path_arr'] as $cp)
-                                    @if(isset($careerLabels[$cp]))
-                                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-sm font-semibold bg-gray-50 text-[#333333] border border-[#E8E0F0]">
-                                            {{ $careerLabels[$cp][1] }}
-                                        </span>
-                                    @endif
-                                @endforeach
-                            </div>
-                        </div>
-                    @endif
-                @elseif(($md['employment_status'] ?? '') === 'unemployed')
-                    <div class="space-y-3">
-                        <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
-                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Unemployment Status</p>
-                            <p class="text-base font-semibold text-[#333333]">
-                                {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
-                            </p>
-                        </div>
-                        @if(($md['unemployment_status'] ?? '') === 'not_looking' && !empty($md['unemployment_reason']))
-                        <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-3">
-                            <p class="text-sm font-semibold uppercase tracking-widest text-[#333333] mb-0.5">Reason</p>
-                            <p class="text-base font-semibold text-[#333333]">{{ $md['unemployment_reason'] }}</p>
-                        </div>
+                </div>
+
+                {{-- RIGHT: Employment Information --}}
+                <div class="border border-[#E8E0F0] rounded-xl p-3.5 bg-white">
+                    <p class="text-[10px] font-bold text-[#7a3f91] uppercase tracking-widest mb-3">Employment Information</p>
+
+                    {{-- Status + updated --}}
+                    <div class="flex items-center gap-2 mb-3 flex-wrap">
+                        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold {{ $statusCls }}">
+                            {{ $statusLbl }}
+                        </span>
+                        @if($md['emp_updated_at'] ?? null)
+                            <span class="text-xs text-[#999999]">
+                                <i class="fa-regular fa-clock mr-0.5"></i>
+                                {{ \Carbon\Carbon::parse($md['emp_updated_at'])->diffForHumans() }}
+                            </span>
                         @endif
                     </div>
-                @else
-                    <div class="bg-gray-50 border border-[#E8E0F0] rounded-xl px-4 py-8 text-center">
-                        <p class="text-base font-semibold text-[#999999]">No employment record yet.</p>
-                        <p class="text-sm text-[#CCCCCC] mt-1">This alumni has not filled in their employment information.</p>
-                    </div>
-                @endif
-            </div>
 
-        </div>
+                    @if($isEmp)
+                        <div class="space-y-2">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Employer</p>
+                                    <p class="text-sm font-bold text-[#333] leading-snug">{{ $md['company_name'] ?? '—' }}</p>
+                                </div>
+                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Title</p>
+                                    <p class="text-sm font-bold text-[#333] leading-snug">{{ $md['job_title'] ?? '—' }}</p>
+                                </div>
+                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Type</p>
+                                    <p class="text-sm font-semibold text-[#333]">{{ $empTypeMap[$md['employment_type'] ?? ''] ?? '—' }}</p>
+                                </div>
+                                <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Location</p>
+                                    <p class="text-sm font-semibold text-[#333]">{{ ucfirst($md['work_location'] ?? '—') }}</p>
+                                </div>
+                            </div>
+                            <div class="bg-gray-50 rounded-lg px-2.5 py-2 border border-[#E8E0F0]">
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Job Related to Program?</p>
+                                @if($relModal)
+                                    <p class="text-sm font-semibold text-[#333]">{{ $relModal[0] }}</p>
+                                @else
+                                    <p class="text-sm text-[#999]">— Not specified</p>
+                                @endif
+                            </div>
+                            @if(!empty($md['career_path_arr']))
+                                <div>
+                                    <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-1.5">Career Path</p>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        @foreach($md['career_path_arr'] as $cp)
+                                            @if(isset($careerLabels[$cp]))
+                                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-gray-50 text-[#333] border border-[#E8E0F0]">
+                                                    <i class="fas {{ $careerLabels[$cp][0] }} text-[9px] text-[#7a3f91]"></i>
+                                                    {{ $careerLabels[$cp][1] }}
+                                                </span>
+                                            @endif
+                                        @endforeach
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                    @elseif(($md['employment_status'] ?? '') === 'unemployed')
+                        <div class="space-y-2">
+                            <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-2.5 py-2">
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Unemployment Status</p>
+                                <p class="text-sm font-semibold text-[#333]">
+                                    {{ ['seeking_employment'=>'Seeking Employment','not_looking'=>'Currently Not Looking'][$md['unemployment_status'] ?? ''] ?? '—' }}
+                                </p>
+                            </div>
+                            @if(($md['unemployment_status'] ?? '') === 'not_looking' && !empty($md['unemployment_reason']))
+                            <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-2.5 py-2">
+                                <p class="text-[9px] font-bold uppercase tracking-widest text-[#888] mb-0.5">Reason</p>
+                                <p class="text-sm font-semibold text-[#333]">{{ $md['unemployment_reason'] }}</p>
+                            </div>
+                            @endif
+                        </div>
+                    @else
+                        <div class="bg-gray-50 border border-[#E8E0F0] rounded-lg px-4 py-6 text-center">
+                            <i class="fas fa-file-circle-question text-2xl text-[#CCC] mb-2 block"></i>
+                            <p class="text-sm font-semibold text-[#999]">No employment record yet.</p>
+                            <p class="text-xs text-[#CCC] mt-0.5">This alumni hasn't filled their employment info.</p>
+                        </div>
+                    @endif
+                </div>
+
+            </div>{{-- /grid --}}
+        </div>{{-- /body --}}
+
+    </div>{{-- /modal panel --}}
 </div>
 @endif
 
