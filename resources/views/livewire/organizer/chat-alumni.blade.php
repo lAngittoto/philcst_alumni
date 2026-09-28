@@ -276,9 +276,50 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     // Photo URL helper
     // ─────────────────────────────────────────────────────────────────────
+    //
+    //    Same resolution logic as alumni-employment / yearbook getPhotoUrl(),
+    //    so profile photos (including ones stored on Cloudinary, full http(s)
+    //    URLs, Cloudinary public_ids, or bare filenames) render properly in
+    //    the messenger instead of silently falling back to the default avatar.
+    //    Returns NULL for empty / "null" / default.png so every caller can
+    //    keep using `?: $defaultAv` to show the default avatar.
+    // ─────────────────────────────────────────────────────────────────────
     private function resolvePhotoUrl(?string $path): ?string
     {
-        if (! $path) return null;
+        $path = is_string($path) ? trim($path) : '';
+
+        // Empty / literal "null" / explicit default.png → default (caller handles)
+        if ($path === '' || $path === 'null' || str_contains($path, 'default.png')) {
+            return null;
+        }
+
+        // Already a full Cloudinary (or any http/https) URL → use as-is
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Protocol-relative URL
+        if (str_starts_with($path, '//')) {
+            return 'https:' . $path;
+        }
+
+        $path = ltrim($path, '/');
+
+        // Cloudinary public_id stored without domain
+        // e.g. "alumni-photos/abc123" or "v1234567890/alumni-photos/abc123"
+        if (str_starts_with($path, 'alumni-photos/') || preg_match('/^v\d{6,}\//', $path)) {
+            $cloudName = config('cloudinary.cloud_name')
+                      ?? config('cloudinary.cloud.cloud_name')
+                      ?? env('CLOUDINARY_CLOUD_NAME', '');
+            if ($cloudName) {
+                return 'https://res.cloudinary.com/' . $cloudName . '/image/upload/' . $path;
+            }
+        }
+
+        // Already-prefixed local storage paths
+        if (str_starts_with($path, 'storage/')) {
+            return asset($path);
+        }
         if (
             str_starts_with($path, 'alumni-photos/') ||
             str_starts_with($path, 'organizers/')    ||
@@ -286,7 +327,13 @@ new class extends Component {
         ) {
             return asset('storage/' . $path);
         }
-        return null;
+
+        // Bare filename → alumni-photos folder
+        if (! str_contains($path, '/')) {
+            return asset('storage/alumni-photos/' . $path);
+        }
+
+        return asset('storage/' . $path);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -3052,7 +3099,7 @@ new class extends Component {
                      style="background:rgba(255,255,255,.18);">
                     <img src="{{ $coordinatorPhoto ?: $defaultAv }}"
                          class="w-full h-full object-cover"
-                         onerror="this.src='{{ $defaultAv }}'"
+                         onerror="this.onerror=null;this.src='{{ $defaultAv }}'"
                          alt="{{ $coordinatorFirstName }}">
                 </div>
                 <div class="flex-1 min-w-0">
@@ -3462,7 +3509,7 @@ new class extends Component {
                                 @if(! $msg['is_mine'])
                                 <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end"
                                      style="{{ $avatarGrad }}" title="{{ $msg['sender_name'] }}">
-                                    <img src="{{ $senderPhotoSrc }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    <img src="{{ $senderPhotoSrc }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                 </div>
                                 @endif
 
@@ -3728,7 +3775,7 @@ new class extends Component {
 
                                 @if($msg['is_mine'])
                                 <div class="w-7 h-7 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white mb-1 self-end" style="background:#6b2490;">
-                                    <img src="{{ $coordinatorPhoto ?: $defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    <img src="{{ $coordinatorPhoto ?: $defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                 </div>
                                 @endif
                             </div>
@@ -3933,7 +3980,7 @@ new class extends Component {
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 bg-violet-50 border border-violet-100">
                                 <div class="relative flex-shrink-0">
                                     <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#4a1d78;">
-                                        <img src="{{ $dir['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                        <img src="{{ $dir['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                     </div>
                                     @if($dir['is_online'])<span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>@endif
                                 </div>
@@ -3967,7 +4014,7 @@ new class extends Component {
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:border-[#c49bdb] hover:bg-[#f2e8f9] transition-all {{ $coord['is_me']?'bg-[#f2e8f9] border-[#c49bdb]':'' }}">
                                 <div class="relative flex-shrink-0">
                                     <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
-                                        <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                        <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                     </div>
                                     <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
                                 </div>
@@ -3980,7 +4027,7 @@ new class extends Component {
                             @foreach($offlineCoords as $coord)
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:bg-[#fafafa] transition-all opacity-70 {{ $coord['is_me']?'bg-[#f2e8f9] border-[#c49bdb] opacity-100':'' }}">
                                 <div class="w-8 h-8 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center" style="background:#c4a8d4;">
-                                    <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <p class="text-xs font-semibold text-[#666666] truncate">{{ $coord['name'] }}@if($coord['is_me'])<span class="text-[#6b2490] font-semibold"> (You)</span>@endif</p>
@@ -4010,7 +4057,7 @@ new class extends Component {
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2 mb-1 bg-[#f2e8f9] border border-[#ddd3e8]">
                                 <div class="relative flex-shrink-0">
                                     <div class="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
-                                        <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                        <img src="{{ $coord['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                     </div>
                                     @if($coord['is_online']||$coord['is_me'])<span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>@endif
                                 </div>
@@ -4037,7 +4084,7 @@ new class extends Component {
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:border-[#c49bdb] hover:bg-[#f2e8f9] transition-all">
                                 <div class="relative flex-shrink-0">
                                     <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center" style="background:#6b2490;">
-                                        <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                        <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                     </div>
                                     <span class="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-white"></span>
                                 </div>
@@ -4062,7 +4109,7 @@ new class extends Component {
                             @foreach($offlineAlumni as $al)
                             <div class="flex items-center gap-2.5 rounded-lg px-3 py-2.5 border border-[#ddd3e8] hover:bg-[#fafafa] transition-all opacity-70">
                                 <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center" style="background:#c4a8d4;">
-                                    <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                                    <img src="{{ $al['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <p class="text-xs font-semibold text-[#666666] truncate">{{ $al['name'] }}</p>
@@ -4251,7 +4298,7 @@ new class extends Component {
                     <div class="flex items-center gap-2.5 px-4 py-2.5"
                          x-show="activeTab === 'all' || activeTab === '{{ $rk }}'">
                         <div class="w-9 h-9 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
-                            <img src="{{ $reactor['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.src='{{ $defaultAv }}'" alt="">
+                            <img src="{{ $reactor['photo']??$defaultAv }}" class="w-full h-full object-cover" onerror="this.onerror=null;this.src='{{ $defaultAv }}'" alt="">
                         </div>
                         <div class="flex-1 min-w-0">
                             <p class="text-sm font-semibold text-[#1a1a1a] truncate">

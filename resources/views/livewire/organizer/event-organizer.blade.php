@@ -829,9 +829,20 @@ public function viewEvent(int $id): void
             ->where('status', 'PENDING')
             ->firstOrFail();
 
+        $willActivate = !((bool) ($event->is_active ?? true));
+
+        // ── Activating: the event's date & start time must still be in the
+        //    future. If it already passed, block it and ask the organizer to
+        //    edit the date/time first (so the schedule is always up to date). ──
+        if ($willActivate && $event->event_date && $event->event_date->lte(now('UTC'))) {
+            $this->dispatch('flash-message', type: 'error',
+                message: 'This event\'s date/time has already passed. Please edit the date and time first before activating.');
+            return;
+        }
+
         $this->pendingToggleId       = $id;
         $this->pendingToggleTitle    = $event->title;
-        $this->pendingToggleActivate = !((bool) ($event->is_active ?? true));
+        $this->pendingToggleActivate = $willActivate;
         $this->showToggleModal       = true;
     }
 
@@ -853,6 +864,14 @@ public function viewEvent(int $id): void
             ->firstOrFail();
 
         $activate = $this->pendingToggleActivate;
+
+        // Safety re-check (date may have passed while the confirm modal was open)
+        if ($activate && $event->event_date && $event->event_date->lte(now('UTC'))) {
+            $this->cancelToggle();
+            $this->dispatch('flash-message', type: 'error',
+                message: 'This event\'s date/time has already passed. Please edit the date and time first before activating.');
+            return;
+        }
 
         // Query-builder update so it works even if is_active is not in $fillable.
         OrganizerEvent::where('id', $event->id)->update([
@@ -2141,10 +2160,10 @@ select.tw-select-arrow {
    it's obvious which fields are meant to be filled up. Error fields keep
    their red bg (bg-red-50), locked contact fields (name/email) stay white. ══ */
 .eo-form-modal {
-    --eo-fill:       #f3e8fb;
-    --eo-fill-hover: #ede0f8;
+    --eo-fill:       #f1f2f4;   /* light gray */
+    --eo-fill-hover: #e8eaed;
     --eo-fill-focus: #ffffff;
-    --eo-fill-border:#d8c2ea;
+    --eo-fill-border:#d1d5db;
 }
 .eo-form-modal input[type="text"]:not(.bg-red-50),
 .eo-form-modal input[type="date"]:not(.bg-red-50),
@@ -2164,7 +2183,7 @@ select.tw-select-arrow {
     border-color: #7a3f91 !important;
 }
 .eo-form-modal input::placeholder,
-.eo-form-modal textarea::placeholder { color: #9a86a8; }
+.eo-form-modal textarea::placeholder { color: #9ca3af; }
 
 /* Start / End time pickers */
 .eo-form-modal .time-select-wrap:not(.bg-red-50) {
@@ -2182,7 +2201,7 @@ select.tw-select-arrow {
 .eo-form-modal .time-select-wrap select:focus { background: transparent !important; }
 
 /* Batch Year dropdown trigger (keeps its own "has-value" look once chosen) */
-.eo-form-modal .eo-batch-trigger:not(.has-value):not(.bg-red-50) {
+.eo-form-modal .eo-batch-trigger:not(.bg-red-50) {
     background-color: var(--eo-fill) !important;
     border-color: var(--eo-fill-border) !important;
 }
@@ -3580,6 +3599,35 @@ select.tw-select-arrow {
                         </div>
                     </div>
                 </div>
+
+                {{-- Created / Last updated (edit & resubmit only) --}}
+                @if($isEditing || $isResubmitting)
+                    @php
+                        $eoMeta = $editingEventId ? \App\Models\OrganizerEvent::find($editingEventId) : null;
+                        $eoCreated = $eoMeta?->created_at ? \Carbon\Carbon::parse($eoMeta->created_at)->setTimezone('Asia/Manila') : null;
+                        $eoUpdated = $eoMeta ? \Carbon\Carbon::parse($eoMeta->updated_at ?? $eoMeta->created_at)->setTimezone('Asia/Manila') : null;
+                    @endphp
+                    @if($eoCreated)
+                    <div class="bg-white border-[1.5px] border-gray-200 rounded-2xl overflow-hidden">
+                        <div class="p-2.5 space-y-2 bg-white">
+                            <div class="flex items-start gap-2">
+                                <i class="fas fa-calendar-plus text-sm text-[#7a3f91] mt-0.5"></i>
+                                <div class="min-w-0">
+                                    <p class="text-xs font-semibold uppercase tracking-[.06em] text-[#777777] leading-tight">Created at</p>
+                                    <p class="text-sm font-semibold text-[#333333]">{{ $eoCreated->format('M j, Y · g:i A') }}</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-2">
+                                <i class="fas fa-clock-rotate-left text-sm text-[#7a3f91] mt-0.5"></i>
+                                <div class="min-w-0">
+                                    <p class="text-xs font-semibold uppercase tracking-[.06em] text-[#777777] leading-tight">Updated at</p>
+                                    <p class="text-sm font-semibold text-[#333333]">{{ $eoUpdated->format('M j, Y · g:i A') }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    @endif
+                @endif
 
                 <div class="bg-white border-[1.5px] border-gray-200 rounded-2xl overflow-hidden">
                     <div class="px-3.5 py-2 bg-white border-b border-gray-200 flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
