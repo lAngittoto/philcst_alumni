@@ -821,12 +821,12 @@ public function viewEvent(int $id): void
     $this->dispatch('close-sidebar');
 }
 
-    // ── Activate / Deactivate: open confirm modal ── allowed for PENDING, APPROVED and REJECTED ──
+    // ── Activate / Deactivate: open confirm modal ── PENDING events only ──
     public function confirmToggleActive(int $id): void
     {
         $event = OrganizerEvent::where('id', $id)
             ->where('organizer_id', $this->organizerId)
-            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED'])
+            ->where('status', 'PENDING')
             ->firstOrFail();
 
         $this->pendingToggleId       = $id;
@@ -849,7 +849,7 @@ public function viewEvent(int $id): void
 
         $event = OrganizerEvent::where('id', $this->pendingToggleId)
             ->where('organizer_id', $this->organizerId)
-            ->whereIn('status', ['PENDING', 'APPROVED', 'REJECTED'])
+            ->where('status', 'PENDING')
             ->firstOrFail();
 
         $activate = $this->pendingToggleActivate;
@@ -2312,7 +2312,7 @@ select.tw-select-arrow {
             </div>
 
             <div id="eo-table-scroll"
-                 class="scroll-c h-full overflow-y-auto overflow-x-auto bg-white">
+                 class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white">
 
             @if($this->events->count() > 0)
 
@@ -2419,10 +2419,10 @@ select.tw-select-arrow {
                                         <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
                                     </span>
                                 @endif
-                                @if(!($event->is_active ?? true))
+                                @if($isPending && !($event->is_active ?? true))
                                     <div class="mt-1">
                                         <span class="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 text-gray-500 whitespace-nowrap">
-                                            <i class="fas fa-eye-slash text-[9px] mr-1"></i>Inactive
+                                            <i class="fas fa-circle-pause text-[9px] mr-1"></i>Inactive
                                         </span>
                                     </div>
                                 @endif
@@ -2432,7 +2432,10 @@ select.tw-select-arrow {
                                 <div class="flex items-center justify-end gap-1.5" @click.stop>
 
                                     @if($isApproved || $isCompleted)
-                                        <div class="relative inline-flex group" data-eo-share>
+                                        <div class="inline-flex" data-eo-share
+                                             x-data="{ s:false, x:0, y:0 }"
+                                             @mouseenter="const r=$el.getBoundingClientRect(); x=r.left+r.width/2; y=r.top; s=true"
+                                             @mouseleave="s=false">
                                             <button type="button"
                                                     wire:click.stop="openShareModal({{ $event->id }})"
                                                     wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
@@ -2441,27 +2444,32 @@ select.tw-select-arrow {
                                                 <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                             </button>
-                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                            <div x-show="s" x-cloak :style="`left:${x}px; top:${y - 8}px`"
+                                                 class="fixed z-[9999] -translate-x-1/2 -translate-y-full bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none">
                                                 Share
                                                 <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                             </div>
                                         </div>
                                     @endif
 
-                                    @if($isPending || $isApproved || $isRejected)
+                                    @if($isPending)
                                         @php $isActiveRow = (bool) ($event->is_active ?? true); @endphp
-                                        <div class="relative inline-flex group" data-eo-share>
+                                        <div class="inline-flex" data-eo-share
+                                             x-data="{ s:false, x:0, y:0 }"
+                                             @mouseenter="const r=$el.getBoundingClientRect(); x=r.left+r.width/2; y=r.top; s=true"
+                                             @mouseleave="s=false">
                                             <button type="button"
                                                     wire:click.stop="confirmToggleActive({{ $event->id }})"
                                                     wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $event->id }})"
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer disabled:opacity-60 disabled:cursor-wait
+                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-sm transition cursor-pointer disabled:opacity-60 disabled:cursor-wait
                                                            {{ $isActiveRow
-                                                               ? 'bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 hover:border-gray-300'
-                                                               : 'bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400' }}">
-                                                <i class="fas {{ $isActiveRow ? 'fa-eye-slash' : 'fa-eye' }}" wire:loading.remove wire:target="confirmToggleActive({{ $event->id }})"></i>
+                                                               ? 'bg-amber-50 text-amber-500 border border-amber-300 hover:bg-amber-100 hover:border-amber-400'
+                                                               : 'bg-emerald-50 text-emerald-500 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400' }}">
+                                                <i class="fas {{ $isActiveRow ? 'fa-circle-pause' : 'fa-circle-play' }}" wire:loading.remove wire:target="confirmToggleActive({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleActive({{ $event->id }})"></i>
                                             </button>
-                                            <div class="absolute bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
+                                            <div x-show="s" x-cloak :style="`left:${x}px; top:${y - 8}px`"
+                                                 class="fixed z-[9999] -translate-x-1/2 -translate-y-full bg-[#1a1a1a] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold whitespace-nowrap pointer-events-none">
                                                 {{ $isActiveRow ? 'Deactivate' : 'Activate' }}
                                                 <span class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#1a1a1a]"></span>
                                             </div>
@@ -2580,10 +2588,10 @@ select.tw-select-arrow {
 <div class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
      wire:keydown.escape.window="cancelToggle">
     <div class="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden m-in bg-white">
-        <div class="px-6 py-4 border-b {{ $pendingToggleActivate ? 'border-emerald-100 bg-emerald-50' : 'border-gray-200 bg-gray-50' }}">
-            <h2 class="text-lg font-semibold {{ $pendingToggleActivate ? 'text-emerald-800' : 'text-[#333333]' }} flex items-center gap-2.5">
-                <div class="w-8 h-8 {{ $pendingToggleActivate ? 'bg-emerald-100' : 'bg-gray-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
-                    <i class="fas {{ $pendingToggleActivate ? 'fa-eye text-emerald-500' : 'fa-eye-slash text-gray-500' }} text-base"></i>
+        <div class="px-6 py-4 border-b {{ $pendingToggleActivate ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50' }}">
+            <h2 class="text-lg font-semibold {{ $pendingToggleActivate ? 'text-emerald-800' : 'text-amber-800' }} flex items-center gap-2.5">
+                <div class="w-8 h-8 {{ $pendingToggleActivate ? 'bg-emerald-100' : 'bg-amber-100' }} rounded-lg flex items-center justify-center flex-shrink-0">
+                    <i class="fas {{ $pendingToggleActivate ? 'fa-circle-play text-emerald-500' : 'fa-circle-pause text-amber-500' }} text-base"></i>
                 </div>
                 {{ $pendingToggleActivate ? 'Activate Event' : 'Deactivate Event' }}
             </h2>
@@ -2597,25 +2605,25 @@ select.tw-select-arrow {
                 <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
                 <span class="text-sm text-amber-800">
                     @if($pendingToggleActivate)
-                        The event will be visible to alumni again.
+                        The event will be visible to the Alumni Director for review and approval.
                     @else
-                        The event will be hidden from alumni. You can activate it again anytime.
+                        The event will be hidden from the Alumni Director. You can activate it again anytime.
                     @endif
                 </span>
             </div>
             <div class="flex gap-2">
                 <button wire:click="cancelToggle"
                         wire:loading.attr="disabled" wire:target="toggleActive"
-                        class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-base font-semibold hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+                        class="flex-1 px-3 py-2.5 border border-gray-200 rounded-xl text-base font-semibold whitespace-nowrap hover:bg-gray-50 transition text-[#333333] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
                     <i class="fas fa-xmark mr-1 text-sm"></i>Cancel
                 </button>
                 <button wire:click="toggleActive"
                         wire:loading.attr="disabled"
                         wire:target="toggleActive"
-                        class="flex-1 px-4 py-2.5 rounded-xl text-base font-semibold text-white transition cursor-pointer disabled:opacity-60 disabled:cursor-wait {{ $pendingToggleActivate ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-gray-600 hover:bg-gray-700' }}">
+                        class="flex-1 px-3 py-2.5 rounded-xl text-base font-semibold text-white whitespace-nowrap transition cursor-pointer disabled:opacity-60 disabled:cursor-wait {{ $pendingToggleActivate ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600' }}">
                     <span wire:loading wire:target="toggleActive"><i class="fas fa-spinner fa-spin mr-1 text-sm"></i>Saving…</span>
                     <span wire:loading.remove wire:target="toggleActive">
-                        <i class="fas {{ $pendingToggleActivate ? 'fa-eye' : 'fa-eye-slash' }} mr-1 text-sm"></i>{{ $pendingToggleActivate ? 'Yes, Activate' : 'Yes, Deactivate' }}
+                        <i class="fas {{ $pendingToggleActivate ? 'fa-circle-play' : 'fa-circle-pause' }} mr-1 text-sm"></i>{{ $pendingToggleActivate ? 'Yes, Activate' : 'Yes, Deactivate' }}
                     </span>
                 </button>
             </div>
@@ -2771,13 +2779,21 @@ select.tw-select-arrow {
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
             </div>
+            @php
+                $editRowStatus = null; $editRowActive = true;
+                try {
+                    $editRowData   = \App\Models\OrganizerEvent::where('id', $editingEventId)->first(['status', 'is_active']);
+                    $editRowStatus = $editRowData?->status;
+                    $editRowActive = (bool) ($editRowData?->is_active ?? true);
+                } catch (\Throwable $e) {}
+            @endphp
+            @if($editRowStatus === 'PENDING')
             <div class="relative inline-flex group">
-                @php try { $editRowActive = (bool) (\App\Models\OrganizerEvent::where('id', $editingEventId)->value('is_active') ?? true); } catch (\Throwable $e) { $editRowActive = true; } @endphp
                 <button wire:click="confirmToggleActive({{ $editingEventId }})" type="button"
                         wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $editingEventId }})"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
                         aria-label="{{ $editRowActive ? 'Deactivate event' : 'Activate event' }}">
-                    <i class="fas {{ $editRowActive ? 'fa-eye-slash' : 'fa-eye' }} text-white text-base" wire:loading.remove wire:target="confirmToggleActive({{ $editingEventId }})"></i>
+                    <i class="fas {{ $editRowActive ? 'fa-circle-pause' : 'fa-circle-play' }} text-white text-base" wire:loading.remove wire:target="confirmToggleActive({{ $editingEventId }})"></i>
                     <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="confirmToggleActive({{ $editingEventId }})"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-xs font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
@@ -2785,6 +2801,7 @@ select.tw-select-arrow {
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
             </div>
+            @endif
             @endif
             <div class="relative inline-flex group">
                 <button wire:click="closeFormModal" type="button"
@@ -3875,13 +3892,13 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             </div>
             @endif
 
-            @if(in_array($ev->status, ['PENDING', 'APPROVED', 'REJECTED']))
+            @if($ev->status === 'PENDING')
             @php $viewRowActive = (bool) ($ev->is_active ?? true); @endphp
             <div class="relative inline-flex group">
                 <button wire:click="confirmToggleActive({{ $ev->id }})" type="button"
                         wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $ev->id }})"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait">
-                    <i class="fas {{ $viewRowActive ? 'fa-eye-slash' : 'fa-eye' }} text-white text-sm" wire:loading.remove wire:target="confirmToggleActive({{ $ev->id }})"></i>
+                    <i class="fas {{ $viewRowActive ? 'fa-circle-pause' : 'fa-circle-play' }} text-white text-sm" wire:loading.remove wire:target="confirmToggleActive({{ $ev->id }})"></i>
                     <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmToggleActive({{ $ev->id }})"></i>
                 </button>
                 <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
