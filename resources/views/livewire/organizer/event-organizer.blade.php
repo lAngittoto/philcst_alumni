@@ -96,6 +96,7 @@ new class extends Component {
      * background call with no full component re-render, matching the
      * alumni photo UX (Alpine drives the preview, not a Livewire repaint).
      */
+    #[\Livewire\Attributes\Renderless]
     public function receiveEventPhoto(string $filename, string $base64): void
     {
         try {
@@ -607,9 +608,7 @@ public function openCreateModal(): void
         $this->contact_email    = $this->organizerEmail;
         $this->contact_phone    = $event->contact_phone  ?? '';
         $this->notes            = $event->notes ?? '';
-        $this->existingPhotoUrl      = $event->photo_url
-            ? $event->photo_url . (str_contains($event->photo_url, '?') ? '&' : '?') . 'v=' . ($event->updated_at?->timestamp ?? time())
-            : null;
+        $this->existingPhotoUrl      = $event->photo_url;
         $this->existingPhotoPublicId = $event->photo_public_id ?? null;
         $this->removePhoto           = false;
         $this->photo                 = null;
@@ -1170,7 +1169,6 @@ public function closeFormModal(): void
                 }
                 $data['photo']           = null;
                 $data['photo_public_id'] = null;
-                $event->forceFill(['photo' => null, 'photo_public_id' => null]);
                 $event->update(array_merge($data, [
                     'updated_by'      => auth()->user()?->name,
                     'updated_by_role' => 'organizer',
@@ -1199,19 +1197,21 @@ public function closeFormModal(): void
                 $ctrl->updateEvent($this->editingEventId, $data);
 
                 // ── PHOTO PERSISTENCE FIX ──
-                // OrganizerEventController::updateEvent() may whitelist/ignore
-                // photo + photo_public_id (or the model's $fillable may not
-                // include them), which made the edit form fall back to the
-                // default photo after Save. Force-write the columns directly
-                // on the model so a newly uploaded photo ALWAYS sticks.
+                // updateEvent() may ignore photo/photo_public_id, so write
+                // them straight to the table. Wrapped so it can never 500.
                 if ($photo) {
-                    $fresh = OrganizerEvent::where('id', $this->editingEventId)
-                        ->where('organizer_id', $this->organizerId)->first();
-                    if ($fresh) {
-                        $fresh->forceFill([
-                            'photo'           => $photo,
-                            'photo_public_id' => $photoPublicId,
-                        ])->save();
+                    try {
+                        DB::table((new OrganizerEvent)->getTable())
+                            ->where('id', $this->editingEventId)
+                            ->where('organizer_id', $this->organizerId)
+                            ->update(['photo' => $photo, 'photo_public_id' => $photoPublicId]);
+                    } catch (\Throwable $e) {
+                        try {
+                            DB::table((new OrganizerEvent)->getTable())
+                                ->where('id', $this->editingEventId)
+                                ->where('organizer_id', $this->organizerId)
+                                ->update(['photo' => $photo]);
+                        } catch (\Throwable) {}
                     }
                 }
             }
@@ -1260,21 +1260,15 @@ public function closeFormModal(): void
                 $data['photo']           = $photo;
                 $data['photo_public_id'] = $photoPublicId;
             }
-            $created = $ctrl->createEvent($data);
+            $ctrl->createEvent($data);
 
-            // Same photo-persistence safety net as the edit path.
             if ($photo) {
                 try {
-                    $newEvent = ($created instanceof OrganizerEvent)
-                        ? $created
-                        : OrganizerEvent::where('organizer_id', $this->organizerId)
-                            ->where('title', trim($this->title))
-                            ->orderByDesc('id')->first();
-                    if ($newEvent) {
-                        $newEvent->forceFill([
-                            'photo'           => $photo,
-                            'photo_public_id' => $photoPublicId,
-                        ])->save();
+                    $newId = OrganizerEvent::where('organizer_id', $this->organizerId)
+                        ->where('title', trim($this->title))->orderByDesc('id')->value('id');
+                    if ($newId) {
+                        DB::table((new OrganizerEvent)->getTable())->where('id', $newId)
+                            ->update(['photo' => $photo, 'photo_public_id' => $photoPublicId]);
                     }
                 } catch (\Throwable) {}
             }
@@ -2044,19 +2038,19 @@ select.tw-select-arrow {
 .eo-batch-dropdown { position: relative; }
 .eo-batch-trigger {
     display: flex; align-items: center; gap: 6px; width: 100%;
-    padding: 8px 11px; border: 1.5px solid #b9a3cc; border-radius: 10px;
+    padding: 8px 11px; border: 1.5px solid #e8e0f0; border-radius: 10px;
     font-size: .875rem; font-weight: 600; background: #fff; color: #333;
     cursor: pointer; transition: border-color .15s, background .15s, color .15s;
     white-space: nowrap; user-select: none;
 }
-.eo-batch-trigger:hover { border-color: #7a3f91; }
+.eo-batch-trigger:hover { border-color: #c49ed8; }
 .eo-batch-trigger.has-value { border-color: #7a3f91; background: #F9F7FC; color: #7a3f91; }
 .eo-batch-trigger .eo-batch-chevron { transition: transform .18s; font-size: .65rem; opacity: .6; }
 .eo-batch-trigger.open .eo-batch-chevron { transform: rotate(180deg); }
 .eo-batch-menu {
     position: absolute; top: calc(100% + 4px); left: 0;
     min-width: 100%; max-height: 220px; overflow-y: auto;
-    background: #fff; border: 1.5px solid #b9a3cc;
+    background: #fff; border: 1.5px solid #e8e0f0;
     border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
     z-index: 500; padding: 4px;
     scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
@@ -2066,7 +2060,7 @@ select.tw-select-arrow {
 .eo-batch-footer {
     position: sticky; bottom: -4px; left: 0; right: 0;
     background: #fff; margin: 0 -4px -4px; padding: 8px 4px 4px;
-    border-top: 1px solid #b9a3cc; border-radius: 0 0 8px 8px;
+    border-top: 1px solid #e8e0f0; border-radius: 0 0 8px 8px;
 }
 .eo-batch-item {
     display: block; width: 100%; padding: 7px 10px; border-radius: 7px;
@@ -2772,7 +2766,7 @@ select.tw-select-arrow {
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
 
         {{-- LEFT COLUMN --}}
-        <div class="w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#b9a3cc] overflow-visible lg:overflow-y-auto bg-white"
+        <div class="w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[#e8e0f0] overflow-visible lg:overflow-y-auto bg-white"
              style="scrollbar-width:thin;">
             <div class="p-3 space-y-3">
 
@@ -2791,8 +2785,8 @@ select.tw-select-arrow {
                     $defaultPhotoExists  = file_exists(public_path($defaultPhotoRelPath));
                     $defaultPhotoAsset   = $defaultPhotoExists ? asset($defaultPhotoRelPath) : '';
                 @endphp
-                <div class="bg-white border-[1.5px] border-[#b9a3cc] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#b9a3cc] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Event Photo
                         <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— Preview</span>
                     </div>
@@ -2876,14 +2870,14 @@ select.tw-select-arrow {
                          }"
                          @dragover.prevent="isDragging=true" @dragleave.prevent="isDragging=false" @drop.prevent="isDragging=false">
                         <div class="relative border-2 rounded-xl text-center cursor-pointer transition-all bg-white"
-                             :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':(hasCurrentOrNew?'border-[#7a3f91] border-solid bg-white':'border-dashed border-[#8b7a99] hover:border-[#7a3f91] hover:bg-white')">
+                             :class="isDragging?'border-[#7a3f91] bg-[#faf7fc]':(hasCurrentOrNew?'border-[#7a3f91] border-solid bg-white':'border-dashed border-[#c4c4cc] hover:border-[#7a3f91] hover:bg-white')">
                             <label class="cursor-pointer block p-2.5">
                                 <input type="file" x-ref="eventPhotoInput" accept="image/jpeg,image/png,image/webp,image/gif" class="hidden" @change="onFileChosen($event)">
 
                                 <template x-if="previewSrc">
                                     <div class="flex flex-col items-center gap-1">
                                         <div class="relative w-full rounded-lg overflow-hidden border flex items-center justify-center"
-                                             :class="hasCurrentOrNew ? 'border-purple-400' : 'border-[#b9a3cc]'" style="height:150px;">
+                                             :class="hasCurrentOrNew ? 'border-purple-200' : 'border-gray-200'" style="height:150px;">
                                             <img :src="previewSrc" class="w-full h-full object-contain" :class="saving ? 'opacity-50' : ''">
                                             <div x-show="saving" x-cloak class="absolute inset-0 flex items-center justify-center bg-white/40">
                                                 <i class="fas fa-spinner fa-spin text-[#7a3f91] text-lg"></i>
@@ -2898,7 +2892,7 @@ select.tw-select-arrow {
 
                                 <template x-if="!previewSrc">
                                     <div class="flex flex-col items-center gap-1.5 py-2">
-                                        <div class="w-full rounded-lg overflow-hidden border border-[#b9a3cc] bg-gradient-to-br from-purple-50 to-white flex items-center justify-center" style="height:120px;">
+                                        <div class="w-full rounded-lg overflow-hidden border border-[#e8e0f0] bg-gradient-to-br from-purple-50 to-white flex items-center justify-center" style="height:120px;">
                                             <svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
                                                 <rect x="6" y="14" width="60" height="46" rx="6" fill="#F3EAF8" stroke="#D9C3E6" stroke-width="1.5"/>
                                                 <circle cx="24" cy="30" r="6" fill="#C9A6DC"/>
@@ -2927,8 +2921,8 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#b9a3cc]' }} rounded-2xl overflow-visible">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#b9a3cc] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest rounded-t-2xl">
+                <div class="bg-white border-[1.5px] {{ isset($formErrors['selected_courses']) ? 'border-red-300' : 'border-[#e8e0f0]' }} rounded-2xl overflow-visible">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest rounded-t-2xl">
                         Programs
                         <span class="text-red-400 font-semibold ml-0.5">*</span>
                         @if(count($selectedCourses) > 0)
@@ -2984,7 +2978,7 @@ select.tw-select-arrow {
                                     <label class="flex items-center gap-1 px-2 py-1 border rounded-lg cursor-pointer transition text-sm font-semibold
                                                   {{ in_array($course, $selectedCourses)
                                                       ? 'border-purple-400 bg-purple-50 text-purple-700'
-                                                      : 'border-[#b9a3cc] hover:border-purple-400 hover:bg-purple-50/40 bg-white text-[#333333]' }}">
+                                                      : 'border-[#e8e0f0] hover:border-purple-400 hover:bg-purple-50/40 bg-white text-[#333333]' }}">
                                         <input type="checkbox" wire:model.live="selectedCourses" value="{{ $course }}"
                                                class="accent-purple-600 w-3 h-3 flex-shrink-0">
                                         <span class="truncate text-sm">{{ $course }}</span>
@@ -3174,7 +3168,7 @@ select.tw-select-arrow {
                                     <template x-if="view === 'range'">
                                         <div class="p-2" style="width:220px;">
                                             <div class="flex items-start gap-2">
-                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#b9a3cc;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#e8e0f0;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                                     @foreach($this->batches as $b)
                                                     <button type="button" @click.stop="if(rangeTo!=='{{ $b }}') pickFrom('{{ $b }}')"
                                                             :disabled="rangeTo==='{{ $b }}'"
@@ -3182,7 +3176,7 @@ select.tw-select-arrow {
                                                             class="eo-batch-item eo-batch-range-item" style="border-radius:0;">{{ $b }}</button>
                                                     @endforeach
                                                 </div>
-                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#b9a3cc;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
+                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#e8e0f0;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
                                                     @foreach($this->batches as $b)
                                                     <button type="button" @click.stop="if(rangeFrom!=='{{ $b }}') pickTo('{{ $b }}')"
                                                             :disabled="rangeFrom==='{{ $b }}'"
@@ -3193,13 +3187,13 @@ select.tw-select-arrow {
                                             </div>
                                             <div class="flex items-center gap-2 mt-3 eo-batch-footer">
                                                 <button type="button" @click.stop="backToMenu()"
-                                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#b9a3cc]">
+                                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-[#e8e0f0]">
                                                     Back
                                                 </button>
                                                 <button type="button" @click.stop="applyRange()"
                                                         :disabled="rangeFrom==='' || rangeTo===''"
                                                         class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
-                                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-[#b9a3cc] bg-[#F5F5F5] cursor-not-allowed' : 'border-[#b9a3cc] hover:bg-[#F5F0FA]'"
+                                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-[#e8e0f0] bg-[#F5F5F5] cursor-not-allowed' : 'border-[#e8e0f0] hover:bg-[#F5F0FA]'"
                                                         :style="(rangeFrom==='' || rangeTo==='') ? '' : 'color:#7a3f91;'">
                                                     Apply
                                                 </button>
@@ -3223,11 +3217,11 @@ select.tw-select-arrow {
         </div>
 
         {{-- MIDDLE COLUMN --}}
-        <div class="flex-1 min-w-0 flex flex-col overflow-visible lg:overflow-hidden border-b lg:border-b-0 lg:border-r border-[#b9a3cc] bg-gray-50">
+        <div class="flex-1 min-w-0 flex flex-col overflow-visible lg:overflow-hidden border-b lg:border-b-0 lg:border-r border-[#e8e0f0] bg-gray-50">
             <div class="lg:flex-1 lg:min-h-0 overflow-visible lg:overflow-y-auto flex flex-col p-3 gap-3" style="scrollbar-width:thin;">
 
-                <div class="flex flex-col bg-white border-[1.5px] border-[#b9a3cc] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#b9a3cc] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest flex-shrink-0">
+                <div class="flex flex-col bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden" style="min-height: 0; flex: 1;">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest flex-shrink-0">
                         Event Details
                     </div>
                     <div class="flex flex-col flex-1 min-h-0 p-2.5 gap-3 bg-white">
@@ -3238,7 +3232,7 @@ select.tw-select-arrow {
                             </label>
                             <input wire:model.live.debounce.100ms="title" type="text"
                                    placeholder="e.g. PHILCST Alumni Homecoming 2026" maxlength="200"
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['title']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99]' }}">
+                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['title']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc]' }}">
                             @if(isset($formErrors['title']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['title'] }}</p>@endif
                         </div>
 
@@ -3248,7 +3242,7 @@ select.tw-select-arrow {
                             </label>
                             <textarea wire:model.live.debounce.100ms="description"
                                       placeholder="Describe the event, agenda, highlights…" maxlength="5000"
-                                      class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99]' }}"
+                                      class="flex-1 w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto {{ isset($formErrors['description']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc]' }}"
                                       style="min-height: 80px;"></textarea>
                             @if(isset($formErrors['description']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1 flex-shrink-0"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['description'] }}</p>@endif
                         </div>
@@ -3262,7 +3256,7 @@ select.tw-select-arrow {
                                 <input wire:model="event_date" type="date"
                                        min="{{ now('Asia/Manila')->format('Y-m-d') }}"
                                        onclick="window.__eoOpenDatePicker(this)"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99]' }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 cursor-pointer {{ isset($formErrors['event_date']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc]' }}">
                                 @if(isset($formErrors['event_date']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['event_date'] }}</p>@endif
                             </div>
 
@@ -3293,23 +3287,23 @@ select.tw-select-arrow {
                                          }
                                      }"
                                      @reset-time-selects.window="h='6';m='00';p='PM';sync()"
-                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['start_time']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99] focus-within:border-[#7a3f91]' }}">
-                                    <span class="flex items-center justify-center px-2 bg-white border-r border-[#b9a3cc]">
+                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['start_time']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc] focus-within:border-[#7a3f91]' }}">
+                                    <span class="flex items-center justify-center px-2 bg-white border-r border-[#e8e0f0]">
                                         <i class="fas fa-clock text-gray-300 text-sm"></i>
                                     </span>
-                                    <select x-model="h" @change="sync()" class="border-r border-[#b9a3cc] text-[#333333]" title="Hour">
+                                    <select x-model="h" @change="sync()" class="border-r border-[#e8e0f0] text-[#333333]" title="Hour">
                                         @foreach(['12','1','2','3','4','5','6','7','8','9','10','11'] as $hr)
                                             <option value="{{ $hr }}">{{ $hr }}</option>
                                         @endforeach
                                     </select>
-                                    <span class="flex items-center px-1 bg-white border-x border-[#b9a3cc] text-[#555] font-semibold text-base select-none">:</span>
+                                    <span class="flex items-center px-1 bg-white border-x border-[#e8e0f0] text-[#555] font-semibold text-base select-none">:</span>
                                     {{-- Start time minutes: no :59 (only up to :50) --}}
                                     <select x-model="m" @change="sync()" class="text-[#333333]" title="Minute">
                                         @foreach(['00','05','10','15','20','25','30','35','40','45','50'] as $mn)
                                             <option value="{{ $mn }}">{{ $mn }}</option>
                                         @endforeach
                                     </select>
-                                    <select x-model="p" @change="sync()" class="border-l border-[#b9a3cc] bg-[#faf7fc] text-[#7a3f91] font-semibold min-w-[3rem] text-center" title="AM/PM">
+                                    <select x-model="p" @change="sync()" class="border-l border-[#e8e0f0] bg-[#faf7fc] text-[#7a3f91] font-semibold min-w-[3rem] text-center" title="AM/PM">
                                         <option value="AM">AM</option>
                                         <option value="PM">PM</option>
                                     </select>
@@ -3344,22 +3338,22 @@ select.tw-select-arrow {
                                          }
                                      }"
                                      @reset-time-selects.window="h='11';m='59';p='PM';sync()"
-                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['end_time']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99] focus-within:border-[#7a3f91]' }}">
-                                    <span class="flex items-center justify-center px-2 bg-white border-r border-[#b9a3cc]">
+                                     class="time-select-wrap flex items-stretch rounded-xl overflow-hidden border transition-shadow focus-within:ring-2 focus-within:ring-[#7a3f91]/20 {{ isset($formErrors['end_time']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc] focus-within:border-[#7a3f91]' }}">
+                                    <span class="flex items-center justify-center px-2 bg-white border-r border-[#e8e0f0]">
                                         <i class="fas fa-clock text-gray-300 text-sm"></i>
                                     </span>
-                                    <select x-model="h" @change="sync()" class="border-r border-[#b9a3cc] text-[#333333]" title="Hour">
+                                    <select x-model="h" @change="sync()" class="border-r border-[#e8e0f0] text-[#333333]" title="Hour">
                                         @foreach(['12','1','2','3','4','5','6','7','8','9','10','11'] as $hr)
                                             <option value="{{ $hr }}">{{ $hr }}</option>
                                         @endforeach
                                     </select>
-                                    <span class="flex items-center px-1 bg-white border-x border-[#b9a3cc] text-[#555] font-semibold text-base select-none">:</span>
+                                    <span class="flex items-center px-1 bg-white border-x border-[#e8e0f0] text-[#555] font-semibold text-base select-none">:</span>
                                     <select x-model="m" @change="sync()" class="text-[#333333]" title="Minute">
                                         @foreach(['00','05','10','15','20','25','30','35','40','45','50','59'] as $mn)
                                             <option value="{{ $mn }}">{{ $mn }}</option>
                                         @endforeach
                                     </select>
-                                    <select x-model="p" @change="sync()" class="border-l border-[#b9a3cc] bg-[#faf7fc] text-[#7a3f91] font-semibold min-w-[3rem] text-center" title="AM/PM">
+                                    <select x-model="p" @change="sync()" class="border-l border-[#e8e0f0] bg-[#faf7fc] text-[#7a3f91] font-semibold min-w-[3rem] text-center" title="AM/PM">
                                         <option value="AM">AM</option>
                                         <option value="PM">PM</option>
                                     </select>
@@ -3376,7 +3370,7 @@ select.tw-select-arrow {
                                 </label>
                                 <input wire:model.live.debounce.100ms="venue" type="text"
                                        placeholder="e.g. PHILCST Main Gym" maxlength="200"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99]' }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc]' }}">
                                 @if(isset($formErrors['venue']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue'] }}</p>@endif
                             </div>
                             <div>
@@ -3385,7 +3379,7 @@ select.tw-select-arrow {
                                 </label>
                                 <input wire:model.live.debounce.100ms="venue_address" type="text"
                                        placeholder="e.g. Old Nalsian Road, Calasiao, Pangasinan" maxlength="200"
-                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue_address']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99]' }}">
+                                       class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['venue_address']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc]' }}">
                                 @if(isset($formErrors['venue_address']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['venue_address'] }}</p>@endif
                             </div>
                         </div>
@@ -3393,15 +3387,15 @@ select.tw-select-arrow {
                     </div>
                 </div>
 
-                <div class="flex-shrink-0 bg-white border-[1.5px] border-[#b9a3cc] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#b9a3cc] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="flex-shrink-0 bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Notes / Requirements
                         <span class="font-normal normal-case tracking-normal text-xs ml-1 text-[#777777]">— optional</span>
                     </div>
                     <div class="p-2.5 bg-white">
                         <textarea wire:model.live.debounce.100ms="notes"
                                   placeholder="Dress code, special instructions, what to bring, parking info…" maxlength="3000"
-                                  class="w-full px-3 py-2 border-[1.5px] border-[#8b7a99] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
+                                  class="w-full px-3 py-2 border-[1.5px] border-[#c4c4cc] rounded-xl text-base bg-white text-[#222] resize-none transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 overflow-y-auto"
                                   style="height: 200px;"></textarea>
                         <p class="text-xs mt-1.5 flex items-center gap-1 text-[#777777]">
                             <i class="fas fa-circle-info text-[11px]"></i>
@@ -3420,15 +3414,15 @@ select.tw-select-arrow {
                 {{-- Contact Person — Name & Email are always the organizer's own
                      account details and are NOT editable (read-only display).
                      Only Phone remains an actual input. ── --}}
-                <div class="bg-white border-[1.5px] border-[#b9a3cc] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#b9a3cc] text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         <span class="block leading-tight">Contact Person</span>
                         <span class="block font-normal normal-case tracking-normal text-xs text-[#777777] mt-0.5">from your account</span>
                     </div>
                     <div class="p-2.5 space-y-2.5 bg-white">
                         <div>
                             <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Name</label>
-                            <div class="w-full px-3 py-2 border-[1.5px] border-[#b9a3cc] rounded-xl text-base bg-[#faf8fc] text-[#333333] flex items-center gap-2">
+                            <div class="w-full px-3 py-2 border-[1.5px] border-[#e8e0f0] rounded-xl text-base bg-white text-[#333333] flex items-center gap-2">
                                 <i class="fas fa-user text-sm text-[#999999]"></i>
                                 <span class="truncate">{{ $contact_person ?: $this->organizerName }}</span>
                                 <i class="fas fa-lock text-xs text-[#bbbbbb] ml-auto flex-shrink-0"></i>
@@ -3436,7 +3430,7 @@ select.tw-select-arrow {
                         </div>
                         <div>
                             <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333] mb-1">Email</label>
-                            <div class="w-full px-3 py-2 border-[1.5px] border-[#b9a3cc] rounded-xl text-base bg-[#faf8fc] text-[#333333] flex items-center gap-2">
+                            <div class="w-full px-3 py-2 border-[1.5px] border-[#e8e0f0] rounded-xl text-base bg-white text-[#333333] flex items-center gap-2">
                                 <i class="fas fa-envelope text-sm text-[#999999]"></i>
                                 <span class="truncate">{{ $contact_email ?: $this->organizerEmail }}</span>
                                 <i class="fas fa-lock text-xs text-[#bbbbbb] ml-auto flex-shrink-0"></i>
@@ -3458,14 +3452,14 @@ select.tw-select-arrow {
                                        if (d.length >= 2 && d.charAt(1) !== '9') { d = '09' + d.slice(2); }
                                        this.value = d.slice(0, 11);
                                    "
-                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_phone']) ? 'border-red-400 bg-red-50' : 'border-[#8b7a99]' }}">
+                                   class="w-full px-3 py-2 border-[1.5px] rounded-xl text-base bg-white text-[#222] transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 {{ isset($formErrors['contact_phone']) ? 'border-red-400 bg-red-50' : 'border-[#c4c4cc]' }}">
                             @if(isset($formErrors['contact_phone']))<p class="text-red-600 text-sm mt-0.5 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['contact_phone'] }}</p>@endif
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-white border-[1.5px] border-[#b9a3cc] rounded-2xl overflow-hidden">
-                    <div class="px-3.5 py-2 bg-white border-b border-[#b9a3cc] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
+                <div class="bg-white border-[1.5px] border-[#e8e0f0] rounded-2xl overflow-hidden">
+                    <div class="px-3.5 py-2 bg-white border-b border-[#e8e0f0] flex items-center gap-1.5 text-[#333333] text-sm font-semibold uppercase tracking-widest">
                         Submission Tips
                     </div>
                     <div class="p-2.5 bg-white">
@@ -3492,7 +3486,7 @@ select.tw-select-arrow {
 
             </div>
 
-            <div class="flex-shrink-0 px-3 py-3 border-t border-[#b9a3cc] bg-white space-y-2">
+            <div class="flex-shrink-0 px-3 py-3 border-t border-[#e8e0f0] bg-white space-y-2">
                 {{-- Disabled while: (1) a photo is actively uploading,
                      (2) the submit/save request itself is in-flight, or
                      (3) any required (*) field is still empty — so it's
