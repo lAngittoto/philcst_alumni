@@ -2228,10 +2228,6 @@ select.tw-select-arrow {
         <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
-                Filters
-            </div>
-
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -2241,6 +2237,10 @@ select.tw-select-arrow {
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] placeholder-[#a78bbd] font-normal
                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
+            </div>
+
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
+                Filters
             </div>
 
             <select wire:model.live="filterStatus"
@@ -2772,7 +2772,7 @@ select.tw-select-arrow {
                 </div>
             </div>
             <div class="relative inline-flex group">
-                @php $editRowActive = (bool) (\App\Models\OrganizerEvent::where('id', $editingEventId)->value('is_active') ?? true); @endphp
+                @php try { $editRowActive = (bool) (\App\Models\OrganizerEvent::where('id', $editingEventId)->value('is_active') ?? true); } catch (\Throwable $e) { $editRowActive = true; } @endphp
                 <button wire:click="confirmToggleActive({{ $editingEventId }})" type="button"
                         wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $editingEventId }})"
                         class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
@@ -2784,7 +2784,6 @@ select.tw-select-arrow {
                     {{ $editRowActive ? 'Deactivate' : 'Activate' }}
                     <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
                 </div>
-            </div>
             </div>
             @endif
             <div class="relative inline-flex group">
