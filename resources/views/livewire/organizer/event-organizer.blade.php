@@ -243,6 +243,12 @@ new class extends Component {
     public ?int   $pendingDeleteId   = null;
     public string $pendingDeleteTitle = '';
 
+    // ── Deactivate / Activate confirm modal ──
+    public bool   $showToggleModal    = false;
+    public ?int   $pendingToggleId    = null;
+    public string $pendingToggleTitle = '';
+    public bool   $pendingToggleActive = true; // current is_active value before toggle
+
     public bool   $showShareModal        = false;
     public ?int   $shareEventId          = null;
     public string $shareEventType        = 'ORGANIZER';
@@ -884,6 +890,70 @@ public function viewEvent(int $id): void
         $this->showDeleteModal    = false;
         $this->pendingDeleteId    = null;
         $this->pendingDeleteTitle = '';
+    }
+
+    // ── Deactivate / Activate — open confirm modal ──
+    // Allowed for PENDING and REJECTED events only (same gate as delete).
+    // is_active = 0 → hidden from Alumni Director view.
+    // is_active = 1 → visible to Alumni Director (default).
+    public function confirmToggleActive(int $id): void
+    {
+        $event = OrganizerEvent::where('id', $id)
+            ->where('organizer_id', $this->organizerId)
+            ->whereIn('status', ['PENDING', 'REJECTED'])
+            ->firstOrFail();
+
+        $this->pendingToggleId     = $id;
+        $this->pendingToggleTitle  = $event->title;
+        $this->pendingToggleActive = (bool) ($event->is_active ?? true);
+        $this->showToggleModal     = true;
+    }
+
+    public function cancelToggleActive(): void
+    {
+        $this->showToggleModal    = false;
+        $this->pendingToggleId    = null;
+        $this->pendingToggleTitle = '';
+    }
+
+    public function doToggleActive(): void
+    {
+        if (!$this->pendingToggleId) return;
+
+        $event = OrganizerEvent::where('id', $this->pendingToggleId)
+            ->where('organizer_id', $this->organizerId)
+            ->whereIn('status', ['PENDING', 'REJECTED'])
+            ->firstOrFail();
+
+        $newActive = ! ($event->is_active ?? true);
+        DB::table((new OrganizerEvent)->getTable())
+            ->where('id', $event->id)
+            ->update(['is_active' => $newActive, 'updated_at' => now()]);
+
+        $action = $newActive ? 'activated' : 'deactivated';
+        try {
+            AuditLog::create([
+                'user_id'       => Auth::id(),
+                'user_name'     => Auth::user()?->name ?? 'Organizer',
+                'user_email'    => Auth::user()?->email,
+                'user_role'     => 'organizer',
+                'action'        => $action,
+                'module'        => 'event',
+                'subject_id'    => $event->id,
+                'subject_label' => $event->title,
+                'description'   => "Organizer {$action} event: '{$event->title}'.",
+                'ip_address'    => request()->ip(),
+                'user_agent'    => request()->userAgent(),
+                'severity'      => 'info',
+            ]);
+        } catch (\Throwable) {}
+
+        $label = $newActive ? 'Event activated — now visible to the Alumni Director.' : 'Event deactivated — hidden from the Alumni Director.';
+        $this->dispatch('flash-message', type: 'success', message: $label);
+
+        $this->showToggleModal    = false;
+        $this->pendingToggleId    = null;
+        $this->pendingToggleTitle = '';
     }
 
     public function resetForm(): void
