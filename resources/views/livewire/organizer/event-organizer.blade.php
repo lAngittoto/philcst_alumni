@@ -2160,10 +2160,10 @@ select.tw-select-arrow {
    it's obvious which fields are meant to be filled up. Error fields keep
    their red bg (bg-red-50), locked contact fields (name/email) stay white. ══ */
 .eo-form-modal {
-    --eo-fill:       #f1f2f4;   /* light gray */
-    --eo-fill-hover: #e8eaed;
+    --eo-fill:       #f8f8fa;   /* super light gray */
+    --eo-fill-hover: #f2f2f5;
     --eo-fill-focus: #ffffff;
-    --eo-fill-border:#d1d5db;
+    --eo-fill-border:#e5e7eb;
 }
 .eo-form-modal input[type="text"]:not(.bg-red-50),
 .eo-form-modal input[type="date"]:not(.bg-red-50),
@@ -2183,7 +2183,7 @@ select.tw-select-arrow {
     border-color: #7a3f91 !important;
 }
 .eo-form-modal input::placeholder,
-.eo-form-modal textarea::placeholder { color: #9ca3af; }
+.eo-form-modal textarea::placeholder { color: #a1a1aa; }
 
 /* Start / End time pickers */
 .eo-form-modal .time-select-wrap:not(.bg-red-50) {

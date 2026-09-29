@@ -2411,6 +2411,38 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 @keyframes jm-dot-bounce { 0%,80%,100% { transform: translateY(0); opacity: .45; } 40% { transform: translateY(-5px); opacity: 1; } }
 [data-jm-rows-busy], [data-jm-rows-busy] * { cursor: default !important; }
 [data-jm-rows-busy] tr { pointer-events: none; }
+/* ══ FILL-IN FIELDS: super light gray bg on every input / select / textarea
+   the user can fill in the Post Job and Edit Job forms (required AND
+   optional). Error fields keep their red bg (bg-red-50); read-only /
+   disabled fields keep their own locked styling. ══ */
+.jm-form-modal {
+    --jm-fill:        #f8f8fa;   /* super light gray */
+    --jm-fill-hover:  #f2f2f5;
+    --jm-fill-focus:  #ffffff;
+    --jm-fill-border: #e5e7eb;
+}
+.jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled),
+.jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled),
+.jm-form-modal select:not(.bg-red-50):not(:disabled),
+.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled) {
+    background-color: var(--jm-fill) !important;
+    border-color: var(--jm-fill-border) !important;
+}
+.jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled):hover,
+.jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled):hover,
+.jm-form-modal select:not(.bg-red-50):not(:disabled):hover,
+.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled):hover {
+    background-color: var(--jm-fill-hover) !important;
+}
+.jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled):focus,
+.jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled):focus,
+.jm-form-modal select:not(.bg-red-50):not(:disabled):focus,
+.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled):focus {
+    background-color: var(--jm-fill-focus) !important;
+    border-color: #7a3f91 !important;
+}
+.jm-form-modal input::placeholder,
+.jm-form-modal textarea::placeholder { color: #a1a1aa; }
 </style>
 
 {{-- ── Reactive flag: photo-upload-in-progress (Post Job modal) ──
@@ -2556,9 +2588,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         <div class="jm-filter-bar bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:loading.attr="data-jm-busy"
              wire:target="search,filterStatus,filterType,filterSource,resetFilters">
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
-                Filters
-            </div>
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -2567,6 +2596,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                        placeholder="Search…"
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] placeholder-[#a78bbd] font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
+            </div>
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]">
+                Filters
             </div>
             <select wire:model.live="filterStatus"
                     class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
@@ -2925,7 +2957,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
 {{-- ══ POST JOB — FULL SCREEN 3-COLUMN ══ --}}
 @if($showPostModal)
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+<div class="jm-form-modal fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closePostModal()">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg">
@@ -3447,7 +3479,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
      the previous x-effect with a Blade-baked literal had no reactive
      dependency for Alpine to react to and so never re-ran after the first
      paint. --}}
-<div class="fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+<div class="jm-form-modal fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
      wire:key="edit-modal-{{ $editingJobId }}-{{ $editJobIsActive ? 'active' : 'inactive' }}-{{ $editIsAlumniDirectorJob ? 'dir' : 'org' }}"
      x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }">
