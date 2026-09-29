@@ -2155,60 +2155,64 @@ select.tw-select-arrow {
     color: #C9C9C9 !important;
 }
 
-/* ══ FILL-IN FIELDS: light purple bg on every input the user can type/select
-   in the Create / Edit / Resubmit event form (required AND optional), so
-   it's obvious which fields are meant to be filled up. Error fields keep
-   their red bg (bg-red-50), locked contact fields (name/email) stay white. ══ */
+/* ══ FILL-IN FIELDS: super light gray bg on every input the user can type/select
+   in the Create / Edit / Resubmit event form (required AND optional).
+   The color stays the SAME on hover / focus / active (no darker or white
+   state, no purple border or ring). Error fields keep their red bg
+   (bg-red-50); locked contact fields (name/email) stay white. ══ */
 .eo-form-modal {
-    --eo-fill:       #f8f8fa;   /* super light gray */
-    --eo-fill-hover: #f2f2f5;
-    --eo-fill-focus: #ffffff;
-    --eo-fill-border:#e5e7eb;
+    --eo-fill:        #f8f8fa;   /* super light gray */
+    --eo-fill-border: #e5e7eb;
 }
 .eo-form-modal input[type="text"]:not(.bg-red-50),
 .eo-form-modal input[type="date"]:not(.bg-red-50),
-.eo-form-modal textarea:not(.bg-red-50) {
-    background-color: var(--eo-fill) !important;
-    border-color: var(--eo-fill-border) !important;
-}
+.eo-form-modal textarea:not(.bg-red-50),
 .eo-form-modal input[type="text"]:not(.bg-red-50):hover,
 .eo-form-modal input[type="date"]:not(.bg-red-50):hover,
-.eo-form-modal textarea:not(.bg-red-50):hover {
-    background-color: var(--eo-fill-hover) !important;
-}
+.eo-form-modal textarea:not(.bg-red-50):hover,
 .eo-form-modal input[type="text"]:not(.bg-red-50):focus,
 .eo-form-modal input[type="date"]:not(.bg-red-50):focus,
-.eo-form-modal textarea:not(.bg-red-50):focus {
-    background-color: var(--eo-fill-focus) !important;
-    border-color: #7a3f91 !important;
+.eo-form-modal textarea:not(.bg-red-50):focus,
+.eo-form-modal input[type="text"]:not(.bg-red-50):active,
+.eo-form-modal input[type="date"]:not(.bg-red-50):active,
+.eo-form-modal textarea:not(.bg-red-50):active {
+    background-color: var(--eo-fill) !important;
+    border-color: var(--eo-fill-border) !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 .eo-form-modal input::placeholder,
 .eo-form-modal textarea::placeholder { color: #a1a1aa; }
 
 /* Start / End time pickers */
-.eo-form-modal .time-select-wrap:not(.bg-red-50) {
+.eo-form-modal .time-select-wrap:not(.bg-red-50),
+.eo-form-modal .time-select-wrap:not(.bg-red-50):hover,
+.eo-form-modal .time-select-wrap:not(.bg-red-50):focus-within {
     background-color: var(--eo-fill) !important;
     border-color: var(--eo-fill-border) !important;
+    box-shadow: none !important;
 }
 .eo-form-modal .time-select-wrap select,
+.eo-form-modal .time-select-wrap select:focus,
 .eo-form-modal .time-select-wrap > span {
     background-color: transparent !important;
+    outline: none !important;
 }
-.eo-form-modal .time-select-wrap:focus-within {
-    background-color: var(--eo-fill-focus) !important;
-    border-color: #7a3f91 !important;
-}
-.eo-form-modal .time-select-wrap select:focus { background: transparent !important; }
 
-/* Batch Year dropdown trigger (keeps its own "has-value" look once chosen) */
-.eo-form-modal .eo-batch-trigger:not(.bg-red-50) {
+/* Batch Year dropdown trigger */
+.eo-form-modal .eo-batch-trigger:not(.bg-red-50),
+.eo-form-modal .eo-batch-trigger:not(.bg-red-50):hover,
+.eo-form-modal .eo-batch-trigger:not(.bg-red-50):focus,
+.eo-form-modal .eo-batch-trigger:not(.bg-red-50).open {
     background-color: var(--eo-fill) !important;
     border-color: var(--eo-fill-border) !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
-.eo-form-modal .eo-batch-trigger:not(.bg-red-50):hover { background-color: var(--eo-fill-hover) !important; }
 
 /* Program checkboxes (unselected) */
-.eo-form-modal label.bg-white.cursor-pointer:not(.border-purple-300) {
+.eo-form-modal label.bg-white.cursor-pointer:not(.border-purple-300),
+.eo-form-modal label.bg-white.cursor-pointer:not(.border-purple-300):hover {
     background-color: var(--eo-fill) !important;
     border-color: var(--eo-fill-border) !important;
 }

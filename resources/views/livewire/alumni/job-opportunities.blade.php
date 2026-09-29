@@ -282,17 +282,33 @@ new class extends Component {
         return \Illuminate\Support\Carbon::parse($job->deadline)->lt(now('Asia/Manila')->startOfDay());
     }
 
+    /**
+     * URL to DISPLAY for a job photo — mirrors Job Management's jobImageUrl().
+     * Job photos now live on Cloudinary, so job_image holds a full https URL:
+     * that is returned as-is. Legacy local paths still resolve through
+     * storage/, and no photo falls back to the default job photo.
+     */
     public static function jobImageUrl(?string $path): string
     {
-        // FIX: match the pattern that works on this server —
-        // asset('storage/' . $path) — same as OrganizerEvent's working
-        // photo_url accessor and the now-fixed job-management component.
-        // Storage::disk('public')->exists()/Storage::url() were both
-        // resolving incorrectly here even with a correct DB path,
-        // silently forcing the default photo for every job.
-        if ($path) {
+        $path = is_string($path) ? trim($path) : '';
+
+        if ($path !== '' && $path !== 'null') {
+            // Full Cloudinary (or any http/https) URL → use as-is
+            if (preg_match('#^https?://#i', $path)) {
+                return $path;
+            }
+            // Protocol-relative URL
+            if (str_starts_with($path, '//')) {
+                return 'https:' . $path;
+            }
+            $path = ltrim($path, '/');
+            // Already-prefixed local path
+            if (str_starts_with($path, 'storage/')) {
+                return asset($path);
+            }
             return asset('storage/' . $path);
         }
+
         return asset('storage/job/default-photo-job.jpg');
     }
 

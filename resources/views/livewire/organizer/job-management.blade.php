@@ -2413,33 +2413,33 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 [data-jm-rows-busy] tr { pointer-events: none; }
 /* ══ FILL-IN FIELDS: super light gray bg on every input / select / textarea
    the user can fill in the Post Job and Edit Job forms (required AND
-   optional). Error fields keep their red bg (bg-red-50); read-only /
-   disabled fields keep their own locked styling. ══ */
+   optional). The color stays the SAME on hover / focus / active (no darker
+   or white state, no purple border or ring). Error fields keep their red
+   bg (bg-red-50); read-only / disabled fields keep their own locked look. ══ */
 .jm-form-modal {
     --jm-fill:        #f8f8fa;   /* super light gray */
-    --jm-fill-hover:  #f2f2f5;
-    --jm-fill-focus:  #ffffff;
     --jm-fill-border: #e5e7eb;
 }
 .jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled),
 .jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled),
 .jm-form-modal select:not(.bg-red-50):not(:disabled),
-.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled) {
-    background-color: var(--jm-fill) !important;
-    border-color: var(--jm-fill-border) !important;
-}
+.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled),
 .jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled):hover,
 .jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled):hover,
 .jm-form-modal select:not(.bg-red-50):not(:disabled):hover,
-.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled):hover {
-    background-color: var(--jm-fill-hover) !important;
-}
+.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled):hover,
 .jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled):focus,
 .jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled):focus,
 .jm-form-modal select:not(.bg-red-50):not(:disabled):focus,
-.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled):focus {
-    background-color: var(--jm-fill-focus) !important;
-    border-color: #7a3f91 !important;
+.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled):focus,
+.jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled):active,
+.jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled):active,
+.jm-form-modal select:not(.bg-red-50):not(:disabled):active,
+.jm-form-modal textarea:not(.bg-red-50):not([readonly]):not(:disabled):active {
+    background-color: var(--jm-fill) !important;
+    border-color: var(--jm-fill-border) !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 .jm-form-modal input::placeholder,
 .jm-form-modal textarea::placeholder { color: #a1a1aa; }

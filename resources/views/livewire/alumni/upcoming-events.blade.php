@@ -405,6 +405,35 @@ new class extends Component {
         }
     }
 
+    /**
+     * URL to DISPLAY for an event photo — mirrors Event Management's
+     * eventPhotoUrl(). Event photos now live on Cloudinary, so the raw `photo`
+     * column holds a full https URL. The model's photo_url accessor can mangle
+     * that (asset('storage/https://…')), so a raw http(s) value is returned
+     * as-is; anything else (legacy local path / none) still goes through the
+     * accessor. Returns '' when there is no photo.
+     */
+    public function eventPhotoUrl($event): string
+    {
+        if (!$event) return '';
+
+        $raw = method_exists($event, 'getRawOriginal')
+            ? $event->getRawOriginal('photo')
+            : ($event->photo ?? null);
+
+        if (is_string($raw)) {
+            $raw = trim($raw);
+            if (preg_match('#^https?://#i', $raw)) {
+                return $raw;
+            }
+            if (str_starts_with($raw, '//')) {
+                return 'https:' . $raw;
+            }
+        }
+
+        return (string) ($event->photo_url ?? '');
+    }
+
     public function openShareModal(int $id, string $type): void
     {
         $event = $type === 'ADMIN'
@@ -429,7 +458,7 @@ new class extends Component {
         $this->shareDescription  = $event->description ?? '';
         $this->shareNotes        = $event->notes ?? '';
         $this->shareTargetParts  = $event->target_participants ?? '';
-        $this->sharePhotoUrl     = $event->photo_url ?? '';
+        $this->sharePhotoUrl     = $this->eventPhotoUrl($event);
         $this->shareOrganizer    = $type === 'ADMIN' ? 'PHILCST Admin' : ($event->organizer?->name ?? 'Organizer');
         $this->shareIsCompleted  = $isCompleted;
         $this->showShareModal    = true;
@@ -1068,7 +1097,8 @@ select.filter-input:hover { cursor: default !important; }
                     $isCompleted  = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
                                     (!$event->event_end_date && $event->event_date <= now('UTC'));
                     $postedAgo    = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila')->diffForHumans();
-                    $hasPhoto     = !empty($event->photo_url);
+                    $evPhotoUrl   = $this->eventPhotoUrl($event);
+                    $hasPhoto     = !empty($evPhotoUrl);
                     $descPreview  = $event->description ? Str::limit(strip_tags($event->description), 90) : null;
                     $displaySrc   = $event->event_source === 'ADMIN' ? 'PHILCST' : null;
                 @endphp
@@ -1084,8 +1114,10 @@ select.filter-input:hover { cursor: default !important; }
 
                     @if($hasPhoto)
                     <div class="relative w-full flex-shrink-0 bg-white" style="height:200px;">
-                        <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                             class="w-full h-full object-contain">
+                        <img src="{{ $evPhotoUrl }}" alt="{{ $event->title }}"
+                             loading="lazy"
+                             class="w-full h-full object-contain"
+                             onerror="this.onerror=null;this.style.display='none';">
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
                                 <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Completed</span>
@@ -1265,7 +1297,8 @@ select.filter-input:hover { cursor: default !important; }
     $isCompleted  = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
                     (!$event->event_end_date && $event->event_date <= now('UTC'));
     $alumniRsvp   = $this->alumniRsvp;
-    $hasPhoto     = !empty($event->photo_url);
+    $evPhotoUrl   = $this->eventPhotoUrl($event);
+    $hasPhoto     = !empty($evPhotoUrl);
     $timeDisplay  = $eventDate->format('g:i A') . ($eventEndDate ? ' – ' . $eventEndDate->format('g:i A') : '');
     $createdPH    = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila');
     $rsvpLabel    = 'Not responded';
@@ -1370,9 +1403,9 @@ select.filter-input:hover { cursor: default !important; }
                 {{-- Top section: photo + event title/tags side-by-side --}}
                 <div class="grid grid-cols-1 {{ $hasPhoto ? 'lg:grid-cols-[320px_1fr]' : '' }} gap-5 items-start">
                     @if($hasPhoto)
-                        <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
+                        <img src="{{ $evPhotoUrl }}" alt="{{ $event->title }}"
                              class="w-full h-56 object-cover bg-white border border-gray-100 rounded-xl self-start"
-                             onerror="this.parentElement.style.display='none'">
+                             onerror="this.onerror=null;this.style.display='none';this.parentElement.classList.remove('lg:grid-cols-[320px_1fr]');">
                     @endif
 
                     <div class="flex flex-col gap-2.5 min-w-0">
