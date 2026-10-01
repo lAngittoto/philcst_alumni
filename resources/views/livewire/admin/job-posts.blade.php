@@ -206,15 +206,24 @@ new class extends Component {
 
     public static function jobImageUrl(?string $path): string
     {
-        // asset('storage/' . $path) — same fix applied in the dashboard's
-        // announcement feed. Storage::disk('public')->exists() and
-        // Storage::url() were resolving incorrectly on this server even
-        // with a correct DB path, silently forcing the default photo for
-        // every job even when a real image was uploaded.
-        if ($path) {
-            return asset('storage/' . $path);
+        $default = asset('storage/job/default-photo-job.jpg');
+        if (!$path || str_contains($path, 'default-photo-job')) {
+            return $default;
         }
-        return asset('storage/job/default-photo-job.jpg');
+
+        // Cloudinary / full URL — return as-is. Job photos are uploaded to
+        // Cloudinary by the Director's Job Management page (folder
+        // "job-photos"), so the DB holds a full https URL. The old code
+        // always did asset('storage/' . $path), which turned that URL into
+        // a broken path and silently showed the default photo.
+        if (preg_match('#^https?://#i', $path)) {
+            return $path;
+        }
+
+        // Legacy local file on the public disk (older postings).
+        // asset('storage/' . $path) — kept as-is (Storage::exists() was
+        // resolving incorrectly on this server even with a correct DB path).
+        return asset('storage/' . ltrim($path, '/'));
     }
 
     public function updatingSearch()        { $this->resetPage(); }
@@ -815,10 +824,6 @@ select.adm-select-arrow {
         <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
-                Filters
-            </div>
-
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -828,6 +833,10 @@ select.adm-select-arrow {
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] placeholder-[#aaaaaa] font-normal
                               hover:border-[#bbbbbb] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
+            </div>
+
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
+                Filters
             </div>
 
             <select wire:model.live="filterStatus"
@@ -1367,7 +1376,7 @@ select.adm-select-arrow {
                 <div class="w-full lg:w-[42%] flex-shrink-0" style="min-height:260px;">
                     <img src="{{ $vJobImgUrl }}" alt="{{ $vj->job_title }}"
                          class="w-full h-full object-cover" style="min-height:260px;"
-                         onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+                         onerror="this.onerror=null; this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
                 </div>
 
                 {{-- Right info --}}

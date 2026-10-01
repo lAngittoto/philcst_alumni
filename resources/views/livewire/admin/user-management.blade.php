@@ -565,6 +565,23 @@ new class extends Component {
                 'updated_at'  => now(),
             ]);
 
+            // Optional profile photo picked in the Create Director form → Cloudinary.
+            // A failed upload never blocks creation; the director just keeps the default photo.
+            if ($this->vPhoto) {
+                try {
+                    $this->validate(['vPhoto' => 'image|mimes:jpg,jpeg,png,gif,webp|max:5120']);
+                    $up  = $this->uploadCloudPhoto($this->vPhoto, 'director');
+                    $upd = ['profile_photo' => $up['url']];
+                    if (\Illuminate\Support\Facades\Schema::hasColumn('director', 'profile_photo_public_id')) {
+                        $upd['profile_photo_public_id'] = $up['public_id'];
+                    }
+                    DB::table('director')->where('user_id', $uid)->update($upd);
+                } catch (\Throwable $photoEx) {
+                    \Illuminate\Support\Facades\Log::warning('Director photo upload failed: ' . $photoEx->getMessage());
+                }
+                $this->vPhoto = null;
+            }
+
             // Send credential email synchronously (->send) so it fires immediately
             // without needing a queue worker running. Wrapped in try/catch so a
             // mail misconfiguration never blocks the director from being created —
@@ -726,27 +743,21 @@ new class extends Component {
             $this->validate(['vPhoto' => 'image|mimes:jpg,jpeg,png,gif,webp|max:2048']);
             $userId = $this->vData['id'];
 
-            // Coordinators store photos on Cloudinary (same as Manage Coordinators),
-            // so the picture is identical everywhere it's shown.
-            if ($role === 'organizer') {
-                $org = DB::table('organizer')->where('user_id', $userId)->first();
-                if (!$org) { $this->flash('error', 'Coordinator record not found.'); return; }
-                $ext = strtolower($this->vPhoto->getClientOriginalExtension() ?: 'jpg');
-                if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) $ext = 'jpg';
-                $b64 = base64_encode(file_get_contents($this->vPhoto->getRealPath()));
-                $up  = cloudinary()->uploadApi()->upload('data:image/' . $ext . ';base64,' . $b64, [
-                    'folder'        => 'organizer-photos',
-                    'public_id'     => 'organizer_' . uniqid(),
-                    'overwrite'     => true,
-                    'resource_type' => 'image',
-                ]);
-                $this->deleteOrganizerPhoto($org);
-                $upd = ['profile_photo' => $up['secure_url'], 'updated_at' => now()];
-                if (\Illuminate\Support\Facades\Schema::hasColumn('organizer', 'profile_photo_public_id')) {
+            // Coordinators and Directors store photos on Cloudinary (same as
+            // Manage Coordinators), so the picture is identical everywhere it's shown.
+            if (in_array($role, ['organizer', 'director'], true)) {
+                $table = $role === 'organizer' ? 'organizer' : 'director';
+                $label = $role === 'organizer' ? 'Coordinator' : 'Director';
+                $rec = DB::table($table)->where('user_id', $userId)->first();
+                if (!$rec) { $this->flash('error', "{$label} record not found."); return; }
+                $up = $this->uploadCloudPhoto($this->vPhoto, $role === 'organizer' ? 'organizer' : 'director');
+                $this->deleteCloudPhoto($rec);
+                $upd = ['profile_photo' => $up['url'], 'updated_at' => now()];
+                if (\Illuminate\Support\Facades\Schema::hasColumn($table, 'profile_photo_public_id')) {
                     $upd['profile_photo_public_id'] = $up['public_id'];
                 }
-                DB::table('organizer')->where('user_id', $userId)->update($upd);
-                $this->vData['photo'] = $up['secure_url'];
+                DB::table($table)->where('user_id', $userId)->update($upd);
+                $this->vData['photo'] = $up['url'];
                 $this->vPhoto = null;
                 $this->bustUserListCache();
                 $this->flash('success', 'Profile photo updated successfully!');
@@ -785,8 +796,23 @@ new class extends Component {
         } finally { $this->vPhotoSave = false; }
     }
 
-    /** Removes a coordinator's current photo (Cloudinary or legacy local file). */
-    private function deleteOrganizerPhoto(object $org): void
+    /** Uploads a Livewire temp file to Cloudinary; returns ['url' => ..., 'public_id' => ...]. */
+    private function uploadCloudPhoto($file, string $prefix): array
+    {
+        $ext = strtolower($file->getClientOriginalExtension() ?: 'jpg');
+        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) $ext = 'jpg';
+        $b64 = base64_encode(file_get_contents($file->getRealPath()));
+        $up  = cloudinary()->uploadApi()->upload('data:image/' . $ext . ';base64,' . $b64, [
+            'folder'        => $prefix . '-photos',
+            'public_id'     => $prefix . '_' . uniqid(),
+            'overwrite'     => true,
+            'resource_type' => 'image',
+        ]);
+        return ['url' => $up['secure_url'], 'public_id' => $up['public_id']];
+    }
+
+    /** Removes a coordinator's/director's current photo (Cloudinary or legacy local file). */
+    private function deleteCloudPhoto(object $org): void
     {
         $photo = $org->profile_photo ?? null;
         if (!$photo || str_contains($photo, 'default.png')) return;
@@ -801,24 +827,26 @@ new class extends Component {
                 Storage::disk('public')->delete($photo);
             }
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Admin coordinator photo delete: ' . $e->getMessage());
+            \Illuminate\Support\Facades\Log::warning('Admin cloud photo delete: ' . $e->getMessage());
         }
     }
 
-    /** Coordinator "Default photo" — clears the custom photo. */
+    /** Coordinator / Director "Default photo" — clears the custom photo. */
     public function resetPhoto(): void {
         $this->vPhotoSave = true;
         try {
-            if (($this->vData['role'] ?? '') !== 'organizer') return;
+            $role = $this->vData['role'] ?? '';
+            if (!in_array($role, ['organizer', 'director'], true)) return;
+            $table  = $role === 'organizer' ? 'organizer' : 'director';
             $userId = $this->vData['id'];
-            $org = DB::table('organizer')->where('user_id', $userId)->first();
-            if (!$org) { $this->flash('error', 'Coordinator record not found.'); return; }
-            $this->deleteOrganizerPhoto($org);
+            $rec = DB::table($table)->where('user_id', $userId)->first();
+            if (!$rec) { $this->flash('error', 'Record not found.'); return; }
+            $this->deleteCloudPhoto($rec);
             $upd = ['profile_photo' => null, 'updated_at' => now()];
-            if (\Illuminate\Support\Facades\Schema::hasColumn('organizer', 'profile_photo_public_id')) {
+            if (\Illuminate\Support\Facades\Schema::hasColumn($table, 'profile_photo_public_id')) {
                 $upd['profile_photo_public_id'] = null;
             }
-            DB::table('organizer')->where('user_id', $userId)->update($upd);
+            DB::table($table)->where('user_id', $userId)->update($upd);
             $this->vData['photo'] = null;
             $this->vPhoto = null;
             $this->bustUserListCache();
@@ -2196,6 +2224,13 @@ select.mu-filter-input.mu-active {
                         <button wire:click="$set('vPhoto', null)" wire:loading.attr="disabled" wire:target="savePhoto"
                                 class="w-full px-1.5 py-1 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition disabled:opacity-50" style="color:#000000;">Cancel</button>
                     </div>
+                    @elseif($canPhoto && !empty($vd['photo']) && !str_contains($vd['photo'], 'default.png'))
+                    <button wire:click="resetPhoto" wire:loading.attr="disabled" wire:target="resetPhoto"
+                            class="px-2 py-1 rounded-lg text-xs font-semibold border border-[#D8B4FE] hover:bg-[#F9F5FC] transition disabled:opacity-50 inline-flex items-center gap-1" style="color:#7A3F91;">
+                        <span wire:loading wire:target="resetPhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span wire:loading.remove wire:target="resetPhoto"><i class="fas fa-user text-xs"></i></span>
+                        Default
+                    </button>
                     @endif
                     <div wire:loading wire:target="vPhoto" class="flex items-center gap-1 text-xs font-medium" style="color:#7A3F91;">
                         <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…

@@ -5,6 +5,9 @@
 use Livewire\Volt\Component;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
+use Livewire\Attributes\Renderless;
 use App\Models\AdminEvent;
 use App\Models\JobPosting;
 use App\Models\Organizer;
@@ -68,10 +71,122 @@ new class extends Component {
 
     public function photoUrl(?string $p): string
     {
-        if (!$p) return asset('storage/alumni-photos/default.png');
+        $default = asset('storage/alumni-photos/default.png');
+        if (!$p || str_contains($p, 'default.png')) return $default;
+        // Cloudinary / full URL — return as-is (same as Alumni Records, Manage
+        // Coordinator and the Coordinator dashboard).
+        if (preg_match('#^https?://#i', $p)) return $p;
         if (str_starts_with($p, 'alumni-photos/') || str_starts_with($p, 'organizers/') || str_starts_with($p, 'directors/') || str_starts_with($p, 'registrars/'))
-            return Storage::disk('public')->exists($p) ? asset('storage/'.$p) : asset('storage/alumni-photos/default.png');
-        return asset('storage/alumni-photos/default.png');
+            return Storage::disk('public')->exists($p) ? asset('storage/'.$p) : $default;
+        return $default;
+    }
+
+    /**
+     * ── Change own profile photo (click the banner) ─────────────────────
+     * Same flow as the Coordinator dashboard / Alumni Records: the browser
+     * aligns + compresses the image -> base64 -> Cloudinary. The URL is saved
+     * in director.profile_photo, so User Management (Admin) shows it too.
+     */
+    #[Renderless]
+    public function receiveDirectorPhoto(string $filename, string $base64): void
+    {
+        try {
+            $dir = DB::table('director')->where('user_id', auth()->id())->first();
+            if (!$dir) {
+                $this->dispatch('dir-photo-failed', message: 'Could not find your profile.');
+                return;
+            }
+
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true) || $base64 === '' || strlen($base64) > 2_800_000) {
+                $this->dispatch('dir-photo-failed', message: 'Photo must be JPG, PNG, or WebP and under 2MB.');
+                return;
+            }
+
+            $result = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'director-photos',
+                    'public_id'     => 'director_' . $dir->id . '_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            $this->deleteDirectorPhotoAsset($dir);
+
+            $upd = ['profile_photo' => $result['secure_url'], 'updated_at' => now()];
+            try {
+                if (Schema::hasColumn('director', 'profile_photo_public_id')) {
+                    $upd['profile_photo_public_id'] = $result['public_id'];
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Director photo public_id: ' . $e->getMessage());
+            }
+            DB::table('director')->where('id', $dir->id)->update($upd);
+
+            $this->directorPhoto = $result['secure_url'];
+            $this->dispatch('dir-photo-saved', newSrc: $result['secure_url']);
+        } catch (\Throwable $e) {
+            Log::error('Director photo upload failed: ' . $e->getMessage());
+            $this->dispatch('dir-photo-failed', message: 'Failed to upload photo. Please try again.');
+        }
+    }
+
+    /**
+     * ── Back to default photo ───────────────────────────────────────────
+     * Deletes the current custom photo (Cloudinary asset / local file) and
+     * clears director.profile_photo so the default avatar is used again.
+     */
+    #[Renderless]
+    public function resetDirectorPhoto(): void
+    {
+        try {
+            $dir = DB::table('director')->where('user_id', auth()->id())->first();
+            if (!$dir) {
+                $this->dispatch('dir-photo-failed', message: 'Could not find your profile.');
+                return;
+            }
+
+            $this->deleteDirectorPhotoAsset($dir);
+
+            $upd = ['profile_photo' => null, 'updated_at' => now()];
+            try {
+                if (Schema::hasColumn('director', 'profile_photo_public_id')) {
+                    $upd['profile_photo_public_id'] = null;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Director photo public_id reset: ' . $e->getMessage());
+            }
+            DB::table('director')->where('id', $dir->id)->update($upd);
+
+            $this->directorPhoto = asset('storage/alumni-photos/default.png');
+            $this->dispatch('dir-photo-saved', newSrc: asset('storage/alumni-photos/default.png'));
+        } catch (\Throwable $e) {
+            Log::error('Director photo reset failed: ' . $e->getMessage());
+            $this->dispatch('dir-photo-failed', message: 'Failed to reset photo. Please try again.');
+        }
+    }
+
+    /** Removes the previous photo (Cloudinary asset or legacy local file). */
+    private function deleteDirectorPhotoAsset(object $dir): void
+    {
+        $photo = $dir->profile_photo ?? null;
+        if (!$photo || str_contains($photo, 'default.png')) return;
+
+        try {
+            if (preg_match('#^https?://#i', $photo)) {
+                $publicId = $dir->profile_photo_public_id ?? null;
+                if (!$publicId && preg_match('#/upload/(?:v\d+/)?(.+)\.[a-z0-9]+$#i', $photo, $m)) {
+                    $publicId = $m[1];
+                }
+                if ($publicId) cloudinary()->uploadApi()->destroy($publicId);
+            } elseif (Storage::disk('public')->exists($photo)) {
+                Storage::disk('public')->delete($photo);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Director photo delete failed: ' . $e->getMessage());
+        }
     }
 
     public function startEditEmail(): void
@@ -326,6 +441,24 @@ new class extends Component {
     .dir-mini-card .dir-mini-tip { display: none !important; }
 }
 
+/* Keep Alpine x-cloak elements (photo action bar / overlays) hidden until Alpine boots */
+[x-cloak] { display: none !important; }
+
+/* ── Profile photo: hidden tooltip, shows only on hover (desktop) ── */
+.dir-photo-pick { display: block; }
+.dir-photo-pick .dir-photo-tip {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #000; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+    padding: 5px 11px; border-radius: 7px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 9999;
+}
+@media (min-width: 1024px) {
+    .dir-photo-pick:hover .dir-photo-tip { opacity: 1; }
+}
+@media (max-width: 1023px) {
+    .dir-photo-pick .dir-photo-tip { display: none !important; }
+}
+
 /* ── Dashboard card click spinner ───────────────────────────
    Purple "..." dot loader — same loading interface used on the
    Alumni Dashboard, applied here for consistency. Card content
@@ -521,25 +654,168 @@ new class extends Component {
     <div class="dir-account-col dir-fade-up">
         <div class="dir-account-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
-            <div class="relative w-full overflow-hidden shrink-0 h-[420px] sm:h-[270px]"
-                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                @if(str_ends_with($directorPhoto, 'default.png'))
-                    <div class="w-full h-full flex items-center justify-center font-black text-white text-[4.5rem] sm:text-[3.6rem]"
+            <div class="shrink-0"
+                 x-data="{
+                     previewSrc: @js($directorPhoto),
+                     originalSrc: @js($directorPhoto),
+                     defaultSrc: @js(asset('storage/alumni-photos/default.png')),
+                     pendingFile: null,
+                     hasFile: false,
+                     resetPending: false,
+                     aligning: false,
+                     alignInfo: '',
+                     saving: false,
+                     msg: '',
+                     msgType: '',
+                     _t: null,
+                     init() {
+                         $wire.$on('dir-photo-saved', (event) => {
+                             const e = Array.isArray(event) ? event[0] : event;
+                             const wasReset = this.resetPending;
+                             this.pendingFile = null; this.hasFile = false; this.resetPending = false; this.saving = false; this.alignInfo = '';
+                             if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                             if (e && e.newSrc) this.previewSrc = e.newSrc + '?t=' + Date.now();
+                             this.originalSrc = this.previewSrc;
+                             this.notify(wasReset ? 'Photo reset to default' : 'Profile photo updated', 'ok');
+                         });
+                         $wire.$on('dir-photo-failed', (event) => {
+                             const e = Array.isArray(event) ? event[0] : event;
+                             this.failCleanup();
+                             this.notify((e && e.message) || 'Failed to upload photo.', 'err');
+                         });
+                     },
+                     notify(m, t) {
+                         this.msg = m; this.msgType = t;
+                         clearTimeout(this._t);
+                         this._t = setTimeout(() => this.msg = '', 3500);
+                     },
+                     failCleanup() {
+                         this.saving = false; this.aligning = false; this.hasFile = false; this.resetPending = false; this.pendingFile = null; this.alignInfo = '';
+                         this.previewSrc = this.originalSrc;
+                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                     },
+                     warmUp() {
+                         if (window.dirPhotoFace) window.dirPhotoFace.warmUp();
+                     },
+                     async onFileChange(event) {
+                         const file = event.target.files[0];
+                         if (!file) return;
+                         if (file.size > 8 * 1024 * 1024) { this.notify('Photo is too large (max 8MB).', 'err'); event.target.value = ''; return; }
+                         if (!window.dirPhotoFace) { this.notify('Photo tools are still loading. Please try again.', 'err'); event.target.value = ''; return; }
+                         this.aligning = true;
+                         try {
+                             // Detects the face, crops a square that frames it for the card,
+                             // and returns a compressed JPEG data URL (what you preview = what gets saved).
+                             const out = await window.dirPhotoFace.process(file, 600, 0.85);
+                             this.pendingFile = { name: file.name.replace(/\.\w+$/, '') + '.jpg', base64: out.dataUrl.split(',')[1] };
+                             this.previewSrc = out.dataUrl;
+                             this.alignInfo = out.faceFound ? 'face' : 'fallback';
+                             this.resetPending = false;
+                             this.hasFile = true;
+                         } catch (err) {
+                             this.notify('Could not read that image.', 'err');
+                             event.target.value = '';
+                         } finally {
+                             this.aligning = false;
+                         }
+                     },
+                     savePhoto() {
+                         if (this.saving || (!this.pendingFile && !this.resetPending)) return;
+                         this.saving = true;
+                         const call = this.resetPending
+                             ? $wire.resetDirectorPhoto()
+                             : $wire.receiveDirectorPhoto(this.pendingFile.name, this.pendingFile.base64);
+                         call.catch(() => { this.failCleanup(); this.notify('Failed to save photo.', 'err'); });
+                     },
+                     useDefault() {
+                         this.pendingFile = null; this.resetPending = true; this.hasFile = true; this.alignInfo = '';
+                         this.previewSrc = this.defaultSrc;
+                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                     },
+                     cancelPhoto() {
+                         this.pendingFile = null; this.hasFile = false; this.resetPending = false; this.alignInfo = '';
+                         this.previewSrc = this.originalSrc;
+                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                     }
+                 }">
+
+                <div class="relative w-full overflow-hidden h-[420px] sm:h-[270px]"
+                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);"
+                     @pointerenter.once="warmUp()">
+                    <div x-show="previewSrc.includes('default.png')"
+                         class="w-full h-full flex items-center justify-center font-black text-white text-[4.5rem] sm:text-[3.6rem]"
                          style="background:rgba(255,255,255,0.16);">
                         <i class="fas fa-user-shield"></i>
                     </div>
-                @else
-                    <img src="{{ $directorPhoto }}" alt="{{ $directorName }}"
-                         class="w-full h-full object-cover">
-                @endif
-                <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.55) 100%);"></div>
-                <div class="absolute bottom-0 left-0 right-0 px-4 pb-4">
-                    <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.1rem] sm:text-[1.15rem]"
-                       style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
-                        {{ $directorName ?: 'Director' }}
+                    <img x-show="!previewSrc.includes('default.png')" :src="previewSrc"
+                         alt="{{ $directorName }}"
+                         draggable="false"
+                         class="w-full h-full object-cover object-top"
+                         onerror="this.onerror=null; this.src='{{ asset('storage/alumni-photos/default.png') }}';">
+                    <div class="absolute inset-0 pointer-events-none" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.55) 100%);"></div>
+
+                    {{-- Click anywhere on the photo to pick a new one.
+                         No visible text — only a tooltip on hover (desktop). --}}
+                    <label x-show="!hasFile && !saving && !aligning"
+                           class="dir-photo-pick absolute inset-0 z-10 cursor-pointer bg-black/0 hover:bg-black/20 transition-colors">
+                        <span class="dir-photo-tip"><i class="fas fa-camera mr-1.5"></i>Click to change photo</span>
+                        <input type="file" x-ref="photoInput" class="hidden"
+                               accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
+                    </label>
+
+                    {{-- Detecting the face / aligning the photo to the card --}}
+                    <div x-show="aligning" x-cloak
+                         class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/50">
+                        <i class="fas fa-spinner fa-spin text-white text-2xl"></i>
+                        <span class="text-white text-[0.72rem] font-bold tracking-wide">Aligning face…</span>
+                    </div>
+
+                    {{-- Saving overlay --}}
+                    <div x-show="saving" x-cloak class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/50">
+                        <i class="fas fa-spinner fa-spin text-white text-2xl"></i>
+                        <span class="text-white text-[0.72rem] font-bold tracking-wide">Saving…</span>
+                    </div>
+
+                    {{-- Result message --}}
+                    <div x-show="msg" x-cloak x-transition
+                         class="absolute top-3 left-3 right-3 z-20 w-fit max-w-full px-2.5 py-1 rounded-full text-[0.68rem] font-bold shadow"
+                         :class="msgType === 'ok' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'"
+                         x-text="msg"></div>
+
+                    <div class="absolute bottom-0 left-0 right-0 px-4 pb-4 pointer-events-none z-[11]">
+                        <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.1rem] sm:text-[1.15rem]"
+                           style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
+                            {{ $directorName ?: 'Director' }}
+                        </p>
+                    </div>
+                </div>
+
+                {{-- After picking a photo: status line + Save / Cancel / Default photo --}}
+                <div x-show="hasFile && !saving && !aligning" x-cloak x-transition
+                     class="px-3 py-2.5 bg-[#FAF6FD]" style="border-bottom:1px solid #E5E7EB;">
+                    <p x-show="resetPending" class="flex items-start gap-1.5 text-[0.72rem] font-semibold text-[#333333] leading-snug mb-2">
+                        <template x-if="resetPending">
+                            <span class="flex items-start gap-1.5"><i class="fas fa-rotate-left text-[#7A3F91] mt-[2px]"></i><span>This will reset your photo to the default avatar.</span></span>
+                        </template>
                     </p>
+                    <div class="flex flex-wrap gap-1.5">
+                        <button type="button" @click="savePhoto()"
+                                class="flex-1 min-w-[84px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.75rem] font-bold text-white shadow-sm active:scale-95 transition"
+                                style="background:#7A3F91;">
+                            <i class="fas fa-check text-[10px]"></i> Save photo
+                        </button>
+                        <button type="button" @click="cancelPhoto()"
+                                class="flex-1 min-w-[84px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.75rem] font-bold bg-white text-[#333333] border border-[#E8E0F0] hover:bg-gray-50 active:scale-95 transition">
+                            <i class="fas fa-xmark text-[10px]"></i> Cancel
+                        </button>
+                        <button type="button" x-show="!resetPending" @click="useDefault()"
+                                class="flex-1 min-w-[104px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.75rem] font-bold bg-white text-[#7A3F91] border border-[#D8B4FE] hover:bg-[#F9F5FC] active:scale-95 transition">
+                            <i class="fas fa-user text-[10px]"></i> Default photo
+                        </button>
+                    </div>
                 </div>
             </div>
+
 
             <div class="dir-info-body dir-scroll">
 
@@ -1033,5 +1309,157 @@ new class extends Component {
 })();
 </script>
 
+
+<script>
+(function () {
+    'use strict';
+    if (window.dirPhotoFace) return;
+
+    // Where the face should land inside the saved square photo, so it looks
+    // right in the profile card (name overlay at the bottom, circle avatars elsewhere):
+    //   FACE_W  = face width as a fraction of the square
+    //   FACE_CY = face centre, measured from the top of the square
+    var FACE_W  = 0.34;
+    var FACE_CY = 0.38;
+
+    var MP_VERSION = '1.0.1';
+    var MP_BASE    = 'https://cdn.jsdelivr.net/npm/@@mediapipe/tasks-vision@@' + MP_VERSION;
+    var MP_MODEL   = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite';
+    var mpPromise  = null;
+
+    function withTimeout(promise, ms) {
+        return new Promise(function (resolve, reject) {
+            var t = setTimeout(function () { reject(new Error('timeout')); }, ms);
+            promise.then(function (v) { clearTimeout(t); resolve(v); },
+                         function (e) { clearTimeout(t); reject(e); });
+        });
+    }
+
+    function loadImage(file) {
+        return new Promise(function (resolve, reject) {
+            var url = URL.createObjectURL(file);
+            var img = new Image();
+            img.onload  = function () { URL.revokeObjectURL(url); resolve(img); };
+            img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('bad image')); };
+            img.src = url;
+        });
+    }
+
+    function toCanvas(img, maxSide) {
+        var s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement('canvas');
+        c.width  = Math.max(1, Math.round(img.naturalWidth  * s));
+        c.height = Math.max(1, Math.round(img.naturalHeight * s));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        return { canvas: c, scale: s };
+    }
+
+    // 1) Browser-native FaceDetector (Chromium builds that ship it): instant, no download.
+    async function detectNative(canvas) {
+        if (!('FaceDetector' in window)) return null;
+        var d = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 5 });
+        var faces = await d.detect(canvas);
+        return (faces || []).map(function (f) {
+            var b = f.boundingBox;
+            return { x: b.x, y: b.y, w: b.width, h: b.height };
+        });
+    }
+
+    // 2) MediaPipe Face Detector, loaded lazily (only when a photo is actually picked,
+    //    or warmed up when the pointer first enters the photo).
+    function getMediaPipe() {
+        if (!mpPromise) {
+            mpPromise = (async function () {
+                var vision  = await import(MP_BASE + '/vision_bundle.mjs');
+                var fileset = await vision.FilesetResolver.forVisionTasks(MP_BASE + '/wasm');
+                return vision.FaceDetector.createFromOptions(fileset, {
+                    baseOptions: { modelAssetPath: MP_MODEL },
+                    runningMode: 'IMAGE',
+                    minDetectionConfidence: 0.5
+                });
+            })();
+            mpPromise.catch(function () { mpPromise = null; }); // allow a retry next time
+        }
+        return mpPromise;
+    }
+
+    async function detectMediaPipe(canvas) {
+        var det = await withTimeout(getMediaPipe(), 12000);
+        var res = det.detect(canvas);
+        return (res.detections || [])
+            .filter(function (d) { return d.boundingBox; })
+            .map(function (d) {
+                var b = d.boundingBox;
+                return { x: b.originX, y: b.originY, w: b.width, h: b.height };
+            });
+    }
+
+    async function detectFaces(canvas) {
+        var found = null;
+        try { found = await detectNative(canvas); } catch (e) { found = null; }
+        if (found && found.length) return found;
+        try { return await detectMediaPipe(canvas); } catch (e) { return []; }
+    }
+
+    // Square crop (in ORIGINAL image pixels) that frames the face for the card.
+    // No face → centred crop that favours the upper part of the picture (where heads usually are).
+    function computeCrop(W, H, face) {
+        var S, cx, cy;
+        if (face) {
+            S  = Math.max(face.w / FACE_W, face.h / 0.46);
+            cx = face.x + face.w / 2;
+            cy = face.y + face.h / 2;
+        } else {
+            S  = Math.min(W, H);
+            cx = W / 2;
+            cy = H * 0.30;
+        }
+        S = Math.min(S, W, H);
+        var sx = Math.min(Math.max(cx - S / 2, 0), W - S);
+        var sy = Math.min(Math.max(cy - S * FACE_CY, 0), H - S);
+        return { sx: sx, sy: sy, size: S };
+    }
+
+    function render(img, crop, outSize, quality) {
+        var size = Math.max(64, Math.min(outSize, Math.round(crop.size)));
+        var c = document.createElement('canvas');
+        c.width = c.height = size;
+        var ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.fillStyle = '#ffffff'; // JPEG has no alpha — transparent PNGs get a white background
+        ctx.fillRect(0, 0, size, size);
+        ctx.drawImage(img, crop.sx, crop.sy, crop.size, crop.size, 0, 0, size, size);
+        return c.toDataURL('image/jpeg', quality);
+    }
+
+    async function processFile(file, outSize, quality) {
+        var img = await loadImage(file);
+        var W = img.naturalWidth, H = img.naturalHeight;
+        var det = toCanvas(img, 640);
+
+        var faces = [];
+        try { faces = await detectFaces(det.canvas); } catch (e) { faces = []; }
+
+        var face = null;
+        if (faces.length) {
+            var best = faces.reduce(function (a, b) { return (b.w * b.h > a.w * a.h) ? b : a; });
+            face = { x: best.x / det.scale, y: best.y / det.scale, w: best.w / det.scale, h: best.h / det.scale };
+        }
+
+        var crop = computeCrop(W, H, face);
+        return { dataUrl: render(img, crop, outSize || 600, quality || 0.85), faceFound: !!face };
+    }
+
+    window.dirPhotoFace = {
+        process: processFile,
+        warmUp: function () {
+            // Only needed when the browser has no native FaceDetector.
+            if (!('FaceDetector' in window)) { getMediaPipe().catch(function () {}); }
+        },
+        _computeCrop: computeCrop
+    };
+})();
+</script>
 
 </div>{{-- end root --}}
