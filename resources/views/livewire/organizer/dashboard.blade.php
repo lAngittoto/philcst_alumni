@@ -809,16 +809,10 @@ new class extends Component {
 
                 {{-- After picking a photo: status line + Save / Cancel / Default photo --}}
                 <div x-show="hasFile && !saving && !aligning" x-cloak x-transition
-                     class="px-3 py-2.5 border-b border-[#EDE0F5] bg-[#FAF6FD]">
-                    <p class="flex items-start gap-1.5 text-[0.72rem] font-semibold text-[#333333] leading-snug mb-2">
+                     class="px-3 py-2.5 bg-[#FAF6FD]" style="border-bottom:1px solid #E5E7EB;">
+                    <p x-show="resetPending" class="flex items-start gap-1.5 text-[0.72rem] font-semibold text-[#333333] leading-snug mb-2">
                         <template x-if="resetPending">
                             <span class="flex items-start gap-1.5"><i class="fas fa-rotate-left text-[#7A3F91] mt-[2px]"></i><span>This will reset your photo to the default avatar.</span></span>
-                        </template>
-                        <template x-if="!resetPending && alignInfo === 'face'">
-                            <span class="flex items-start gap-1.5"><i class="fas fa-wand-magic-sparkles text-[#7A3F91] mt-[2px]"></i><span>Face detected — photo auto-aligned to fit the card.</span></span>
-                        </template>
-                        <template x-if="!resetPending && alignInfo === 'fallback'">
-                            <span class="flex items-start gap-1.5"><i class="fas fa-circle-info text-[#7A3F91] mt-[2px]"></i><span>No face detected — photo was centered automatically.</span></span>
                         </template>
                     </p>
                     <div class="flex flex-wrap gap-1.5">

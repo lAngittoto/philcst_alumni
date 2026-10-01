@@ -646,6 +646,7 @@ new class extends Component {
                 DB::raw("COALESCE(org.suffix,'')            as org_suffix"),
                 DB::raw("COALESCE(org.id_number,'')         as id_number"),
                 DB::raw("COALESCE(org.department,'')        as department"),
+                DB::raw("COALESCE(org.email,'')             as organizer_email"),
                 DB::raw("COALESCE(dir.first_name,'')        as first_name"),
                 DB::raw("COALESCE(dir.middle_name,'')       as middle_name"),
                 DB::raw("COALESCE(dir.last_name,'')         as last_name"),
@@ -686,6 +687,10 @@ new class extends Component {
             $this->ueEmail = $r->name ?? '';
             $this->ueId    = $id;
             $this->ueName  = $r->name;
+        } elseif ($r->role === 'organizer') {
+            $this->ueEmail = $r->organizer_email ?: (str_ends_with($r->email ?? '', '.internal') ? '' : ($r->email ?? ''));
+            $this->ueId    = $id;
+            $this->ueName  = trim(implode(' ', array_filter([$r->org_first_name, $r->org_last_name]))) ?: $r->name;
         }
         if (in_array($r->role, ['registrar','admin'])) {
             $this->cpId   = $id;
@@ -714,12 +719,41 @@ new class extends Component {
         try {
             if (!$this->vPhoto) { $this->flash('error', 'Please select a photo to upload.'); return; }
             $role   = $this->vData['role'] ?? '';
-            if (!in_array($role, ['director', 'registrar'])) {
-                $this->flash('error', 'Profile photo can only be uploaded for Directors and Registrars.');
+            if (!in_array($role, ['director', 'registrar', 'organizer'])) {
+                $this->flash('error', 'Profile photo can only be uploaded for Directors, Coordinators and Registrars.');
                 return;
             }
             $this->validate(['vPhoto' => 'image|mimes:jpg,jpeg,png,gif,webp|max:2048']);
             $userId = $this->vData['id'];
+
+            // Coordinators store photos on Cloudinary (same as Manage Coordinators),
+            // so the picture is identical everywhere it's shown.
+            if ($role === 'organizer') {
+                $org = DB::table('organizer')->where('user_id', $userId)->first();
+                if (!$org) { $this->flash('error', 'Coordinator record not found.'); return; }
+                $ext = strtolower($this->vPhoto->getClientOriginalExtension() ?: 'jpg');
+                if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) $ext = 'jpg';
+                $b64 = base64_encode(file_get_contents($this->vPhoto->getRealPath()));
+                $up  = cloudinary()->uploadApi()->upload('data:image/' . $ext . ';base64,' . $b64, [
+                    'folder'        => 'organizer-photos',
+                    'public_id'     => 'organizer_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]);
+                $this->deleteOrganizerPhoto($org);
+                $upd = ['profile_photo' => $up['secure_url'], 'updated_at' => now()];
+                if (\Illuminate\Support\Facades\Schema::hasColumn('organizer', 'profile_photo_public_id')) {
+                    $upd['profile_photo_public_id'] = $up['public_id'];
+                }
+                DB::table('organizer')->where('user_id', $userId)->update($upd);
+                $this->vData['photo'] = $up['secure_url'];
+                $this->vPhoto = null;
+                $this->bustUserListCache();
+                $this->flash('success', 'Profile photo updated successfully!');
+                $this->dispatch('mu-save-done');
+                return;
+            }
+
             $folder = match($role) {
                 'alumni'    => 'alumni-photos',
                 'organizer' => 'organizers',
@@ -748,6 +782,49 @@ new class extends Component {
         } catch (\Exception $e) {
             $this->flash('error', 'Failed to upload photo: ' . $e->getMessage());
             $this->dispatch('mu-save-done');
+        } finally { $this->vPhotoSave = false; }
+    }
+
+    /** Removes a coordinator's current photo (Cloudinary or legacy local file). */
+    private function deleteOrganizerPhoto(object $org): void
+    {
+        $photo = $org->profile_photo ?? null;
+        if (!$photo || str_contains($photo, 'default.png')) return;
+        try {
+            if (str_starts_with($photo, 'https://res.cloudinary.com')) {
+                $publicId = $org->profile_photo_public_id ?? null;
+                if (!$publicId && preg_match('#/upload/(?:v\d+/)?(.+)\.[a-z0-9]+$#i', $photo, $m)) {
+                    $publicId = $m[1];
+                }
+                if ($publicId) cloudinary()->uploadApi()->destroy($publicId);
+            } elseif (Storage::disk('public')->exists($photo)) {
+                Storage::disk('public')->delete($photo);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Admin coordinator photo delete: ' . $e->getMessage());
+        }
+    }
+
+    /** Coordinator "Default photo" — clears the custom photo. */
+    public function resetPhoto(): void {
+        $this->vPhotoSave = true;
+        try {
+            if (($this->vData['role'] ?? '') !== 'organizer') return;
+            $userId = $this->vData['id'];
+            $org = DB::table('organizer')->where('user_id', $userId)->first();
+            if (!$org) { $this->flash('error', 'Coordinator record not found.'); return; }
+            $this->deleteOrganizerPhoto($org);
+            $upd = ['profile_photo' => null, 'updated_at' => now()];
+            if (\Illuminate\Support\Facades\Schema::hasColumn('organizer', 'profile_photo_public_id')) {
+                $upd['profile_photo_public_id'] = null;
+            }
+            DB::table('organizer')->where('user_id', $userId)->update($upd);
+            $this->vData['photo'] = null;
+            $this->vPhoto = null;
+            $this->bustUserListCache();
+            $this->flash('success', 'Profile photo reset to default.');
+        } catch (\Exception $e) {
+            $this->flash('error', 'Failed to reset photo: ' . $e->getMessage());
         } finally { $this->vPhotoSave = false; }
     }
 
@@ -871,6 +948,36 @@ new class extends Component {
 
                 // Bust cache so the table row reflects the new email right away.
                 $this->bustUserListCache();
+            } elseif ($role === 'organizer') {
+                $duplicate = DB::table('organizer')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists()
+                          || DB::table('users')->where('email', $email)->where('id', '!=', $this->ueId)->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already taken by another account."]]; return;
+                }
+                $coordinator = \App\Models\Organizer::where('user_id', $this->ueId)->first();
+                if (!$coordinator) {
+                    $this->ueErrors = ['general' => ['Coordinator record not found.']]; return;
+                }
+
+                // Same flow as Manage Coordinators: new temp password, forced
+                // change on next login, credentials emailed to the new address.
+                $tmp = Str::random(12);
+                $coordinator->update(['email' => $email, 'password_changed_at' => null]);
+                DB::table('users')->where('id', $this->ueId)
+                    ->update(['email' => $email, 'password' => Hash::make($tmp), 'updated_at' => now()]);
+
+                try {
+                    \Illuminate\Support\Facades\Mail::to($email)
+                        ->send(new \App\Mail\OrganizerRegistered($coordinator->fresh(), $tmp));
+                } catch (\Throwable $mailEx) {
+                    \Illuminate\Support\Facades\Log::warning('[AdminCoordinatorEmailUpdate] mail failed to ' . $email . ': ' . $mailEx->getMessage());
+                }
+
+                if ($this->vData) {
+                    $this->vData['email'] = $email;
+                    $this->vData['organizer_email'] = $email;
+                }
+                $this->bustUserListCache();
             } else {
                 $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
                 if ($duplicate) {
@@ -917,7 +1024,7 @@ new class extends Component {
                 'role'  => $role,
             ]);
 
-            $msg = $role === 'director'
+            $msg = in_array($role, ['director', 'organizer'], true)
                 ? "Email updated for {$this->ueName}. A new temporary password has been sent to {$email}. They must log in and change it immediately."
                 : "Email updated for {$this->ueName}. Their password has been reset to the temporary password (Student ID + first 2 letters of last name). They must log in using that and change it immediately.";
             $this->ueSuccess = $msg;
@@ -972,6 +1079,20 @@ new class extends Component {
     public function executeToggle(): void {
         try {
             $s = $this->tAction==='activate' ? 'ACTIVE' : 'INACTIVE';
+
+            // Same rule as Manage Coordinators: only one ACTIVE coordinator per college.
+            if ($this->tRole==='organizer' && $s==='ACTIVE') {
+                $self = DB::table('organizer')->where('user_id',$this->tId)->first();
+                $conflict = $self ? DB::table('organizer')
+                    ->whereNull('deleted_at')->where('status','ACTIVE')
+                    ->where('department',$self->department)
+                    ->where('user_id','!=',$this->tId)->first() : null;
+                if ($conflict) {
+                    $cn = trim(implode(' ', array_filter([$conflict->first_name ?? '', $conflict->last_name ?? ''])));
+                    $this->flash('error', "Cannot activate: college \"{$self->department}\" already has an active coordinator ({$cn}). Deactivate them first.");
+                    return;
+                }
+            }
             if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='organizer') DB::table('organizer')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='registrar') DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
@@ -1035,7 +1156,11 @@ new class extends Component {
     }
 
     public function photoUrl(?string $p): string {
-        if (!$p) return asset('storage/alumni-photos/default.png');
+        if (!$p || str_contains($p, 'default.png')) return asset('storage/alumni-photos/default.png');
+        // Cloudinary / full URL (coordinator photos) — return as-is, same as
+        // Manage Coordinators + Alumni Records. Without this the admin page
+        // fell through to default.png and showed the wrong picture.
+        if (str_starts_with($p, 'https://') || str_starts_with($p, 'http://')) return $p;
         if (str_starts_with($p,'alumni-photos/')||str_starts_with($p,'organizers/')||str_starts_with($p,'directors/')||str_starts_with($p,'registrars/'))
             return Storage::disk('public')->exists($p) ? asset('storage/'.$p) : asset('storage/alumni-photos/default.png');
         return asset('storage/alumni-photos/default.png');
@@ -1961,8 +2086,8 @@ select.mu-filter-input.mu-active {
     $isDir    = $vRole === 'director';
     $isReg    = $vRole === 'registrar';
     $isAdmin  = $vRole === 'admin';
-    $canPhoto = in_array($vRole, ['director']);
-    $canToggle= in_array($vRole, ['director']);
+    $canPhoto = in_array($vRole, ['director', 'organizer']);
+    $canToggle= in_array($vRole, ['director', 'organizer']);
 
     if ($isDir)
         $headerName = implode(' ', array_filter([$vd['first_name']??'', $vd['middle_name']??'', $vd['last_name']??'', $vd['suffix']??''])) ?: $vd['name'];
@@ -2202,12 +2327,53 @@ select.mu-filter-input.mu-active {
                 <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden flex flex-col items-center p-5 gap-3 sm:w-56 shrink-0">
 
                     {{-- Avatar --}}
-                    <div class="relative">
-                        <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $orgName }}"
-                             class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#E8E0F0]">
-                        {{-- Active/Inactive dot --}}
-                        <span class="absolute bottom-1 right-1 w-4 h-4 rounded-full border-2 border-white
-                                     {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
+                    <div class="flex flex-col items-center gap-1.5"
+                         x-data="{ dragging: false }"
+                         @dragover.prevent="dragging=true"
+                         @dragleave.prevent="dragging=false"
+                         @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
+                        <label for="vPhotoInput" class="relative group cursor-pointer">
+                            @if($vPhoto)
+                                <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
+                                     class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#7A3F91]/40">
+                            @else
+                                <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $orgName }}"
+                                     class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#E8E0F0]" :class="dragging ? 'ring-[#7A3F91]' : ''">
+                            @endif
+                            <div class="absolute inset-0 rounded-2xl bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <i class="fas fa-camera text-white text-sm"></i>
+                            </div>
+                            {{-- Active/Inactive dot --}}
+                            <span class="absolute bottom-1 right-1 w-4 h-4 rounded-full border-2 border-white
+                                         {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
+                            <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
+                        </label>
+                        @if(!$vPhoto)
+                        <p class="text-xs font-semibold uppercase tracking-wide text-center" style="color:#7A3F91;">Click to change photo</p>
+                        @endif
+                        @if($vPhoto)
+                        <div class="flex items-center gap-1.5 w-full">
+                            <button wire:click="savePhoto" wire:loading.attr="disabled" wire:target="savePhoto"
+                                    class="flex-1 px-2 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
+                                    style="background:#7A3F91;">
+                                <span wire:loading wire:target="savePhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                                <span wire:loading.remove wire:target="savePhoto"><i class="fas fa-check text-xs"></i> Save</span>
+                            </button>
+                            <button wire:click="$set('vPhoto', null)" wire:loading.attr="disabled" wire:target="savePhoto"
+                                    class="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition disabled:opacity-50" style="color:#000000;">Cancel</button>
+                        </div>
+                        @elseif(!empty($vd['photo']) && !str_contains($vd['photo'], 'default.png'))
+                        <button wire:click="resetPhoto" wire:loading.attr="disabled" wire:target="resetPhoto"
+                                class="px-2.5 py-1 rounded-lg text-xs font-semibold border border-[#D8B4FE] hover:bg-[#F9F5FC] transition disabled:opacity-50 inline-flex items-center gap-1" style="color:#7A3F91;">
+                            <span wire:loading wire:target="resetPhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                            <span wire:loading.remove wire:target="resetPhoto"><i class="fas fa-user text-xs"></i></span>
+                            Default photo
+                        </button>
+                        @endif
+                        <div wire:loading wire:target="vPhoto" class="flex items-center gap-1 text-xs font-medium" style="color:#7A3F91;">
+                            <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
+                        </div>
+                        @error('vPhoto')<p class="text-xs text-red-600 text-center flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
                     </div>
 
                     {{-- Name + ID --}}
@@ -2230,7 +2396,7 @@ select.mu-filter-input.mu-active {
                     </div>
                     @endif
 
-                    {{-- Account access note (read-only for admin — director manages this) --}}
+                    {{-- Account access note — admin can activate/deactivate via Account Status below --}}
                     <div class="w-full rounded-xl px-3 py-2.5" style="background:#F9F7FC;border:1px solid #E8E0F0;">
                         <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#7A3F91;">Account Access</p>
                         <p class="text-sm font-medium leading-snug" style="color:#333333;">
@@ -2287,7 +2453,7 @@ select.mu-filter-input.mu-active {
                                 <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Teacher ID</p>
                                 <p class="text-lg font-bold font-mono" style="color:#333333;">{{ $vd['id_number'] ?: '—' }}</p>
                             </div>
-                            {{-- Email — read-only, no edit icon (director manages coordinator emails) --}}
+                            {{-- Current email — admin edits it in the Email Address card below --}}
                             <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
                                 <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Email Address</p>
                                 <p class="text-lg font-semibold break-all" style="color:#333333;">
@@ -2402,15 +2568,17 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- UPDATE EMAIL — Alumni / Director --}}
-            @if($isAlumni || $isDir)
+            {{-- UPDATE EMAIL — Alumni / Director / Coordinator --}}
+            @if($isAlumni || $isDir || $isOrg)
             @php
                 $ueCurrent = $isAlumni
                     ? ((!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local')) ? $vd['record_email'] : null)
-                    : ($vd['director_email'] ?: null);
-                $ueNote = $isDir
+                    : ($isOrg ? ($vd['organizer_email'] ?: null) : ($vd['director_email'] ?: null));
+                $ueNote = $isOrg
+                    ? 'A new temporary password will be generated and emailed to the new address. The coordinator must change it on next login.'
+                    : ($isDir
                     ? 'This is the director\'s contact email. It is not used to log in.'
-                    : 'Updating the email will require the account to reset their password on next login.';
+                    : 'Updating the email will require the account to reset their password on next login.');
                 $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">

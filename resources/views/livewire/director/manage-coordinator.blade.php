@@ -981,6 +981,12 @@ new class extends Component {
     .coord-filter-select::-ms-expand { display: none; }
 
     /* ══ Manage Colleges modal — simple header, no sidebar ══ */
+    /* Manage Colleges: list column width. Plain CSS (not Tailwind col-span-8/9 utilities,
+       which weren't being generated and collapsed the list into a 1-column sliver). */
+    @media (min-width: 1024px) {
+        .mc-list-span-9 { grid-column: span 9 / span 9; min-width: 0; }
+        .mc-list-span-8 { grid-column: span 8 / span 8; min-width: 0; }
+    }
     .cfs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #f8f7fb; }
 
     /* ══ View Profile — hover-to-upload photo (mirrors alumni-records) ══ */
@@ -2510,7 +2516,7 @@ new class extends Component {
                 </div>
                 @endif
 
-                <div id="mc-section-list" class="{{ $orgAddingToCollege ? 'lg:col-span-8' : 'lg:col-span-9' }} scroll-mt-4 lg:min-h-0">
+                <div id="mc-section-list" class="{{ $orgAddingToCollege ? 'mc-list-span-8' : 'mc-list-span-9' }} scroll-mt-4 lg:min-h-0">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col max-h-[75vh] lg:max-h-full lg:h-full">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-shrink-0">
                             <h3 class="text-sm font-semibold text-[#333333] uppercase tracking-wider">Colleges and Programs</h3>
