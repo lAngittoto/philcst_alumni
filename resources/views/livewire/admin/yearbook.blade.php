@@ -207,18 +207,40 @@ new class extends Component {
 
     public function getPhotoUrl(?string $path): string
     {
+        // Empty / null / literal "null" → default
         if (empty($path) || $path === 'null' || is_null($path)) {
             return asset('storage/alumni-photos/default.png');
         }
+
+        // Explicit default.png references → default
         if (strpos($path, 'default.png') !== false) {
             return asset('storage/alumni-photos/default.png');
         }
+
+        // Already a full Cloudinary (or any http/https) URL → use as-is
+        if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+            return $path;
+        }
+
+        // Cloudinary public_id stored without domain
+        // e.g. "alumni-photos/abc123" or "v1234567890/alumni-photos/abc123"
+        if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'v1')) {
+            $cloudName = config('cloudinary.cloud_name')
+                      ?? config('cloudinary.cloud.cloud_name')
+                      ?? env('CLOUDINARY_CLOUD_NAME', '');
+            if ($cloudName) {
+                return 'https://res.cloudinary.com/' . $cloudName . '/image/upload/' . $path;
+            }
+        }
+
+        // Local storage paths
         if (str_starts_with($path, 'alumni-photos/')) {
             return asset('storage/' . $path);
         }
         if (!str_contains($path, '/')) {
             return asset('storage/alumni-photos/' . $path);
         }
+
         return asset('storage/' . $path);
     }
 
@@ -305,7 +327,7 @@ mark.yb-adm-hl {
     font-weight: 700;
 }
 
-/* ── Card base ── */
+/* ── Card base (mobile-first: fluid sizes grow with breakpoints) ── */
 .yb-adm-card {
     transition: border-color .15s ease, box-shadow .15s ease;
     position: relative;
@@ -313,9 +335,9 @@ mark.yb-adm-hl {
     background: #fff;
     display: flex;
     flex-direction: column;
-    height: 420px;
-    min-height: 420px;
-    max-height: 420px;
+    height: 360px;
+    min-height: 360px;
+    max-height: 360px;
     align-self: stretch;
     border-color: #E2D6F0;
 }
@@ -337,19 +359,20 @@ mark.yb-adm-hl {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 22px 0 18px;
-    min-height: 190px;
+    padding: 16px 0 14px;
+    min-height: 160px;
 }
 .yb-adm-card-photo {
-    width: 130px;
-    height: 130px;
+    width: 100px;
+    height: 100px;
     object-fit: cover;
     object-position: top center;
     display: block;
     border-radius: 50%;
-    border: 4px solid rgba(255,255,255,.9);
+    border: 3px solid rgba(255,255,255,.9);
     box-shadow: 0 4px 16px rgba(0,0,0,.3);
     flex-shrink: 0;
+    background: #E9DDF3;
 }
 
 /* ── Right / body column ── */
@@ -364,7 +387,7 @@ mark.yb-adm-hl {
 /* ── Purple name ribbon ── */
 .yb-adm-card-name-band {
     background: #7A3F91;
-    padding: 8px 36px 8px 13px;
+    padding: 7px 32px 7px 11px;
     position: relative;
     overflow: hidden;
     flex-shrink: 0;
@@ -390,7 +413,7 @@ mark.yb-adm-hl {
     pointer-events: none;
 }
 .yb-adm-card-name {
-    font-size: 15px; font-weight: 800;
+    font-size: 13px; font-weight: 800;
     color: #FFFFFF; line-height: 1.2;
     text-transform: uppercase;
     letter-spacing: .01em;
@@ -403,30 +426,62 @@ mark.yb-adm-hl {
 
 /* ── Card info body ── */
 .yb-adm-card-text {
-    padding: 10px 13px 12px;
+    padding: 8px 11px 10px;
     flex: 1;
-    display: flex; flex-direction: column; gap: 3px;
+    display: flex; flex-direction: column; gap: 2px;
     background: #fff;
     overflow: hidden;
 }
 .yb-adm-card-line {
-    font-size: 14px; color: #1a1a1a; line-height: 1.4; font-weight: 600;
+    font-size: 12px; color: #1a1a1a; line-height: 1.35; font-weight: 600;
     overflow: hidden;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
 }
 .yb-adm-card-motto {
-    font-size: 13px; font-weight: 700;
-    color: #5A1A8A; margin-top: 4px;
+    font-size: 11px; font-weight: 700;
+    color: #5A1A8A; margin-top: 3px;
 }
 .yb-adm-card-motto-text {
-    font-size: 13px; font-style: italic; font-weight: 600;
-    color: #1a1a1a; line-height: 1.4;
+    font-size: 11px; font-style: italic; font-weight: 600;
+    color: #1a1a1a; line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+}
+
+/* ── TABLET (>=640px) — larger photo & text ── */
+@media (min-width: 640px) {
+    .yb-adm-card {
+        height: 400px;
+        min-height: 400px;
+        max-height: 400px;
+    }
+    .yb-adm-card-photo-wrap { padding: 20px 0 16px; min-height: 180px; }
+    .yb-adm-card-photo      { width: 120px; height: 120px; border-width: 4px; }
+    .yb-adm-card-name-band  { padding: 8px 36px 8px 13px; }
+    .yb-adm-card-name       { font-size: 14px; }
+    .yb-adm-card-text       { padding: 10px 13px 12px; gap: 3px; }
+    .yb-adm-card-line       { font-size: 13px; }
+    .yb-adm-card-motto      { font-size: 12px; margin-top: 4px; }
+    .yb-adm-card-motto-text { font-size: 12px; }
+}
+
+/* ── DESKTOP (>=1024px) — full size ── */
+@media (min-width: 1024px) {
+    .yb-adm-card {
+        height: 420px;
+        min-height: 420px;
+        max-height: 420px;
+    }
+    .yb-adm-card-photo-wrap { padding: 22px 0 18px; min-height: 190px; }
+    .yb-adm-card-photo      { width: 130px; height: 130px; }
+    .yb-adm-card-name       { font-size: 15px; }
+    .yb-adm-card-line       { font-size: 14px; line-height: 1.4; }
+    .yb-adm-card-motto      { font-size: 13px; }
+    .yb-adm-card-motto-text { font-size: 13px; line-height: 1.4; }
 }
 
 /* ── Badges ── */
@@ -460,7 +515,7 @@ mark.yb-adm-hl {
 
 /* ── Search input ── */
 .yb-adm-search-input {
-    padding: 0.5rem 0.75rem 0.5rem 2.25rem;
+    padding: 0.4rem 0.75rem 0.4rem 2.25rem;
     border: 1px solid #E8E0F0; border-radius: 0.5rem;
     font-size: 0.875rem; font-weight: 500;
     background: #fff; color: #333333;
@@ -474,7 +529,7 @@ mark.yb-adm-hl {
 /* ── Dropdown trigger ── */
 .yb-adm-dd-btn {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+    padding: 0.4rem 2.25rem 0.4rem 0.75rem;
     border: 1px solid #E8E0F0; border-radius: 0.5rem;
     font-size: 0.875rem; font-weight: 500;
     background: #fff; color: #333333;
@@ -532,13 +587,48 @@ mark.yb-adm-hl {
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
     flex: 1; min-height: 0;
 }
+/* ── FILTER BAR — two rows on mobile, single row >=640px ── */
 .yb-adm-filter-bar {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
-    padding: 0.6rem 0.875rem; flex-shrink: 0;
+    padding: 0.5rem 0.75rem; flex-shrink: 0;
     position: relative; z-index: 50; overflow: visible;
     pointer-events: all !important;
     cursor: default !important;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
 }
+/* Row 1 on mobile: search fills the full width */
+.yb-adm-filter-search-wrap {
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+    position: relative;
+}
+/* Row 2 on mobile: dropdowns + count + reset in one row */
+.yb-adm-filter-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+/* "Filters" text hidden on small screens to save space */
+.yb-adm-filter-label { display: none; }
+.yb-adm-found-count  { flex-shrink: 0; margin-left: auto; }
+
+@media (min-width: 640px) {
+    .yb-adm-filter-search-wrap { flex: 1 1 160px; max-width: 280px; }
+    .yb-adm-filter-controls    { width: auto; flex: 1; }
+    .yb-adm-filter-label       { display: flex; }
+}
+@media (min-width: 768px) {
+    .yb-adm-filter-bar { padding: 0.6rem 0.875rem; gap: 8px; }
+    .yb-adm-filter-search-wrap { max-width: 320px; }
+}
+
 .yb-adm-pagination-bar {
     flex-shrink: 0;
     background: linear-gradient(to right, #7a3f91, #9b59b6);
@@ -550,7 +640,7 @@ mark.yb-adm-hl {
 }
 .yb-adm-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
-    min-width: 32px; height: 32px; padding: 0 10px;
+    min-width: 30px; height: 30px; padding: 0 8px;
     border-radius: 8px; font-size: 12px; font-weight: 700; transition: all .15s;
 }
 .yb-adm-pg-active { background: #fff; color: #7a3f91; }
@@ -567,10 +657,7 @@ mark.yb-adm-hl {
     max-height: var(--yb-adm-avail-h, calc(100vh - 180px));
 }
 
-/* ── Mobile ── */
-@media (max-width: 640px) {
-    .yb-adm-filter-bar { gap: 8px; }
-}
+/* ── MOBILE (<768px) — compact everything ── */
 @media (max-width: 767px) {
     html, body { overflow: hidden !important; }
     .yb-adm-root-height {
@@ -581,11 +668,24 @@ mark.yb-adm-hl {
     .yb-adm-mobile-subtitle { display: none; }
     .yb-adm-mobile-header-icon { width: 2.25rem !important; height: 2.25rem !important; }
     .yb-adm-mobile-title { font-size: 1rem !important; }
-    .yb-adm-filter-bar { padding: 0.45rem 0.65rem; }
-    .yb-adm-dd-btn, .yb-adm-search-input { padding-top: 0.4rem; padding-bottom: 0.4rem; }
-    .yb-adm-pagination-bar { min-height: 40px; padding: 6px 0.75rem; }
-    .yb-adm-pagination-bar p { font-size: 11px; }
-    .yb-adm-pagination-bar { padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px)); }
+
+    .yb-adm-pagination-bar {
+        min-height: 40px;
+        padding: 6px 0.75rem;
+        padding-bottom: calc(0.4rem + env(safe-area-inset-bottom, 0px));
+    }
+    .yb-adm-pagination-bar p { font-size: 10px; }
+    .yb-adm-pg-btn { min-width: 26px; height: 26px; padding: 0 6px; font-size: 11px; }
+
+    /* Truncate dropdown labels on small screens */
+    .yb-adm-dd-btn { font-size: 0.8rem; padding-right: 2rem; max-width: 110px; }
+    .yb-adm-dd-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ── EXTRA-SMALL (<400px) — very tight phones ── */
+@media (max-width: 399px) {
+    .yb-adm-dd-btn { max-width: 96px; font-size: 0.75rem; }
+    .yb-adm-chip   { padding: 3px 8px; font-size: 10px; }
 }
 
 [x-cloak] { display: none !important; }
@@ -617,7 +717,10 @@ mark.yb-adm-hl {
     <div class="yb-adm-table-block">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="yb-adm-filter-bar flex flex-wrap gap-2 items-center"
+        {{-- openDd tracks which dropdown is currently open ('batch'|'course'|'').
+             When one is open, the other button gets pointer-events:none + cursor:default
+             so only one dropdown can be interacted with at a time. --}}
+        <div class="yb-adm-filter-bar"
              x-data="{
                 openDd: '',
                 init() {
@@ -625,8 +728,8 @@ mark.yb-adm-hl {
                 }
              }">
 
-            {{-- Search --}}
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
+            {{-- Row 1: Search (full width on mobile, inline on ≥sm) --}}
+            <div class="yb-adm-filter-search-wrap"
                  wire:ignore
                  x-data="{ q: '', init() { this.q = $wire.search ?? ''; $wire.$watch('search', v => { if (v !== this.q) this.q = v; }); } }">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-xs"
@@ -639,106 +742,112 @@ mark.yb-adm-hl {
                        autocomplete="off" spellcheck="false">
             </div>
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
-                 style="color:#7a3f91;">
-                Filters
-            </div>
+            {{-- Row 2 (mobile) / inline (≥sm): Filters label + dropdowns + count + reset --}}
+            <div class="yb-adm-filter-controls">
 
-            {{-- Batch dropdown ── --}}
-            <div class="relative" @click.outside="if(openDd==='batch') openDd=''">
-                <button type="button"
-                        @click="openDd = openDd === 'batch' ? '' : 'batch'"
-                        :class="{ 'active': $wire.batch !== '' }"
-                        :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
-                        wire:loading.attr="disabled"
-                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
-                        class="yb-adm-dd-btn">
-                    <span x-text="$wire.batch !== '' ? 'Batch ' + $wire.batch : 'All Batches'"></span>
-                </button>
-                <div x-show="openDd === 'batch'"
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95"
-                     x-transition:enter-end="opacity-100 scale-100"
-                     x-transition:leave="transition ease-in duration-75"
-                     x-transition:leave-start="opacity-100 scale-100"
-                     x-transition:leave-end="opacity-0 scale-95"
-                     class="yb-adm-dd-panel"
-                     style="display:none;">
-                    <button type="button"
-                            @click="$wire.set('batch', ''); openDd = ''"
-                            :class="{ 'sel': $wire.batch === '' }"
-                            class="yb-adm-dd-item">All Batches</button>
-                    @foreach($this->batches as $b)
-                    <button type="button"
-                            @click="$wire.set('batch', '{{ $b }}'); openDd = ''"
-                            :class="{ 'sel': $wire.batch === '{{ $b }}' }"
-                            class="yb-adm-dd-item">{{ $b }}</button>
-                    @endforeach
+                {{-- FILTERS label (hidden on mobile) --}}
+                <div class="yb-adm-filter-label items-center gap-2 px-2 h-[34px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                     style="color:#7a3f91;">
+                    Filters
                 </div>
-            </div>
 
-            {{-- Course dropdown ── --}}
-            <div class="relative" @click.outside="if(openDd==='course') openDd=''">
-                <button type="button"
-                        @click="openDd = openDd === 'course' ? '' : 'course'"
-                        :class="{ 'active': $wire.course !== '' }"
-                        :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
-                        wire:loading.attr="disabled"
-                        wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
-                        class="yb-adm-dd-btn">
-                    @if($course !== '')
-                        <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
-                    @else
-                        <span>All Programs</span>
-                    @endif
-                </button>
-                <div x-show="openDd === 'course'"
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95"
-                     x-transition:enter-end="opacity-100 scale-100"
-                     x-transition:leave="transition ease-in duration-75"
-                     x-transition:leave-start="opacity-100 scale-100"
-                     x-transition:leave-end="opacity-0 scale-95"
-                     class="yb-adm-dd-panel"
-                     style="display:none; min-width:220px;">
+                {{-- Batch dropdown ── --}}
+                <div class="relative shrink-0" @click.outside="if(openDd==='batch') openDd=''">
                     <button type="button"
-                            @click="$wire.set('course', ''); openDd = ''"
-                            :class="{ 'sel': $wire.course === '' }"
-                            class="yb-adm-dd-item">All Programs</button>
-                    @foreach($this->courses as $c)
-                    <button type="button"
-                            @click="$wire.set('course', '{{ $c->code }}'); openDd = ''"
-                            :class="{ 'sel': $wire.course === '{{ $c->code }}' }"
-                            class="yb-adm-dd-item">{{ $c->name }}</button>
-                    @endforeach
+                            @click="openDd = openDd === 'batch' ? '' : 'batch'"
+                            :class="{ 'active': $wire.batch !== '' }"
+                            :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                            wire:loading.attr="disabled"
+                            wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
+                            class="yb-adm-dd-btn">
+                        <span x-text="$wire.batch !== '' ? 'Batch ' + $wire.batch : 'All Batches'"></span>
+                    </button>
+                    <div x-show="openDd === 'batch'"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 scale-95"
+                         x-transition:enter-end="opacity-100 scale-100"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="opacity-100 scale-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="yb-adm-dd-panel"
+                         style="display:none;">
+                        <button type="button"
+                                @click="$wire.set('batch', ''); openDd = ''"
+                                :class="{ 'sel': $wire.batch === '' }"
+                                class="yb-adm-dd-item">All Batches</button>
+                        @foreach($this->batches as $b)
+                        <button type="button"
+                                @click="$wire.set('batch', '{{ $b }}'); openDd = ''"
+                                :class="{ 'sel': $wire.batch === '{{ $b }}' }"
+                                class="yb-adm-dd-item">{{ $b }}</button>
+                        @endforeach
+                    </div>
                 </div>
-            </div>
 
-            {{-- Found count ── --}}
-            <div class="flex items-center gap-2 ml-auto">
-                <span class="text-xs font-bold px-2.5 py-1 rounded-full uppercase"
-                      style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
-                    {{ number_format($this->totalFiltered) }} found
-                </span>
-            </div>
+                {{-- Program dropdown ── --}}
+                <div class="relative shrink-0" @click.outside="if(openDd==='course') openDd=''">
+                    <button type="button"
+                            @click="openDd = openDd === 'course' ? '' : 'course'"
+                            :class="{ 'active': $wire.course !== '' }"
+                            :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
+                            wire:loading.attr="disabled"
+                            wire:target="search,batch,course,resetFilters,previousPage,nextPage,gotoPage"
+                            class="yb-adm-dd-btn">
+                        @if($course !== '')
+                            <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
+                        @else
+                            <span>All Programs</span>
+                        @endif
+                    </button>
+                    <div x-show="openDd === 'course'"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 scale-95"
+                         x-transition:enter-end="opacity-100 scale-100"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="opacity-100 scale-100"
+                         x-transition:leave-end="opacity-0 scale-95"
+                         class="yb-adm-dd-panel"
+                         style="display:none; min-width:200px;">
+                        <button type="button"
+                                @click="$wire.set('course', ''); openDd = ''"
+                                :class="{ 'sel': $wire.course === '' }"
+                                class="yb-adm-dd-item">All Programs</button>
+                        @foreach($this->courses as $c)
+                        <button type="button"
+                                @click="$wire.set('course', '{{ $c->code }}'); openDd = ''"
+                                :class="{ 'sel': $wire.course === '{{ $c->code }}' }"
+                                class="yb-adm-dd-item">{{ $c->name }}</button>
+                        @endforeach
+                    </div>
+                </div>
 
-            {{-- Reset ── --}}
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    @if($search === '' && $batch === '' && $course === '') disabled @endif
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
-                           bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
-                    style="color:#333333;">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7A3F91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
+                {{-- Found count ── --}}
+                <div class="yb-adm-found-count flex items-center">
+                    <span class="text-xs font-bold px-2 py-1 rounded-full uppercase whitespace-nowrap"
+                          style="background:#F9F7FC; color:#7A3F91; border:1.5px solid #E8E0F0;">
+                        {{ number_format($this->totalFiltered) }} found
+                    </span>
+                </div>
+
+                {{-- Reset ── --}}
+                <button wire:click="resetFilters"
+                        wire:loading.attr="disabled"
+                        wire:loading.class="opacity-60 cursor-wait"
+                        wire:target="resetFilters"
+                        @if($search === '' && $batch === '' && $course === '') disabled @endif
+                        class="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm font-semibold
+                               bg-white border border-[#E8E0F0] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer"
+                        style="color:#333333;">
+                    <span wire:loading.remove wire:target="resetFilters">
+                        <i class="fas fa-rotate-left text-xs"></i>
+                    </span>
+                    <span wire:loading wire:target="resetFilters">
+                        <i class="fas fa-spinner fa-spin text-xs" style="color:#7A3F91;"></i>
+                    </span>
+                    <span class="hidden sm:inline text-xs">Reset</span>
+                </button>
+
+            </div>{{-- /yb-adm-filter-controls --}}
         </div>
 
         {{-- ── SCROLLABLE CARDS AREA ── --}}
@@ -776,8 +885,8 @@ mark.yb-adm-hl {
                             </span>
                         </div>
 
-                        {{-- Card grid ── capped at 5 cols, equal-height rows --}}
-                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
+                        {{-- Card grid: 1 col <400px, 2 col sm, 3 col md, 4 col lg, 5 col xl --}}
+                        <div class="grid grid-cols-1 min-[400px]:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-3 items-stretch">
                             @foreach($group['members'] as $alumni)
                             @php
                                 $cardName = $this->formatAlumniName(

@@ -278,10 +278,35 @@ new #[Layout('app')] class extends Component {
         // and Storage::url() were resolving incorrectly on this server
         // even with a correct DB path, silently forcing the default
         // photo for every job even when a real image was uploaded.
+        // Cloudinary: Event Organizer / Director uploads save the absolute
+        // https URL in the DB. Wrapping that in asset('storage/' . $path)
+        // produced a broken URL (".../storage/https://res.cloudinary.com/...")
+        // so the slide showed no proper picture. Absolute URLs are therefore
+        // returned as-is; only legacy local paths go through asset().
         if ($path) {
-            return asset('storage/' . $path);
+            if (preg_match('#^https?://#i', $path)) {
+                return $path;
+            }
+            return asset('storage/' . ltrim($path, '/'));
         }
         return asset('storage/job/default-photo-job.jpg');
+    }
+
+    /**
+     * URL to DISPLAY for an event photo (same rule as Manage Event / Events).
+     * The model's photo_url accessor was written for the old local-disk flow
+     * and turns a Cloudinary absolute URL into a broken storage path, so an
+     * http(s) value in the raw `photo` column is returned as-is; anything
+     * else (legacy local photo / no photo) still uses the model accessor.
+     */
+    private function eventImageUrl($event): ?string
+    {
+        if (! $event) return null;
+        $raw = $event->getRawOriginal('photo');
+        if (is_string($raw) && preg_match('#^https?://#i', $raw)) {
+            return $raw;
+        }
+        return $event->photo_url ?: null;
     }
 
     private function loadAnnouncements(): void
@@ -311,7 +336,7 @@ new #[Layout('app')] class extends Component {
                         'title'       => $event->title ?: 'Untitled Event',
                         'subtitle'    => 'Approved and now visible to alumni',
                         'when'        => $event->reviewed_at,
-                        'image'       => $event->photo_url ?: null,
+                        'image'       => $this->eventImageUrl($event),
                     ]);
                 });
 

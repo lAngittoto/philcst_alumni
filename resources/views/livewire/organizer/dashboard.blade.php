@@ -235,6 +235,41 @@ new class extends Component {
         }
     }
 
+    /**
+     * ── Back to default photo ───────────────────────────────────────────
+     * Deletes the current custom photo (Cloudinary asset / local file) and
+     * clears organizer.profile_photo so the shared default avatar is used
+     * again (organizerPhotoUrl() already falls back to default.png).
+     */
+    #[Renderless]
+    public function resetOrganizerPhoto(): void
+    {
+        try {
+            $organizer = Auth::user()?->organizer;
+            if (! $organizer) {
+                $this->dispatch('org-photo-failed', message: 'Could not find your profile.');
+                return;
+            }
+
+            $this->deleteOrganizerPhotoAsset($organizer);
+
+            $organizer->update(['profile_photo' => null]);
+            try {
+                if (Schema::hasColumn($organizer->getTable(), 'profile_photo_public_id')) {
+                    $organizer->forceFill(['profile_photo_public_id' => null])->save();
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Organizer photo public_id reset: ' . $e->getMessage());
+            }
+
+            unset($this->organizerPhotoUrl); // clear cached #[Computed] value
+            $this->dispatch('org-photo-saved', newSrc: asset('storage/alumni-photos/default.png'));
+        } catch (\Throwable $e) {
+            Log::error('Organizer photo reset failed: ' . $e->getMessage());
+            $this->dispatch('org-photo-failed', message: 'Failed to reset photo. Please try again.');
+        }
+    }
+
     /** Removes the previous photo (Cloudinary asset or legacy local file). */
     private function deleteOrganizerPhotoAsset($organizer): void
     {
@@ -411,6 +446,21 @@ new class extends Component {
 }
 @media (max-width: 1023px) {
     .org-stat-card .org-card-tip { display: none !important; }
+}
+
+/* ── Profile photo: hidden tooltip, shows only on hover (desktop) ── */
+.org-photo-pick { display: block; }
+.org-photo-pick .org-photo-tip {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: #000; color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0.05em;
+    padding: 5px 11px; border-radius: 7px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 9999;
+}
+@media (min-width: 1024px) {
+    .org-photo-pick:hover .org-photo-tip { opacity: 1; }
+}
+@media (max-width: 1023px) {
+    .org-photo-pick .org-photo-tip { display: none !important; }
 }
 
 /* ── Mini cards (clickable stat tiles) ── */
@@ -624,6 +674,7 @@ new class extends Component {
                      defaultSrc: @js(asset('storage/alumni-photos/default.png')),
                      pendingFile: null,
                      hasFile: false,
+                     resetPending: false,
                      saving: false,
                      msg: '',
                      msgType: '',
@@ -631,11 +682,12 @@ new class extends Component {
                      init() {
                          $wire.$on('org-photo-saved', (event) => {
                              const e = Array.isArray(event) ? event[0] : event;
-                             this.pendingFile = null; this.hasFile = false; this.saving = false;
+                             const wasReset = this.resetPending;
+                             this.pendingFile = null; this.hasFile = false; this.resetPending = false; this.saving = false;
                              if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                              if (e && e.newSrc) this.previewSrc = e.newSrc + '?t=' + Date.now();
                              this.originalSrc = this.previewSrc;
-                             this.notify('Profile photo updated', 'ok');
+                             this.notify(wasReset ? 'Photo reset to default' : 'Profile photo updated', 'ok');
                          });
                          $wire.$on('org-photo-failed', (event) => {
                              const e = Array.isArray(event) ? event[0] : event;
@@ -649,7 +701,7 @@ new class extends Component {
                          this._t = setTimeout(() => this.msg = '', 3500);
                      },
                      failCleanup() {
-                         this.saving = false; this.hasFile = false; this.pendingFile = null;
+                         this.saving = false; this.hasFile = false; this.resetPending = false; this.pendingFile = null;
                          this.previewSrc = this.originalSrc;
                          if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                      },
@@ -681,19 +733,27 @@ new class extends Component {
                              const dataUrl = await this.compress(file, 600, 600, 0.8);
                              this.pendingFile = { name: file.name.replace(/\.\w+$/, '') + '.jpg', base64: dataUrl.split(',')[1] };
                              this.previewSrc = dataUrl;
+                             this.resetPending = false;
                              this.hasFile = true;
                          } catch (err) {
                              this.notify('Could not read that image.', 'err');
                          }
                      },
                      savePhoto() {
-                         if (this.saving || !this.pendingFile) return;
+                         if (this.saving || (!this.pendingFile && !this.resetPending)) return;
                          this.saving = true;
-                         $wire.receiveOrganizerPhoto(this.pendingFile.name, this.pendingFile.base64)
-                             .catch(() => { this.failCleanup(); this.notify('Failed to upload photo.', 'err'); });
+                         const call = this.resetPending
+                             ? $wire.resetOrganizerPhoto()
+                             : $wire.receiveOrganizerPhoto(this.pendingFile.name, this.pendingFile.base64);
+                         call.catch(() => { this.failCleanup(); this.notify('Failed to save photo.', 'err'); });
+                     },
+                     useDefault() {
+                         this.pendingFile = null; this.resetPending = true; this.hasFile = true;
+                         this.previewSrc = this.defaultSrc;
+                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                      },
                      cancelPhoto() {
-                         this.pendingFile = null; this.hasFile = false;
+                         this.pendingFile = null; this.hasFile = false; this.resetPending = false;
                          this.previewSrc = this.originalSrc;
                          if (this.$refs.photoInput) this.$refs.photoInput.value = '';
                      }
@@ -707,27 +767,30 @@ new class extends Component {
                 </div>
                 <div class="absolute inset-0 pointer-events-none" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.65) 100%);"></div>
 
-                {{-- Hover-to-change: click anywhere on the photo to pick a new one --}}
+                {{-- Click anywhere on the photo to pick a new one.
+                     No visible text — only a tooltip on hover (desktop). --}}
                 <label x-show="!hasFile && !saving"
-                       class="absolute inset-0 z-10 flex items-center justify-center cursor-pointer bg-black/0 hover:bg-black/40 transition-colors"
-                       title="Change profile photo">
-                    <span class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/55 text-white text-[0.7rem] font-bold uppercase tracking-wider opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                        <i class="fas fa-camera text-[11px]"></i> Change photo
-                    </span>
+                       class="org-photo-pick absolute inset-0 z-10 cursor-pointer bg-black/0 hover:bg-black/20 transition-colors">
+                    <span class="org-photo-tip"><i class="fas fa-camera mr-1.5"></i>Click to change photo</span>
                     <input type="file" x-ref="photoInput" class="hidden"
                            accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
                 </label>
 
-                {{-- Pending change: Save / Cancel --}}
-                <div x-show="hasFile && !saving" x-cloak class="absolute top-3 right-3 z-20 flex items-center gap-1.5">
+                {{-- Pending change: Cancel / Back to default / Save --}}
+                <div x-show="hasFile && !saving" x-cloak
+                     class="absolute top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-center gap-1.5">
                     <button type="button" @click="cancelPhoto()"
                             class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[0.7rem] font-bold bg-white text-gray-700 shadow hover:bg-gray-50">
                         <i class="fas fa-xmark text-[10px]"></i> Cancel
                     </button>
+                    <button type="button" x-show="!resetPending" @click="useDefault()"
+                            class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[0.7rem] font-bold bg-white text-gray-700 shadow hover:bg-gray-50">
+                        <i class="fas fa-rotate-left text-[10px]"></i> Back to default
+                    </button>
                     <button type="button" @click="savePhoto()"
                             class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[0.7rem] font-bold text-white shadow"
                             style="background:#7A3F91;">
-                        <i class="fas fa-check text-[10px]"></i> Save photo
+                        <i class="fas fa-check text-[10px]"></i> Save
                     </button>
                 </div>
 
