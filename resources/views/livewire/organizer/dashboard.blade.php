@@ -4,6 +4,9 @@
 
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Renderless;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
@@ -160,6 +163,13 @@ new class extends Component {
             return $default;
         }
 
+        // Cloudinary URL — return as-is (same as Alumni Records / Manage
+        // Coordinator). This is what lets a photo uploaded by the Director
+        // in Manage Coordinator show up here.
+        if (preg_match('#^https?://#i', $path)) {
+            return $path;
+        }
+
         if (
             str_starts_with($path, 'organizers/')   ||
             str_starts_with($path, 'alumni-photos/') ||
@@ -171,6 +181,79 @@ new class extends Component {
         }
 
         return $default;
+    }
+
+    /**
+     * ── Change own profile photo (hover the banner) ─────────────────────
+     * Same flow as Alumni Records / Manage Coordinator: the browser
+     * compresses the image → base64 → Cloudinary. The URL is saved in
+     * organizer.profile_photo, so Manage Coordinator (Director) shows the
+     * new photo too.
+     */
+    #[Renderless]
+    public function receiveOrganizerPhoto(string $filename, string $base64): void
+    {
+        try {
+            $organizer = Auth::user()?->organizer;
+            if (! $organizer) {
+                $this->dispatch('org-photo-failed', message: 'Could not find your profile.');
+                return;
+            }
+
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (! in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true) || $base64 === '' || strlen($base64) > 2_800_000) {
+                $this->dispatch('org-photo-failed', message: 'Photo must be JPG, PNG, or WebP and under 2MB.');
+                return;
+            }
+
+            $result = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'organizer-photos',
+                    'public_id'     => 'organizer_' . $organizer->id . '_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            $this->deleteOrganizerPhotoAsset($organizer);
+
+            $organizer->update(['profile_photo' => $result['secure_url']]);
+            try {
+                if (Schema::hasColumn($organizer->getTable(), 'profile_photo_public_id')) {
+                    $organizer->forceFill(['profile_photo_public_id' => $result['public_id']])->save();
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Organizer photo public_id: ' . $e->getMessage());
+            }
+
+            unset($this->organizerPhotoUrl); // clear cached #[Computed] value
+            $this->dispatch('org-photo-saved', newSrc: $result['secure_url']);
+        } catch (\Throwable $e) {
+            Log::error('Organizer photo upload failed: ' . $e->getMessage());
+            $this->dispatch('org-photo-failed', message: 'Failed to upload photo. Please try again.');
+        }
+    }
+
+    /** Removes the previous photo (Cloudinary asset or legacy local file). */
+    private function deleteOrganizerPhotoAsset($organizer): void
+    {
+        $photo = $organizer->profile_photo;
+        if (! $photo || str_contains($photo, 'default.png')) return;
+
+        try {
+            if (preg_match('#^https?://#i', $photo)) {
+                $publicId = $organizer->profile_photo_public_id ?? null;
+                if (! $publicId && preg_match('#/upload/(?:v\d+/)?(.+)\.[a-z0-9]+$#i', $photo, $m)) {
+                    $publicId = $m[1];
+                }
+                if ($publicId) cloudinary()->uploadApi()->destroy($publicId);
+            } elseif (Storage::disk('public')->exists($photo)) {
+                Storage::disk('public')->delete($photo);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Organizer photo delete failed: ' . $e->getMessage());
+        }
     }
 
     private function loadStats(): void
@@ -534,16 +617,132 @@ new class extends Component {
         <div class="org-profile-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
             {{-- Photo banner — organizer's actual profile picture, not an icon --}}
-          <div class="relative w-full overflow-hidden shrink-0 h-[400px] sm:h-[240px] bg-[#EDE0F5]">
-                <img src="{{ $orgPhotoUrl }}"
+          <div class="relative w-full overflow-hidden shrink-0 h-[400px] sm:h-[240px] bg-[#EDE0F5] group"
+                 x-data="{
+                     previewSrc: @js($orgPhotoUrl),
+                     originalSrc: @js($orgPhotoUrl),
+                     defaultSrc: @js(asset('storage/alumni-photos/default.png')),
+                     pendingFile: null,
+                     hasFile: false,
+                     saving: false,
+                     msg: '',
+                     msgType: '',
+                     _t: null,
+                     init() {
+                         $wire.$on('org-photo-saved', (event) => {
+                             const e = Array.isArray(event) ? event[0] : event;
+                             this.pendingFile = null; this.hasFile = false; this.saving = false;
+                             if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                             if (e && e.newSrc) this.previewSrc = e.newSrc + '?t=' + Date.now();
+                             this.originalSrc = this.previewSrc;
+                             this.notify('Profile photo updated', 'ok');
+                         });
+                         $wire.$on('org-photo-failed', (event) => {
+                             const e = Array.isArray(event) ? event[0] : event;
+                             this.failCleanup();
+                             this.notify((e && e.message) || 'Failed to upload photo.', 'err');
+                         });
+                     },
+                     notify(m, t) {
+                         this.msg = m; this.msgType = t;
+                         clearTimeout(this._t);
+                         this._t = setTimeout(() => this.msg = '', 3500);
+                     },
+                     failCleanup() {
+                         this.saving = false; this.hasFile = false; this.pendingFile = null;
+                         this.previewSrc = this.originalSrc;
+                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                     },
+                     compress(file, maxW, maxH, quality) {
+                         return new Promise((resolve, reject) => {
+                             const img = new Image();
+                             const reader = new FileReader();
+                             reader.onload = (e) => {
+                                 img.onload = () => {
+                                     let w = img.width, h = img.height;
+                                     if (w > maxW || h > maxH) { const r = Math.min(maxW / w, maxH / h); w = Math.round(w * r); h = Math.round(h * r); }
+                                     const c = document.createElement('canvas');
+                                     c.width = w; c.height = h;
+                                     c.getContext('2d').drawImage(img, 0, 0, w, h);
+                                     resolve(c.toDataURL('image/jpeg', quality));
+                                 };
+                                 img.onerror = reject;
+                                 img.src = e.target.result;
+                             };
+                             reader.onerror = reject;
+                             reader.readAsDataURL(file);
+                         });
+                     },
+                     async onFileChange(event) {
+                         const file = event.target.files[0];
+                         if (!file) return;
+                         if (file.size > 8 * 1024 * 1024) { this.notify('Photo is too large (max 8MB).', 'err'); event.target.value = ''; return; }
+                         try {
+                             const dataUrl = await this.compress(file, 600, 600, 0.8);
+                             this.pendingFile = { name: file.name.replace(/\.\w+$/, '') + '.jpg', base64: dataUrl.split(',')[1] };
+                             this.previewSrc = dataUrl;
+                             this.hasFile = true;
+                         } catch (err) {
+                             this.notify('Could not read that image.', 'err');
+                         }
+                     },
+                     savePhoto() {
+                         if (this.saving || !this.pendingFile) return;
+                         this.saving = true;
+                         $wire.receiveOrganizerPhoto(this.pendingFile.name, this.pendingFile.base64)
+                             .catch(() => { this.failCleanup(); this.notify('Failed to upload photo.', 'err'); });
+                     },
+                     cancelPhoto() {
+                         this.pendingFile = null; this.hasFile = false;
+                         this.previewSrc = this.originalSrc;
+                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                     }
+                 }">
+                <img :src="previewSrc"
                      alt="{{ $this->organizerName }}"
                      class="w-full h-full object-cover object-top"
-                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                     onerror="this.onerror=null; this.src='{{ asset('storage/alumni-photos/default.png') }}';">
                 <div class="w-full h-full items-center justify-center font-black text-white hidden text-[5rem] bg-[#7A3F91]" style="display:none;">
                     {{ strtoupper(substr($this->organizerName, 0, 1)) ?: '?' }}
                 </div>
-                <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.65) 100%);"></div>
-                <div class="absolute bottom-0 left-0 right-0 px-4 pb-4">
+                <div class="absolute inset-0 pointer-events-none" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.65) 100%);"></div>
+
+                {{-- Hover-to-change: click anywhere on the photo to pick a new one --}}
+                <label x-show="!hasFile && !saving"
+                       class="absolute inset-0 z-10 flex items-center justify-center cursor-pointer bg-black/0 hover:bg-black/40 transition-colors"
+                       title="Change profile photo">
+                    <span class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/55 text-white text-[0.7rem] font-bold uppercase tracking-wider opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                        <i class="fas fa-camera text-[11px]"></i> Change photo
+                    </span>
+                    <input type="file" x-ref="photoInput" class="hidden"
+                           accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
+                </label>
+
+                {{-- Pending change: Save / Cancel --}}
+                <div x-show="hasFile && !saving" x-cloak class="absolute top-3 right-3 z-20 flex items-center gap-1.5">
+                    <button type="button" @click="cancelPhoto()"
+                            class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[0.7rem] font-bold bg-white text-gray-700 shadow hover:bg-gray-50">
+                        <i class="fas fa-xmark text-[10px]"></i> Cancel
+                    </button>
+                    <button type="button" @click="savePhoto()"
+                            class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[0.7rem] font-bold text-white shadow"
+                            style="background:#7A3F91;">
+                        <i class="fas fa-check text-[10px]"></i> Save photo
+                    </button>
+                </div>
+
+                {{-- Saving overlay --}}
+                <div x-show="saving" x-cloak class="absolute inset-0 z-20 flex items-center justify-center bg-black/40">
+                    <i class="fas fa-spinner fa-spin text-white text-2xl"></i>
+                </div>
+
+                {{-- Result message --}}
+                <div x-show="msg" x-cloak x-transition
+                     class="absolute top-3 left-3 z-20 px-2.5 py-1 rounded-full text-[0.68rem] font-bold shadow"
+                     :class="msgType === 'ok' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'"
+                     x-text="msg"></div>
+
+                <div class="absolute bottom-0 left-0 right-0 px-4 pb-4 pointer-events-none z-[11]">
                     <p class="text-white font-bold uppercase leading-tight tracking-wide text-[1.1rem] sm:text-[1.15rem]"
                        style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
                         {{ $this->organizerName ?: '—' }}

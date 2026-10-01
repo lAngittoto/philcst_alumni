@@ -98,6 +98,13 @@ new class extends Component {
 
         if (! $path) return $default;
 
+        // Cloudinary (or any absolute) URL — return as-is, same rule as
+        // getPhotoUrl() in Alumni Records / Manage Coordinator. Profile
+        // photos are now uploaded to Cloudinary, so the DB stores the full URL.
+        if (preg_match('#^https?://#i', $path)) {
+            return str_contains($path, 'default.png') ? $default : $path;
+        }
+
         if (
             str_starts_with($path, 'organizers/')    ||
             str_starts_with($path, 'alumni-photos/') ||
@@ -210,7 +217,14 @@ new class extends Component {
             if ($event) {
                 $when     = $event->event_date ?? null;
                 $endWhen  = $event->event_end_date ?? null;
-                $image    = $event->photo_url ?? null;
+                // Event Organizer uploads photos to Cloudinary and stores the
+                // absolute URL in `photo`. The model's photo_url accessor
+                // mangles absolute URLs (→ default photo), so use the raw
+                // URL when it is one; otherwise fall back to the accessor.
+                $rawPhoto = method_exists($event, 'getRawOriginal') ? $event->getRawOriginal('photo') : null;
+                $image    = (is_string($rawPhoto) && preg_match('#^https?://#i', $rawPhoto))
+                    ? $rawPhoto
+                    : ($event->photo_url ?? null);
 
                 // ── Real-world logic: an event card should say "Completed"
                 //    once it has actually happened, not "Save the Date"
