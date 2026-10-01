@@ -625,11 +625,6 @@ mark.yb-adm-hl {
                 }
              }">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
-                 style="color:#7a3f91;">
-                Filters
-            </div>
-
             {{-- Search --}}
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
@@ -642,6 +637,11 @@ mark.yb-adm-hl {
                        placeholder="Search..."
                        class="yb-adm-search-input"
                        autocomplete="off" spellcheck="false">
+            </div>
+
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                 style="color:#7a3f91;">
+                Filters
             </div>
 
             {{-- Batch dropdown ── --}}

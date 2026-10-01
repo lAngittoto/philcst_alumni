@@ -267,6 +267,25 @@ new class extends Component {
         $this->resetPage();
     }
 
+    /**
+     * URL to DISPLAY for an event photo. Event Organizer uploads photos to
+     * Cloudinary and saves the absolute https URL in the `photo` column.
+     * The model's photo_url accessor was written for the old local-disk flow
+     * and turns that absolute URL into a broken storage path, so a
+     * Cloudinary/http URL is returned as-is; anything else (legacy local
+     * photo / no photo) still goes through the model's photo_url accessor.
+     * Same logic as Manage Event (Director).
+     */
+    public function eventPhotoUrl($event): ?string
+    {
+        if (!$event) return null;
+        $raw = $event->getRawOriginal('photo');
+        if (is_string($raw) && preg_match('#^https?://#i', $raw)) {
+            return $raw;
+        }
+        return $event->photo_url;
+    }
+
     /** Wraps matches of the current search term in a light-blue <mark>,
      *  same visual treatment as Alumni Records / Yearbook / Job Postings'
      *  highlight(). Used on title, since that's the only searched field
@@ -332,7 +351,7 @@ new class extends Component {
         $this->shareEventVenue       = $event->venue;
         $this->shareEventVenueAddr   = $event->venue_address ?? '';
         $this->shareEventDescription = $event->description ?? '';
-        $this->shareEventPhotoUrl    = $event->photo_url;
+        $this->shareEventPhotoUrl    = $this->eventPhotoUrl($event) ?? '';
         $this->shareEventTarget      = $event->target_participants ?? '';
         $this->shareEventStatus      = $event->status;
 
@@ -658,10 +677,6 @@ select.adm-select-arrow {
              class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterSort,filterCollege">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
-                Filters
-            </div>
-
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -671,6 +686,10 @@ select.adm-select-arrow {
                        class="w-full pl-9 pr-4 py-2 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] placeholder-[#aaaaaa] font-normal
                               hover:border-[#bbbbbb] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                        autocomplete="off" maxlength="100" spellcheck="false">
+            </div>
+
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
+                Filters
             </div>
 
             <select wire:model.live="filterStatus"
@@ -1042,7 +1061,8 @@ select.adm-select-arrow {
     $eventEndPH  = $ev->event_end_date?->setTimezone('Asia/Manila');
     $timeDisplay = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
     $createdPH   = \Carbon\Carbon::parse($ev->created_at)->setTimezone('Asia/Manila');
-    $hasPhoto    = !empty($ev->photo_url);
+    $evPhotoUrl  = $this->eventPhotoUrl($ev);
+    $hasPhoto    = !empty($evPhotoUrl);
 
     $vStatusLabel = $isCompleted ? 'Completed' : ($isApproved ? 'Approved' : ($isPending ? 'Pending' : 'Rejected'));
     $vStatusBg    = $isCompleted ? 'bg-green-100 text-green-700 border-green-300'
@@ -1213,17 +1233,16 @@ select.adm-select-arrow {
                 <div class="flex flex-col sm:flex-row gap-0">
 
                     {{-- Photo --}}
-                    <div class="w-full sm:w-[42%] flex-shrink-0" style="min-height:280px;">
-                        @if($hasPhoto)
-                            <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}"
-                                 class="w-full h-[240px] sm:h-full object-cover" style="min-height:280px;">
-                        @else
-                            <div class="w-full h-[240px] sm:h-full flex items-center justify-center"
-                                 style="background:linear-gradient(135deg,#7a3f91,#5e2f72); min-height:280px;">
-                                <i class="fas fa-calendar-days text-white/20 text-5xl"></i>
-                            </div>
-                        @endif
+                    @if($hasPhoto)
+                    <div class="w-full sm:w-[42%] flex-shrink-0 overflow-hidden border border-gray-100 bg-gray-50">
+                        <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}"
+                             class="w-full h-full object-cover block" style="max-height:340px; min-height:220px;">
                     </div>
+                    @else
+                    <div class="w-full sm:w-[42%] flex-shrink-0 flex items-center justify-center" style="min-height:220px; background:#7a3f91;">
+                        <i class="fas fa-calendar-days text-white/20 text-6xl"></i>
+                    </div>
+                    @endif
 
                     {{-- Right: title + chips + grid --}}
                     <div class="flex-1 min-w-0 px-6 pt-5 pb-5 flex flex-col gap-3">

@@ -1388,7 +1388,7 @@ new class extends Component {
 ?>
 
 <div class="flex flex-col" wire:poll.3000ms
-     style="height: calc(100vh - 180px); height: calc(100dvh - 180px); max-height: calc(100dvh - 180px); overflow: hidden;">
+     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
 
 <style>
 /* ── Search highlight — same light blue mark used on Alumni Records / Coordinator Management ── */
@@ -1493,17 +1493,6 @@ select.tw-select-arrow[disabled] {
 }
 .dir-mrow:active { background: #F7F4FA; }
 
-/* ══ Responsive: smaller screens get more usable height ══ */
-@media (max-width: 1023px) {
-    .dir-table-card { min-height: 0; }
-}
-@media (max-width: 640px) {
-    .dir-pg-bar { justify-content: center !important; }
-}
-@media (max-height: 640px) and (min-width: 1024px) {
-    .dir-vm-card { padding: .6rem .75rem !important; }
-}
-
 /* ══ Table container height — mirrors event-organizer's flex-fill card ══ */
 .dir-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
@@ -1557,7 +1546,7 @@ select.tw-select-arrow[disabled] {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-3 sm:gap-4 px-3 sm:px-6 lg:px-8 xl:px-10 pt-4 sm:pt-6 pb-3 sm:pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left, mirrors organizer style) ══ --}}
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
@@ -1590,8 +1579,7 @@ select.tw-select-arrow[disabled] {
         <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterCollege">
 
-            {{-- 1) Search bar --}}
-            <div class="relative w-full sm:w-auto sm:flex-1 sm:min-w-[180px] sm:max-w-xs"
+            <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
@@ -1602,15 +1590,13 @@ select.tw-select-arrow[disabled] {
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            {{-- 2) "Filters" text --}}
-            <div class="flex items-center gap-2 px-1 sm:px-3 h-[38px] rounded-xl shrink-0 font-semibold text-xs sm:text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                 Filters
             </div>
 
-            {{-- 3) Dropdowns --}}
             <select wire:model.live="filterStatus"
                     wire:loading.attr="disabled"
-                    class="flex-1 sm:flex-none min-w-[120px] py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
+                    class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
                            hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
                 <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
                 <option value="PENDING">Pending</option>
@@ -1621,8 +1607,8 @@ select.tw-select-arrow[disabled] {
 
             <select wire:model.live="filterCollege"
                     wire:loading.attr="disabled"
-                    class="flex-1 sm:flex-none min-w-[120px] max-w-full sm:max-w-[240px] py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal truncate
-                           hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                    class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
+                           hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow hidden sm:block">
                 <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
                 @foreach($this->colleges as $col)
                     <option value="{{ $col }}">{{ $col }}</option>
@@ -1681,6 +1667,14 @@ select.tw-select-arrow[disabled] {
                 </span>
                 <span class="hidden sm:inline" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
             </button>
+
+            {{-- Mobile college select --}}
+            <select wire:model.live="filterCollege"
+                    wire:loading.attr="disabled"
+                    class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] flex-1 sm:hidden tw-select-arrow">
+                <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
+                @foreach($this->colleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
+            </select>
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
@@ -2002,7 +1996,7 @@ select.tw-select-arrow[disabled] {
             $pgStart  = max(1, $cp - 2);
             $pgEnd    = min($lp, $cp + 2);
         @endphp
-        <div class="dir-pg-bar flex-shrink-0 border-t border-purple-800/30 px-3 sm:px-4 flex items-center justify-between gap-2 flex-wrap min-h-[48px] py-1"
+        <div class="flex-shrink-0 border-t border-purple-800/30 px-4 flex items-center justify-between gap-2 flex-wrap min-h-[48px] py-1"
              style="background: linear-gradient(to right, #7a3f91, #9b59b6);">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
@@ -2699,183 +2693,203 @@ select.tw-select-arrow[disabled] {
         </div>
     </div>
 
-    {{-- Full-screen card grid: fills the whole viewport on desktop (no page scroll);
-         stacks and scrolls only on small screens. Long text scrolls inside its own card. --}}
-    <div class="flex-1 min-h-0 overflow-y-auto lg:overflow-hidden scroll-c" style="background:#f0ecf5;">
-        <div class="w-full max-w-[2000px] mx-auto p-3 sm:p-4 lg:h-full">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 lg:h-full">
+    <div class="flex-1 min-h-0 overflow-y-auto scroll-c" style="background:#f0ecf5;">
+        <div class="max-w-7xl mx-auto p-5 sm:p-8 flex flex-col gap-5">
 
-                {{-- COLUMN 1: Photo + About --}}
-                <div class="flex flex-col gap-3 lg:min-h-0">
-                    {{-- Photo card — fills its space, title overlaid --}}
-                    <div class="relative rounded-xl overflow-hidden border border-gray-100 shadow-sm min-h-[220px] sm:min-h-[260px] lg:min-h-0 lg:flex-[5]" style="background:#7a3f91;">
-                        @if($hasPhoto)
-                            <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}" class="absolute inset-0 w-full h-full object-cover block">
-                        @else
-                            <div class="absolute inset-0 flex items-center justify-center"><i class="fas fa-calendar-days text-white/20 text-6xl"></i></div>
-                        @endif
-                        <div class="absolute inset-0 pointer-events-none" style="background:linear-gradient(to top, rgba(20,8,30,.85) 0%, rgba(20,8,30,.25) 55%, transparent 100%);"></div>
-                        <div class="absolute bottom-0 left-0 right-0 p-4">
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider text-white mb-1.5" style="background:#7a3f91;">
-                                <i class="fas fa-calendar-days text-[10px]"></i> Event Title
-                            </span>
-                            <h2 class="text-white font-bold leading-tight text-lg xl:text-2xl line-clamp-3" style="text-shadow:0 1px 6px rgba(0,0,0,.5);">{{ $ev->title }}</h2>
-                        </div>
-                    </div>
-                    <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0 min-h-[140px] lg:min-h-0 lg:flex-[4]">
-                        <div class="px-4 py-2.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
-                            <i class="fas fa-align-left text-white/80 text-sm"></i>
-                            <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest text-white">About This Event</p>
-                        </div>
-                        <div class="dir-vm-card bg-white flex-1 min-h-0 overflow-y-auto scroll-c px-4 py-3 ">
-                            @if($ev->description)
-                                <p class="text-sm xl:text-base text-[#333333] whitespace-pre-wrap" style="line-height:1.7;">{{ trim($ev->description) }}</p>
-                            @else
-                                <p class="text-sm text-[#aaaaaa] italic">No description provided.</p>
-                            @endif
-                        </div>
-                    </div>
+            {{-- ── TOP CARD: photo left + title/chips right ── --}}
+            <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col sm:flex-row gap-6">
+
+                {{-- Photo --}}
+                @if($hasPhoto)
+                <div class="w-full sm:w-[46%] flex-shrink-0 rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
+                    <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}"
+                         class="w-full h-full object-cover block" style="max-height:340px; min-height:220px;">
                 </div>
-
-                {{-- COLUMN 2: Venue, Date & Time, Open For, Notes --}}
-                <div class="flex flex-col gap-3 lg:min-h-0">
-                    <div class="dir-vm-card bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex flex-col min-h-0 lg:flex-1">
-                        <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-2 shrink-0" style="color:#7a3f91;">
-                            <i class="fas fa-location-dot"></i> Venue
-                        </p>
-                        <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col justify-center gap-1">
-                            @if($ev->venue)
-                                <p class="text-sm xl:text-base font-bold text-[#1a1026] leading-snug">{{ $ev->venue }}</p>
-                                @if($ev->venue_address)<p class="text-xs xl:text-sm text-[#555555] font-medium leading-snug uppercase">{{ $ev->venue_address }}</p>@endif
-                            @else
-                                <p class="text-sm text-[#aaaaaa] italic">Not specified</p>
-                            @endif
-                        </div>
-                    </div>
-                    <div class="dir-vm-card bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex flex-col min-h-0 lg:flex-1">
-                        <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-2 shrink-0" style="color:#7a3f91;">
-                            <i class="fas fa-calendar-days"></i> Date &amp; Time
-                        </p>
-                        <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col justify-center gap-1">
-                            <p class="text-sm xl:text-base font-bold text-[#1a1026]">{{ $eventDatePH->format('M d, Y') }}</p>
-                            <p class="text-xs xl:text-sm font-semibold text-[#555555]">{{ $timeDisplay }}</p>
-                        </div>
-                    </div>
-                    <div class="dir-vm-card bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex flex-col min-h-0 lg:flex-1">
-                        <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-2 shrink-0" style="color:#7a3f91;">
-                            <i class="fas fa-users"></i> Open For
-                        </p>
-                        <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col justify-center gap-1">
-                            @if($ev->target_participants)
-                                <div class="flex flex-wrap gap-1.5">
-                                    @foreach(array_filter(array_map('trim', preg_split('/[,·\\·]+/u', $ev->target_participants))) as $chip)
-                                    <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-300 bg-gray-50 text-[#333333] text-xs xl:text-sm font-semibold">
-                                        <i class="fas fa-tag text-[9px]" style="color:#7a3f91;"></i>{{ $chip }}
-                                    </span>
-                                    @endforeach
-                                </div>
-                            @else
-                                <p class="text-sm text-[#aaaaaa] italic">All alumni</p>
-                            @endif
-                        </div>
-                    </div>
-                    <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0 min-h-[120px] lg:min-h-0 lg:flex-[1.6]">
-                        <div class="px-4 py-2.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
-                            <i class="fas fa-note-sticky text-white/80 text-sm"></i>
-                            <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest text-white">Additional Notes</p>
-                        </div>
-                        <div class="dir-vm-card bg-white flex-1 min-h-0 overflow-y-auto scroll-c px-4 py-3 ">
-                            @if($ev->notes)
-                                <p class="text-sm xl:text-base text-[#333333] whitespace-pre-wrap" style="line-height:1.7;">{{ trim($ev->notes) }}</p>
-                            @else
-                                <p class="text-sm text-[#aaaaaa] italic">No additional notes.</p>
-                            @endif
-                        </div>
-                    </div>
+                @else
+                <div class="w-full sm:w-[46%] flex-shrink-0 rounded-xl flex items-center justify-center" style="min-height:220px; background:#7a3f91;">
+                    <i class="fas fa-calendar-days text-white/20 text-6xl"></i>
                 </div>
+                @endif
 
-                {{-- COLUMN 3: Approval, Responses, Posted, Contact --}}
-                <div class="flex flex-col gap-3 lg:min-h-0 md:col-span-2 lg:col-span-1">
-                    <div class="dir-vm-card bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex flex-col min-h-0 lg:flex-1">
-                        <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-2 shrink-0" style="color:#7a3f91;">
-                            <i class="fas fa-circle-check"></i> Approval
-                        </p>
-                        <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col justify-center gap-1">
-                            @if($isCompleted)
-                                <p class="text-sm xl:text-base font-bold text-green-600">Completed</p>
-                            @elseif($isApproved)
-                                <p class="text-sm xl:text-base font-bold text-emerald-600">Approved</p>
-                                @if($ev->review_remarks)<p class="text-xs xl:text-sm text-[#555555] italic">"{{ $ev->review_remarks }}"</p>@endif
-                            @elseif($isPending)
-                                <p class="text-sm xl:text-base font-bold text-amber-600">Pending Review</p>
-                                @if($eventDateExpired)<p class="text-xs xl:text-sm text-red-500 font-semibold">Date needs updating.</p>@endif
-                            @else
-                                <p class="text-sm xl:text-base font-bold text-red-600">Rejected</p>
-                                @if($ev->review_remarks)<p class="text-xs xl:text-sm text-[#555555] font-medium">{{ $ev->review_remarks }}</p>@endif
-                                @if($eventDateExpired)<p class="text-xs xl:text-sm text-red-500 font-semibold">Date needs updating.</p>@endif
-                            @endif
-                        </div>
+                {{-- Title + badges --}}
+                <div class="flex-1 min-w-0 flex flex-col gap-4 pt-1">
+                    <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider w-fit text-white" style="background:#7a3f91;">
+                        <i class="fas fa-calendar-days text-[11px]"></i> Event Title
+                    </span>
+                    <h2 class="text-2xl sm:text-3xl font-bold text-[#1a1026] leading-tight">{{ $ev->title }}</h2>
+                    @if($ev->target_participants)
+                    <div class="flex flex-wrap gap-2 mt-1">
+                        @foreach(array_filter(array_map('trim', preg_split('/[,·\·]+/u', $ev->target_participants))) as $chip)
+                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-300 bg-gray-50 text-[#333333] text-sm font-semibold">
+                            <i class="fas fa-tag text-[10px]" style="color:#7a3f91;"></i>{{ $chip }}
+                        </span>
+                        @endforeach
                     </div>
-                    <div class="dir-vm-card bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex flex-col min-h-0 lg:flex-1">
-                        <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-2 shrink-0" style="color:#7a3f91;">
-                            <i class="fas fa-chart-simple"></i> Responses
-                        </p>
-                        <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col justify-center gap-1">
-                            <p class="text-sm xl:text-base font-bold text-[#1a1026]">{{ $ev->confirmed_count }} Attending</p>
-                            <p class="text-xs xl:text-sm text-[#555555] font-medium">{{ $ev->tentative_count }} Maybe &middot; {{ $ev->declined_count }} No</p>
-                        </div>
-                    </div>
-                    <div class="dir-vm-card bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex flex-col min-h-0 lg:flex-1">
-                        <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-2 shrink-0" style="color:#7a3f91;">
-                            <i class="fas fa-clock-rotate-left"></i> Posted
-                        </p>
-                        <div class="flex-1 min-h-0 overflow-y-auto scroll-c flex flex-col justify-center gap-1">
-                            <p class="text-sm xl:text-base font-bold text-[#1a1026]">{{ $createdPH->format('M d, Y') }}</p>
-                            <p class="text-xs xl:text-sm text-[#555555] font-medium">{{ $createdPH->diffForHumans() }}</p>
-                            <p class="text-xs text-[#777777] truncate">{{ $postedByLabel }}</p>
-                        </div>
-                    </div>
-                    <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0 min-h-[120px] lg:min-h-0 lg:flex-[1.6]">
-                        <div class="px-4 py-2.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
-                            <i class="fas fa-address-card text-white/80 text-sm"></i>
-                            <p class="text-[11px] xl:text-xs font-bold uppercase tracking-widest text-white">Contact Information</p>
-                        </div>
-                        <div class="dir-vm-card bg-white flex-1 min-h-0 overflow-y-auto scroll-c px-4 py-3 flex flex-col gap-2.5">
-                            @php $hasContact = $ev->contact_person || $ev->contact_email || $ev->contact_phone || $ev->organizer; @endphp
-                            @if($hasContact)
-                                @if($ev->contact_person || $ev->organizer)
-                                <div class="flex items-center gap-3">
-                                    <i class="fas fa-user text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                    <span class="text-sm xl:text-base text-[#333333] font-medium">{{ $ev->contact_person ?: $ev->organizer->name }}</span>
-                                </div>
-                                @endif
-                                @if($ev->contact_email || $ev->organizer?->email)
-                                <div class="flex items-center gap-3">
-                                    <i class="fas fa-envelope text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                    <span class="text-sm xl:text-base text-[#333333] font-medium break-all">{{ $ev->contact_email ?: $ev->organizer->email }}</span>
-                                </div>
-                                @endif
-                                @if($ev->contact_phone)
-                                <div class="flex items-center gap-3">
-                                    <i class="fas fa-phone text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                    <span class="text-sm xl:text-base text-[#333333] font-medium">{{ $ev->contact_phone }}</span>
-                                </div>
-                                @endif
-                                @if($ev->organizer?->department)
-                                <div class="flex items-center gap-3 pt-2.5 border-t border-gray-100 mt-auto">
-                                    <i class="fas fa-building text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                    <span class="text-sm xl:text-base text-[#555555] font-medium">{{ $ev->organizer->department }}</span>
-                                </div>
-                                @endif
-                            @else
-                                <p class="text-sm text-[#aaaaaa] italic">No contact information.</p>
-                            @endif
-                        </div>
-                    </div>
+                    @endif
                 </div>
-
             </div>
-        </div>
+
+            {{-- ── INFO ROW 1: Venue | Date & Time | Open For ── --}}
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
+                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
+                        <i class="fas fa-location-dot"></i> Venue
+                    </p>
+                    @if($ev->venue)
+                        <p class="text-base font-bold text-[#1a1026]">{{ $ev->venue }}</p>
+                        @if($ev->venue_address)<p class="text-sm text-[#555555] font-medium leading-snug mt-1 uppercase">{{ $ev->venue_address }}</p>@endif
+                    @else
+                        <p class="text-sm text-[#aaaaaa] italic">Not specified</p>
+                    @endif
+                </div>
+                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
+                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
+                        <i class="fas fa-calendar-days"></i> Date &amp; Time
+                    </p>
+                    <p class="text-base font-bold text-[#1a1026]">{{ $eventDatePH->format('M d, Y') }}</p>
+                    <p class="text-sm font-semibold text-[#555555] mt-1">{{ $timeDisplay }}</p>
+                </div>
+                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
+                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
+                        <i class="fas fa-users"></i> Open For
+                    </p>
+                    @if($ev->target_participants)
+                        <p class="text-base font-bold text-[#1a1026]">{{ $ev->target_participants }}</p>
+                    @else
+                        <p class="text-sm text-[#aaaaaa] italic">All alumni</p>
+                    @endif
+                </div>
+            </div>
+
+            {{-- ── INFO ROW 2: Responses | Approval | Posted ── --}}
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
+                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
+                        <i class="fas fa-chart-simple"></i> Responses
+                    </p>
+                    <p class="text-base font-bold text-[#1a1026]">{{ $ev->confirmed_count }} Attending</p>
+                    <p class="text-sm text-[#555555] font-medium mt-1">{{ $ev->tentative_count }} Maybe &middot; {{ $ev->declined_count }} No</p>
+                </div>
+                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
+                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
+                        <i class="fas fa-circle-check"></i> Approval
+                    </p>
+                    @if($isCompleted)
+                        <p class="text-base font-bold text-green-600">Completed</p>
+                    @elseif($isApproved)
+                        <p class="text-base font-bold text-emerald-600">Approved</p>
+                        @if($ev->review_remarks)<p class="text-sm text-[#555555] italic mt-1">"{{ $ev->review_remarks }}"</p>@endif
+                    @elseif($isPending)
+                        <p class="text-base font-bold text-amber-600">Pending Review</p>
+                        @if($eventDateExpired)<p class="text-sm text-red-500 font-semibold mt-1">Date needs updating.</p>@endif
+                    @else
+                        <p class="text-base font-bold text-red-600">Rejected</p>
+                        @if($ev->review_remarks)<p class="text-sm text-[#555555] font-medium mt-1">{{ $ev->review_remarks }}</p>@endif
+                        @if($eventDateExpired)<p class="text-sm text-red-500 font-semibold mt-1">Date needs updating.</p>@endif
+                    @endif
+                </div>
+                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
+                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
+                        <i class="fas fa-clock-rotate-left"></i> Posted
+                    </p>
+                    <p class="text-base font-bold text-[#1a1026]">{{ $createdPH->format('M d, Y') }}</p>
+                    <p class="text-sm text-[#555555] font-medium mt-1">{{ $createdPH->diffForHumans() }}</p>
+                </div>
+            </div>
+
+
+
+            {{-- ── BOTTOM 3-COL: About | Notes | Contact (equal height) ── --}}
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-stretch">
+
+                {{-- About This Event --}}
+                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col">
+                    <div class="px-5 py-3.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
+                        <i class="fas fa-align-left text-white/80 text-sm"></i>
+                        <p class="text-xs font-bold uppercase tracking-widest text-white">About This Event</p>
+                    </div>
+                    <div class="bg-white flex-1 px-5 py-5">
+                        @if($ev->description)
+                            <p class="text-sm text-[#333333] leading-relaxed whitespace-pre-wrap" style="line-height:1.9;">{{ trim($ev->description) }}</p>
+                        @else
+                            <p class="text-sm text-[#aaaaaa] italic">No description provided.</p>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Additional Notes --}}
+                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col">
+                    <div class="px-5 py-3.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
+                        <i class="fas fa-note-sticky text-white/80 text-sm"></i>
+                        <p class="text-xs font-bold uppercase tracking-widest text-white">Additional Notes</p>
+                    </div>
+                    <div class="bg-white flex-1 px-5 py-5">
+                        @if($ev->notes)
+                            <p class="text-sm text-[#333333] leading-relaxed whitespace-pre-wrap" style="line-height:1.9;">{{ trim($ev->notes) }}</p>
+                        @else
+                            <p class="text-sm text-[#aaaaaa] italic">No additional notes.</p>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Contact Information --}}
+                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col">
+                    <div class="px-5 py-3.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
+                        <i class="fas fa-address-card text-white/80 text-sm"></i>
+                        <p class="text-xs font-bold uppercase tracking-widest text-white">Contact Information</p>
+                    </div>
+                    <div class="bg-white flex-1 px-5 py-5 flex flex-col gap-3">
+                        @php
+                            $hasContact = $ev->contact_person || $ev->contact_email || $ev->contact_phone || $ev->organizer;
+                        @endphp
+                        @if($hasContact)
+                            {{-- Contact person: explicit field first, fallback to organizer name --}}
+                            @if($ev->contact_person)
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-user text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
+                                <span class="text-sm text-[#333333] font-medium">{{ $ev->contact_person }}</span>
+                            </div>
+                            @elseif($ev->organizer)
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-user text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
+                                <span class="text-sm text-[#333333] font-medium">{{ $ev->organizer->name }}</span>
+                            </div>
+                            @endif
+                            {{-- Email --}}
+                            @if($ev->contact_email)
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-envelope text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
+                                <span class="text-sm text-[#333333] font-medium break-all">{{ $ev->contact_email }}</span>
+                            </div>
+                            @elseif($ev->organizer?->email)
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-envelope text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
+                                <span class="text-sm text-[#333333] font-medium break-all">{{ $ev->organizer->email }}</span>
+                            </div>
+                            @endif
+                            {{-- Phone --}}
+                            @if($ev->contact_phone)
+                            <div class="flex items-center gap-3">
+                                <i class="fas fa-phone text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
+                                <span class="text-sm text-[#333333] font-medium">{{ $ev->contact_phone }}</span>
+                            </div>
+                            @endif
+                            {{-- Department --}}
+                            @if($ev->organizer?->department)
+                            <div class="flex items-center gap-3 pt-3 border-t border-gray-100 mt-auto">
+                                <i class="fas fa-building text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
+                                <span class="text-sm text-[#555555] font-medium">{{ $ev->organizer->department }}</span>
+                            </div>
+                            @endif
+                        @else
+                            <p class="text-sm text-[#aaaaaa] italic">No contact information.</p>
+                        @endif
+                    </div>
+                </div>
+
+            </div>{{-- end bottom 3-col --}}
+
+        </div>{{-- end max-w --}}
     </div>{{-- end scrollable --}}
 
 </div>
