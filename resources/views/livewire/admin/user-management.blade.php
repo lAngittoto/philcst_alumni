@@ -33,6 +33,13 @@ new class extends Component {
     public string $dOk   = '';
     public bool   $dSave = false;
 
+    // ── Create Registrar (username + password only) ──
+    public string $rUsername = '';
+    public string $rPassword = '';
+    public array  $rErrs     = [];
+    public string $rOk       = '';
+    public bool   $rSave     = false;
+
     public ?array  $vData = null;
 
     public $vPhoto       = null;
@@ -425,6 +432,7 @@ new class extends Component {
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
         $this->dErrs=[]; $this->dOk='';
+        $this->rUsername=$this->rPassword=''; $this->rErrs=[]; $this->rOk='';
         $this->vPhoto = null;
     }
 
@@ -434,6 +442,72 @@ new class extends Component {
         $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[];
         $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
         $this->vPhoto=null; $this->vPhotoSave=false;
+        $this->rUsername=$this->rPassword=''; $this->rErrs=[]; $this->rOk='';
+    }
+
+    /**
+     * Create a Registrar account — username + password only.
+     * Registrars live in the `users` table (role = 'registrar'); their login
+     * email is "<username>@registrar.internal" (same convention the username
+     * update in View Profile uses) and `name` holds the username. There is no
+     * "only one registrar" limit — any number of accounts can be created.
+     */
+    public function createRegistrar(): void {
+        $this->rErrs = []; $this->rOk = ''; $this->rSave = true;
+        try {
+            $uname = trim($this->rUsername);
+            $pass  = $this->rPassword;
+
+            $errors = [];
+            if ($uname === '') {
+                $errors['username'] = 'Username is required.';
+            } elseif (strlen($uname) < 3 || strlen($uname) > 50) {
+                $errors['username'] = 'Username must be 3 to 50 characters.';
+            } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', $uname)) {
+                $errors['username'] = 'Letters, numbers, dots, dashes, and underscores only.';
+            }
+            if ($pass === '') {
+                $errors['password'] = 'Password is required.';
+            } elseif (strlen($pass) < 8) {
+                $errors['password'] = 'Password must be at least 8 characters.';
+            } elseif (strlen($pass) > 64) {
+                $errors['password'] = 'Password must be 64 characters or fewer.';
+            }
+            if (!empty($errors)) { $this->rErrs = $errors; return; }
+
+            $loginEmail = $uname . '@registrar.internal';
+            if (DB::table('users')->where('email', $loginEmail)->exists()) {
+                $this->rErrs = ['username' => 'That username is already taken. Please choose a different one.'];
+                return;
+            }
+
+            DB::table('users')->insert([
+                'name'        => $uname,
+                'email'       => $loginEmail,
+                'role'        => 'registrar',
+                'password'    => Hash::make($pass),
+                'user_status' => 'ACTIVE',
+                'created_at'  => now(),
+                'updated_at'  => now(),
+            ]);
+
+            // Refresh stat cards + table immediately, and jump to the Registrar
+            // tab so the new account is visible right away.
+            $this->bustUserListCache();
+            $this->activeRole  = 'registrar';
+            $this->search      = '';
+            $this->currentPage = 1;
+
+            $this->rOk       = $uname;
+            $this->rPassword = '';
+            $this->flash('success', "Registrar account '{$uname}' created successfully!");
+        } catch (\Illuminate\Database\QueryException $e) {
+            $this->rErrs = ($e->errorInfo[1] ?? null) === 1062
+                ? ['username' => 'That username is already taken. Please choose a different one.']
+                : ['general' => 'A database error occurred. Please try again.'];
+        } catch (\Exception $e) {
+            $this->rErrs = ['general' => $e->getMessage()];
+        } finally { $this->rSave = false; }
     }
 
     public function createDirector(): void {
@@ -1437,7 +1511,30 @@ select.mu-filter-input.mu-active {
             <h1 class="text-lg sm:text-2xl font-semibold tracking-tight leading-tight" style="color:#000000;">User Management</h1>
             <p class="text-xs sm:text-sm leading-relaxed mt-0.5" style="color:#000000;">Manage all system users across every role</p>
         </div>
-        <div class="ml-auto relative" x-data="{tip:false}">
+        <div class="ml-auto flex items-center gap-2">
+
+        {{-- New Registrar — no one-account limit, always available --}}
+        <div class="relative" x-data="{tip:false}">
+            <button wire:click="openModal('createRegistrar')" wire:loading.attr="disabled" wire:target="openModal('createRegistrar')"
+                    @mouseenter="tip=true" @mouseleave="tip=false"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
+                    style="background:linear-gradient(135deg,#027a4f,#10b981);">
+                <span wire:loading wire:target="openModal('createRegistrar')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createRegistrar')"><i class="fas fa-user-clock text-white text-base"></i></span>
+            </button>
+            <div x-show="tip" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
+                <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                    <i class="fas fa-user-clock mr-1.5"></i>New Registrar
+                </div>
+                <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
+            </div>
+        </div>
+
+        <div class="relative" x-data="{tip:false}">
             @if($hasActiveDirector)
                 <button type="button" disabled
                         @mouseenter="tip=true" @mouseleave="tip=false"
@@ -1475,6 +1572,8 @@ select.mu-filter-input.mu-active {
                 </div>
             @endif
         </div>
+
+        </div>{{-- /header action buttons --}}
     </div>
 
     {{-- KPI STAT CARDS --}}
@@ -2755,6 +2854,154 @@ select.mu-filter-input.mu-active {
                             style="background:#7A3F91;">
                         <span class="flex items-center gap-2">
                             <i class="fas fa-user-tie text-sm"></i> Create Director
+                        </span>
+                    </button>
+                </div>
+            </div>
+            @endif
+
+        </div>
+    </div>
+</div>
+@endif
+
+
+@if($activeModal === 'createRegistrar')
+{{-- Compact centered modal — only a username + password, so no full-screen layout. --}}
+<div class="fixed inset-0 mu-modal-selectable flex items-center justify-center p-4"
+     style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
+     x-data="{ muClosing: false, showPw: false }"
+     x-show="!muClosing"
+     x-transition:enter="transition ease-out duration-150"
+     x-transition:enter-start="opacity-0"
+     x-transition:enter-end="opacity-100"
+     @keydown.escape.window="$wire.closeModal(); muClosing = true"
+     @click.self="$wire.closeModal(); muClosing = true">
+    <div class="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]" style="background:#FFFFFF;"
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 scale-95"
+         x-transition:enter-end="opacity-100 scale-100">
+
+        {{-- Header --}}
+        <div class="flex items-center justify-between gap-3 px-5 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 ring-2 ring-white/30">
+                    <i class="fas fa-user-clock text-white text-base"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="font-bold text-base text-white leading-snug truncate">New Registrar Account</p>
+                    <p class="text-xs text-white/70 mt-0.5 truncate">Username and password only</p>
+                </div>
+            </div>
+            <button type="button" @click="$wire.closeModal(); muClosing = true"
+                    class="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
+                <i class="fa-solid fa-xmark text-base"></i>
+            </button>
+        </div>
+
+        <div class="p-5 overflow-y-auto" style="scrollbar-width:thin;">
+
+            @if($rOk)
+            {{-- Success — auto-closes shortly so the new row in the table can be seen --}}
+            <div x-init="setTimeout(() => { $wire.closeModal(); muClosing = true; }, 1800)"></div>
+            <div class="p-4 rounded-xl border bg-emerald-50 border-emerald-200 mb-4">
+                <div class="flex items-start gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-circle-check text-white text-sm"></i>
+                    </div>
+                    <div class="space-y-1 flex-1 min-w-0">
+                        <p class="text-sm font-bold text-emerald-800 leading-snug">Registrar account created!</p>
+                        <p class="text-sm text-emerald-800 leading-snug break-words">
+                            Username: <strong>{{ $rOk }}</strong>
+                        </p>
+                        <p class="text-xs text-emerald-700 leading-snug">They can log in right away with this username and the password you set.</p>
+                    </div>
+                </div>
+            </div>
+            <button type="button" @click="$wire.closeModal(); muClosing = true"
+                    class="w-full py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style="background:#7A3F91;">
+                Done
+            </button>
+            @else
+
+            @if(isset($rErrs['general']))
+            <div class="mb-4 p-3 rounded-xl bg-red-50 border border-red-200">
+                <p class="text-sm text-red-700 flex items-start gap-2">
+                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-sm"></i><span>{{ $rErrs['general'] }}</span>
+                </p>
+            </div>
+            @endif
+
+            <div class="space-y-4" wire:loading.class="opacity-60 pointer-events-none" wire:target="createRegistrar">
+
+                {{-- Username --}}
+                <div>
+                    <p class="text-sm font-bold mb-1.5" style="color:#000000;">Username <span class="text-red-500">*</span></p>
+                    <div class="relative">
+                        <i class="fas fa-user absolute left-3.5 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#8a8a8a;"></i>
+                        <input wire:model="rUsername" wire:keydown.enter="createRegistrar"
+                               type="text" placeholder="e.g. registrar.juan" maxlength="50"
+                               autocomplete="off" spellcheck="false" autofocus
+                               class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['username']) ? 'border-red-400 bg-red-50' : '' }}"
+                               style="padding-left:2.4rem;">
+                    </div>
+                    @if(isset($rErrs['username']))
+                    <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                        <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['username'] }}
+                    </p>
+                    @else
+                    <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Letters, numbers, dots, dashes, underscores only</p>
+                    @endif
+                </div>
+
+                {{-- Password (with show / hide) --}}
+                <div>
+                    <p class="text-sm font-bold mb-1.5" style="color:#000000;">Password <span class="text-red-500">*</span></p>
+                    <div class="relative">
+                        <i class="fas fa-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#8a8a8a;"></i>
+                        <input wire:model="rPassword" wire:keydown.enter="createRegistrar"
+                               :type="showPw ? 'text' : 'password'" placeholder="Min. 8 characters" maxlength="64"
+                               autocomplete="new-password" spellcheck="false"
+                               class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['password']) ? 'border-red-400 bg-red-50' : '' }}"
+                               style="padding-left:2.4rem;padding-right:2.6rem;">
+                        <button type="button" @click="showPw = !showPw" tabindex="-1"
+                                class="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center transition hover:bg-black/5"
+                                :aria-label="showPw ? 'Hide password' : 'Show password'">
+                            <i class="fas text-sm" :class="showPw ? 'fa-eye-slash' : 'fa-eye'" style="color:#6b6b6b;"></i>
+                        </button>
+                    </div>
+                    @if(isset($rErrs['password']))
+                    <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                        <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['password'] }}
+                    </p>
+                    @else
+                    <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">At least 8 characters</p>
+                    @endif
+                </div>
+
+                <div class="p-3 rounded-xl flex items-start gap-2.5" style="background:#fffbeb;border:1px solid #fde68a;">
+                    <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
+                        No email is sent — give the username and password to the registrar directly.
+                    </p>
+                </div>
+
+                <div class="flex gap-3 pt-1">
+                    <button type="button" @click="$wire.closeModal(); muClosing = true"
+                            wire:loading.attr="disabled" wire:target="createRegistrar"
+                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-black/5 disabled:opacity-40"
+                            style="color:#000000;border-color:#E5E5E5;">
+                        Cancel
+                    </button>
+                    <button type="button" wire:click="createRegistrar"
+                            wire:loading.attr="disabled" wire:target="createRegistrar"
+                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-70 disabled:cursor-wait"
+                            style="background:#7A3F91;">
+                        <span wire:loading.remove wire:target="createRegistrar" class="flex items-center gap-2">
+                            <i class="fas fa-user-plus text-xs"></i> Create Registrar
+                        </span>
+                        <span wire:loading wire:target="createRegistrar" class="flex items-center gap-2">
+                            <i class="fas fa-spinner animate-spin text-xs"></i> Creating…
                         </span>
                     </button>
                 </div>
