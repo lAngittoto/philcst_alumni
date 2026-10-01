@@ -709,6 +709,48 @@ new class extends Component {
         return $q->paginate(20);
     }
 
+    /**
+     * URL to DISPLAY for an event photo. Event Organizer uploads photos to
+     * Cloudinary and saves the absolute https URL in the `photo` column
+     * (same rule as getPhotoUrl() in alumni-records). The model's photo_url
+     * accessor was written for the old local-disk flow and turns that
+     * absolute URL into a broken storage path — which is why Manage Event
+     * kept showing the default photo for organizer events that had a real
+     * uploaded one. A Cloudinary/http URL is therefore returned as-is;
+     * anything else (legacy local photo / no photo) still goes through the
+     * model's photo_url accessor exactly like before.
+     */
+    public function eventPhotoUrl($event): ?string
+    {
+        if (!$event) return null;
+        $raw = $event->getRawOriginal('photo');
+        if (is_string($raw) && preg_match('#^https?://#i', $raw)) {
+            return $raw;
+        }
+        return $event->photo_url;
+    }
+
+    /** Deletes an event's stored photo — Cloudinary asset or legacy local file. */
+    private function deleteEventPhotoAsset($event): void
+    {
+        $raw = $event?->getRawOriginal('photo');
+        if (!$raw || $raw === AdminEvent::DEFAULT_PHOTO) return;
+
+        try {
+            if (preg_match('#^https?://#i', $raw)) {
+                $publicId = $event->photo_public_id ?? null;
+                if (!$publicId && preg_match('#/upload/(?:v\d+/)?(.+)\.[a-z0-9]+$#i', $raw, $m)) {
+                    $publicId = $m[1];
+                }
+                if ($publicId) cloudinary()->uploadApi()->destroy($publicId);
+            } else {
+                Storage::disk('public')->delete($raw);
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Event photo delete failed: ' . $e->getMessage());
+        }
+    }
+
     #[Computed]
     public function viewingEvent(): ?AdminEvent
     {
@@ -769,7 +811,7 @@ new class extends Component {
         $this->contact_email           = $event->contact_email ?? '';
         $this->contact_phone           = $event->contact_phone ?? '';
         $this->notes                   = $event->notes ?? '';
-        $this->existingPhotoUrl        = $event->photo_url;
+        $this->existingPhotoUrl        = $this->eventPhotoUrl($event);
         $this->removePhoto             = false;
         $this->photo                   = null;
         $this->formErrors              = [];
@@ -919,9 +961,11 @@ new class extends Component {
             ];
 
             if ($this->removePhoto && !$photo) {
-                if ($oldEvent->photo && $oldEvent->photo !== AdminEvent::DEFAULT_PHOTO)
-                    Storage::disk('public')->delete($oldEvent->photo);
+                $this->deleteEventPhotoAsset($oldEvent);
                 $data['photo'] = null;
+                if (\Illuminate\Support\Facades\Schema::hasColumn($oldEvent->getTable(), 'photo_public_id')) {
+                    $oldEvent->forceFill(['photo_public_id' => null]);
+                }
                 $oldEvent->update(array_merge($data, [
                     'updated_by'      => $this->myDisplayName,
                     'updated_by_role' => 'director',
@@ -1234,7 +1278,7 @@ new class extends Component {
         $this->shareEventVenueAddr   = $event->venue_address ?? '';
         $this->shareEventDescription = $event->description ?? '';
         $this->shareEventNotes       = $event->notes ?? '';
-        $this->shareEventPhotoUrl    = $event->photo_url;
+        $this->shareEventPhotoUrl    = $this->eventPhotoUrl($event) ?? '';
         $this->shareEventTarget      = $event->target_participants ?? '';
         $this->shareEventStatus      = $event->status;
         $this->showShareModal        = true;
@@ -2505,7 +2549,8 @@ select.tw-select-arrow[disabled] {
     $eventEndPH  = $ev->event_end_date?->setTimezone('Asia/Manila');
     $timeDisplay = $eventDatePH->format('g:i A') . ($eventEndPH ? ' – ' . $eventEndPH->format('g:i A') : '');
     $createdPH   = \Carbon\Carbon::parse($ev->created_at)->setTimezone('Asia/Manila');
-    $hasPhoto    = !empty($ev->photo_url);
+    $evPhotoUrl  = $this->eventPhotoUrl($ev);
+    $hasPhoto    = !empty($evPhotoUrl);
 
     $roleDisplayLabel = match($ev->updated_by_role ?? '') {
         'director'  => 'Alumni Director',
@@ -2657,7 +2702,7 @@ select.tw-select-arrow[disabled] {
                 {{-- Photo --}}
                 @if($hasPhoto)
                 <div class="w-full sm:w-[46%] flex-shrink-0 rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
-                    <img src="{{ $ev->photo_url }}" alt="{{ $ev->title }}"
+                    <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}"
                          class="w-full h-full object-cover block" style="max-height:340px; min-height:220px;">
                 </div>
                 @else

@@ -3,6 +3,7 @@
 use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Renderless;
 use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 use App\Models\Organizer;
@@ -31,7 +32,8 @@ new class extends Component {
     public string $coordEmail             = '';
     public string $coordDept              = '';
     public string $coordCollegeSelect     = '';
-    public        $coordPhoto             = null;
+    public string $coordPhotoName         = '';
+    public string $coordPhotoBase64       = '';
     public bool   $registeringCoordinator = false;
     public array  $coordinatorErrors      = [];
     public string $coordinatorSuccess     = '';
@@ -170,6 +172,8 @@ new class extends Component {
     public function getPhotoUrl(?string $path): string
     {
         if (!$path || str_contains($path, 'default.png')) return asset('storage/alumni-photos/default.png');
+        // Cloudinary URL — return as-is (same as Alumni Records)
+        if (str_starts_with($path, 'https://res.cloudinary.com')) return $path;
         if (str_starts_with($path, 'alumni-photos/') || str_starts_with($path, 'organizers/')) {
             return Storage::disk('public')->exists($path) ? asset('storage/' . $path) : asset('storage/alumni-photos/default.png');
         }
@@ -269,7 +273,6 @@ new class extends Component {
                 'coordTeacherId'     => ['required', 'string', 'regex:/^\d{8}$/', 'unique:organizer,id_number'],
                 'coordEmail'         => ['required', 'email', 'max:255', 'unique:organizer,email', 'unique:users,email'],
                 'coordCollegeSelect' => ['required', 'string'],
-                'coordPhoto'         => ['nullable', 'image', 'mimes:jpeg,png,jpg,webp', 'max:5120'],
             ], [
                 'coordFirstName.required'     => 'First name is required.',
                 'coordLastName.required'      => 'Last name is required.',
@@ -282,7 +285,6 @@ new class extends Component {
                 'coordEmail.required'         => 'Email address is required.',
                 'coordEmail.unique'           => 'This email address is already taken.',
                 'coordCollegeSelect.required' => 'Please select a college.',
-                'coordPhoto.max'              => 'Profile photo must not exceed 5 MB.',
             ]);
 
             $firstName = trim($this->coordFirstName);
@@ -324,7 +326,10 @@ new class extends Component {
 
             $fullName  = $this->buildFullName($firstName, $mid, $lastName, $suffix);
             $paddedId  = str_pad($this->coordTeacherId, 8, '0', STR_PAD_LEFT);
-            $photoPath = $this->coordPhoto ? $this->storeCoordinatorPhoto($this->coordPhoto) : null;
+            $photo     = $this->coordPhotoBase64 !== ''
+                ? $this->uploadPhotoToCloudinary($this->coordPhotoName, $this->coordPhotoBase64)
+                : null;
+            $photoPath = $photo['url'] ?? null;
             $tmp       = Str::random(12);
 
             $user = User::create([
@@ -346,6 +351,8 @@ new class extends Component {
                 'profile_photo'  => $photoPath,
                 'status'         => 'ACTIVE',
             ]);
+
+            $this->savePhotoPublicId($coordinator, $photo['public_id'] ?? null);
 
             try {
                 Mail::to($coordinator->email)->send(new \App\Mail\OrganizerRegistered($coordinator, $tmp));
@@ -375,16 +382,65 @@ new class extends Component {
         }
     }
 
-    private function storeCoordinatorPhoto($p): ?string
+    /**
+     * Same flow as Alumni Records: photo comes in as base64 (compressed in the
+     * browser) and is pushed to Cloudinary, so it survives Railway redeploys
+     * and never hits the Livewire signed-URL upload 401.
+     * Returns ['url' => ..., 'public_id' => ...] or null on failure.
+     */
+    private function uploadPhotoToCloudinary(string $filename, string $base64): ?array
     {
-        if (!$p) return null;
         try {
-            $f = 'organizer-' . Str::uuid() . '.' . $p->getClientOriginalExtension();
-            $r = $p->storeAs('organizers', $f, 'public');
-            return $r === false ? null : "organizers/{$f}";
-        } catch (\Exception $e) {
-            Log::error('CoordPhoto: ' . $e->getMessage());
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) return null;
+
+            $result = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'organizer-photos',
+                    'public_id'     => 'organizer_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            return ['url' => $result['secure_url'], 'public_id' => $result['public_id']];
+        } catch (\Throwable $e) {
+            Log::error('CoordPhoto upload: ' . $e->getMessage());
             return null;
+        }
+    }
+
+    /** Stores the Cloudinary public_id if the organizer table has that column. */
+    private function savePhotoPublicId(Organizer $coordinator, ?string $publicId): void
+    {
+        try {
+            if (\Illuminate\Support\Facades\Schema::hasColumn($coordinator->getTable(), 'profile_photo_public_id')) {
+                $coordinator->forceFill(['profile_photo_public_id' => $publicId])->save();
+            }
+        } catch (\Throwable $e) {
+            Log::warning('CoordPhoto public_id: ' . $e->getMessage());
+        }
+    }
+
+    /** Removes the coordinator's current photo (Cloudinary or legacy local file). */
+    private function deleteExistingPhoto(Organizer $coordinator): void
+    {
+        $photo = $coordinator->profile_photo;
+        if (!$photo || str_contains($photo, 'default.png')) return;
+
+        try {
+            if (str_starts_with($photo, 'https://res.cloudinary.com')) {
+                $publicId = $coordinator->profile_photo_public_id ?? null;
+                if (!$publicId && preg_match('#/upload/(?:v\d+/)?(.+)\.[a-z0-9]+$#i', $photo, $m)) {
+                    $publicId = $m[1];
+                }
+                if ($publicId) cloudinary()->uploadApi()->destroy($publicId);
+            } elseif (Storage::disk('public')->exists($photo)) {
+                Storage::disk('public')->delete($photo);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('CoordPhoto delete: ' . $e->getMessage());
         }
     }
 
@@ -393,7 +449,7 @@ new class extends Component {
         $this->coordFirstName = $this->coordMiddleInitial = $this->coordLastName = '';
         $this->coordSuffix = $this->coordTeacherId = $this->coordEmail = '';
         $this->coordDept = $this->coordCollegeSelect = '';
-        $this->coordPhoto = null;
+        $this->coordPhotoName = $this->coordPhotoBase64 = '';
         $this->coordinatorErrors = [];
     }
 
@@ -774,28 +830,33 @@ new class extends Component {
     }
 
     /**
-     * Photo upload for the View Profile panel — mirrors the alumni-records
-     * hover-to-upload flow (camera overlay on hover, upload/reset/cancel).
+     * Photo upload for the View Profile panel — same base64 → Cloudinary flow
+     * as Alumni Records (receiveAlumniPhoto).
      */
-    public function uploadCoordPhoto(): void
+    #[Renderless]
+    public function receiveCoordPhoto(string $filename, string $base64): void
     {
-        if (!$this->viewingProfileId || !$this->newCoordPhoto) return;
+        if (!$this->viewingProfileId) return;
 
         try {
             $coordinator = Organizer::findOrFail($this->viewingProfileId);
 
-            if ($coordinator->profile_photo && !str_contains($coordinator->profile_photo, 'default.png')) {
-                Storage::disk('public')->delete($coordinator->profile_photo);
+            $photo = $this->uploadPhotoToCloudinary($filename, $base64);
+            if (!$photo) {
+                $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo.');
+                $this->dispatch('coord-photo-failed');
+                return;
             }
 
-            $stored = $this->storeCoordinatorPhoto($this->newCoordPhoto);
-            $coordinator->update(['profile_photo' => $stored]);
+            $this->deleteExistingPhoto($coordinator);
 
-            $this->viewingProfile['profile_photo'] = $stored;
-            $this->newCoordPhoto = null;
+            $coordinator->update(['profile_photo' => $photo['url']]);
+            $this->savePhotoPublicId($coordinator, $photo['public_id']);
 
-            $this->flash('success', 'Profile photo updated successfully.');
-            $this->dispatch('coord-photo-saved');
+            $this->viewingProfile['profile_photo'] = $photo['url'];
+
+            $this->dispatch('flash-message', type: 'success', message: 'Profile photo updated successfully.');
+            $this->dispatch('coord-photo-saved', newSrc: $photo['url']);
 
             $this->dispatch('dir-coordinator-updated',
                 id: $coordinator->id,
@@ -803,10 +864,12 @@ new class extends Component {
                 action: 'photo_updated'
             );
         } catch (\Exception $e) {
-            $this->flash('error', 'Failed to upload photo.');
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to upload photo: ' . $e->getMessage());
+            $this->dispatch('coord-photo-failed');
         }
     }
 
+    #[Renderless]
     public function resetCoordPhoto(): void
     {
         if (!$this->viewingProfileId) return;
@@ -814,19 +877,17 @@ new class extends Component {
         try {
             $coordinator = Organizer::findOrFail($this->viewingProfileId);
 
-            if ($coordinator->profile_photo
-                && !str_contains($coordinator->profile_photo, 'default.png')
-                && Storage::disk('public')->exists($coordinator->profile_photo)) {
-                Storage::disk('public')->delete($coordinator->profile_photo);
-            }
+            $this->deleteExistingPhoto($coordinator);
 
             $coordinator->update(['profile_photo' => null]);
+            $this->savePhotoPublicId($coordinator, null);
             $this->viewingProfile['profile_photo'] = null;
 
-            $this->flash('success', 'Profile photo reset to default.');
+            $this->dispatch('flash-message', type: 'success', message: 'Profile photo reset to default.');
             $this->dispatch('coord-photo-saved');
         } catch (\Exception $e) {
-            $this->flash('error', 'Failed to reset photo.');
+            $this->dispatch('flash-message', type: 'error', message: 'Failed to reset photo.');
+            $this->dispatch('coord-photo-failed');
         }
     }
 };
@@ -1155,8 +1216,6 @@ new class extends Component {
                  wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1),viewProfile">
             </div>
 
-            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
-
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{ q: '', init() { this.q = $wire.coordSearch ?? ''; $wire.$watch('coordSearch', val => { if (val !== this.q) this.q = val; }); } }">
@@ -1166,6 +1225,8 @@ new class extends Component {
                        class="coord-filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition"
                        autocomplete="off" spellcheck="false">
             </div>
+
+            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
 
             <select wire:model.live="coordCollege"
                     class="coord-filter-input coord-filter-select py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition cursor-pointer">
@@ -1543,21 +1604,73 @@ new class extends Component {
                         <div class="p-6">
                             <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
                                 <div class="lg:col-span-1 flex flex-col items-center gap-3">
-                                    <div class="border-2 border-dashed border-purple-400 rounded-2xl p-5 text-center cursor-pointer hover:border-purple-600 hover:bg-purple-50 transition w-full"
-                                         onclick="document.getElementById('coordPhotoInput').click()">
-                                        @if($coordPhoto)
-                                            <img src="{{ $coordPhoto->temporaryUrl() }}" class="w-20 h-20 rounded-xl mx-auto mb-2 object-cover shadow-md">
-                                            <p class="text-xs text-emerald-600 font-semibold">Selected</p>
-                                        @else
-                                            <div class="w-24 h-24 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-gray-100 border-2 border-gray-200">
-                                                <svg class="w-14 h-14 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
-                                                    <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
-                                                </svg>
-                                            </div>
-                                            <p class="text-sm text-[#333333] font-semibold">Profile Photo</p>
-                                            <p class="text-xs text-[#333333] mt-0.5">JPG, PNG, WebP · 5 MB</p>
-                                        @endif
-                                        <input type="file" id="coordPhotoInput" wire:model="coordPhoto" accept="image/jpeg,image/png,image/webp" class="hidden">
+                                    <div class="w-full"
+                                         x-data="{
+                                             preview: null,
+                                             init() { this.$watch('$wire.coordPhotoBase64', v => { if (!v) this.preview = null; }); },
+                                             compress(file, maxW, maxH, quality) {
+                                                 return new Promise((resolve, reject) => {
+                                                     const img = new Image();
+                                                     const reader = new FileReader();
+                                                     reader.onload = (e) => {
+                                                         img.onload = () => {
+                                                             let w = img.width, h = img.height;
+                                                             if (w > maxW || h > maxH) { const r = Math.min(maxW / w, maxH / h); w = Math.round(w * r); h = Math.round(h * r); }
+                                                             const c = document.createElement('canvas');
+                                                             c.width = w; c.height = h;
+                                                             c.getContext('2d').drawImage(img, 0, 0, w, h);
+                                                             resolve(c.toDataURL('image/jpeg', quality));
+                                                         };
+                                                         img.onerror = reject;
+                                                         img.src = e.target.result;
+                                                     };
+                                                     reader.onerror = reject;
+                                                     reader.readAsDataURL(file);
+                                                 });
+                                             },
+                                             async pick(event) {
+                                                 const file = event.target.files[0];
+                                                 if (!file) return;
+                                                 if (file.size > 5 * 1024 * 1024) { alert('Profile photo must not exceed 5 MB.'); event.target.value = ''; return; }
+                                                 try {
+                                                     const dataUrl = await this.compress(file, 500, 500, 0.75);
+                                                     this.preview = dataUrl;
+                                                     $wire.set('coordPhotoName', file.name.replace(/\.\w+$/, '') + '.jpg', false);
+                                                     $wire.set('coordPhotoBase64', dataUrl.split(',')[1], false);
+                                                 } catch (e) {
+                                                     alert('Could not read that image. Please try another file.');
+                                                 }
+                                                 event.target.value = '';
+                                             },
+                                             clear() {
+                                                 this.preview = null;
+                                                 $wire.set('coordPhotoName', '', false);
+                                                 $wire.set('coordPhotoBase64', '', false);
+                                             }
+                                         }">
+                                        <div class="border-2 border-dashed border-purple-400 rounded-2xl p-5 text-center cursor-pointer hover:border-purple-600 hover:bg-purple-50 transition w-full"
+                                             @click="$refs.coordPhotoInput.click()">
+                                            <template x-if="preview">
+                                                <div>
+                                                    <img :src="preview" class="w-20 h-20 rounded-xl mx-auto mb-2 object-cover shadow-md">
+                                                    <p class="text-xs text-emerald-600 font-semibold">Selected</p>
+                                                </div>
+                                            </template>
+                                            <template x-if="!preview">
+                                                <div>
+                                                    <div class="w-24 h-24 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-gray-100 border-2 border-gray-200">
+                                                        <svg class="w-14 h-14 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
+                                                            <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                                                        </svg>
+                                                    </div>
+                                                    <p class="text-sm text-[#333333] font-semibold">Profile Photo</p>
+                                                    <p class="text-xs text-[#333333] mt-0.5">JPG, PNG, WebP · 5 MB</p>
+                                                </div>
+                                            </template>
+                                            <input type="file" x-ref="coordPhotoInput" @change="pick($event)" @click.stop accept="image/jpeg,image/png,image/webp" class="hidden">
+                                        </div>
+                                        <button type="button" x-show="preview" @click="clear()" style="display:none;"
+                                                class="mt-2 w-full text-xs font-semibold text-red-500 hover:text-red-700 transition">Remove photo</button>
                                     </div>
                                     <p class="text-xs text-[#333333] text-center">Optional — leave blank for default</p>
                                 </div>
@@ -1882,11 +1995,19 @@ new class extends Component {
                              isDefaultPending: false,
                              get isShowingDefault() { return this.previewSrc === this.defaultSrc; },
                              init() {
-                                 $wire.$on('coord-photo-saved', () => {
+                                 $wire.$on('coord-photo-saved', (event) => {
                                      this.pendingFile = null; this.hasFile = false;
                                      this.saving = false; this.isDefaultPending = false;
+                                     if (event && event.newSrc) {
+                                         // Cloudinary URL from the server (cache-busted)
+                                         this.previewSrc = event.newSrc + '?t=' + Date.now();
+                                     } else {
+                                         // Reset-to-default — server sent no newSrc
+                                         this.previewSrc = this.defaultSrc;
+                                     }
                                      this.originalSrc = this.previewSrc;
                                  });
+                                 $wire.$on('coord-photo-failed', () => { this.failCleanup(); });
                              },
                              async onFileChange(event) {
                                  const file = event.target.files[0];
@@ -1939,22 +2060,28 @@ new class extends Component {
                                  this.isDefaultPending = true; this.previewSrc = this.defaultSrc;
                                  if (this.$refs.coordPhotoInput) this.$refs.coordPhotoInput.value = '';
                              },
+                             failCleanup() {
+                                 this.saving = false; this.hasFile = false;
+                                 this.isDefaultPending = false; this.pendingFile = null;
+                                 this.previewSrc = this.originalSrc;
+                                 if (this.$refs.coordPhotoInput) this.$refs.coordPhotoInput.value = '';
+                             },
                              savePhoto() {
                                  if (this.saving) return;
                                  this.saving = true;
                                  if (this.isDefaultPending) {
-                                     $wire.resetCoordPhoto();
+                                     // success handled by the coord-photo-saved event
+                                     $wire.resetCoordPhoto().catch(() => this.failCleanup());
                                  } else if (this.pendingFile) {
-                                     $wire.upload('newCoordPhoto', this.pendingFile,
-                                         () => { $wire.uploadCoordPhoto(); },
-                                         () => {
-                                             this.saving = false; this.hasFile = false;
-                                             this.isDefaultPending = false; this.pendingFile = null;
-                                             this.previewSrc = this.originalSrc;
-                                             if (this.$refs.coordPhotoInput) this.$refs.coordPhotoInput.value = '';
-                                         },
-                                         () => {}
-                                     );
+                                     // base64 → Cloudinary (same as Alumni Records)
+                                     const file = this.pendingFile;
+                                     const reader = new FileReader();
+                                     reader.onload = (e) => {
+                                         const base64 = e.target.result.split(',')[1];
+                                         $wire.receiveCoordPhoto(file.name, base64).catch(() => this.failCleanup());
+                                     };
+                                     reader.onerror = () => this.failCleanup();
+                                     reader.readAsDataURL(file);
                                  } else { this.saving = false; }
                              },
                              cancelPhoto() {
@@ -2291,21 +2418,21 @@ new class extends Component {
          5/7) so the "Colleges & Departments" list panel gets more breathing
          room per FIX #1. --}}
     <main id="org-modal-scroll"
-          class="cfs-main overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
+          class="cfs-main min-h-0 overflow-y-auto overflow-x-hidden lg:overflow-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
           @org-modal-scroll-top.window="$nextTick(() => $el.scrollTo({ top: 0, behavior: 'smooth' }))">
-        <div class="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-10 py-7 space-y-5">
+        <div class="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col gap-4 lg:flex-1 lg:min-h-0">
 
             @if($orgCourseAlert)
-            <div class="flex items-start gap-2.5 p-4 rounded-2xl shadow-sm {{ $orgCourseAlertType === 'success' ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200' }}">
+            <div class="flex items-start gap-2.5 p-3 flex-shrink-0 rounded-2xl shadow-sm {{ $orgCourseAlertType === 'success' ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200' }}">
                 <i class="fas mt-0.5 text-base {{ $orgCourseAlertType === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-xmark text-red-500' }}"></i>
                 <p class="text-sm font-semibold {{ $orgCourseAlertType === 'success' ? 'text-emerald-900' : 'text-red-900' }}">{{ $orgCourseAlert }}</p>
             </div>
             @endif
 
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:flex-1 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)]">
 
                 @if(!$orgAddingToCollege)
-                <div id="mc-section-add" class="lg:col-span-5 scroll-mt-4">
+                <div id="mc-section-add" class="lg:col-span-3 scroll-mt-4 lg:min-h-0">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden lg:sticky lg:top-5">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
                             <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Add New College</h3>
@@ -2328,8 +2455,8 @@ new class extends Component {
                     </div>
                 </div>
                 @else
-                <div id="mc-section-assign" class="lg:col-span-5 scroll-mt-4">
-                    <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden lg:sticky lg:top-5 flex flex-col" style="max-height: calc(100vh - 220px);">
+                <div id="mc-section-assign" class="lg:col-span-4 scroll-mt-4 lg:min-h-0">
+                    <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden flex flex-col max-h-[80vh] lg:max-h-full lg:h-full">
                         <div class="px-5 py-3.5 border-b border-[#e2d3ef] bg-[#f5eef9] flex-shrink-0">
                             <h3 class="text-xs font-semibold text-[#7a3f91] uppercase tracking-wider flex items-center gap-2">
                                 <i class="fas fa-{{ isset($orgCoursesList[$orgAddingToCollege]) ? 'pencil' : 'plus' }}"></i>
@@ -2383,14 +2510,14 @@ new class extends Component {
                 </div>
                 @endif
 
-                <div id="mc-section-list" class="lg:col-span-7 scroll-mt-4">
-                    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="min-height: 700px; max-height: calc(100vh - 220px);">
+                <div id="mc-section-list" class="{{ $orgAddingToCollege ? 'lg:col-span-8' : 'lg:col-span-9' }} scroll-mt-4 lg:min-h-0">
+                    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col max-h-[75vh] lg:max-h-full lg:h-full">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-shrink-0">
                             <h3 class="text-sm font-semibold text-[#333333] uppercase tracking-wider">Colleges and Programs</h3>
                             <span class="ml-auto text-xs font-semibold text-[#7a3f91] bg-[#f5eef9] px-2.5 py-1 rounded-full border border-[#d4aaeb]">{{ count($orgCoursesList) }}</span>
                         </div>
 
-                        <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
+                        <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0 p-3 sm:p-4 bg-[#faf9fc] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
                             @if(count($orgCoursesList) === 0)
                             <div class="flex flex-col items-center justify-center h-full text-center py-16">
                                 <i class="fas fa-building-columns text-4xl text-gray-200 block mb-3"></i>
@@ -2398,10 +2525,10 @@ new class extends Component {
                                 <p class="text-xs text-gray-400 mt-1">Add one using the panel on the left.</p>
                             </div>
                             @else
-                            <div class="divide-y divide-gray-100">
+                            <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3 items-start">
                                 @foreach($orgCoursesList as $college => $departments)
                                 @php $occupied = $this->occupiedColleges(); $coordName = $occupied[$college] ?? null; @endphp
-                                <div class="bg-white hover:bg-[#faf7fd] transition-colors duration-100 px-5 py-4" wire:key="college-row-{{ Str::slug($college) }}">
+                                <div class="bg-white hover:border-[#d4aaeb] hover:shadow-md transition rounded-xl border border-gray-200 shadow-sm px-4 py-3" wire:key="college-row-{{ Str::slug($college) }}">
 
                                     {{-- NOTE ON RENAME UX FIX:
                                          Renaming now happens INLINE, directly in place of this row's
@@ -2447,24 +2574,24 @@ new class extends Component {
                                                 <i class="fas fa-building-columns text-xs text-white"></i>
                                             </div>
                                             <div class="flex-1 min-w-0">
-                                                <p class="font-semibold text-[#333333] text-base leading-snug">{{ $college }}</p>
+                                                <p class="font-semibold text-[#333333] text-sm leading-snug">{{ $college }}</p>
                                                 @if(count($departments) > 0)
                                                     <div class="flex flex-wrap gap-1 mt-1.5">
                                                         @foreach($departments as $dept)
                                                             <span class="inline-block px-2 py-1 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-md text-xs font-mono font-semibold">{{ $dept['code'] }}</span>
                                                         @endforeach
                                                     </div>
-                                                    <p class="text-sm text-[#333333] mt-1">{{ count($departments) }} department{{ count($departments) !== 1 ? 's' : '' }}</p>
+                                                    <p class="text-xs text-gray-500 mt-1">{{ count($departments) }} department{{ count($departments) !== 1 ? 's' : '' }}</p>
                                                 @else
-                                                    <span class="text-sm text-[#333333] mt-1 block">No departments</span>
+                                                    <span class="text-xs text-gray-500 mt-1 block">No departments</span>
                                                 @endif
                                                 @if($coordName)
                                                     <div class="flex items-center gap-1.5 mt-1.5">
                                                         <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
-                                                        <span class="text-sm text-[#333333]">{{ $coordName }}</span>
+                                                        <span class="text-xs text-[#333333]">{{ $coordName }}</span>
                                                     </div>
                                                 @else
-                                                    <span class="text-sm text-[#333333] italic mt-1.5 block">Unassigned</span>
+                                                    <span class="text-xs text-gray-500 italic mt-1.5 block">Unassigned</span>
                                                 @endif
                                             </div>
                                         </div>

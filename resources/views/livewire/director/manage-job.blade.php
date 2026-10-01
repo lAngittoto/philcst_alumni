@@ -6,6 +6,7 @@ use Livewire\Volt\Component;
 use Livewire\Attributes\Computed;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
+use Livewire\Attributes\Renderless;
 use App\Models\JobPosting;
 use App\Models\JobOption;
 use App\Models\Course;
@@ -77,8 +78,11 @@ new class extends Component {
     public array  $postErrors                      = [];
     public bool   $postAllColleges                 = false;
 
-    public $postJobImage  = null;
-    public $editJobImage  = null;
+    // Photo flow (same as Alumni Records): browser compresses → base64 → Cloudinary on save.
+    public string $postJobImageName   = '';
+    public string $postJobImageBase64 = '';
+    public string $editJobImageName   = '';
+    public string $editJobImageBase64 = '';
     public bool $postRemoveImage = false;
     public bool $editRemoveImage = false;
 
@@ -145,10 +149,7 @@ new class extends Component {
 
     protected function rules(): array
     {
-        return [
-            'postJobImage' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
-            'editJobImage' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
-        ];
+        return [];
     }
 
     private function authorizeRole(): void
@@ -832,29 +833,70 @@ new class extends Component {
         return JobPosting::with('organizer')->findOrFail($id);
     }
 
-    private function storeJobImage($imageFile, string $existingPath = ''): ?string
+    /** Valid base64 image payload (jpg/png/webp, roughly <= 2MB after compression)? */
+    private function isValidJobImagePayload(string $name, string $base64): bool
     {
-        if ($imageFile && $imageFile instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
-            if ($existingPath && Storage::disk('public')->exists($existingPath)) {
-                Storage::disk('public')->delete($existingPath);
-            }
-            $path = $imageFile->store('job', 'public');
-            return $path ?: null;
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        return in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)
+            && $base64 !== ''
+            && strlen($base64) <= 2_800_000;
+    }
+
+    /**
+     * Uploads the base64 photo to Cloudinary (persistent across Railway
+     * deploys, no Livewire signed-URL upload / 401) and returns the URL.
+     * Deletes the previous photo if one is passed in.
+     */
+    private function storeJobImage(string $name, string $base64, string $existingPath = ''): ?string
+    {
+        if (!$this->isValidJobImagePayload($name, $base64)) return null;
+
+        try {
+            $ext    = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            $result = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'job-photos',
+                    'public_id'     => 'job_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            if ($existingPath) $this->deleteJobImage($existingPath);
+
+            return $result['secure_url'] ?? null;
+        } catch (\Throwable $e) {
+            \Log::error('Job photo upload failed: ' . $e->getMessage());
+            return null;
         }
-        return null;
+    }
+
+    /** Removes a stored job photo (Cloudinary URL or legacy local file). */
+    private function deleteJobImage(?string $path): void
+    {
+        if (!$path) return;
+
+        try {
+            if (str_starts_with($path, 'https://res.cloudinary.com')) {
+                if (preg_match('#/upload/(?:v\d+/)?(.+)\.[a-z0-9]+$#i', $path, $m)) {
+                    cloudinary()->uploadApi()->destroy($m[1]);
+                }
+            } elseif (Storage::disk('public')->exists($path)) {
+                Storage::disk('public')->delete($path);
+            }
+        } catch (\Throwable $e) {
+            \Log::warning('Job photo delete failed: ' . $e->getMessage());
+        }
     }
 
     public static function jobImageUrl(?string $path): string
     {
-        // FIX: match the pattern that works on this server —
-        // asset('storage/' . $path) — same as OrganizerEvent's working
-        // photo_url accessor and the now-fixed job-management/
-        // job-opportunities components. Storage::disk('public')->exists()/
-        // Storage::url() were both resolving incorrectly here even with a
-        // correct DB path, silently forcing the default photo for every
-        // job — which is exactly why the Director's Manage Job page kept
-        // showing the default photo for jobs that had a real uploaded one.
         if ($path) {
+            // Cloudinary URL — return as-is (same as Alumni Records)
+            if (str_starts_with($path, 'https://res.cloudinary.com')) {
+                return $path;
+            }
             return asset('storage/' . $path);
         }
         return asset('storage/job/default-photo-job.jpg');
@@ -1178,12 +1220,8 @@ new class extends Component {
         if (!$qualifications)          $errors['postQualifications']          = 'Qualifications are required.';
         if (!$applicationInstructions) $errors['postApplicationInstructions'] = 'Application instructions are required.';
 
-        if ($this->postJobImage) {
-            try {
-                $this->validateOnly('postJobImage');
-            } catch (\Livewire\Exceptions\ValidationException $e) {
-                $errors['postJobImage'] = 'Image must be JPG, PNG, or WebP and under 2MB.';
-            }
+        if ($this->postJobImageBase64 !== '' && !$this->isValidJobImagePayload($this->postJobImageName, $this->postJobImageBase64)) {
+            $errors['postJobImage'] = 'Image must be JPG, PNG, or WebP and under 2MB.';
         }
 
         if (empty($this->postTargetColleges)) {
@@ -1219,7 +1257,9 @@ new class extends Component {
 
         $resolvedLocation = $orgCat === 'philcst' ? $this->philcstLocation : $location;
         $targetCollegeStr = !empty($this->postTargetColleges) ? implode(',', $this->postTargetColleges) : null;
-        $imagePath        = $this->storeJobImage($this->postJobImage);
+        $imagePath        = $this->postJobImageBase64 !== ''
+            ? $this->storeJobImage($this->postJobImageName, $this->postJobImageBase64)
+            : null;
 
         $job = JobPosting::create([
             'organizer_id'             => null,
@@ -1284,7 +1324,7 @@ new class extends Component {
         $this->postTargetColleges = [];
         $this->postErrors = [];
         $this->postAllColleges = false;
-        $this->postJobImage    = null;
+        $this->postJobImageName = $this->postJobImageBase64 = '';
         $this->postRemoveImage = false;
     }
 
@@ -1332,7 +1372,8 @@ new class extends Component {
         $this->editApplicationInstructions = $job->application_instructions ?? '';
         $this->editTargetColleges          = !empty($job->target_college) ? explode(',', $job->target_college) : [];
         $this->editCurrentImage            = $job->job_image ?? '';
-        $this->editJobImage                = null;
+        $this->editJobImageName            = '';
+        $this->editJobImageBase64          = '';
         $this->editRemoveImage             = false;
         $this->editErrors                  = [];
 
@@ -1372,7 +1413,7 @@ new class extends Component {
         $this->editTargetColleges = [];
         $this->editErrors = [];
         $this->editAllColleges  = false;
-        $this->editJobImage     = null;
+        $this->editJobImageName = $this->editJobImageBase64 = '';
         $this->editRemoveImage  = false;
         $this->editOrgCategory  = '';
     }
@@ -1443,12 +1484,8 @@ new class extends Component {
         if (!$qualifications)          $errors['editQualifications']          = 'Qualifications are required.';
         if (!$applicationInstructions) $errors['editApplicationInstructions'] = 'Application instructions are required.';
 
-        if ($this->editJobImage) {
-            try {
-                $this->validateOnly('editJobImage');
-            } catch (\Livewire\Exceptions\ValidationException $e) {
-                $errors['editJobImage'] = 'Image must be JPG, PNG, or WebP and under 2MB.';
-            }
+        if ($this->editJobImageBase64 !== '' && !$this->isValidJobImagePayload($this->editJobImageName, $this->editJobImageBase64)) {
+            $errors['editJobImage'] = 'Image must be JPG, PNG, or WebP and under 2MB.';
         }
 
         if (empty($this->editTargetColleges)) {
@@ -1495,13 +1532,17 @@ new class extends Component {
 
         // Handle image
         $newImagePath = $job->job_image;
-        if ($this->editRemoveImage) {
-            if ($job->job_image && Storage::disk('public')->exists($job->job_image)) {
-                Storage::disk('public')->delete($job->job_image);
-            }
+        if ($this->editRemoveImage && $this->editJobImageBase64 === '') {
+            $this->deleteJobImage($job->job_image);
             $newImagePath = null;
-        } elseif ($this->editJobImage) {
-            $newImagePath = $this->storeJobImage($this->editJobImage, $job->job_image ?? '');
+        } elseif ($this->editJobImageBase64 !== '') {
+            $uploaded = $this->storeJobImage($this->editJobImageName, $this->editJobImageBase64, $job->job_image ?? '');
+            if ($uploaded) {
+                $newImagePath = $uploaded;
+            } else {
+                $this->editErrors['editJobImage'] = 'Photo upload failed. Please try again.';
+                return;
+            }
         }
 
         $targetCollegeStr = !empty($this->editTargetColleges) ? implode(',', $this->editTargetColleges) : null;
@@ -1572,7 +1613,7 @@ new class extends Component {
         $this->editErrors = [];
         $this->editAllColleges  = false;
         $this->editCurrentImage = '';
-        $this->editJobImage     = null;
+        $this->editJobImageName = $this->editJobImageBase64 = '';
         $this->editRemoveImage  = false;
         $this->editOrgCategory  = '';
     }
@@ -2363,9 +2404,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         {{-- ── FILTER BAR ── --}}
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort">
-            <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                Filters
-            </div>
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -2374,6 +2412,10 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                        placeholder="Search..."
                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 pl-9 rounded-lg w-full transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] placeholder-[#a78bbd]"
                        autocomplete="off" maxlength="100" spellcheck="false">
+            </div>
+
+            <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+                Filters
             </div>
 
             <select wire:model.live="filterStatus"
@@ -2961,6 +3003,26 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
      what was causing the default photo to get saved even after uploading
      one. Alpine.store() is reactive so every reader re-renders correctly. --}}
 <script>
+function eoCompressToBase64(file, maxW, maxH, quality) {
+    return new Promise(function (resolve, reject) {
+        var img = new Image(), reader = new FileReader();
+        reader.onload = function (e) {
+            img.onload = function () {
+                var w = img.width, h = img.height;
+                if (w > maxW || h > maxH) { var r = Math.min(maxW / w, maxH / h); w = Math.round(w * r); h = Math.round(h * r); }
+                var c = document.createElement('canvas'); c.width = w; c.height = h;
+                c.getContext('2d').drawImage(img, 0, 0, w, h);
+                resolve(c.toDataURL('image/jpeg', quality));
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+window.eoCompressToBase64 = eoCompressToBase64;
+
 (function () {
     function registerEoPostPhoto() {
         if (!Alpine.store('eoPostPhoto')) {
@@ -3285,31 +3347,22 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                              const f = e.target.files[0];
                              if (!f) return;
                              this.uploadError = false;
-                             const r = new FileReader();
-                             r.onload = ev => { this.preview = ev.target.result; };
-                             r.readAsDataURL(f);
+                             if (f.size > 8 * 1024 * 1024) { this.uploadError = true; return; }
 
                              this.uploading = true;
                              Alpine.store('eoPostPhoto').uploading = true;
-                             clearTimeout(this._eoUploadTimeout);
-                             this._eoUploadTimeout = setTimeout(() => {
+                             // Compress in the browser → base64 → sent with Post Job (Cloudinary on the server)
+                             window.eoCompressToBase64(f, 1000, 1000, 0.8).then(dataUrl => {
+                                 this.preview = dataUrl;
+                                 $wire.set('postJobImageName', f.name.replace(/\.\w+$/, '') + '.jpg', false);
+                                 $wire.set('postJobImageBase64', dataUrl.split(',')[1], false);
+                                 this.uploading = false;
+                                 Alpine.store('eoPostPhoto').uploading = false;
+                             }).catch(() => {
                                  this.uploading = false;
                                  this.uploadError = true;
                                  Alpine.store('eoPostPhoto').uploading = false;
-                             }, 30000);
-                             $wire.upload('postJobImage', f,
-                                 () => {
-                                     clearTimeout(this._eoUploadTimeout);
-                                     this.uploading = false;
-                                     Alpine.store('eoPostPhoto').uploading = false;
-                                 },
-                                 () => {
-                                     clearTimeout(this._eoUploadTimeout);
-                                     this.uploading = false;
-                                     this.uploadError = true;
-                                     Alpine.store('eoPostPhoto').uploading = false;
-                                 }
-                             );
+                             });
                          },
                          clear() {
                              this.preview = null;
@@ -3317,7 +3370,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                              this.uploadError = false;
                              Alpine.store('eoPostPhoto').uploading = false;
                              this.$refs.fileInput.value = '';
-                             $wire.set('postJobImage', null);
+                             $wire.set('postJobImageName', '', false);
+                             $wire.set('postJobImageBase64', '', false);
                          }
                      }">
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] flex items-center gap-1.5 text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#7a3f91]">
@@ -3906,7 +3960,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                         <div wire:ignore
                              x-data="{
                                  preview: null,
-                                 existing: @js($editCurrentImage ? asset('storage/' . $editCurrentImage) : ''),
+                                 existing: @js($editCurrentImage ? $this::jobImageUrl($editCurrentImage) : ''),
                                  removed: false,
                                  uploading: false,
                                  uploadError: false,
@@ -3915,31 +3969,22 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                      if (!f) return;
                                      this.removed = false;
                                      this.uploadError = false;
-                                     const r = new FileReader();
-                                     r.onload = ev => { this.preview = ev.target.result; };
-                                     r.readAsDataURL(f);
+                                     if (f.size > 8 * 1024 * 1024) { this.uploadError = true; return; }
 
                                      this.uploading = true;
                                      Alpine.store('eoEditPhoto').uploading = true;
-                                     clearTimeout(this._eoUploadTimeout);
-                                     this._eoUploadTimeout = setTimeout(() => {
+                                     window.eoCompressToBase64(f, 1000, 1000, 0.8).then(dataUrl => {
+                                         this.preview = dataUrl;
+                                         $wire.set('editRemoveImage', false, false);
+                                         $wire.set('editJobImageName', f.name.replace(/\.\w+$/, '') + '.jpg', false);
+                                         $wire.set('editJobImageBase64', dataUrl.split(',')[1], false);
+                                         this.uploading = false;
+                                         Alpine.store('eoEditPhoto').uploading = false;
+                                     }).catch(() => {
                                          this.uploading = false;
                                          this.uploadError = true;
                                          Alpine.store('eoEditPhoto').uploading = false;
-                                     }, 30000);
-                                     $wire.upload('editJobImage', f,
-                                         () => {
-                                             clearTimeout(this._eoUploadTimeout);
-                                             this.uploading = false;
-                                             Alpine.store('eoEditPhoto').uploading = false;
-                                         },
-                                         () => {
-                                             clearTimeout(this._eoUploadTimeout);
-                                             this.uploading = false;
-                                             this.uploadError = true;
-                                             Alpine.store('eoEditPhoto').uploading = false;
-                                         }
-                                     );
+                                     });
                                  },
                                  clearNew() {
                                      this.preview = null;
@@ -3947,7 +3992,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                      this.uploadError = false;
                                      Alpine.store('eoEditPhoto').uploading = false;
                                      this.$refs.fileInput.value = '';
-                                     $wire.set('editJobImage', null);
+                                     $wire.set('editJobImageName', '', false);
+                                     $wire.set('editJobImageBase64', '', false);
                                  },
                                  removeExisting() {
                                      this.existing = '';
@@ -3955,7 +4001,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                      this.removed  = true;
                                      $wire.set('editRemoveImage', true);
                                      if (this.$refs.fileInput) this.$refs.fileInput.value = '';
-                                     $wire.set('editJobImage', null);
+                                     $wire.set('editJobImageName', '', false);
+                                     $wire.set('editJobImageBase64', '', false);
                                  }
                              }">
 
