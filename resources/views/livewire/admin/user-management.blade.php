@@ -1958,9 +1958,6 @@ select.mu-filter-input.mu-active {
         {{-- FILTER BAR --}}
         <div class="mu-table-block-filter flex flex-wrap gap-2 items-center transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage">
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
-                 style="color:#7a3f91;">Filters</div>
-
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
@@ -1970,6 +1967,9 @@ select.mu-filter-input.mu-active {
                        class="mu-filter-input w-full" style="padding-left:2.25rem;padding-right:1rem;"
                        autocomplete="off" maxlength="100" spellcheck="false">
             </div>
+
+            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
+                 style="color:#7a3f91;">Filters</div>
 
             <div class="flex gap-1 bg-gray-100 p-0.5 rounded-xl flex-shrink-0">
                 @foreach([
@@ -2348,7 +2348,7 @@ select.mu-filter-input.mu-active {
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto {{ $isOrg ? 'p-3 sm:p-4 space-y-2.5 max-w-6xl' : ($isAlumni ? 'p-3 sm:p-4 max-w-7xl' : 'p-4 sm:p-5 space-y-3 max-w-4xl') }} mu-vp-scroll mx-auto w-full relative">
+        <div class="flex-1 min-h-0 overflow-y-auto {{ $isOrg ? 'p-3 sm:p-4 space-y-2.5 max-w-6xl' : ($isAlumni ? 'p-3 sm:p-4' : 'p-4 sm:p-5 space-y-3 max-w-4xl') }} mu-vp-scroll mx-auto w-full relative">
 
             {{-- Saving overlay: appears instantly when any modal action fires,
                  before the Livewire round-trip completes. Prevents double-clicks

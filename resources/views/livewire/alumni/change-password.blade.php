@@ -102,6 +102,7 @@ new #[Layout('app')] class extends Component {
     private function cacheResendAttemptsKey(int $id): string  { return "alumni_resend_attempts:{$id}"; }
     private function cacheResendLockKey(int $id): string      { return "alumni_resend_locked:{$id}"; }
     private function cacheResendCooldownKey(int $id): string  { return "alumni_resend_cooldown:{$id}"; }
+    private function cacheOtpSigKey(int $id): string          { return "alumni_otp_sig:{$id}"; }
 
     /**
      * NEW: persistent, session-INDEPENDENT "OTP already verified" flag —
@@ -527,7 +528,32 @@ new #[Layout('app')] class extends Component {
             // in the expiry right here, before any network call, means the
             // visible countdown always reflects the moment the user clicked
             // "Send", never however long the send itself took.
-            $exactExpiry = now()->addMinutes(10);
+            //
+            // The 60-second resend cooldown is derived from this SAME instant
+            // (not from a later now() after Mail::send() returns). Before,
+            // the cooldown started a few seconds after the expiry clock
+            // because it was stamped after the email finished sending, so
+            // the two timers were never in sync. Now: both start together,
+            // so "Resend in 00:00" lands exactly 60s into "Code Expires In".
+            $sentAt        = now();
+            $exactExpiry   = $sentAt->copy()->addMinutes(10);
+            $cooldownUntil = $sentAt->copy()->addSeconds(self::RESEND_COOLDOWN_SECONDS);
+
+            // Remember a signature of the code that was JUST generated, so
+            // verifyOtp() can accept ONLY the most recently sent code. A new
+            // send always overwrites it, so every earlier code is dead the
+            // moment a new one goes out — independent of how the model
+            // stores/compares the OTP.
+            $otpStr = (string) $otp;
+            if (strlen($otpStr) === 6 && ctype_digit($otpStr)) {
+                cache()->put(
+                    $this->cacheOtpSigKey($alumni->id),
+                    hash_hmac('sha256', $otpStr, (string) config('app.key')),
+                    $exactExpiry->copy()->addMinutes(2)
+                );
+            } else {
+                cache()->forget($this->cacheOtpSigKey($alumni->id));
+            }
 
             // ── FIX: mail errors are now surfaced to the user ─────────────
             // Previously this was wrapped in its own silent try-catch that
@@ -567,8 +593,7 @@ new #[Layout('app')] class extends Component {
             ]);
             $alumni->refresh(); // ensure syncOtpExpiry() reads the just-written value
 
-            // Start the 60-second resend cooldown for this send.
-            $cooldownUntil = now()->addSeconds(self::RESEND_COOLDOWN_SECONDS);
+            // Start the 60-second resend cooldown — same instant as the expiry above.
             cache()->put($this->cacheResendCooldownKey($alumni->id), $cooldownUntil->getTimestamp(), $cooldownUntil);
 
             // A fresh code being sent means any previously-verified flag
@@ -635,7 +660,15 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        if (!$alumni->isOtpValid($trimmed)) {
+        // Only the most recently SENT code works. If a newer code was sent
+        // (Resend / Request New Code), any earlier code is rejected here even
+        // if it hasn't expired yet. If no signature is on record (cache
+        // cleared), fall back to the normal model check only.
+        $latestSig    = cache()->get($this->cacheOtpSigKey($alumni->id));
+        $isLatestCode = !$latestSig
+            || hash_equals((string) $latestSig, hash_hmac('sha256', $trimmed, (string) config('app.key')));
+
+        if (!$isLatestCode || !$alumni->isOtpValid($trimmed)) {
             $new = $attempts + 1;
             cache()->put($attemptsKey, $new, 700);
             $rem = 3 - $new;
@@ -651,6 +684,7 @@ new #[Layout('app')] class extends Component {
 
         cache()->forget($attemptsKey);
         cache()->forget($lockKey);
+        cache()->forget($this->cacheOtpSigKey($alumni->id));
         $alumni->clearOtp();
 
         // OTP is now successfully verified — from this point on the alumni
@@ -1511,7 +1545,9 @@ new #[Layout('app')] class extends Component {
                     this.seconds = 0;
                     this.expired = true;
                 } else {
-                    const remaining = Math.floor((this.expiresAtMs - Date.now()) / 1000);
+                    // Math.ceil (same rounding as the resend timer below) so
+                    // the two countdowns drop a second at the exact same moment.
+                    const remaining = Math.ceil((this.expiresAtMs - Date.now()) / 1000);
                     if (remaining > 0) {
                         this.seconds = remaining;
                         this.expired = false;
