@@ -7,6 +7,7 @@ use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
+use Livewire\Attributes\Renderless;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -33,14 +34,16 @@ new class extends Component {
     public string $dOk   = '';
     public bool   $dSave = false;
 
-    // ── Create Registrar (username + password only) ──
-    public string $rUsername = '';
-    public string $rPassword = '';
+    // ── Create Registrar (same fields as Create Director, minus photo) ──
+    public string $rFn='', $rMn='', $rLn='', $rSfx='';
+    public string $rUsername='', $rEmail='';
     public array  $rErrs     = [];
     public string $rOk       = '';
     public bool   $rSave     = false;
 
     public ?array  $vData = null;
+    // Latest employment record of the alumnus being viewed (Alumni Records style card).
+    public ?array  $vEmployment = null;
 
     public $vPhoto       = null;
     public bool $vPhotoSave = false;
@@ -432,7 +435,7 @@ new class extends Component {
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
         $this->dErrs=[]; $this->dOk='';
-        $this->rUsername=$this->rPassword=''; $this->rErrs=[]; $this->rOk='';
+        $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
         $this->vPhoto = null;
     }
 
@@ -441,55 +444,93 @@ new class extends Component {
         $this->tId=null;
         $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[];
         $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
-        $this->vPhoto=null; $this->vPhotoSave=false;
-        $this->rUsername=$this->rPassword=''; $this->rErrs=[]; $this->rOk='';
+        $this->vPhoto=null; $this->vPhotoSave=false; $this->vEmployment=null;
+        $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
     }
 
     /**
-     * Create a Registrar account — username + password only.
-     * Registrars live in the `users` table (role = 'registrar'); their login
-     * email is "<username>@registrar.internal" (same convention the username
-     * update in View Profile uses) and `name` holds the username. There is no
-     * "only one registrar" limit — any number of accounts can be created.
+     * Create a Registrar account — same fields and flow as Create Director,
+     * minus the photo. Registrars live in the `users` table (role =
+     * 'registrar'): `name` holds the full name and the login email is
+     * "<username>@registrar.internal" (the username is the local part, same
+     * convention as the username update in View Profile). Only ONE active
+     * registrar is allowed at a time — same rule as Director. A secure
+     * password is auto-generated and emailed to the address typed in the form.
      */
     public function createRegistrar(): void {
-        $this->rErrs = []; $this->rOk = ''; $this->rSave = true;
+        $this->rErrs=[]; $this->rOk=''; $this->rSave=true;
         try {
-            $uname = trim($this->rUsername);
-            $pass  = $this->rPassword;
-
-            $errors = [];
-            if ($uname === '') {
-                $errors['username'] = 'Username is required.';
-            } elseif (strlen($uname) < 3 || strlen($uname) > 50) {
-                $errors['username'] = 'Username must be 3 to 50 characters.';
-            } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', $uname)) {
-                $errors['username'] = 'Letters, numbers, dots, dashes, and underscores only.';
+            $fieldErrors = [];
+            if (!trim($this->rFn))       $fieldErrors['first_name']  = 'First name is required.';
+            if (!trim($this->rLn))       $fieldErrors['last_name']   = 'Last name is required.';
+            if (!trim($this->rMn))       $fieldErrors['middle_name'] = 'Middle name is required.';
+            if (!trim($this->rUsername)) {
+                $fieldErrors['username'] = 'Username is required.';
+            } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', trim($this->rUsername))) {
+                $fieldErrors['username'] = 'Letters, numbers, dots, dashes, and underscores only.';
             }
-            if ($pass === '') {
-                $errors['password'] = 'Password is required.';
-            } elseif (strlen($pass) < 8) {
-                $errors['password'] = 'Password must be at least 8 characters.';
-            } elseif (strlen($pass) > 64) {
-                $errors['password'] = 'Password must be 64 characters or fewer.';
+            if (!trim($this->rEmail)) {
+                $fieldErrors['email'] = 'Email address is required.';
+            } elseif (!filter_var(trim($this->rEmail), FILTER_VALIDATE_EMAIL)) {
+                $fieldErrors['email'] = 'Please enter a valid email address.';
             }
-            if (!empty($errors)) { $this->rErrs = $errors; return; }
+            if (!empty($fieldErrors)) { $this->rErrs = $fieldErrors; return; }
 
-            $loginEmail = $uname . '@registrar.internal';
+            // Only one active Registrar at a time (NULL user_status counts as
+            // ACTIVE, same as the COALESCE used everywhere else on this page).
+            $hasActiveRegistrar = DB::table('users')
+                ->where('role', 'registrar')
+                ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
+                ->exists();
+            if ($hasActiveRegistrar) {
+                $this->rErrs = ['general' => ['There is already an active Registrar. Please deactivate the current Registrar first.']];
+                return;
+            }
+
+            $uname      = trim($this->rUsername);
+            $loginEmail = $uname.'@registrar.internal';
             if (DB::table('users')->where('email', $loginEmail)->exists()) {
                 $this->rErrs = ['username' => 'That username is already taken. Please choose a different one.'];
                 return;
             }
 
-            DB::table('users')->insert([
-                'name'        => $uname,
+            $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
+            $full  = implode(' ', array_filter(array_map('trim', [$this->rFn, $this->rMn, $this->rLn, $this->rSfx])));
+            $email = trim($this->rEmail);
+
+            $uid = DB::table('users')->insertGetId([
+                'name'        => $full,
                 'email'       => $loginEmail,
                 'role'        => 'registrar',
-                'password'    => Hash::make($pass),
+                'password'    => Hash::make($autoPassword),
                 'user_status' => 'ACTIVE',
                 'created_at'  => now(),
                 'updated_at'  => now(),
             ]);
+
+            // Send credential email synchronously so it fires immediately without
+            // a queue worker. Wrapped in try/catch so a mail misconfiguration never
+            // blocks the registrar from being created — the account is already saved.
+            try {
+                $safeName = e($full);
+                $safeUser = e($uname);
+                $safePass = e($autoPassword);
+                $html = "<div style=\"font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#222;\">"
+                    . "<h2 style=\"color:#7A3F91;margin-bottom:4px;\">PHILCST Alumni System</h2>"
+                    . "<p>Hello <strong>{$safeName}</strong>,</p>"
+                    . "<p>A <strong>Registrar</strong> account has been created for you. Use the credentials below to log in:</p>"
+                    . "<table style=\"border-collapse:collapse;margin:12px 0;\">"
+                    . "<tr><td style=\"padding:6px 14px 6px 0;color:#666;\">Username</td><td style=\"padding:6px 0;\"><strong>{$safeUser}</strong></td></tr>"
+                    . "<tr><td style=\"padding:6px 14px 6px 0;color:#666;\">Temporary password</td><td style=\"padding:6px 0;\"><strong>{$safePass}</strong></td></tr>"
+                    . "</table>"
+                    . "<p>You will be asked to change your password on your first login.</p>"
+                    . "</div>";
+                \Mail::html($html, function ($m) use ($email) {
+                    $m->to($email)->subject('Your Registrar Account — PHILCST Alumni System');
+                });
+            } catch (\Exception $mailEx) {
+                \Illuminate\Support\Facades\Log::warning('RegistrarRegistered mail failed: ' . $mailEx->getMessage());
+            }
 
             // Refresh stat cards + table immediately, and jump to the Registrar
             // tab so the new account is visible right away.
@@ -498,15 +539,14 @@ new class extends Component {
             $this->search      = '';
             $this->currentPage = 1;
 
-            $this->rOk       = $uname;
-            $this->rPassword = '';
-            $this->flash('success', "Registrar account '{$uname}' created successfully!");
-        } catch (\Illuminate\Database\QueryException $e) {
-            $this->rErrs = ($e->errorInfo[1] ?? null) === 1062
-                ? ['username' => 'That username is already taken. Please choose a different one.']
-                : ['general' => 'A database error occurred. Please try again.'];
+            // Success message — no credentials shown here; they are in the email.
+            $this->rOk = "Registrar <strong>{$full}</strong> registered successfully!"
+                . "|Credentials have been sent to <strong>" . e($email) . "</strong>."
+                . "|The registrar can log in using their username once they receive the email.";
+
+            $this->flash('success', "Registrar '{$full}' registered successfully!");
         } catch (\Exception $e) {
-            $this->rErrs = ['general' => $e->getMessage()];
+            $this->rErrs = ['general' => [$e->getMessage()]];
         } finally { $this->rSave = false; }
     }
 
@@ -648,6 +688,22 @@ new class extends Component {
                     WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
                     ELSE 'ACTIVE'
                 END) as user_status"),
+                DB::raw("al.id                              as alumni_id"),
+                DB::raw("COALESCE(al.gender,'')             as alumni_gender"),
+                DB::raw("al.date_of_birth                   as alumni_dob"),
+                DB::raw("COALESCE(al.contact_number,'')     as alumni_contact"),
+                DB::raw("COALESCE(al.father_last_name,'')   as father_last_name"),
+                DB::raw("COALESCE(al.father_given_name,'')  as father_given_name"),
+                DB::raw("COALESCE(al.father_middle_name,'') as father_middle_name"),
+                DB::raw("COALESCE(al.mother_last_name,'')   as mother_last_name"),
+                DB::raw("COALESCE(al.mother_given_name,'')  as mother_given_name"),
+                DB::raw("COALESCE(al.mother_middle_name,'') as mother_middle_name"),
+                DB::raw("COALESCE(al.dswd_household_no,'') as dswd_household_no"),
+                DB::raw("COALESCE(al.disability,'')         as disability"),
+                DB::raw("COALESCE(al.address_street,'')       as address_street"),
+                DB::raw("COALESCE(al.address_barangay,'')     as address_barangay"),
+                DB::raw("COALESCE(al.address_municipality,'') as address_municipality"),
+                DB::raw("COALESCE(al.address_province,'')     as address_province"),
                 DB::raw("COALESCE(al.student_id,'')         as student_id"),
                 DB::raw("COALESCE(al.course_code,'')        as course_code"),
                 DB::raw("COALESCE(al.course_name,'')        as course_name"),
@@ -683,6 +739,15 @@ new class extends Component {
             ->where('users.id',$id)->first();
         if (!$r) { $this->flash('error','User not found.'); return; }
         $this->vData = (array) $r;
+        $this->vEmployment = null;
+        if ($r->role === 'alumni' && !empty($r->alumni_id)) {
+            $emp = DB::table('employment_trackings')
+                ->where('alumni_id', $r->alumni_id)
+                ->whereNull('deleted_at')
+                ->latest('created_at')
+                ->first();
+            $this->vEmployment = $emp ? (array) $emp : null;
+        }
         $this->vPhoto = null;
         $this->ueEmail  = '';
         $this->ueErrors = [];
@@ -701,7 +766,10 @@ new class extends Component {
             $this->ueId    = $id;
             $this->ueName  = $r->name;
         } elseif ($r->role === 'registrar') {
-            $this->ueEmail = $r->name ?? '';
+            // name now holds the registrar's full name; the login username is
+            // the local part of the @registrar.internal email (older registrars
+            // had name == username, so this resolves to the same value for them).
+            $this->ueEmail = $this->adminUsername($r->email ?? '', $r->name ?? '');
             $this->ueId    = $id;
             $this->ueName  = $r->name;
         } elseif ($r->role === 'organizer') {
@@ -828,6 +896,84 @@ new class extends Component {
             }
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::warning('Admin cloud photo delete: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Alumni photo — same flow as Alumni Records: the browser compresses the
+     * image -> base64 -> Cloudinary. Saved in alumni.profile_photo so the
+     * picture is identical on Alumni Records, the alumni's own pages, and here.
+     */
+    #[Renderless]
+    public function receiveAlumniPhoto(string $filename, string $base64): void
+    {
+        if (($this->vData['role'] ?? '') !== 'alumni') return;
+        try {
+            $ext = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true) || $base64 === '' || strlen($base64) > 2_800_000) {
+                $this->flash('error', 'Photo must be JPG, PNG, or WebP and under 2MB.');
+                $this->dispatch('alu-photo-failed');
+                return;
+            }
+            $al = DB::table('alumni')->where('user_id', $this->vData['id'])->first();
+            if (!$al) {
+                $this->flash('error', 'Alumni record not found.');
+                $this->dispatch('alu-photo-failed');
+                return;
+            }
+
+            $up = cloudinary()->uploadApi()->upload(
+                'data:image/' . $ext . ';base64,' . $base64,
+                [
+                    'folder'        => 'alumni-photos',
+                    'public_id'     => 'alumni_' . $al->id . '_' . uniqid(),
+                    'overwrite'     => true,
+                    'resource_type' => 'image',
+                ]
+            );
+
+            $this->deleteCloudPhoto($al);
+            DB::table('alumni')->where('id', $al->id)->update([
+                'profile_photo'           => $up['secure_url'],
+                'profile_photo_public_id' => $up['public_id'],
+                'updated_at'              => now(),
+            ]);
+
+            $this->vData['photo'] = $up['secure_url'];
+            $this->bustUserListCache();
+            $this->flash('success', 'Profile photo updated successfully.');
+            $this->dispatch('alu-photo-saved', newSrc: $up['secure_url']);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('Admin alumni photo upload failed: ' . $e->getMessage());
+            $this->flash('error', 'Failed to upload photo: ' . $e->getMessage());
+            $this->dispatch('alu-photo-failed');
+        }
+    }
+
+    #[Renderless]
+    public function resetAlumniPhoto(): void
+    {
+        if (($this->vData['role'] ?? '') !== 'alumni') return;
+        try {
+            $al = DB::table('alumni')->where('user_id', $this->vData['id'])->first();
+            if (!$al) {
+                $this->flash('error', 'Alumni record not found.');
+                $this->dispatch('alu-photo-failed');
+                return;
+            }
+            $this->deleteCloudPhoto($al);
+            DB::table('alumni')->where('id', $al->id)->update([
+                'profile_photo'           => null,
+                'profile_photo_public_id' => null,
+                'updated_at'              => now(),
+            ]);
+            $this->vData['photo'] = null;
+            $this->bustUserListCache();
+            $this->flash('success', 'Profile photo reset to default.');
+            $this->dispatch('alu-photo-saved');
+        } catch (\Throwable $e) {
+            $this->flash('error', 'Failed to reset photo.');
+            $this->dispatch('alu-photo-failed');
         }
     }
 
@@ -1599,6 +1745,48 @@ select.mu-filter-input.mu-active {
 }
 .mu-vp-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; } /* Chrome/Safari/new Edge */
 
+/* ── Alumni View Details — same design as Alumni Records → View Details ── */
+.mua-body-grid { display: grid; grid-template-columns: 1fr 1fr; align-items: stretch; gap: 16px; box-sizing: border-box; padding-bottom: 6px; }
+.mua-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.mua-col > .mua-card:last-child { flex: 1; }
+.mua-card { background: #fff; border: 1.5px solid #E4E4E4; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.mua-card-header { padding: 10px 14px; border-bottom: 1.5px solid #EEEEEE; background: #F7F7F7; display: flex; align-items: center; gap: 8px; }
+.mua-card-header p { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: #333333; margin: 0; }
+.mua-card-header i { color: #7A3F91 !important; font-size: .85rem; width: 16px; text-align: center; flex-shrink: 0; }
+.mua-cell { padding: 10px 13px; border: 1.5px solid #EEEEEE; background: #fff; border-radius: 8px; }
+.mua-field-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #333333; margin-bottom: 4px; }
+.mua-field-value { font-size: .95rem; font-weight: 600; color: #333333; word-break: break-word; }
+.mua-emp-updated { font-size: .7rem; font-weight: 700; color: #555555; white-space: nowrap; }
+.mua-info-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 999px; font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; white-space: nowrap; }
+.mua-avatar-strip { display: flex; align-items: stretch; gap: 0; background: #fff; border: 1.5px solid #E4E4E4; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.mua-photo-col { display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; padding: 10px; border-right: 1.5px solid #EEEEEE; background: #F7F7F7; gap: 5px; min-width: 0; }
+.mua-info-col { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 10px 12px; gap: 3px; background: #fff; }
+.mua-photo-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 7px; border: 1.5px solid #E0E0E0; background: #fff; cursor: pointer; transition: all .15s; font-size: 12px; flex-shrink: 0; }
+.mua-photo-save { background: #7A3F91; border-color: #7A3F91; color: #fff; }
+.mua-photo-save:hover { background: #6a3280; border-color: #6a3280; }
+.mua-photo-cancel { color: #555555; }
+.mua-photo-cancel:hover { background: #FEF2F2; border-color: #FECACA; color: #DC2626; }
+.mua-photo-default { color: #555555; }
+.mua-photo-default:hover { background: #F5F5F5; border-color: #BBBBBB; color: #333333; }
+@keyframes muaShimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.mua-uploading { position: absolute; inset: 0; border-radius: 12px; background: linear-gradient(90deg,rgba(122,63,145,.15) 25%,rgba(122,63,145,.35) 50%,rgba(122,63,145,.15) 75%); background-size: 200% 100%; animation: muaShimmer 1.2s infinite linear; display: flex; align-items: center; justify-content: center; }
+@media (max-width: 768px) {
+    .mua-body-grid { grid-template-columns: 1fr; gap: 10px; }
+    .mua-col { gap: 10px; }
+    .mua-avatar-strip { flex-direction: column; }
+    .mua-photo-col { border-right: none; border-bottom: 1.5px solid #EEEEEE; width: 100%; }
+    .mua-info-col { padding: 12px 14px; }
+}
+
+/* ── Coordinator View Details: single full-screen layout (no scrolling on desktop) ── */
+.mu-org-grid   { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; align-items: start; }
+.mu-org-right  { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
+.mu-org-bottom { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+@media (min-width: 1024px) {
+    .mu-org-grid   { grid-template-columns: 16.5rem minmax(0, 1fr); }
+    .mu-org-bottom { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+}
+
 /* ── Role badge — status style ── */
 .mu-role-badge {
     display: inline-flex;
@@ -1654,7 +1842,7 @@ select.mu-filter-input.mu-active {
 <div class="flex flex-col gap-3 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full mu-main-layout" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow:hidden;">
 
     {{-- PAGE HEADER --}}
-    @php $s = $this->stats; $hasActiveDirector = $s['dirActive'] > 0; @endphp
+    @php $s = $this->stats; @endphp
     <div class="flex items-center gap-4 flex-shrink-0">
         <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
              style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
@@ -1666,7 +1854,7 @@ select.mu-filter-input.mu-active {
         </div>
         <div class="ml-auto flex items-center gap-2">
 
-        {{-- New Registrar — no one-account limit, always available --}}
+        {{-- New Registrar — always openable; the one-active-account limit is enforced on submit --}}
         <div class="relative" x-data="{tip:false}">
             <button wire:click="openModal('createRegistrar')" wire:loading.attr="disabled" wire:target="openModal('createRegistrar')"
                     @mouseenter="tip=true" @mouseleave="tip=false"
@@ -1688,42 +1876,23 @@ select.mu-filter-input.mu-active {
         </div>
 
         <div class="relative" x-data="{tip:false}">
-            @if($hasActiveDirector)
-                <button type="button" disabled
-                        @mouseenter="tip=true" @mouseleave="tip=false"
-                        class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md cursor-not-allowed opacity-40"
-                        style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                    <i class="fas fa-user-tie text-white text-base"></i>
-                </button>
-                <div x-show="tip" x-cloak
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95"
-                     x-transition:enter-end="opacity-100 scale-100"
-                     class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
-                    <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
-                        <i class="fas fa-lock mr-1.5 text-amber-400"></i>Only one active Director account is allowed
-                    </div>
-                    <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
+            <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
+                    @mouseenter="tip=true" @mouseleave="tip=false"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
+                    style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
+                <span wire:loading wire:target="openModal('createDirector')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas fa-user-tie text-white text-base"></i></span>
+            </button>
+            <div x-show="tip" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
+                <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                    <i class="fas fa-user-tie mr-1.5"></i>New Director
                 </div>
-            @else
-                <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
-                        @mouseenter="tip=true" @mouseleave="tip=false"
-                        class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
-                        style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
-                    <span wire:loading wire:target="openModal('createDirector')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
-                    <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas fa-user-tie text-white text-base"></i></span>
-                </button>
-                <div x-show="tip" x-cloak
-                     x-transition:enter="transition ease-out duration-100"
-                     x-transition:enter-start="opacity-0 scale-95"
-                     x-transition:enter-end="opacity-100 scale-100"
-                     class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
-                    <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
-                        <i class="fas fa-user-tie mr-1.5"></i>New Director
-                    </div>
-                    <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
-                </div>
-            @endif
+                <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
+            </div>
         </div>
 
         </div>{{-- /header action buttons --}}
@@ -2147,6 +2316,17 @@ select.mu-filter-input.mu-active {
     <div class="w-full h-full flex flex-col" style="background:#F2F2F2;overflow:hidden;">
 
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            @if($isAlumni)
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                    <i class="fas fa-user text-white text-xs"></i>
+                </div>
+                <div class="min-w-0">
+                    <h2 class="text-white font-semibold text-sm leading-tight">Alumni Profile</h2>
+                    <p class="text-white/60 text-xs font-normal truncate">{{ $headerName }}</p>
+                </div>
+            </div>
+            @else
             <div class="flex items-center gap-3 min-w-0">
                 @if($vPhoto)
                     <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
@@ -2160,6 +2340,7 @@ select.mu-filter-input.mu-active {
                     <p class="text-xs text-white/70 mt-0.5 truncate">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
                 </div>
             </div>
+            @endif
             <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal"
                     class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
                 <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-base"></i>
@@ -2167,7 +2348,7 @@ select.mu-filter-input.mu-active {
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-3 mu-vp-scroll max-w-4xl mx-auto w-full relative">
+        <div class="flex-1 min-h-0 overflow-y-auto {{ $isOrg ? 'p-3 sm:p-4 space-y-2.5 max-w-6xl' : ($isAlumni ? 'p-3 sm:p-4 max-w-7xl' : 'p-4 sm:p-5 space-y-3 max-w-4xl') }} mu-vp-scroll mx-auto w-full relative">
 
             {{-- Saving overlay: appears instantly when any modal action fires,
                  before the Livewire round-trip completes. Prevents double-clicks
@@ -2185,7 +2366,7 @@ select.mu-filter-input.mu-active {
 
             {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
-            @if(!$isOrg)
+            @if(!$isOrg && !$isAlumni)
             <div class="bg-white rounded-xl border border-[#E8E0F0] p-5 flex items-start gap-5">
                 @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0"
@@ -2274,48 +2455,388 @@ select.mu-filter-input.mu-active {
                     </p>
                 </div>
             </div>
-            @endif {{-- /!$isOrg --}}
+            @endif {{-- /!$isOrg && !$isAlumni --}}
 
-            {{-- ALUMNI: STUDENT ID + STUDENT'S NAME --}}
+            {{-- ALUMNI — same design as Alumni Records → View Details (+ admin Change Email / photo change) --}}
             @if($isAlumni)
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                    {{-- invisible text mirrors the right header height exactly --}}
-                    <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-base font-bold uppercase tracking-widest invisible select-none" aria-hidden="true">Student's Name</p>
-                    </div>
-                    <div class="p-4 flex flex-col gap-3">
-                        <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                            <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Student ID</p>
-                            <p class="text-lg font-semibold" style="color:#333333;">{{ $vd['student_id'] ?: '—' }}</p>
+            @php
+                $up  = fn(?string $v): string => strtoupper(trim($v ?? ''));
+                $emp = $vEmployment;
+
+                $empStatusMap = ['employed' => 'Employed', 'self_employed' => 'Self-Employed', 'unemployed' => 'Unemployed'];
+                $empTypeMap   = ['full_time' => 'Full-Time', 'part_time' => 'Part-Time', 'contractual' => 'Contractual', 'project_based' => 'Project-Based', 'internship' => 'Internship'];
+                $relevanceMap = ['yes' => 'Related to Course', 'no' => 'Not Related to Course', 'partially' => 'Partially Related'];
+                $unempMap     = ['seeking_employment' => 'Actively Seeking Employment', 'not_looking' => 'Not Currently Looking'];
+                $workLocMap   = ['local' => 'Local', 'abroad' => 'Abroad', 'remote' => 'Remote', 'hybrid' => 'Hybrid / Mixed'];
+
+                $empStatus  = $emp['employment_status'] ?? null;
+                $isWorking  = in_array($empStatus, ['employed', 'self_employed']);
+                $empTypeLbl = $empTypeMap[$emp['employment_type'] ?? ''] ?? null;
+                $updatedAt  = !empty($emp['updated_at'])
+                    ? \Carbon\Carbon::parse($emp['updated_at'])->format('M j, Y g:i A') : null;
+
+                $dob = !empty($vd['alumni_dob'])
+                    ? strtoupper(\Carbon\Carbon::parse($vd['alumni_dob'])->format('F j, Y'))
+                    : '—';
+
+                $aluPhoto = $this->photoUrl($vd['photo'] ?? '');
+                $aluEmail = (!empty($vd['record_email']) && !str_contains($vd['record_email'], '@pending.local')) ? $vd['record_email'] : null;
+                $aluComplete = $vStatus === 'VERIFIED';
+                $ueCooldown = $this->ueCooldownDaysLeft();
+            @endphp
+
+            <div class="mua-body-grid">
+
+                {{-- ══ COLUMN 1 ══ --}}
+                <div class="mua-col">
+
+                    <div class="mua-avatar-strip">
+
+                        {{-- Photo (hover to change) — base64 -> Cloudinary, same as Alumni Records --}}
+                        <div class="mua-photo-col" wire:ignore
+                             x-data="{
+                                 previewSrc: @js($aluPhoto),
+                                 originalSrc: @js($aluPhoto),
+                                 defaultSrc: @js(asset('storage/alumni-photos/default.png')),
+                                 pendingFile: null,
+                                 hasFile: false,
+                                 saving: false,
+                                 isDefaultPending: false,
+                                 get isShowingDefault() { return this.previewSrc === this.defaultSrc; },
+                                 init() {
+                                     $wire.$on('alu-photo-saved', (event) => {
+                                         const e = Array.isArray(event) ? event[0] : event;
+                                         this.pendingFile = null; this.hasFile = false; this.saving = false; this.isDefaultPending = false;
+                                         if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                         this.previewSrc = (e && e.newSrc) ? (e.newSrc + '?t=' + Date.now()) : this.defaultSrc;
+                                         this.originalSrc = this.previewSrc;
+                                     });
+                                     $wire.$on('alu-photo-failed', () => { this.failCleanup(); });
+                                 },
+                                 failCleanup() {
+                                     this.saving = false; this.hasFile = false; this.isDefaultPending = false; this.pendingFile = null;
+                                     this.previewSrc = this.originalSrc;
+                                     if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                 },
+                                 async onFileChange(event) {
+                                     const file = event.target.files[0];
+                                     if (!file) return;
+                                     this.isDefaultPending = false;
+                                     let use = file;
+                                     try { use = await this.compressImage(file, 500, 500, 0.75); } catch (err) { use = file; }
+                                     this.pendingFile = use; this.hasFile = true;
+                                     const reader = new FileReader();
+                                     reader.onload = (e) => { this.previewSrc = e.target.result; };
+                                     reader.readAsDataURL(use);
+                                 },
+                                 compressImage(file, maxW, maxH, quality) {
+                                     return new Promise((resolve, reject) => {
+                                         const img = new Image();
+                                         const reader = new FileReader();
+                                         reader.onload = (e) => {
+                                             img.onload = () => {
+                                                 let w = img.width, h = img.height;
+                                                 if (w > maxW || h > maxH) {
+                                                     const ratio = Math.min(maxW / w, maxH / h);
+                                                     w = Math.round(w * ratio); h = Math.round(h * ratio);
+                                                 }
+                                                 const canvas = document.createElement('canvas');
+                                                 canvas.width = w; canvas.height = h;
+                                                 canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                                                 canvas.toBlob((blob) => {
+                                                     if (!blob) return reject(new Error('compress failed'));
+                                                     resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+                                                 }, 'image/jpeg', quality);
+                                             };
+                                             img.onerror = reject;
+                                             img.src = e.target.result;
+                                         };
+                                         reader.onerror = reject;
+                                         reader.readAsDataURL(file);
+                                     });
+                                 },
+                                 setDefault() {
+                                     this.pendingFile = null; this.hasFile = true; this.isDefaultPending = true;
+                                     this.previewSrc = this.defaultSrc;
+                                     if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                 },
+                                 savePhoto() {
+                                     if (this.saving) return;
+                                     this.saving = true;
+                                     if (this.isDefaultPending) {
+                                         $wire.resetAlumniPhoto().catch(() => this.failCleanup());
+                                     } else if (this.pendingFile) {
+                                         const file = this.pendingFile;
+                                         const reader = new FileReader();
+                                         reader.onload = (e) => {
+                                             $wire.receiveAlumniPhoto(file.name, e.target.result.split(',')[1]).catch(() => this.failCleanup());
+                                         };
+                                         reader.onerror = () => this.failCleanup();
+                                         reader.readAsDataURL(file);
+                                     } else {
+                                         this.saving = false;
+                                     }
+                                 },
+                                 cancelPhoto() {
+                                     this.pendingFile = null; this.hasFile = false; this.isDefaultPending = false;
+                                     this.previewSrc = this.originalSrc;
+                                     if (this.$refs.photoInput) this.$refs.photoInput.value = '';
+                                 }
+                             }">
+                            <div class="flex items-start gap-2">
+                                <div class="relative group" style="width:74px;height:74px;flex-shrink:0;">
+                                    <img :src="previewSrc" alt="{{ $vd['alumni_first_name'] ?? '' }}"
+                                         class="w-full h-full object-cover shadow-md transition-all" style="border-radius:12px;"
+                                         :class="hasFile ? 'ring-2 ring-[#7A3F91] ring-offset-2' : 'ring-2 ring-[#E0E0E0]'"
+                                         onerror="this.onerror=null;this.src='{{ asset('storage/alumni-photos/default.png') }}';">
+                                    <div x-show="saving" x-cloak class="mua-uploading">
+                                        <i class="fas fa-spinner fa-spin text-[#7A3F91] text-base"></i>
+                                    </div>
+                                    <label x-show="!saving"
+                                           class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                                           style="border-radius:12px;">
+                                        <i class="fas fa-camera text-white" style="font-size:13px;"></i>
+                                        <input type="file" x-ref="photoInput" class="hidden"
+                                               accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
+                                    </label>
+                                    <span x-show="hasFile && !saving" x-cloak
+                                          class="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#7A3F91] border-2 border-white shadow"></span>
+                                </div>
+
+                                <div class="flex flex-col gap-1.5" x-show="!saving" style="padding-top:2px;">
+                                    <div class="relative group/rst">
+                                        <button type="button" class="mua-photo-btn mua-photo-default"
+                                                x-show="!hasFile && !isShowingDefault" x-cloak @click="setDefault()">
+                                            <i class="fas fa-rotate-left"></i>
+                                        </button>
+                                        <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none bg-[#1a1a1a] text-white font-semibold whitespace-nowrap shadow-lg opacity-0 group-hover/rst:opacity-100 transition-opacity duration-150 z-[9999]"
+                                             style="font-size:10px;padding:4px 9px;border-radius:6px;letter-spacing:.04em;">
+                                            Back to default photo
+                                            <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
+                                        </div>
+                                    </div>
+                                    <div class="relative group/sav">
+                                        <button type="button" class="mua-photo-btn mua-photo-save" x-show="hasFile" x-cloak @click="savePhoto()">
+                                            <i class="fas fa-check"></i>
+                                        </button>
+                                        <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none bg-[#1a1a1a] text-white font-semibold whitespace-nowrap shadow-lg opacity-0 group-hover/sav:opacity-100 transition-opacity duration-150 z-[9999]"
+                                             style="font-size:10px;padding:4px 9px;border-radius:6px;letter-spacing:.04em;">
+                                            Save photo
+                                            <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
+                                        </div>
+                                    </div>
+                                    <div class="relative group/can">
+                                        <button type="button" class="mua-photo-btn mua-photo-cancel" x-show="hasFile" x-cloak @click="cancelPhoto()">
+                                            <i class="fas fa-xmark"></i>
+                                        </button>
+                                        <div class="absolute left-[calc(100%+8px)] top-1/2 -translate-y-1/2 pointer-events-none bg-[#1a1a1a] text-white font-semibold whitespace-nowrap shadow-lg opacity-0 group-hover/can:opacity-100 transition-opacity duration-150 z-[9999]"
+                                             style="font-size:10px;padding:4px 9px;border-radius:6px;letter-spacing:.04em;">
+                                            Cancel
+                                            <span class="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1a1a1a]"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <p x-show="!hasFile && !saving" class="text-center font-semibold leading-tight select-none"
+                               style="font-size:.62rem;color:#666666;max-width:84px;display:block;">
+                                Hover photo to change
+                            </p>
                         </div>
-                        <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                            <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Program</p>
-                            <p class="text-lg font-semibold" style="color:#333333;">{{ $vd['course_name'] ?: '—' }}</p>
+
+                        <div class="mua-info-col">
+                            <p class="font-bold uppercase leading-tight" style="font-size:.98rem;color:#111111;">{{ $headerName }}</p>
+                            <p class="font-mono font-semibold" style="font-size:.92rem;color:#333333;letter-spacing:.03em;">{{ $vd['student_id'] ?: '—' }}</p>
+                            <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+                                <span class="mua-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;font-size:.8rem;">{{ $vd['course_code'] ?: '—' }}</span>
+                                <span style="color:#CCCCCC;font-size:.8rem;">•</span>
+                                <span class="mua-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;font-size:.8rem;">Batch {{ $vd['batch'] ?: '—' }}</span>
+                                <span style="color:#CCCCCC;font-size:.8rem;">•</span>
+                                @if($aluComplete)
+                                    <span class="mua-info-chip" style="background:#ECFDF5;color:#059669;border:1px solid #6ee7b7;">Complete</span>
+                                @else
+                                    <span class="mua-info-chip" style="background:#FFFBEB;color:#D97706;border:1px solid #fcd34d;">Incomplete</span>
+                                @endif
+                            </div>
+                            <p style="font-size:.78rem;color:#444444;font-weight:500;word-break:break-all;">{{ $aluEmail ?: '—' }}</p>
+                        </div>
+                    </div>
+
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-id-card"></i><p>Student ID</p></div>
+                        <div class="p-2">
+                            <div class="mua-cell">
+                                <p class="mua-field-label">Student ID</p>
+                                <p class="mua-field-value font-mono">{{ $up($vd['student_id'] ?? '') ?: '—' }}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-user-graduate"></i><p>Student's Name</p></div>
+                        <div class="p-2 grid grid-cols-2 gap-1.5">
+                            <div class="mua-cell"><p class="mua-field-label">Last Name</p><p class="mua-field-value">{{ $up($vd['alumni_last_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Given Name</p><p class="mua-field-value">{{ $up($vd['alumni_first_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Middle Name</p><p class="mua-field-value">{{ $up($vd['alumni_middle_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Suffix</p><p class="mua-field-value">{{ $up($vd['alumni_suffix'] ?? '') ?: '—' }}</p></div>
+                        </div>
+                    </div>
+
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-user"></i><p>Student's Data</p></div>
+                        <div class="p-2 grid grid-cols-2 gap-1.5">
+                            <div class="mua-cell"><p class="mua-field-label">Sex</p><p class="mua-field-value">{{ $up($vd['alumni_gender'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Birthdate</p><p class="mua-field-value">{{ $dob }}</p></div>
+                            <div class="mua-cell col-span-2"><p class="mua-field-label">Program</p><p class="mua-field-value">{{ $up($vd['course_name'] ?? $vd['course_code'] ?? '') ?: '—' }}</p></div>
+                        </div>
+                    </div>
+
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-location-dot"></i><p>Permanent Address</p></div>
+                        <div class="p-2 grid grid-cols-2 gap-1.5">
+                            <div class="mua-cell"><p class="mua-field-label">Street</p><p class="mua-field-value">{{ $up($vd['address_street'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Barangay</p><p class="mua-field-value">{{ $up($vd['address_barangay'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Municipality / City</p><p class="mua-field-value">{{ $up($vd['address_municipality'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Province</p><p class="mua-field-value">{{ $up($vd['address_province'] ?? '') ?: '—' }}</p></div>
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                    <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                        <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Student's Name</p>
-                    </div>
-                    <div class="p-4 grid grid-cols-2 gap-3">
-                        @foreach([
-                            ['Last Name',    $vd['alumni_last_name']   ?? ''],
-                            ['Given Name',   $vd['alumni_first_name']  ?? ''],
-                            ['Middle Name',  $vd['alumni_middle_name'] ?? ''],
-                            ['Ext.',         $vd['alumni_suffix']      ?? ''],
-                        ] as [$lbl,$val])
-                        <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                            <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">{{ $lbl }}</p>
-                            <p class="text-lg font-semibold" style="color:#333333;">{{ $val ?: '—' }}</p>
+                {{-- ══ COLUMN 2 ══ --}}
+                <div class="mua-col">
+
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-person"></i><p>Father's Name</p></div>
+                        <div class="p-2 grid grid-cols-3 gap-1.5">
+                            <div class="mua-cell"><p class="mua-field-label">Last Name</p><p class="mua-field-value">{{ $up($vd['father_last_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Given Name</p><p class="mua-field-value">{{ $up($vd['father_given_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Middle Name</p><p class="mua-field-value">{{ $up($vd['father_middle_name'] ?? '') ?: '—' }}</p></div>
                         </div>
-                        @endforeach
                     </div>
+
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-person-dress"></i><p>Mother's Maiden Name</p></div>
+                        <div class="p-2 grid grid-cols-3 gap-1.5">
+                            <div class="mua-cell"><p class="mua-field-label">Last Name</p><p class="mua-field-value">{{ $up($vd['mother_last_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Given Name</p><p class="mua-field-value">{{ $up($vd['mother_given_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Middle Name</p><p class="mua-field-value">{{ $up($vd['mother_middle_name'] ?? '') ?: '—' }}</p></div>
+                        </div>
+                    </div>
+
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-file-lines"></i><p>Additional Information</p></div>
+                        <div class="p-2 grid grid-cols-2 gap-1.5">
+                            <div class="mua-cell"><p class="mua-field-label">DSWD Household No.</p><p class="mua-field-value">{{ $up($vd['dswd_household_no'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Disability</p><p class="mua-field-value">{{ $up($vd['disability'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell col-span-2"><p class="mua-field-label">Contact Number</p><p class="mua-field-value">{{ $up($vd['alumni_contact'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell col-span-2"><p class="mua-field-label">Email Address</p><p class="mua-field-value">{{ $aluEmail ?: '—' }}</p></div>
+                        </div>
+                    </div>
+
+                    {{-- CHANGE EMAIL (admin) --}}
+                    <div class="mua-card">
+                        <div class="mua-card-header"><i class="fas fa-envelope"></i><p>Change Email</p></div>
+                        <div class="p-2">
+                            @if($ueCooldown > 0)
+                            <div class="mb-2 p-2 rounded-lg flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
+                                <i class="fas fa-lock text-sm mt-0.5 shrink-0" style="color:#555555;"></i>
+                                <p class="text-sm font-semibold leading-snug" style="color:#333333;">Email was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.</p>
+                            </div>
+                            @endif
+                            @if($ueSuccess)
+                            <div x-init="saving = false"></div>
+                            <div class="mb-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                                <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
+                                <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
+                            </div>
+                            @endif
+                            @if(count($ueErrors))
+                            <div x-init="saving = false"></div>
+                            <div class="mb-2 p-2 rounded-lg bg-red-50 border border-red-200 space-y-1">
+                                @foreach($ueErrors as $msgs)
+                                    @foreach($msgs as $msg)
+                                    <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                                    @endforeach
+                                @endforeach
+                            </div>
+                            @endif
+                            <div class="flex gap-2">
+                                <div class="relative flex-1">
+                                    <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                                    <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
+                                           @if($ueCooldown > 0) disabled @endif
+                                           class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
+                                </div>
+                                <button wire:click="saveUpdateEmail"
+                                        @click="saving = true"
+                                        wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                                        @if($ueCooldown > 0) disabled @endif
+                                        class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
+                                        style="background:#7A3F91;">
+                                    <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                                    <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-sm"></i></span>
+                                    <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
+                                    <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
+                                </button>
+                            </div>
+                            <div class="mt-2 p-2 rounded-lg flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                                <i class="fas fa-key text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                                <p class="text-xs font-semibold leading-snug" style="color:#92400e;">Updating the email resets the password to the temporary one (Student ID + first 2 letters of last name). The alumnus must change it on next login.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mua-card">
+                        <div class="mua-card-header flex items-center justify-between">
+                            <span class="flex items-center gap-2"><i class="fas fa-briefcase"></i><p>Employment</p></span>
+                            @if($emp && $updatedAt)
+                                <span class="mua-emp-updated">Last updated {{ $updatedAt }}</span>
+                            @endif
+                        </div>
+                        @if(!$emp)
+                            <div class="p-3">
+                                <div class="mua-cell">
+                                    <p class="mua-field-label">Employment Record</p>
+                                    <p class="mua-field-value">No employment information submitted yet.</p>
+                                </div>
+                            </div>
+                        @else
+                            <div class="p-2 grid grid-cols-3 gap-1.5">
+                                <div class="mua-cell"><p class="mua-field-label">Status</p><p class="mua-field-value">{{ $empStatusMap[$empStatus] ?? '—' }}</p></div>
+
+                                @if($isWorking && $empTypeLbl)
+                                <div class="mua-cell"><p class="mua-field-label">Employment Type</p><p class="mua-field-value">{{ $empTypeLbl }}</p></div>
+                                @endif
+
+                                @if($isWorking && !empty($emp['work_location']))
+                                <div class="mua-cell"><p class="mua-field-label">Work Location</p><p class="mua-field-value">{{ $workLocMap[$emp['work_location']] ?? ucfirst($emp['work_location']) }}</p></div>
+                                @endif
+
+                                @if($isWorking)
+                                    @if(!empty($emp['company_name']))
+                                    <div class="mua-cell"><p class="mua-field-label">{{ $empStatus === 'self_employed' ? 'Business Name' : 'Company/Organization' }}</p><p class="mua-field-value" style="text-transform:uppercase;">{{ strtoupper($emp['company_name']) }}</p></div>
+                                    @endif
+                                    @if(!empty($emp['job_title']))
+                                    <div class="mua-cell"><p class="mua-field-label">Job Title</p><p class="mua-field-value">{{ $emp['job_title'] }}</p></div>
+                                    @endif
+                                    @if(!empty($emp['course_relevance']) && isset($relevanceMap[$emp['course_relevance']]))
+                                    <div class="mua-cell"><p class="mua-field-label">Course Relevance</p><p class="mua-field-value">{{ $relevanceMap[$emp['course_relevance']] }}</p></div>
+                                    @endif
+                                @endif
+
+                                @if($empStatus === 'unemployed' && !empty($emp['unemployment_status']))
+                                <div class="mua-cell"><p class="mua-field-label">Job Search Status</p><p class="mua-field-value">{{ $unempMap[$emp['unemployment_status']] ?? '—' }}</p></div>
+                                @endif
+
+                                @if($empStatus === 'unemployed' && ($emp['unemployment_status'] ?? '') === 'not_looking' && !empty($emp['unemployment_reason']))
+                                <div class="mua-cell"><p class="mua-field-label">Reason</p><p class="mua-field-value">{{ $emp['unemployment_reason'] }}</p></div>
+                                @endif
+                            </div>
+                        @endif
+                    </div>
+
                 </div>
             </div>
-
             @endif
 
             {{-- DIRECTOR INFO --}}
@@ -2341,7 +2862,7 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- COORDINATOR INFO — two-panel layout (left: photo card, right: details) --}}
+            {{-- COORDINATOR INFO — compact single-screen layout (left: photo card, right: details + email + status) --}}
             @if($isOrg)
             @php
                 $orgName  = trim(implode(' ', array_filter([
@@ -2355,11 +2876,12 @@ select.mu-filter-input.mu-active {
                 $orgLast   = $vd['org_last_name']   ?: '—';
                 $orgSuffix = $vd['org_suffix']      ?: '—';
                 $orgStatus = $vStatus;
+                $orgEmailCurrent = $vd['organizer_email'] ?: ((!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : null);
             @endphp
-            <div class="flex flex-col sm:flex-row gap-3">
+            <div class="mu-org-grid">
 
-                {{-- LEFT PANEL: photo + name + status + college + toggle --}}
-                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden flex flex-col items-center p-5 gap-3 sm:w-56 shrink-0">
+                {{-- LEFT PANEL: photo + name + status + college + access + registered --}}
+                <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden flex flex-col items-center p-4 gap-2.5">
 
                     {{-- Avatar --}}
                     <div class="flex flex-col items-center gap-1.5"
@@ -2411,12 +2933,11 @@ select.mu-filter-input.mu-active {
                         @error('vPhoto')<p class="text-xs text-red-600 text-center flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
                     </div>
 
-                    {{-- Name + ID --}}
+                    {{-- Name + ID + status --}}
                     <div class="text-center">
-                        <p class="font-bold text-lg leading-snug" style="color:#333333;">{{ $orgName }}</p>
-                        <p class="text-base font-mono font-semibold mt-0.5" style="color:#333333;">{{ $vd['id_number'] ?: '—' }}</p>
-                        {{-- Status badge --}}
-                        <span class="inline-flex items-center gap-1.5 mt-1.5 px-3 py-1 rounded-full text-xs font-bold
+                        <p class="font-bold text-base leading-snug" style="color:#333333;">{{ $orgName }}</p>
+                        <p class="text-sm font-mono font-semibold mt-0.5" style="color:#333333;">{{ $vd['id_number'] ?: '—' }}</p>
+                        <span class="inline-flex items-center gap-1.5 mt-1.5 px-3 py-0.5 rounded-full text-xs font-bold
                                      {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200' }}">
                             <span class="w-1.5 h-1.5 rounded-full {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
                             {{ $orgStatus }}
@@ -2425,14 +2946,14 @@ select.mu-filter-input.mu-active {
 
                     {{-- College --}}
                     @if($vd['department'])
-                    <div class="w-full rounded-xl px-3 py-2.5 text-center" style="background:#F9F7FC;border:1px solid #E8E0F0;">
+                    <div class="w-full rounded-xl px-3 py-2 text-center" style="background:#F9F7FC;border:1px solid #E8E0F0;">
                         <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#7A3F91;">College</p>
-                        <p class="text-base font-semibold leading-snug" style="color:#333333;">{{ $vd['department'] }}</p>
+                        <p class="text-sm font-semibold leading-snug" style="color:#333333;">{{ $vd['department'] }}</p>
                     </div>
                     @endif
 
-                    {{-- Account access note — admin can activate/deactivate via Account Status below --}}
-                    <div class="w-full rounded-xl px-3 py-2.5" style="background:#F9F7FC;border:1px solid #E8E0F0;">
+                    {{-- Account access note --}}
+                    <div class="w-full rounded-xl px-3 py-2" style="background:#F9F7FC;border:1px solid #E8E0F0;">
                         <p class="text-xs font-semibold uppercase tracking-widest mb-0.5" style="color:#7A3F91;">Account Access</p>
                         <p class="text-sm font-medium leading-snug" style="color:#333333;">
                             @if($orgStatus === 'ACTIVE')
@@ -2444,72 +2965,137 @@ select.mu-filter-input.mu-active {
                     </div>
 
                     {{-- Registered date --}}
-                    <p class="text-sm font-medium text-center" style="color:#555555;">
+                    <p class="text-xs font-medium text-center" style="color:#555555;">
                         Registered {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A') }}
                     </p>
                 </div>
 
-                {{-- RIGHT PANEL: Name Details + Account Details --}}
-                <div class="flex-1 flex flex-col gap-3 min-w-0">
+                {{-- RIGHT COLUMN --}}
+                <div class="mu-org-right">
 
                     {{-- Name Details --}}
                     <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                        <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                            <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Name Details</p>
+                        <div class="px-4 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                            <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Name Details</p>
                         </div>
-                        <div class="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">First Name</p>
-                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgFirst }}</p>
+                        <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            @foreach([['First Name',$orgFirst],['Middle Name',$orgMiddle],['Last Name',$orgLast],['Suffix',$orgSuffix]] as [$lbl,$val])
+                            <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0]">
+                                <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
+                                <p class="text-base font-semibold truncate" style="color:#333333;">{{ $val }}</p>
                             </div>
-                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Middle Name</p>
-                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgMiddle }}</p>
-                            </div>
-                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Last Name</p>
-                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgLast }}</p>
-                            </div>
-                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Suffix</p>
-                                <p class="text-lg font-semibold" style="color:#333333;">{{ $orgSuffix }}</p>
-                            </div>
+                            @endforeach
                         </div>
                     </div>
 
                     {{-- Account Details --}}
                     <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                        <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                            <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Account Details</p>
+                        <div class="px-4 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                            <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Account Details</p>
                         </div>
-                        <div class="p-4 flex flex-col gap-3">
-                            {{-- Teacher ID --}}
-                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Teacher ID</p>
-                                <p class="text-lg font-bold font-mono" style="color:#333333;">{{ $vd['id_number'] ?: '—' }}</p>
+                        <div class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0]">
+                                <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Teacher ID</p>
+                                <p class="text-base font-bold font-mono" style="color:#333333;">{{ $vd['id_number'] ?: '—' }}</p>
                             </div>
-                            {{-- Current email — admin edits it in the Email Address card below --}}
-                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Email Address</p>
-                                <p class="text-lg font-semibold break-all" style="color:#333333;">
-                                    @php
-                                        $orgEmail = $vd['email'] ?? '';
-                                        $orgEmailDisplay = (!empty($orgEmail) && !str_ends_with($orgEmail, '.internal'))
-                                            ? $orgEmail : '—';
-                                    @endphp
-                                    {{ $orgEmailDisplay }}
-                                </p>
-                            </div>
-                            {{-- College Assignment --}}
-                            <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                                <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">College Assignment</p>
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <p class="text-lg font-semibold" style="color:#333333;">{{ $vd['department'] ?: '—' }}</p>
-                                </div>
+                            <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0]">
+                                <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">College Assignment</p>
+                                <p class="text-base font-semibold truncate" style="color:#333333;">{{ $vd['department'] ?: '—' }}</p>
                             </div>
                         </div>
                     </div>
 
+                    {{-- Email Address (left) + Account Status (right) --}}
+                    <div class="mu-org-bottom">
+
+                        <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                            <div class="px-4 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                                <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Email Address</p>
+                            </div>
+                            <div class="p-3">
+                                <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0] mb-2">
+                                    <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Current Email</p>
+                                    <p class="text-base font-semibold break-all" style="color:#333333;">
+                                        @if($orgEmailCurrent) {{ $orgEmailCurrent }} @else <span class="italic" style="color:#555555;">Not set</span> @endif
+                                    </p>
+                                </div>
+                                @if($ueSuccess)
+                                <div x-init="saving = false"></div>
+                                <div class="mb-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                                    <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
+                                    <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
+                                </div>
+                                @endif
+                                @if(count($ueErrors))
+                                <div x-init="saving = false"></div>
+                                <div class="mb-2 p-2 rounded-lg bg-red-50 border border-red-200 space-y-1">
+                                    @foreach($ueErrors as $msgs)
+                                        @foreach($msgs as $msg)
+                                        <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                                        @endforeach
+                                    @endforeach
+                                </div>
+                                @endif
+                                <div class="flex gap-2">
+                                    <div class="relative flex-1">
+                                        <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                                        <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
+                                               class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
+                                    </div>
+                                    <button wire:click="saveUpdateEmail"
+                                            @click="saving = true"
+                                            wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                                            class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                            style="background:#7A3F91;">
+                                        <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                                        <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
+                                        <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
+                                        <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
+                                    </button>
+                                </div>
+                                <div class="mt-2 p-2 rounded-lg flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                                    <i class="fas fa-key text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">A new temporary password will be generated and emailed to the new address. The coordinator must change it on next login.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if($canToggle)
+                        <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden flex flex-col">
+                            <div class="px-4 py-2 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                                <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Account Status</p>
+                            </div>
+                            <div class="p-3 flex flex-col gap-2 flex-1 justify-center">
+                                <p class="text-sm font-medium leading-snug" style="color:#333333;">
+                                    @if($vStatus === 'ACTIVE')
+                                        This account is <span class="text-emerald-700 font-semibold">active</span>. Deactivating disables their login.
+                                    @else
+                                        This account is <span class="text-amber-700 font-semibold">inactive</span>. Activating restores their access.
+                                    @endif
+                                </p>
+                                @if($vStatus === 'ACTIVE')
+                                <button wire:click="confirmToggle({{ $vd['id'] }}, 'deactivate')"
+                                        wire:loading.attr="disabled" wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"
+                                        class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition hover:opacity-90 disabled:opacity-50"
+                                        style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;">
+                                    <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                                    <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-ban text-sm"></i></span>
+                                    Deactivate Account
+                                </button>
+                                @else
+                                <button wire:click="confirmToggle({{ $vd['id'] }}, 'activate')"
+                                        wire:loading.attr="disabled" wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"
+                                        class="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition hover:opacity-90 disabled:opacity-50"
+                                        style="background:#f0fdf4;color:#15803d;border:1px solid #bbf7d0;">
+                                    <span wire:loading wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                                    <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"><i class="fas fa-circle-check text-sm"></i></span>
+                                    Activate Account
+                                </button>
+                                @endif
+                            </div>
+                        </div>
+                        @endif
+                    </div>
                 </div>
             </div>
             @endif
@@ -2603,8 +3189,8 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- UPDATE EMAIL — Alumni / Director / Coordinator --}}
-            @if($isAlumni || $isDir || $isOrg)
+            {{-- UPDATE EMAIL — Director (alumni + coordinator have their own cards above) --}}
+            @if($isDir)
             @php
                 $ueCurrent = $isAlumni
                     ? ((!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local')) ? $vd['record_email'] : null)
@@ -2726,8 +3312,8 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- ACTIVATE / DEACTIVATE --}}
-            @if($canToggle)
+            {{-- ACTIVATE / DEACTIVATE (coordinator has its own compact card above) --}}
+            @if($canToggle && !$isOrg)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Account Status</p>
@@ -3069,142 +3655,252 @@ select.mu-filter-input.mu-active {
 @endif
 
 
+{{-- ═══════════════════════════════════════════════════════════
+     CREATE REGISTRAR MODAL (same layout as Create Director, no photo)
+     ═══════════════════════════════════════════════════════════ --}}
 @if($activeModal === 'createRegistrar')
-{{-- Compact centered modal — only a username + password, so no full-screen layout. --}}
-<div class="fixed inset-0 mu-modal-selectable flex items-center justify-center p-4"
+<div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     x-data="{ muClosing: false, showPw: false }"
+     x-data="{ muClosing: false, submitting: false }"
      x-show="!muClosing"
-     x-transition:enter="transition ease-out duration-150"
-     x-transition:enter-start="opacity-0"
-     x-transition:enter-end="opacity-100"
-     @keydown.escape.window="$wire.closeModal(); muClosing = true"
-     @click.self="$wire.closeModal(); muClosing = true">
-    <div class="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]" style="background:#FFFFFF;"
-         x-transition:enter="transition ease-out duration-150"
-         x-transition:enter-start="opacity-0 scale-95"
-         x-transition:enter-end="opacity-100 scale-100">
+     x-init="muClosing = false; submitting = false"
+     @keydown.escape.window="!submitting && ($wire.closeModal(), muClosing = true)">
+    <div class="w-full h-full flex flex-col" style="background:#FFFFFF;overflow:hidden;">
 
-        {{-- Header --}}
-        <div class="flex items-center justify-between gap-3 px-5 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+        <div class="flex items-center justify-between px-6 sm:px-8 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             <div class="flex items-center gap-3 min-w-0">
-                <div class="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 ring-2 ring-white/30">
+                <div class="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 ring-2 ring-white/30">
                     <i class="fas fa-user-clock text-white text-base"></i>
                 </div>
                 <div class="min-w-0">
-                    <p class="font-bold text-base text-white leading-snug truncate">New Registrar Account</p>
-                    <p class="text-xs text-white/70 mt-0.5 truncate">Username and password only</p>
+                    <p class="font-bold text-lg text-white leading-snug truncate">Create New Registrar</p>
+                    <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
                 </div>
             </div>
-            <button type="button" @click="$wire.closeModal(); muClosing = true"
-                    class="w-8 h-8 rounded-lg bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
-                <i class="fa-solid fa-xmark text-base"></i>
+            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting"
+                    :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/30'"
+                    class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center transition text-white shrink-0">
+                <i class="fa-solid fa-xmark text-lg"></i>
             </button>
         </div>
 
-        <div class="p-5 overflow-y-auto" style="scrollbar-width:thin;">
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 mu-vp-scroll max-w-4xl mx-auto w-full relative" style="scrollbar-width:thin;scrollbar-color:#cccccc #F5F5F5;">
 
             @if($rOk)
-            {{-- Success — auto-closes shortly so the new row in the table can be seen --}}
-            <div x-init="setTimeout(() => { $wire.closeModal(); muClosing = true; }, 1800)"></div>
-            <div class="p-4 rounded-xl border bg-emerald-50 border-emerald-200 mb-4">
+            {{-- Success: reset the Alpine submitting flag so the overlay clears
+                 immediately — same pattern as the ueErrors branch below.
+                 Auto-close the modal after a short delay so the admin can see
+                 the confirmation briefly, then the table is already refreshed. --}}
+            <div x-init="
+                submitting = false;
+                setTimeout(() => { $wire.closeModal(); muClosing = true; }, 1800);
+            "></div>
+            @php $parts = explode('|', $rOk); @endphp
+            <div class="p-5 rounded-xl border bg-emerald-50 border-emerald-200 mb-5 space-y-3">
                 <div class="flex items-start gap-3">
-                    <div class="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0">
-                        <i class="fas fa-circle-check text-white text-sm"></i>
+                    <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <i class="fas fa-circle-check text-white text-base"></i>
                     </div>
-                    <div class="space-y-1 flex-1 min-w-0">
-                        <p class="text-sm font-bold text-emerald-800 leading-snug">Registrar account created!</p>
-                        <p class="text-sm text-emerald-800 leading-snug break-words">
-                            Username: <strong>{{ $rOk }}</strong>
-                        </p>
-                        <p class="text-xs text-emerald-700 leading-snug">They can log in right away with this username and the password you set.</p>
+                    <div class="space-y-1.5 flex-1">
+                        @foreach($parts as $part)
+                        <p class="text-base text-emerald-800 leading-snug">{!! $part !!}</p>
+                        @endforeach
                     </div>
                 </div>
             </div>
-            <button type="button" @click="$wire.closeModal(); muClosing = true"
-                    class="w-full py-2.5 rounded-xl text-sm font-bold text-white transition hover:opacity-90" style="background:#7A3F91;">
-                Done
+            <button @click="$wire.closeModal(); muClosing = true" wire:loading.attr="disabled" wire:target="closeModal"
+                    class="w-full py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
+                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-sm"></i>
+                <span>Done</span>
             </button>
-            @else
+            @endif
+
+            @if($rErrs)
+            {{-- Errors came back → reset submitting so the overlay clears --}}
+            <div x-init="submitting = false"></div>
+            @endif
 
             @if(isset($rErrs['general']))
-            <div class="mb-4 p-3 rounded-xl bg-red-50 border border-red-200">
-                <p class="text-sm text-red-700 flex items-start gap-2">
-                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-sm"></i><span>{{ $rErrs['general'] }}</span>
+            <div class="mb-5 p-4 rounded-xl bg-red-50 border border-red-200 space-y-1.5">
+                @foreach($rErrs['general'] as $msg)
+                <p class="text-base text-red-700 flex items-start gap-2">
+                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-sm"></i><span>{{ $msg }}</span>
                 </p>
+                @endforeach
             </div>
             @endif
 
-            <div class="space-y-4" wire:loading.class="opacity-60 pointer-events-none" wire:target="createRegistrar">
+            @if(!$rOk)
+            {{-- Full-form loading overlay — appears the instant the button is clicked,
+                 before Livewire's round-trip even starts. Covers the whole scroll area
+                 so the user gets immediate visual feedback while Mail::send() runs. --}}
+            <div x-show="submitting" x-cloak
+                 class="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10"
+                 style="background:rgba(255,255,255,0.88);backdrop-filter:blur(2px);">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    <i class="fas fa-spinner animate-spin text-white text-xl"></i>
+                </div>
+                <div class="text-center">
+                    <p class="text-lg font-bold" style="color:#333333;">Creating Registrar Account…</p>
+                    <p class="text-sm font-medium mt-1" style="color:#6b6b6b;">Sending login credentials via email</p>
+                </div>
+            </div>
+            <div class="space-y-4" :class="submitting ? 'pointer-events-none select-none' : ''" style="transition: opacity .2s ease;" :style="submitting ? 'opacity:0.4' : 'opacity:1'"
+                 wire:loading.class="opacity-60 pointer-events-none" wire:target="createRegistrar">
 
-                {{-- Username --}}
-                <div>
-                    <p class="text-sm font-bold mb-1.5" style="color:#000000;">Username <span class="text-red-500">*</span></p>
-                    <div class="relative">
-                        <i class="fas fa-user absolute left-3.5 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#8a8a8a;"></i>
-                        <input wire:model="rUsername" wire:keydown.enter="createRegistrar"
-                               type="text" placeholder="e.g. registrar.juan" maxlength="50"
-                               autocomplete="off" spellcheck="false" autofocus
-                               class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['username']) ? 'border-red-400 bg-red-50' : '' }}"
-                               style="padding-left:2.4rem;">
+                <div class="rounded-xl border overflow-visible" style="border-color:#E5E5E5;">
+                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Personal Information</p>
                     </div>
-                    @if(isset($rErrs['username']))
-                    <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
-                        <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['username'] }}
-                    </p>
-                    @else
-                    <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Letters, numbers, dots, dashes, underscores only</p>
-                    @endif
+                    <div class="p-5 flex flex-col sm:flex-row gap-5">
+                        <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="rFn" type="text" placeholder="e.g. Juan"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['first_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($rErrs['first_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['first_name'] }}
+                                </p>
+                                @endif
+                            </div>
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="rLn" type="text" placeholder="e.g. dela Cruz"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['last_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($rErrs['last_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['last_name'] }}
+                                </p>
+                                @endif
+                            </div>
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
+                                <input wire:model.defer="rMn" type="text" placeholder="e.g. Santos"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($rErrs['middle_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['middle_name'] }}
+                                </p>
+                                @endif
+                            </div>
+                            <div class="relative" x-data="{ open: false, sfxOptions: [
+                                    { v: 'Jr.',   l: 'Junior' },
+                                    { v: 'Sr.',   l: 'Senior' },
+                                    { v: 'II',    l: 'II — the Second' },
+                                    { v: 'III',   l: 'III — the Third' },
+                                    { v: 'IV',    l: 'IV — the Fourth' },
+                                    { v: 'V',     l: 'V — the Fifth' },
+                                    { v: 'VI',    l: 'VI — the Sixth' },
+                                ] }" @click.away="open = false">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="text-red-400 font-normal">*</span></p>
+                                <div class="mu-sfx-field">
+                                    <button type="button" @click="open = !open"
+                                            class="mu-sfx-trigger w-full mu-smooth-input text-base flex items-center justify-between"
+                                            :class="open ? 'mu-sfx-trigger--open' : ''">
+                                        <span class="flex items-center gap-2 truncate" :class="'{{ $rSfx }}' === '' ? '' : ''">
+                                            <i class="fas fa-tag text-xs shrink-0" style="color:#7A3F91;"></i>
+                                            <span style="{{ $rSfx === '' ? 'color:#595959;font-weight:400;' : '' }}">{{ $rSfx !== '' ? $rSfx : 'None' }}</span>
+                                        </span>
+                                        <i class="fas fa-chevron-down text-xs transition-transform shrink-0" style="color:#7A3F91;" :class="open ? 'rotate-180' : ''"></i>
+                                    </button>
+                                    <div x-show="open" x-cloak
+                                         x-transition:enter="transition ease-out duration-100"
+                                         x-transition:enter-start="opacity-0 scale-95"
+                                         x-transition:enter-end="opacity-100 scale-100"
+                                         class="mu-sfx-panel">
+                                        <p class="mu-sfx-panel-title">Select Suffix</p>
+                                        <div class="mu-sfx-list">
+                                            <template x-for="opt in sfxOptions" :key="opt.v">
+                                                <button type="button"
+                                                        @click="$wire.set('rSfx', opt.v); open = false"
+                                                        class="mu-sfx-item"
+                                                        :class="'{{ $rSfx }}' === opt.v ? 'mu-sfx-item--sel' : ''">
+                                                    <span class="mu-sfx-item-code" x-text="opt.v"></span>
+                                                    <span class="mu-sfx-item-label" x-text="opt.l"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                        <button type="button" @click="$wire.set('rSfx', ''); open = false"
+                                                class="mu-sfx-panel-footer">
+                                            Optional — leave blank if none
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                {{-- Password (with show / hide) --}}
-                <div>
-                    <p class="text-sm font-bold mb-1.5" style="color:#000000;">Password <span class="text-red-500">*</span></p>
-                    <div class="relative">
-                        <i class="fas fa-lock absolute left-3.5 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#8a8a8a;"></i>
-                        <input wire:model="rPassword" wire:keydown.enter="createRegistrar"
-                               :type="showPw ? 'text' : 'password'" placeholder="Min. 8 characters" maxlength="64"
-                               autocomplete="new-password" spellcheck="false"
-                               class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['password']) ? 'border-red-400 bg-red-50' : '' }}"
-                               style="padding-left:2.4rem;padding-right:2.6rem;">
-                        <button type="button" @click="showPw = !showPw" tabindex="-1"
-                                class="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center transition hover:bg-black/5"
-                                :aria-label="showPw ? 'Hide password' : 'Show password'">
-                            <i class="fas text-sm" :class="showPw ? 'fa-eye-slash' : 'fa-eye'" style="color:#6b6b6b;"></i>
-                        </button>
+                {{-- ACCOUNT CREDENTIALS card --}}
+                <div class="rounded-xl border overflow-hidden" style="border-color:#E5E5E5;">
+                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Account Credentials</p>
                     </div>
-                    @if(isset($rErrs['password']))
-                    <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
-                        <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['password'] }}
-                    </p>
-                    @else
-                    <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">At least 8 characters</p>
-                    @endif
-                </div>
-
-                <div class="p-3 rounded-xl flex items-start gap-2.5" style="background:#fffbeb;border:1px solid #fde68a;">
-                    <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
-                    <p class="text-xs font-semibold leading-snug" style="color:#92400e;">
-                        No email is sent — give the username and password to the registrar directly.
-                    </p>
+                    <div class="p-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Username <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="rUsername" type="text"
+                                       placeholder="e.g. jdelacruz"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['username']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($rErrs['username']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['username'] }}
+                                </p>
+                                @else
+                                <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Letters, numbers, dots, dashes, underscores only</p>
+                                @endif
+                            </div>
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
+                                <input wire:model.defer="rEmail" type="email" placeholder="registrar@example.com"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['email']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($rErrs['email']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $rErrs['email'] }}
+                                </p>
+                                @else
+                                <p class="text-xs font-medium mt-1.5" style="color:#6b6b6b;">Login credentials will be sent here</p>
+                                @endif
+                            </div>
+                        </div>
+                        <div class="mt-4 p-4 rounded-xl flex items-start gap-2.5" style="background:#fffbeb;border:1px solid #fde68a;">
+                            <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                            <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
+                                A secure password will be <strong>auto-generated</strong> and sent to this email.
+                                The registrar logs in using their <strong>Username</strong>.
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="flex gap-3 pt-1">
-                    <button type="button" @click="$wire.closeModal(); muClosing = true"
-                            wire:loading.attr="disabled" wire:target="createRegistrar"
-                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-black/5 disabled:opacity-40"
+                    <button type="button"
+                            @click="if(!submitting){ $wire.closeModal(); muClosing = true; }"
+                            :disabled="submitting"
+                            :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
                             style="color:#000000;border-color:#E5E5E5;">
-                        Cancel
+                        <span>Cancel</span>
                     </button>
-                    <button type="button" wire:click="createRegistrar"
+                    {{-- Set submitting=true immediately on click so the overlay and
+                         disabled states fire before the Livewire round-trip begins —
+                         especially important because Mail::send() is synchronous and
+                         can take 1-3 s before the server responds. --}}
+                    <button wire:click="createRegistrar"
+                            @click="submitting = true"
                             wire:loading.attr="disabled" wire:target="createRegistrar"
-                            class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold text-white transition flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-70 disabled:cursor-wait"
+                            :disabled="submitting"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
                             style="background:#7A3F91;">
-                        <span wire:loading.remove wire:target="createRegistrar" class="flex items-center gap-2">
-                            <i class="fas fa-user-plus text-xs"></i> Create Registrar
-                        </span>
-                        <span wire:loading wire:target="createRegistrar" class="flex items-center gap-2">
-                            <i class="fas fa-spinner animate-spin text-xs"></i> Creating…
+                        <span class="flex items-center gap-2">
+                            <i class="fas fa-user-clock text-sm"></i> Create Registrar
                         </span>
                     </button>
                 </div>

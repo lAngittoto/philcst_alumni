@@ -35,6 +35,13 @@ new #[Layout('app')] class extends Component {
     // forward, or a brand-new code was just requested.
     public int $otpExpiresAtMs = 0;
 
+    // ── Resend cooldown (separate from the 10-min OTP expiry) ────────────
+    // Epoch ms when the "Request New Code" button becomes available again.
+    // Only RESEND_COOLDOWN_SECONDS (60s) after each send — the OTP itself
+    // still expires after 10 minutes, and the 3-sends-then-24-hour-lock
+    // security is untouched.
+    public int $resendAvailableAtMs = 0;
+
     // ── "Request New Code" lockout (Step 1 button) ───────────────────────
     // After MAX_RESEND_ATTEMPTS (3) sends within the current window, the
     // account is locked for RESEND_LOCK_MINUTES (24 hours). This is tracked
@@ -60,6 +67,7 @@ new #[Layout('app')] class extends Component {
     public bool   $showResendLockedModal = false;
 
     private const MAX_RESEND_ATTEMPTS   = 3;
+    private const RESEND_COOLDOWN_SECONDS = 60;
 
     // FIX: previously 30 minutes. To mirror the seriousness of 3 failed
     // "send verification code" attempts (mirrors the same 3x-then-lock
@@ -100,6 +108,7 @@ new #[Layout('app')] class extends Component {
     private function cacheOtpVerifiedKey(int $id): string     { return "fp_otp_verified:{$id}"; }
     private function cacheResendAttemptsKey(int $id): string  { return "fp_resend_attempts:{$id}"; }
     private function cacheResendLockKey(int $id): string      { return "fp_resend_locked:{$id}"; }
+    private function cacheResendCooldownKey(int $id): string  { return "fp_resend_cooldown:{$id}"; }
     private function rateLimitKey(): string                  { return 'fp_verify_' . request()->ip(); }
 
     private function clearAllErrors(): void
@@ -164,6 +173,13 @@ new #[Layout('app')] class extends Component {
     {
         $this->otpExpiresAtMs = $alumni->otp_expires_at
             ? $alumni->otp_expires_at->getTimestamp() * 1000
+            : 0;
+
+        // Resend cooldown comes from the server cache (not guessed on the
+        // front-end), so refresh / browser back-forward can't skip the 60s.
+        $cooldownUntil = cache()->get($this->cacheResendCooldownKey($alumni->id));
+        $this->resendAvailableAtMs = ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp())
+            ? (int) $cooldownUntil * 1000
             : 0;
     }
 
@@ -338,7 +354,7 @@ new #[Layout('app')] class extends Component {
 
         $this->reset([
             'studentId', 'email', 'otp', 'password', 'password_confirmation',
-            'otpSent', 'otpLocked', 'maskedEmail', 'showSuccessModal', 'otpExpiresAtMs',
+            'otpSent', 'otpLocked', 'maskedEmail', 'showSuccessModal', 'otpExpiresAtMs', 'resendAvailableAtMs',
         ]);
         $this->clearAllErrors();
         $this->step = 1;
@@ -703,6 +719,10 @@ new #[Layout('app')] class extends Component {
             // so the countdown the user sees is always a true 10:00.
             $alumni->update(['otp_expires_at' => $exactExpiry]);
 
+            // Start the 60-second resend cooldown for this send.
+            $cooldownUntil = now()->addSeconds(self::RESEND_COOLDOWN_SECONDS);
+            cache()->put($this->cacheResendCooldownKey($alumni->id), $cooldownUntil->getTimestamp(), $cooldownUntil);
+
             cache()->forget($this->cacheOtpAttemptsKey($alumni->id));
             cache()->forget($this->cacheOtpLockKey($alumni->id));
             cache()->forget($this->cacheOtpVerifiedKey($alumni->id));
@@ -799,6 +819,7 @@ new #[Layout('app')] class extends Component {
         $this->step                  = 3;
         $this->otp                   = '';
         $this->otpExpiresAtMs        = 0;
+        $this->resendAvailableAtMs   = 0;
         $this->successMessage        = 'Email verified! Please set your new password below.';
         $this->dispatch('otp-verified');
     }
@@ -821,6 +842,16 @@ new #[Layout('app')] class extends Component {
             session([self::SESSION_LOCKED_ID_KEY => $alumni->id]);
             $this->checkAndSyncSendLock();
             $this->showResendLockedModal = true;
+            return;
+        }
+
+        // 60-second cooldown between sends — enforced server-side too, so it
+        // can't be bypassed by poking the button from the browser console.
+        $cooldownUntil = cache()->get($this->cacheResendCooldownKey($alumni->id));
+        if ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp()) {
+            $wait = (int) $cooldownUntil - now()->getTimestamp();
+            $this->resendAvailableAtMs = (int) $cooldownUntil * 1000;
+            $this->errorMessage = "Please wait {$wait} second(s) before requesting a new code.";
             return;
         }
 
@@ -973,6 +1004,7 @@ new #[Layout('app')] class extends Component {
         $this->successMessage = '';
         $this->errorMessage   = 'For your security, this password reset session has expired. Please verify your identity again.';
         $this->otpExpiresAtMs = 0;
+        $this->resendAvailableAtMs = 0;
         $this->step            = 1;
 
         // FIX: same bug as resetToStep1()/mount() — don't proactively
@@ -1281,7 +1313,7 @@ new #[Layout('app')] class extends Component {
 
             {{-- ══ STEP 2: OTP ══ --}}
             @if ($step == 2)
-                <div class="space-y-5" x-data="otpTimer($wire.entangle('otpExpiresAtMs'))">
+                <div class="space-y-5" x-data="otpTimer($wire.entangle('otpExpiresAtMs'), $wire.entangle('resendAvailableAtMs'), $wire.entangle('otpLocked'))">
                     <div>
                         <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Verify Your Code</h2>
                         <p class="text-sm mt-1" style="color: #555555;">A 6-digit code was sent to <strong style="color: #7A3F91;">{{ $maskedEmail }}</strong>. Enter it below and click Confirm.</p>
@@ -1350,7 +1382,7 @@ new #[Layout('app')] class extends Component {
                             class="w-full py-3 rounded-lg font-semibold text-sm border transition-all flex items-center justify-center gap-2"
                             :style="canResend ? 'background:#FFFFFF; border-color:#7A3F91; color:#7A3F91;' : 'background:#F5F5F5; border-color:#E8E8E8; color:#999999;'">
                         <span wire:loading.remove wire:target="resendOtp">
-                            <span x-show="!canResend" wire:ignore>Resend in <span class="font-bold" x-text="formattedTime"></span></span>
+                            <span x-show="!canResend" wire:ignore>Resend in <span class="font-bold" x-text="resendFormattedTime"></span></span>
                             <span x-show="canResend">Request New Code</span>
                         </span>
                         <span wire:loading wire:target="resendOtp" x-cloak class="flex items-center gap-1.5">
@@ -1634,9 +1666,12 @@ new #[Layout('app')] class extends Component {
             }
         }));
 
-        Alpine.data('otpTimer', (expiresAtMs) => ({
+        Alpine.data('otpTimer', (expiresAtMs, resendAtMs, otpLocked) => ({
             expiresAtMs,
+            resendAtMs,
+            otpLocked,
             seconds: 0,
+            resendSeconds: 0,
             expired: true,
             canResend: true,
             _interval: null,
@@ -1647,28 +1682,47 @@ new #[Layout('app')] class extends Component {
                 return `${m}:${s}`;
             },
 
+            get resendFormattedTime() {
+                const m = String(Math.floor(this.resendSeconds / 60)).padStart(2, '0');
+                const s = String(this.resendSeconds % 60).padStart(2, '0');
+                return `${m}:${s}`;
+            },
+
             init() {
                 this.recalc();
                 this._interval = setInterval(() => this.recalc(), 500);
                 this.$watch('expiresAtMs', () => this.recalc());
+                this.$watch('resendAtMs', () => this.recalc());
+                this.$watch('otpLocked', () => this.recalc());
             },
 
             recalc() {
+                // "Code Expires In" — still the real 10-minute OTP window.
                 if (!this.expiresAtMs) {
-                    this.seconds   = 0;
-                    this.expired   = true;
-                    this.canResend = true;
-                    return;
-                }
-                const remaining = Math.floor((this.expiresAtMs - Date.now()) / 1000);
-                if (remaining > 0) {
-                    this.seconds   = remaining;
-                    this.expired   = false;
-                    this.canResend = false;
+                    this.seconds = 0;
+                    this.expired = true;
                 } else {
-                    this.seconds   = 0;
-                    this.expired   = true;
-                    this.canResend = true;
+                    const remaining = Math.floor((this.expiresAtMs - Date.now()) / 1000);
+                    if (remaining > 0) {
+                        this.seconds = remaining;
+                        this.expired = false;
+                    } else {
+                        this.seconds = 0;
+                        this.expired = true;
+                    }
+                }
+
+                // "Resend in" — only the 60-second cooldown after each send.
+                // A wrong-code lockout (otpLocked) still has to wait for the
+                // OTP to expire first, same as before.
+                const resendRemaining = this.resendAtMs
+                    ? Math.ceil((this.resendAtMs - Date.now()) / 1000)
+                    : 0;
+                this.resendSeconds = resendRemaining > 0 ? resendRemaining : 0;
+                this.canResend = this.resendSeconds === 0 && (!this.otpLocked || this.expired);
+                if (!this.canResend && this.resendSeconds === 0) {
+                    // Locked + still within the OTP window: show the OTP countdown.
+                    this.resendSeconds = this.seconds;
                 }
             },
 
