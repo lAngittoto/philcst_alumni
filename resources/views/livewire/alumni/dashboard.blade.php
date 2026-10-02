@@ -399,11 +399,19 @@ new class extends Component {
         grid-template-columns: 300px 1fr;
         gap: 1rem;
         align-items: stretch;
+        max-height: min(680px, calc(100vh - 10rem));
+    }
+    @media (max-width: 1279px) {
+        .dash-main-grid {
+            grid-template-columns: 260px 1fr;
+            max-height: min(620px, calc(100vh - 10rem));
+        }
     }
     @media (max-width: 1023px) {
         .dash-main-grid {
             grid-template-columns: 1fr;
             gap: 0.85rem;
+            max-height: none;
         }
     }
 
@@ -411,11 +419,28 @@ new class extends Component {
     .dash-profile-col {
         display: flex;
         flex-direction: column;
+        min-height: 0;
     }
     .dash-profile-card {
         flex: 1;
         display: flex;
         flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+    /* photo banner: shrinks on shorter viewports */
+    .dash-profile-photo {
+        height: clamp(160px, 28vh, 260px);
+    }
+    @media (max-width: 1023px) {
+        .dash-profile-photo {
+            height: 200px;
+        }
+    }
+    @media (max-width: 639px) {
+        .dash-profile-photo {
+            height: 200px;
+        }
     }
 
     /* ── Stat grid: 2×2 equal height on desktop, 1-col on phone ── */
@@ -425,12 +450,15 @@ new class extends Component {
         grid-template-rows: 1fr 1fr;
         gap: 0.75rem;
         height: 100%;
+        min-height: 0;
     }
     .dash-stat-grid .dash-stat-card {
         height: 100%;
         display: flex;
         flex-direction: column;
         justify-content: center;
+        min-height: 0;
+        overflow: hidden;
     }
     @media (max-width: 639px) {
         .dash-stat-grid {
@@ -517,10 +545,10 @@ new class extends Component {
 </style>
 
 {{-- ═══ DASHBOARD ROOT ════════════════════════════════════════════ --}}
-<div class="px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto">
+<div class="px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto min-h-[calc(100vh-4rem)] flex flex-col">
 
     {{-- ═══ PAGE HEADER ════════════════════════════════════════════ --}}
-    <div class="flex items-center gap-4 mb-5 flex-wrap">
+    <div class="flex items-center gap-4 mb-5 flex-wrap shrink-0">
         <div class="w-11 h-11 rounded-2xl flex items-center justify-center shadow-md shrink-0 bg-[#7A3F91]">
             <i class="fas fa-graduation-cap text-white text-base"></i>
         </div>
@@ -548,6 +576,7 @@ new class extends Component {
     {{-- ═══ MAIN GRID ══════════════════════════════════════════════ --}}
     @php $photoUrl = $this->getProfilePhotoUrl(); @endphp
 
+    <div class="flex-1 flex flex-col justify-center">
     <div class="dash-main-grid">
 
         {{-- ══ LEFT: Profile Card ═══ --}}
@@ -559,7 +588,7 @@ new class extends Component {
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View My Profile</span>
 
                 {{-- Photo banner --}}
-                <div class="relative w-full overflow-hidden shrink-0 h-[300px] sm:h-[220px] bg-[#EDE0F5]">
+                <div class="dash-profile-photo relative w-full overflow-hidden shrink-0 bg-[#EDE0F5]">
                     <img src="{{ $photoUrl }}"
                          alt="{{ $alumniFirstName }}"
                          class="w-full h-full object-cover object-[center_25%]"
@@ -718,6 +747,7 @@ new class extends Component {
 
         </div>{{-- end stat grid --}}
     </div>{{-- end main grid --}}
+    </div>{{-- end flex-1 centering wrapper --}}
 
 </div>
 
