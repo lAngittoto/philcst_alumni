@@ -70,7 +70,8 @@ new class extends Component {
      *  applyProfileCompletionFilter() and user-management_blade.php's
      *  computed_status — kept in sync so the dashboard counts, the alumni
      *  list filter, and the per-row badge all agree, instead of relying on
-     *  the profile_completed DB flag which can go stale. date_of_birth is a
+     *  the profile_completed DB flag which can go stale. Parents' middle names
+     *  are optional, so they're NOT part of the required set. date_of_birth is a
      *  DATE column, so only whereNotNull applies to it — comparing a DATE
      *  column to '' throws in MySQL strict mode. Returns the query builder
      *  so callers can chain ->count(), ->get(), etc. */
@@ -78,8 +79,8 @@ new class extends Component {
     {
         $required = [
             'email', 'gender', 'contact_number',
-            'father_last_name', 'father_given_name', 'father_middle_name',
-            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'father_last_name', 'father_given_name',
+            'mother_last_name', 'mother_given_name',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
         ];
 
@@ -108,8 +109,8 @@ new class extends Component {
 
         $required = [
             'email', 'gender', 'date_of_birth', 'contact_number',
-            'father_last_name', 'father_given_name', 'father_middle_name',
-            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'father_last_name', 'father_given_name',
+            'mother_last_name', 'mother_given_name',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
         ];
         foreach ($required as $field) {

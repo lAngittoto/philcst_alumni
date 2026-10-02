@@ -393,62 +393,143 @@ new class extends Component {
         .close-btn-wrap:hover .close-tooltip { opacity: 1; }
     }
 
-    /* ── Equal-height main grid ── */
+    /* ══════════════════════════════════════════════════════════════
+       PAGE SHELL — centers the whole dashboard.
+       • Horizontal: always centered, capped width so cards never
+         stretch edge-to-edge on big monitors.
+       • Vertical: centered on tablet/desktop (min-height fills the
+         viewport). Adjust --dash-offset if your top bar is taller/shorter.
+       • .dash-container is a CSS container, so the layout reacts to
+         the REAL available width (sidebar open/collapsed included),
+         not just the browser window width.
+       ══════════════════════════════════════════════════════════════ */
+    .dash-shell {
+        --dash-offset: 5rem;
+        width: 100%;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 1.25rem 1rem 1.75rem;
+    }
+    .dash-container {
+        width: 100%;
+        max-width: 1200px;
+        margin-inline: auto;
+        container-type: inline-size;
+        container-name: dash;
+    }
+    @media (min-width: 640px) {
+        .dash-shell { padding: 1.5rem 1.75rem 2rem; }
+    }
+    @media (min-width: 768px) {
+        .dash-shell {
+            justify-content: center;
+            min-height: calc(100vh - var(--dash-offset));
+            min-height: calc(100dvh - var(--dash-offset));
+        }
+    }
+    @media (min-width: 1024px) {
+        .dash-shell { padding: 2rem 2.5rem; }
+    }
+    @media (min-width: 1700px) {
+        .dash-container { max-width: 1320px; }
+    }
+
+    /* ── Main grid: phone/tablet = stacked, desktop = profile | stats ── */
     .dash-main-grid {
         display: grid;
-        grid-template-columns: 300px 1fr;
-        gap: 1rem;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.85rem;
         align-items: stretch;
     }
-    @media (max-width: 1023px) {
+    @container dash (min-width: 960px) {
         .dash-main-grid {
-            grid-template-columns: 1fr;
-            gap: 0.85rem;
+            grid-template-columns: minmax(300px, 330px) minmax(0, 1fr);
+            gap: 1.25rem;
         }
     }
 
-    /* ── Profile card fills height ── */
+    /* ── Profile card ── */
     .dash-profile-col {
         display: flex;
         flex-direction: column;
+        min-width: 0;
     }
     .dash-profile-card {
         flex: 1;
         display: flex;
         flex-direction: column;
+        min-width: 0;
+    }
+    .dash-profile-card .dash-profile-photo {
+        position: relative;
+        flex: none;
+        width: 100%;
+        height: 260px;
+        height: clamp(220px, 58cqi, 300px);
+    }
+    .dash-photo-img,
+    .dash-photo-fallback {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+    }
+    /* Tablet: photo on the left, details on the right */
+    @container dash (min-width: 600px) and (max-width: 959.98px) {
+        .dash-profile-card { flex-direction: row; }
+        .dash-profile-card .dash-profile-photo {
+            width: 42%;
+            height: auto;
+            min-height: 300px;
+        }
+        .dash-profile-card > div:last-child { min-width: 0; }
+    }
+    /* Desktop: compact photo banner on top of the details */
+    @container dash (min-width: 960px) {
+        .dash-profile-card .dash-profile-photo { height: 230px; }
     }
 
-    /* ── Stat grid: 2×2 equal height on desktop, 1-col on phone ── */
+    /* ── Stat grid: 1 col phone → 2×2 tablet/desktop, equal heights ── */
     .dash-stat-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        grid-template-rows: 1fr 1fr;
-        gap: 0.75rem;
-        height: 100%;
+        grid-template-columns: minmax(0, 1fr);
+        grid-auto-rows: minmax(140px, auto);
+        gap: 0.7rem;
+        min-width: 0;
+    }
+    @container dash (min-width: 520px) {
+        .dash-stat-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-auto-rows: minmax(160px, 1fr);
+            gap: 0.85rem;
+        }
+    }
+    @container dash (min-width: 960px) {
+        .dash-stat-grid {
+            height: 100%;
+            gap: 1.25rem;
+        }
     }
     .dash-stat-grid .dash-stat-card {
         height: 100%;
         display: flex;
         flex-direction: column;
         justify-content: center;
+        min-width: 0;
+        padding: 1.1rem !important;
     }
-    @media (max-width: 639px) {
-        .dash-stat-grid {
-            grid-template-columns: 1fr;
-            grid-template-rows: none;
-            gap: 0.65rem;
-        }
-        .dash-stat-grid .dash-stat-card {
-            padding: 1rem !important;
-        }
-        .dash-stat-grid .dash-stat-card .stat-big-num {
-            font-size: 2.1rem !important;
-        }
+    @container dash (min-width: 520px) {
+        .dash-stat-grid .dash-stat-card { padding: 1.25rem !important; }
     }
-    @media (min-width: 640px) and (max-width: 1023px) {
-        .dash-stat-grid .dash-stat-card .stat-big-num {
-            font-size: 2.4rem !important;
-        }
+    @container dash (min-width: 960px) {
+        .dash-stat-grid .dash-stat-card { padding: 1.5rem !important; }
+    }
+    .dash-stat-card .stat-big-num {
+        font-size: 2rem;
+        font-size: clamp(2rem, 3.7cqi, 3rem);
+        line-height: 1;
     }
 
     /* ── Dashboard card click spinner ───────────────────────────
@@ -517,7 +598,8 @@ new class extends Component {
 </style>
 
 {{-- ═══ DASHBOARD ROOT ════════════════════════════════════════════ --}}
-<div class="px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto">
+<div class="dash-shell">
+<div class="dash-container">
 
     {{-- ═══ PAGE HEADER ════════════════════════════════════════════ --}}
     <div class="flex items-center gap-4 mb-5 flex-wrap">
@@ -559,12 +641,12 @@ new class extends Component {
                 <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View My Profile</span>
 
                 {{-- Photo banner --}}
-                <div class="relative w-full overflow-hidden shrink-0 h-[300px] sm:h-[220px] bg-[#EDE0F5]">
+                <div class="dash-profile-photo relative w-full overflow-hidden shrink-0 bg-[#EDE0F5]">
                     <img src="{{ $photoUrl }}"
                          alt="{{ $alumniFirstName }}"
-                         class="w-full h-full object-cover object-[center_25%]"
+                         class="dash-photo-img w-full h-full object-cover object-[center_25%]"
                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                    <div class="w-full h-full items-center justify-center font-black text-white hidden text-[5rem] bg-[#7A3F91]" style="display:none;">
+                    <div class="dash-photo-fallback w-full h-full items-center justify-center font-black text-white hidden text-[5rem] bg-[#7A3F91]" style="display:none;">
                         {{ strtoupper(substr($alumniFirstName, 0, 1)) ?: '?' }}
                     </div>
                     <div class="absolute inset-0" style="background:linear-gradient(to bottom, transparent 35%, rgba(0,0,0,.65) 100%);"></div>
@@ -639,7 +721,7 @@ new class extends Component {
                     </div>
                     <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-blue-700 border border-blue-200 bg-blue-50 text-[0.7rem] sm:text-[0.75rem]">Upcoming</span>
                 </div>
-                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ $upcomingEvents }}</p>
+                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight">{{ $upcomingEvents }}</p>
                 <p class="text-gray-900 font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Upcoming Events</p>
             </button>
 
@@ -655,7 +737,7 @@ new class extends Component {
                     </div>
                     <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-emerald-700 border border-emerald-200 bg-emerald-50 text-[0.7rem] sm:text-[0.75rem]">Total</span>
                 </div>
-                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ $totalEvents }}</p>
+                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight">{{ $totalEvents }}</p>
                 <p class="text-gray-900 font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Total Events</p>
             </button>
 
@@ -671,7 +753,7 @@ new class extends Component {
                     </div>
                     <span class="font-semibold px-2.5 py-1 rounded-full uppercase text-amber-700 border border-amber-200 bg-amber-50 text-[0.7rem] sm:text-[0.75rem]">Jobs</span>
                 </div>
-                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight text-[2.6rem] sm:text-[3rem]">{{ $activeJobs }}</p>
+                <p class="stat-big-num text-gray-900 font-extrabold leading-none tracking-tight">{{ $activeJobs }}</p>
                 <p class="text-gray-900 font-semibold mt-2 text-[0.98rem] sm:text-[1.05rem]">Active Job Posts</p>
             </button>
 
@@ -699,7 +781,7 @@ new class extends Component {
                     <i class="fas fa-chevron-right text-gray-700 opacity-40 text-base mt-1"></i>
                 </div>
                 @if($hasEmployment && $empCard)
-                    <p class="stat-big-num font-extrabold text-gray-900 text-[2.6rem] sm:text-[3rem] leading-none tracking-tight truncate">{{ $empCard[0] }}</p>
+                    <p class="stat-big-num font-extrabold text-gray-900 leading-none tracking-tight truncate">{{ $empCard[0] }}</p>
                     <p class="font-semibold mt-2 text-gray-700 text-[0.98rem] sm:text-[1.05rem]">Employment Status</p>
                     @if($jobTitle)
                         <p class="font-semibold mt-1 truncate uppercase text-[0.8rem] sm:text-[0.82rem] text-gray-700">
@@ -708,7 +790,7 @@ new class extends Component {
                         </p>
                     @endif
                 @else
-                    <p class="stat-big-num font-extrabold leading-none text-red-600 text-[2.6rem] sm:text-[3rem] tracking-tight">No Record</p>
+                    <p class="stat-big-num font-extrabold leading-none text-red-600 tracking-tight">No Record</p>
                     <p class="font-semibold mt-2 text-gray-700 text-[0.98rem] sm:text-[1.05rem]">Employment Status</p>
                     <p class="font-semibold mt-1 flex items-center gap-1 text-red-600 text-[0.85rem]">
                         <i class="fas fa-plus-circle"></i> Add record now
@@ -719,7 +801,8 @@ new class extends Component {
         </div>{{-- end stat grid --}}
     </div>{{-- end main grid --}}
 
-</div>
+</div>{{-- end container --}}
+</div>{{-- end shell --}}
 
 
 {{-- ════════════════════════════════════════════════════════════════
