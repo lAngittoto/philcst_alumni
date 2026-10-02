@@ -793,6 +793,55 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
+    //  Keep the notification poll OUT of the way of real navigation / actions.
+    //  Every poll is a full Laravel "web" request (session read + session
+    //  write). When one lands at the exact moment a sidebar click
+    //  (wire:navigate) or a Livewire action is in flight, 2-3 requests hit the
+    //  same session at once — on file/database session drivers that race can
+    //  drop the auth session and the next response bounces to /login, which
+    //  looks exactly like a random "auto logout" on click. So: no poll while a
+    //  navigation or a Livewire request is pending. Everything here is
+    //  self-expiring, so the poll can never get stuck switched off.
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__notifNavUntil  = 0;
+    window.__notifLwPending = 0;
+    window.__notifPollBlocked = function () {
+        if (window.__notifPollSuspended === true) return true;
+        if (Date.now() < window.__notifNavUntil)  return true;
+        if (window.__notifLwPending > 0)          return true;
+        try {
+            if (window.Alpine && typeof Alpine.$data === 'function') {
+                var d = Alpine.$data(document.body);
+                if (d && d.navClickedRoute !== null && d.navClickedRoute !== undefined) return true;
+            }
+        } catch (e) { /* ignore */ }
+        return false;
+    };
+    document.addEventListener('livewire:navigate', function () {
+        window.__notifNavUntil = Date.now() + 8000;
+    });
+    document.addEventListener('livewire:navigated', function () {
+        window.__notifNavUntil = 0;
+    });
+    document.addEventListener('livewire:init', function () {
+        try {
+            Livewire.hook('commit', function (ctx) {
+                window.__notifLwPending++;
+                var done = false;
+                function fin() {
+                    if (done) return;
+                    done = true;
+                    window.__notifLwPending = Math.max(0, window.__notifLwPending - 1);
+                }
+                setTimeout(fin, 15000); // safety valve
+                if (ctx && typeof ctx.respond === 'function') ctx.respond(fin);
+                if (ctx && typeof ctx.succeed === 'function') ctx.succeed(fin);
+                if (ctx && typeof ctx.fail    === 'function') ctx.fail(fin);
+            });
+        } catch (e) { /* hook API differs — nav guard above still applies */ }
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
     //  STORE FACTORY
     // ─────────────────────────────────────────────────────────────────────────
     window.__makeNotifsStore = function () {
@@ -815,7 +864,7 @@
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
                 this._pollTimer = setInterval(function () {
-                    if (window.__notifPollSuspended) return; // paused e.g. during a photo save
+                    if (window.__notifPollBlocked && window.__notifPollBlocked()) return; // paused during photo save / navigation / Livewire requests
                     if (document.hidden) return;             // don't poll from background tabs
                     self._fetch();
                 }, 5000);

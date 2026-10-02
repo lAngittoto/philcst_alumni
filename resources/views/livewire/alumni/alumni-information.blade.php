@@ -30,8 +30,13 @@ new class extends Component {
     // property, so a field only unlocks by staying genuinely empty.
     public bool $genderLocked = false;
     public bool $dobLocked    = false;
-    public bool $fatherLocked = false;
-    public bool $motherLocked = false;
+
+    // Parents' names are OPTIONAL. Each individual name field locks the moment
+    // it has a value on record (computed from the DB at mount() and refreshed
+    // after every save). A field that is still empty stays editable so the
+    // alumni can add it later; once filled it can never be changed again.
+    public array $lockedFields = [];
+
     public bool $mottoLocked  = false;
 
     // Same 'motto' column the Yearbook page reads/writes — editing it here
@@ -124,6 +129,14 @@ new class extends Component {
         ];
     }
 
+    private function parentFields(): array
+    {
+        return [
+            'father_last_name', 'father_given_name', 'father_middle_name', 'father_suffix',
+            'mother_last_name',  'mother_given_name',  'mother_middle_name',
+        ];
+    }
+
     // ══════════ MOUNT ══════════
     public function mount(): void
     {
@@ -193,12 +206,10 @@ new class extends Component {
         // the field first.
         $this->genderLocked = !empty($alumni->gender);
         $this->dobLocked    = !empty($alumni->date_of_birth);
-        $this->fatherLocked = !empty($alumni->father_last_name)
-                            && !empty($alumni->father_given_name)
-                            && !empty($alumni->father_middle_name);
-        $this->motherLocked = !empty($alumni->mother_last_name)
-                            && !empty($alumni->mother_given_name)
-                            && !empty($alumni->mother_middle_name);
+        $this->lockedFields = array_values(array_filter(
+            $this->parentFields(),
+            fn($f) => trim((string)($alumni->$f ?? '')) !== ''
+        ));
 
         $this->dswd_household_no    = $alumni->dswd_household_no    ?? '';
         $this->address_street       = $alumni->address_street       ?? '';
@@ -246,20 +257,6 @@ new class extends Component {
         return (int) ceil(now()->diffInSeconds($unlockAt) / 86400);
     }
 
-    public function getCanEditProfileProperty(): bool
-    {
-        if (!$this->hasProfileChangedAtColumn || !$this->profile_changed_at) return true;
-        return \Carbon\Carbon::parse($this->profile_changed_at)->addDays(30)->isPast();
-    }
-
-    public function getProfileCooldownDaysLeftProperty(): int
-    {
-        if (!$this->hasProfileChangedAtColumn || !$this->profile_changed_at) return 0;
-        $unlockAt = \Carbon\Carbon::parse($this->profile_changed_at)->addDays(30);
-        if ($unlockAt->isPast()) return 0;
-        return (int) ceil(now()->diffInSeconds($unlockAt) / 86400);
-    }
-
     // ── Live "has anything actually changed?" check used to enable/disable
     //    the Save button in real time. Same comparison saveProfile() uses
     //    server-side (case-insensitive, trimmed) so re-typing the exact
@@ -275,30 +272,10 @@ new class extends Component {
         return false;
     }
 
-    // ══════════ EMPLOYMENT COOLDOWN ══════════
-    public function getCanEditEmploymentProperty(): bool
-    {
-        if (!$this->employment_changed_at) return true;
-        return \Carbon\Carbon::parse($this->employment_changed_at)->addDays(30)->isPast();
-    }
-
-    public function getEmploymentCooldownDaysLeftProperty(): int
-    {
-        if (!$this->employment_changed_at) return 0;
-        $unlockAt = \Carbon\Carbon::parse($this->employment_changed_at)->addDays(30);
-        if ($unlockAt->isPast()) return 0;
-        return (int) ceil(now()->diffInSeconds($unlockAt) / 86400);
-    }
-
     // ══════════ PROFILE ACTIONS ══════════
     public function startEditingProfile(): void
     {
         $this->errorMessage = $this->successMessage = '';
-
-        if ($this->profileComplete && !$this->canEditProfile) {
-            $this->dispatch('show-toast', type: 'error', message: "You can only update your profile once every 30 days. Please try again in {$this->profileCooldownDaysLeft} day(s).");
-            return;
-        }
 
         $keys = $this->editableKeys();
         $this->snapshot = array_combine($keys, array_map(fn($k) => $this->$k, $keys));
@@ -317,28 +294,23 @@ new class extends Component {
     {
         $this->errorMessage = $this->successMessage = '';
 
-        if ($this->profileComplete && !$this->canEditProfile) {
-            $this->errorMessage = "You can only update your profile once every 30 days. Please try again in {$this->profileCooldownDaysLeft} day(s).";
-            $this->dispatch('show-toast', type: 'error', message: $this->errorMessage);
-            return;
-        }
-
         // Locked fields can never be part of an update — reset them to the
         // originally-loaded value regardless of what the request sent, so
         // a locked field can't be changed even by tampering with the
         // underlying Livewire request directly.
         if ($this->genderLocked) $this->gender        = $this->snapshot['gender']        ?? $this->gender;
         if ($this->dobLocked)    $this->date_of_birth = $this->snapshot['date_of_birth'] ?? $this->date_of_birth;
-        if ($this->fatherLocked) {
-            $this->father_last_name   = $this->snapshot['father_last_name']   ?? $this->father_last_name;
-            $this->father_given_name  = $this->snapshot['father_given_name']  ?? $this->father_given_name;
-            $this->father_middle_name = $this->snapshot['father_middle_name'] ?? $this->father_middle_name;
-            $this->father_suffix      = $this->snapshot['father_suffix']      ?? $this->father_suffix;
-        }
-        if ($this->motherLocked) {
-            $this->mother_last_name   = $this->snapshot['mother_last_name']   ?? $this->mother_last_name;
-            $this->mother_given_name  = $this->snapshot['mother_given_name']  ?? $this->mother_given_name;
-            $this->mother_middle_name = $this->snapshot['mother_middle_name'] ?? $this->mother_middle_name;
+
+        // Parents' names: any name that already has a value in the DATABASE is
+        // permanently locked. Read straight from the DB (not from the
+        // client-side snapshot/lock list) so it can't be bypassed by
+        // tampering with the Livewire request.
+        $onRecord = DB::table('alumni')->where('id', $this->alumniId)->first($this->parentFields());
+        if ($onRecord) {
+            foreach ($this->parentFields() as $f) {
+                $v = trim((string)($onRecord->$f ?? ''));
+                if ($v !== '') $this->$f = $v;
+            }
         }
         if ($this->mottoLocked) $this->motto = $this->snapshot['motto'] ?? $this->motto;
 
@@ -373,13 +345,13 @@ new class extends Component {
                 'email'                 => ['required', 'max:255', 'unique:alumni,email,' . $this->alumniId, 'regex:/^[a-zA-Z0-9._%+\-]+@gmail\.com$/i'],
                 'gender'               => 'required|string|in:Male,Female',
                 'date_of_birth'        => 'required|date|before:today',
-                'father_last_name'     => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
-                'father_given_name'    => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
-                'father_middle_name'   => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'father_last_name'     => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'father_given_name'    => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'father_middle_name'   => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'father_suffix'        => ['nullable', 'string', 'max:20', 'regex:' . self::NAME_REGEX],
-                'mother_last_name'     => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
-                'mother_given_name'    => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
-                'mother_middle_name'   => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'mother_last_name'     => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'mother_given_name'    => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'mother_middle_name'   => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'dswd_household_no'    => 'nullable|string|max:50',
                 'address_street'       => 'required|string|max:255',
                 'address_barangay'     => ['required', 'string', 'max:255', 'regex:' . self::NAME_REGEX],
@@ -395,18 +367,12 @@ new class extends Component {
                 'gender.required'               => 'Please select your sex/gender.',
                 'date_of_birth.required'        => 'Birth date is required.',
                 'date_of_birth.before'          => 'Birth date must be in the past.',
-                'father_last_name.required'     => "Father's last name is required.",
                 'father_last_name.regex'        => "Father's last name must not contain numbers.",
-                'father_given_name.required'    => "Father's given name is required.",
                 'father_given_name.regex'       => "Father's given name must not contain numbers.",
-                'father_middle_name.required'   => "Father's middle name is required.",
                 'father_middle_name.regex'      => "Father's middle name must not contain numbers.",
                 'father_suffix.regex'           => "Father's suffix must not contain numbers.",
-                'mother_last_name.required'     => "Mother's last name is required.",
                 'mother_last_name.regex'        => "Mother's last name must not contain numbers.",
-                'mother_given_name.required'    => "Mother's given name is required.",
                 'mother_given_name.regex'       => "Mother's given name must not contain numbers.",
-                'mother_middle_name.required'   => "Mother's middle name is required.",
                 'mother_middle_name.regex'      => "Mother's middle name must not contain numbers.",
                 'address_street.required'       => 'Street is required.',
                 'address_barangay.required'     => 'Barangay is required.',
@@ -429,10 +395,6 @@ new class extends Component {
             $profileComplete =
                 !empty($this->email)
                 && !empty($this->gender) && !empty($this->date_of_birth)
-                && !empty($this->father_last_name) && !empty($this->father_given_name)
-                && !empty($this->father_middle_name)
-                && !empty($this->mother_last_name) && !empty($this->mother_given_name)
-                && !empty($this->mother_middle_name)
                 && !empty($this->address_street) && !empty($this->address_barangay)
                 && !empty($this->address_municipality) && !empty($this->address_province)
                 && !empty($this->contact_number);
@@ -470,6 +432,12 @@ new class extends Component {
             }
 
             DB::table('alumni')->where('id', $this->alumniId)->update($updateData);
+
+            // Any parent name that now has a value is locked immediately.
+            $this->lockedFields = array_values(array_filter(
+                $this->parentFields(),
+                fn($f) => trim((string)$this->$f) !== ''
+            ));
 
             $this->profileComplete = $profileComplete;
             $this->editingProfile  = false;
@@ -841,11 +809,6 @@ new class extends Component {
     {
         $this->errorMessage = $this->successMessage = '';
 
-        if ($this->hasEmploymentRecord && !$this->canEditEmployment) {
-            $this->dispatch('show-toast', type: 'error', message: "You can only update your employment info once every 30 days. Please try again in {$this->employmentCooldownDaysLeft} day(s).");
-            return;
-        }
-
         $this->employmentSnapshot = [];
         foreach (self::EMP_SNAP_KEYS as $k) { $this->employmentSnapshot[$k] = $this->$k; }
         $this->editingEmployment = true;
@@ -971,12 +934,6 @@ new class extends Component {
     public function saveEmployment(): void
     {
         $this->errorMessage = $this->successMessage = '';
-
-        if ($this->hasEmploymentRecord && !$this->canEditEmployment) {
-            $this->errorMessage = "You can only update your employment info once every 30 days. Please try again in {$this->employmentCooldownDaysLeft} day(s).";
-            $this->dispatch('show-toast', type: 'error', message: $this->errorMessage);
-            return;
-        }
 
         if ($this->trackingId !== 0 && !$this->hasEmploymentChanged()) {
             $this->dispatch('show-toast', type: 'error', message: 'No changes were made. Please edit a field before saving.');
@@ -1762,12 +1719,6 @@ function phAddress(initial) {
         </span>
     </div>
     @endif
-    @if($profileComplete && !$editingProfile && !$this->canEditProfile)
-        <div class="rounded-xl px-4 py-2 text-xs border bg-gray-50 text-gray-700 border-gray-200 flex items-center gap-2 flex-shrink-0">
-            <i class="fas fa-lock flex-shrink-0"></i>
-            <span class="font-semibold">Profile is locked. You can update it again in {{ $this->profileCooldownDaysLeft }} day(s).</span>
-        </div>
-    @endif
 
     {{-- ══ CONTENT BLOCK ══ --}}
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
@@ -1860,7 +1811,7 @@ function phAddress(initial) {
                         </div>
                     </div>
 
-                    {{-- Permanent Address --}}
+                    {{-- Current Address --}}
                     <div class="ai-card"
                          x-data="phAddress({
                              province: @js($address_province),
@@ -1868,7 +1819,7 @@ function phAddress(initial) {
                              barangay: @js($address_barangay),
                          })" x-init="init()">
                         <div class="ai-card-header">
-                            <div class="ai-card-header-title"><i class="fas fa-location-dot" style="color:#7A3F91 !important;"></i><p>Permanent Address</p></div>
+                            <div class="ai-card-header-title"><i class="fas fa-location-dot" style="color:#7A3F91 !important;"></i><p>Current Address</p></div>
                             @if($editingProfile)
                                 <div class="flex items-center gap-3">
                                     <p class="text-[10px] font-semibold text-[#333333] flex items-center gap-1" x-show="loading">
@@ -2031,12 +1982,12 @@ function phAddress(initial) {
                     {{-- Father's Name --}}
                     <div class="ai-card">
                         <div class="ai-card-header">
-                            <div class="ai-card-header-title"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p> @if($fatherLocked)<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
+                            <div class="ai-card-header-title"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p> @if(in_array('father_last_name', $lockedFields, true) && in_array('father_given_name', $lockedFields, true) && in_array('father_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
                         </div>
                         <div class="ai-card-body grid grid-cols-3 gap-1.5">
                             <div class="ai-cell text-center">
-                                <p class="field-label">Last Name @if($editingProfile && !$fatherLocked)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile && !$fatherLocked)
+                                <p class="field-label">Last Name @if(in_array('father_last_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                @if($editingProfile && !in_array('father_last_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="father_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_last_name') ? 'field-error' : '' }}">
                                     @error('father_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -2045,8 +1996,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Given Name @if($editingProfile && !$fatherLocked)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile && !$fatherLocked)
+                                <p class="field-label">Given Name @if(in_array('father_given_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                @if($editingProfile && !in_array('father_given_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="father_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_given_name') ? 'field-error' : '' }}">
                                     @error('father_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -2055,8 +2006,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Middle Name @if($editingProfile && !$fatherLocked)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile && !$fatherLocked)
+                                <p class="field-label">Middle Name @if(in_array('father_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                @if($editingProfile && !in_array('father_middle_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="father_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_middle_name') ? 'field-error' : '' }}">
                                     @error('father_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -2064,18 +2015,21 @@ function phAddress(initial) {
                                     @if($father_middle_name)<p class="field-value">{{ strtoupper($father_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
+                            @if($editingProfile && (!in_array('father_last_name', $lockedFields, true) || !in_array('father_given_name', $lockedFields, true) || !in_array('father_middle_name', $lockedFields, true)))
+                                <p class="col-span-3 text-xs text-[#333333] font-normal mt-0.5 m-0">Optional. Once saved, a name can no longer be changed.</p>
+                            @endif
                         </div>
                     </div>
 
                     {{-- Mother's Maiden Name --}}
                     <div class="ai-card">
                         <div class="ai-card-header">
-                            <div class="ai-card-header-title"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p> @if($motherLocked)<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
+                            <div class="ai-card-header-title"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p> @if(in_array('mother_last_name', $lockedFields, true) && in_array('mother_given_name', $lockedFields, true) && in_array('mother_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
                         </div>
                         <div class="ai-card-body grid grid-cols-3 gap-1.5">
                             <div class="ai-cell text-center">
-                                <p class="field-label">Last Name @if($editingProfile && !$motherLocked)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile && !$motherLocked)
+                                <p class="field-label">Last Name @if(in_array('mother_last_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                @if($editingProfile && !in_array('mother_last_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="mother_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_last_name') ? 'field-error' : '' }}">
                                     @error('mother_last_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -2084,8 +2038,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Given Name @if($editingProfile && !$motherLocked)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile && !$motherLocked)
+                                <p class="field-label">Given Name @if(in_array('mother_given_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                @if($editingProfile && !in_array('mother_given_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="mother_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_given_name') ? 'field-error' : '' }}">
                                     @error('mother_given_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -2094,8 +2048,8 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Middle Name @if($editingProfile && !$motherLocked)<span class="text-red-500">*</span>@endif</p>
-                                @if($editingProfile && !$motherLocked)
+                                <p class="field-label">Middle Name @if(in_array('mother_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                @if($editingProfile && !in_array('mother_middle_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="mother_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_middle_name') ? 'field-error' : '' }}">
                                     @error('mother_middle_name') <p class="text-xs text-red-400 font-medium mt-0.5 m-0">{{ $message }}</p> @enderror
@@ -2103,6 +2057,9 @@ function phAddress(initial) {
                                     @if($mother_middle_name)<p class="field-value">{{ strtoupper($mother_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
+                            @if($editingProfile && (!in_array('mother_last_name', $lockedFields, true) || !in_array('mother_given_name', $lockedFields, true) || !in_array('mother_middle_name', $lockedFields, true)))
+                                <p class="col-span-3 text-xs text-[#333333] font-normal mt-0.5 m-0">Optional. Once saved, a name can no longer be changed.</p>
+                            @endif
                         </div>
                     </div>
 
@@ -2168,11 +2125,6 @@ function phAddress(initial) {
                             <span class="flex items-center gap-2">
                                 @if($currentRecord && ($currentRecord['submitted_at'] ?? ''))
                                     <span class="text-[13px] font-semibold" style="color:#333333;">Last updated {{ $currentRecord['submitted_at'] }}</span>
-                                @endif
-                                @if($hasEmploymentRecord && !$this->canEditEmployment)
-                                    <span class="text-[10px] font-semibold text-[#333333] flex items-center gap-1">
-                                        <i class="fas fa-lock"></i> Locked for {{ $this->employmentCooldownDaysLeft }} day(s)
-                                    </span>
                                 @endif
                             </span>
                         </div>
@@ -2258,8 +2210,8 @@ function phAddress(initial) {
                 </div>
                 <h3 class="text-base font-semibold text-gray-900">Confirm Profile Update</h3>
                 <p class="text-base text-gray-900 font-medium mt-2 leading-relaxed">
-                    Once saved, you won't be able to update your profile again for
-                    <strong class="text-gray-900 font-bold">30 days</strong>. Make sure all information is correct before continuing.
+                    Make sure all information is correct before continuing. Your email can only be changed
+                    once every <strong class="text-gray-900 font-bold">30 days</strong>, and parent names that are already filled in can no longer be changed.
                 </p>
             </div>
             <div class="px-6 pb-6 flex gap-2">
@@ -2507,8 +2459,7 @@ function phAddress(initial) {
                 </div>
                 <h3 class="text-base font-semibold text-gray-900">Confirm Employment Update</h3>
                 <p class="text-base text-gray-900 font-medium mt-2 leading-relaxed">
-                    Once saved, you won't be able to update your employment information again for
-                    <strong class="text-gray-900 font-bold">30 days</strong>. Make sure all information is correct before continuing.
+                    Make sure all information is correct before continuing.
                 </p>
             </div>
             <div class="px-6 pb-6 flex gap-2">

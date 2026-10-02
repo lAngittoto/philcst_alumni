@@ -50,14 +50,39 @@ new class extends Component {
 
     private function generateTempPassword(string $paddedId, string $lastName): string
     {
-        $raw  = substr(trim($lastName), 0, 2);
-        $part = ucfirst(strtolower($raw));
+        $raw  = mb_substr(trim($lastName), 0, 2, 'UTF-8');
+        $part = mb_strtoupper(mb_substr($raw, 0, 1, 'UTF-8'), 'UTF-8')
+              . mb_strtolower(mb_substr($raw, 1, null, 'UTF-8'), 'UTF-8');
         return $paddedId . '_' . $part;
     }
 
     private function validateName(string $n): bool
     {
-        return (bool) preg_match('/^[a-zA-Z\s\-\.\']+$/', $n);
+        // \pL = any Unicode letter (Ñ, ñ, é, ü, ...), \pM = combining marks
+        // (so a decomposed "N" + "~" from Excel/Mac also passes).
+        return (bool) preg_match('/^[\pL\pM\s\-\.\']+$/u', $n);
+    }
+
+    /**
+     * Student ID from the Excel import → exactly 8 digits with leading zeros
+     * kept (e.g. 00037801, 00003434). Excel drops leading zeros on numeric
+     * cells, so anything 1–8 digits is left-padded back to 8. Returns null
+     * when it can't be a valid ID. NOTE: trailing zeros are NEVER stripped
+     * (the old rtrim('0') turned 00037800 into 00000378).
+     */
+    private function normalizeStudentId(mixed $raw): ?string
+    {
+        if (is_float($raw) && floor($raw) == $raw) {
+            $s = sprintf('%.0f', $raw);
+        } else {
+            $s = trim((string) $raw);
+        }
+        // "37801.0" / "00037801.00" from numeric cells → drop only the .0 part
+        if (preg_match('/^(\d+)\.0+$/', $s, $m)) $s = $m[1];
+
+        if (!preg_match('/^\d{1,8}$/', $s)) return null;
+        $padded = str_pad($s, 8, '0', STR_PAD_LEFT);
+        return $padded === '00000000' ? null : $padded;
     }
 
     private function buildFullName(string $f, string $m, string $l, string $s): string
@@ -101,11 +126,11 @@ new class extends Component {
         if ($mid === '') {
             // Optional — not everyone has a middle name on record.
         } else {
-            if (!preg_match('/^[a-zA-Z]+$/', $mid)) {
+            if (!preg_match('/^[\pL\pM]+$/u', $mid)) {
                 $errors[]               = 'Middle name must contain letters only.';
                 $fieldErrors[]          = 'middleName';
                 $fieldMsgs['middleName'] = 'Letters only, no numbers or symbols.';
-            } elseif (strlen($mid) < 2) {
+            } elseif (mb_strlen($mid, 'UTF-8') < 2) {
                 $errors[]               = 'Middle name must be a full word (e.g. Santos, not S).';
                 $fieldErrors[]          = 'middleName';
                 $fieldMsgs['middleName'] = 'Must be a full word (e.g. Santos, not S).';
@@ -113,7 +138,7 @@ new class extends Component {
         }
 
         $suffix = trim($this->regSuffix);
-        if ($suffix !== '' && !preg_match('/^[a-zA-Z\.\s]+$/', $suffix)) {
+        if ($suffix !== '' && !preg_match('/^[\pL\pM\.\s]+$/u', $suffix)) {
             $errors[]           = 'Suffix may only contain letters and periods (e.g. Jr. Sr. III).';
             $fieldErrors[]      = 'suffix';
             $fieldMsgs['suffix'] = 'Letters and periods only (e.g. Jr. Sr. III).';
@@ -223,7 +248,7 @@ new class extends Component {
                 return;
             }
 
-            $paddedId = str_pad($this->regStudentId, 8, '0', STR_PAD_LEFT);
+            $paddedId = str_pad(trim($this->regStudentId), 8, '0', STR_PAD_LEFT);
             $mid      = trim($this->regMiddleInitial);
             $email    = trim($this->regEmail);
             $course   = Course::where('code', $this->regCourseCode)->firstOrFail();
@@ -540,9 +565,9 @@ public function closeImportModal(): void
                 // else: Old + no email provided — allowed, $email stays ''.
 
                 if (!$firstName) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: First name is empty."); continue; }
-                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $firstName)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: First name has invalid characters."); continue; }
+                if (!$this->validateName($firstName)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: First name has invalid characters."); continue; }
                 if (!$lastName)  { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Last name is empty."); continue; }
-                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $lastName)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Last name has invalid characters."); continue; }
+                if (!$this->validateName($lastName)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Last name has invalid characters."); continue; }
 
                 // ── Middle name ────────────────────────────────────────
                 // Optional for both Recent and Old — a blank cell is fine
@@ -552,24 +577,23 @@ public function closeImportModal(): void
                 if ($mid === '') {
                     // no-op — allowed blank
                 } else {
-                    if (!preg_match('/^[a-zA-Z][a-zA-Z ]*[a-zA-Z]$|^[a-zA-Z]$/', $mid)) {
+                    if (!preg_match('/^[\pL\pM][\pL\pM ]*[\pL\pM]$|^[\pL\pM]$/u', $mid)) {
                         $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name must contain letters only."); continue;
                     }
                     $midError = false;
                     foreach (explode(' ', $mid) as $part) {
-                        if (strlen($part) < 2) {
+                        if (mb_strlen($part, 'UTF-8') < 2) {
                             $this->appendImportError($validationErrors, $maxErrors, "{$label}: Each word in middle name must be >=2 chars."); $midError = true; break;
                         }
                     }
                     if ($midError) continue;
                 }
 
-                $rawId      = preg_replace('/\..*$/', '', rtrim(rtrim((string)($row['student_id'] ?? ''), '0'), '.'));
-                $rawIdClean = ltrim($rawId, '0') ?: '0';
-                if (!$rawId || !preg_match('/^\d{1,8}$/', $rawIdClean) || (int)$rawIdClean === 0) {
-                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Student ID \"{$rawId}\" is invalid."); continue;
+                $rawId = trim((string)($row['student_id'] ?? ''));
+                $sid   = $this->normalizeStudentId($row['student_id'] ?? '');
+                if ($sid === null) {
+                    $this->appendImportError($validationErrors, $maxErrors, "{$label}: Student ID \"{$rawId}\" is invalid (must be 8 digits)."); continue;
                 }
-                $sid = str_pad($rawIdClean, 8, '0', STR_PAD_LEFT);
                 if (isset($existingIds[$sid]) || isset($seenIds[$sid])) {
                     $duplicates[] = "{$label}: Student ID \"{$sid}\" already exists.";
                     $this->importDuplicateCount++;
