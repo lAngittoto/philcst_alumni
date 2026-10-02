@@ -553,7 +553,7 @@ new class extends Component {
 
 }; ?>
 
-<div class="flex flex-col" style="height:calc(100vh - 180px);height:calc(100dvh - 180px);max-height:calc(100vh - 180px);max-height:calc(100dvh - 180px);overflow:hidden;">
+<div class="flex flex-col jb-page-height">
 
 {{-- ── Clean-URL cleanup script ──────────────────────────────────────────
      Strips the "?job=123" query param from the address bar once the job
@@ -582,6 +582,35 @@ new class extends Component {
 </script>
 
 <style>
+/* ─────────────────────────────────────────────
+   PAGE HEIGHT — responsive instead of a fixed
+   "- 180px" subtraction that made the page look
+   too short/cramped on small mobile screens.
+───────────────────────────────────────────── */
+.jb-page-height {
+    height: calc(100vh - 120px);
+    height: calc(100dvh - 120px);
+    max-height: calc(100vh - 120px);
+    max-height: calc(100dvh - 120px);
+    overflow: hidden;
+}
+@media (min-width: 640px) {
+    .jb-page-height {
+        height: calc(100vh - 150px);
+        height: calc(100dvh - 150px);
+        max-height: calc(100vh - 150px);
+        max-height: calc(100dvh - 150px);
+    }
+}
+@media (min-width: 1024px) {
+    .jb-page-height {
+        height: calc(100vh - 180px);
+        height: calc(100dvh - 180px);
+        max-height: calc(100vh - 180px);
+        max-height: calc(100dvh - 180px);
+    }
+}
+
 /* ─────────────────────────────────────────────
    FILTER SELECTS
 ───────────────────────────────────────────── */
@@ -984,14 +1013,14 @@ select.filter-input option {
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- PAGE HEADER --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center gap-4">
+    <div class="flex flex-col items-center justify-center text-center gap-2 flex-shrink-0">
+        <div class="flex flex-col items-center gap-2 sm:gap-3">
             <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
                 <i class="fas fa-briefcase text-white text-lg"></i>
             </div>
-            <div>
-                <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Job Opportunities</h1>
-                <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+            <div class="flex flex-col items-center text-center">
+                <h1 class="text-xl font-semibold tracking-tight text-gray-900 text-center" style="user-select:none;-webkit-user-select:none;">Job Opportunities</h1>
+                <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700 text-center" style="user-select:none;-webkit-user-select:none;">
                     Openings available for
                     <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
                         {{ $alumniCollege ?: 'your college' }}
@@ -1002,7 +1031,7 @@ select.filter-input option {
     </div>
 
     {{-- ══ SEEK-STYLE 2-COLUMN LAYOUT ══ --}}
-    <div class="flex-1 min-h-0 flex gap-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
+    <div class="flex-1 min-h-0 flex gap-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative mt-1 sm:mt-2"
          id="jb-content-block">
 
         {{-- ── LEFT PANEL: Filter bar + List + Pagination ── --}}
