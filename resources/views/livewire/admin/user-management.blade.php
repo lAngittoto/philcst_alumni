@@ -431,7 +431,56 @@ new class extends Component {
         return $result;
     }
 
+    /**
+     * Single source of truth for the "only ONE active Director / Registrar"
+     * rule. Used by the header buttons (disabled state), by openModal(),
+     * by the create methods, and by executeToggle() (re-activation), so the
+     * UI and the server can never disagree. Intentionally NOT cached —
+     * these are two cheap EXISTS queries, and a stale value here would
+     * leave the button clickable (or locked) for up to the stats TTL.
+     */
+    private function activeDirectorExists(?int $exceptUserId = null): bool
+    {
+        return DB::table('director')
+            ->where('status', 'ACTIVE')
+            ->whereNull('deleted_at')
+            ->when($exceptUserId, fn($q) => $q->where('user_id', '!=', $exceptUserId))
+            ->exists();
+    }
+
+    private function activeRegistrarExists(?int $exceptUserId = null): bool
+    {
+        // NULL user_status counts as ACTIVE (same COALESCE used across this page).
+        return DB::table('users')
+            ->where('role', 'registrar')
+            ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
+            ->when($exceptUserId, fn($q) => $q->where('id', '!=', $exceptUserId))
+            ->exists();
+    }
+
+    #[Computed]
+    public function hasActiveDirector(): bool
+    {
+        return $this->activeDirectorExists();
+    }
+
+    #[Computed]
+    public function hasActiveRegistrar(): bool
+    {
+        return $this->activeRegistrarExists();
+    }
+
     public function openModal(string $m): void {
+        // Hard stop even if someone re-enables the disabled button via devtools.
+        if ($m === 'createDirector' && $this->activeDirectorExists()) {
+            $this->flash('error', 'There is already an active Director. Please deactivate the current Director first.');
+            return;
+        }
+        if ($m === 'createRegistrar' && $this->activeRegistrarExists()) {
+            $this->flash('error', 'There is already an active Registrar. Please deactivate the current Registrar first.');
+            return;
+        }
+
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
         $this->dErrs=[]; $this->dOk='';
@@ -478,11 +527,7 @@ new class extends Component {
 
             // Only one active Registrar at a time (NULL user_status counts as
             // ACTIVE, same as the COALESCE used everywhere else on this page).
-            $hasActiveRegistrar = DB::table('users')
-                ->where('role', 'registrar')
-                ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
-                ->exists();
-            if ($hasActiveRegistrar) {
+            if ($this->activeRegistrarExists()) {
                 $this->rErrs = ['general' => ['There is already an active Registrar. Please deactivate the current Registrar first.']];
                 return;
             }
@@ -508,26 +553,18 @@ new class extends Component {
                 'updated_at'  => now(),
             ]);
 
-            // Send credential email synchronously so it fires immediately without
-            // a queue worker. Wrapped in try/catch so a mail misconfiguration never
-            // blocks the registrar from being created — the account is already saved.
+            // Send credential email synchronously (->send) so it fires immediately
+            // without needing a queue worker — same as Create Director. Wrapped in
+            // try/catch so a mail misconfiguration never blocks the registrar from
+            // being created; the account is already saved at this point.
             try {
-                $safeName = e($full);
-                $safeUser = e($uname);
-                $safePass = e($autoPassword);
-                $html = "<div style=\"font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#222;\">"
-                    . "<h2 style=\"color:#7A3F91;margin-bottom:4px;\">PHILCST Alumni System</h2>"
-                    . "<p>Hello <strong>{$safeName}</strong>,</p>"
-                    . "<p>A <strong>Registrar</strong> account has been created for you. Use the credentials below to log in:</p>"
-                    . "<table style=\"border-collapse:collapse;margin:12px 0;\">"
-                    . "<tr><td style=\"padding:6px 14px 6px 0;color:#666;\">Username</td><td style=\"padding:6px 0;\"><strong>{$safeUser}</strong></td></tr>"
-                    . "<tr><td style=\"padding:6px 14px 6px 0;color:#666;\">Temporary password</td><td style=\"padding:6px 0;\"><strong>{$safePass}</strong></td></tr>"
-                    . "</table>"
-                    . "<p>You will be asked to change your password on your first login.</p>"
-                    . "</div>";
-                \Mail::html($html, function ($m) use ($email) {
-                    $m->to($email)->subject('Your Registrar Account — PHILCST Alumni System');
-                });
+                \Mail::to($email)
+                    ->send(new \App\Mail\RegistrarRegistered(
+                        fullName:     $full,
+                        username:     $uname,
+                        tempPassword: $autoPassword,
+                        email:        $email,
+                    ));
             } catch (\Exception $mailEx) {
                 \Illuminate\Support\Facades\Log::warning('RegistrarRegistered mail failed: ' . $mailEx->getMessage());
             }
@@ -569,7 +606,7 @@ new class extends Component {
             }
             if (!empty($fieldErrors)) { $this->dErrs = $fieldErrors; return; }
 
-            if (DB::table('director')->where('status', 'ACTIVE')->exists()) {
+            if ($this->activeDirectorExists()) {
                 $this->dErrs = ['general' => ['There is already an active Director. Please deactivate the current Director first.']];
                 return;
             }
@@ -1267,6 +1304,15 @@ new class extends Component {
                     return;
                 }
             }
+            // Same "only one active" rule as Create Director / Create Registrar.
+            if ($this->tRole==='director' && $s==='ACTIVE' && $this->activeDirectorExists($this->tId)) {
+                $this->flash('error', 'Cannot activate: there is already an active Director. Deactivate them first.');
+                return;
+            }
+            if ($this->tRole==='registrar' && $s==='ACTIVE' && $this->activeRegistrarExists($this->tId)) {
+                $this->flash('error', 'Cannot activate: there is already an active Registrar. Deactivate them first.');
+                return;
+            }
             if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='organizer') DB::table('organizer')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='registrar') DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
@@ -1860,14 +1906,17 @@ select.mu-filter-input.mu-active {
         </div>
         <div class="ml-auto flex items-center gap-2">
 
-        {{-- New Registrar — always openable; the one-active-account limit is enforced on submit --}}
-        <div class="relative" x-data="{tip:false}">
-            <button wire:click="openModal('createRegistrar')" wire:loading.attr="disabled" wire:target="openModal('createRegistrar')"
-                    @mouseenter="tip=true" @mouseleave="tip=false"
-                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
+        {{-- New Registrar — disabled while an ACTIVE registrar exists (only one allowed) --}}
+        @php $regLocked = $this->hasActiveRegistrar; @endphp
+        <div class="relative" x-data="{tip:false}" @mouseenter="tip=true" @mouseleave="tip=false">
+            <button @if(!$regLocked) wire:click="openModal('createRegistrar')" @endif
+                    wire:loading.attr="disabled" wire:target="openModal('createRegistrar')"
+                    @disabled($regLocked)
+                    aria-disabled="{{ $regLocked ? 'true' : 'false' }}"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition {{ $regLocked ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:opacity-90 active:scale-95' }}"
                     style="background:linear-gradient(135deg,#027a4f,#10b981);">
                 <span wire:loading wire:target="openModal('createRegistrar')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
-                <span wire:loading.remove wire:target="openModal('createRegistrar')"><i class="fas fa-user-clock text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createRegistrar')"><i class="fas {{ $regLocked ? 'fa-lock' : 'fa-user-clock' }} text-white text-base"></i></span>
             </button>
             <div x-show="tip" x-cloak
                  x-transition:enter="transition ease-out duration-100"
@@ -1875,19 +1924,27 @@ select.mu-filter-input.mu-active {
                  x-transition:enter-end="opacity-100 scale-100"
                  class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
                 <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
-                    <i class="fas fa-user-clock mr-1.5"></i>New Registrar
+                    @if($regLocked)
+                        <i class="fas fa-lock mr-1.5"></i>Active Registrar exists — deactivate first
+                    @else
+                        <i class="fas fa-user-clock mr-1.5"></i>New Registrar
+                    @endif
                 </div>
                 <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
             </div>
         </div>
 
-        <div class="relative" x-data="{tip:false}">
-            <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
-                    @mouseenter="tip=true" @mouseleave="tip=false"
-                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
+        {{-- New Director — disabled while an ACTIVE director exists (only one allowed) --}}
+        @php $dirLocked = $this->hasActiveDirector; @endphp
+        <div class="relative" x-data="{tip:false}" @mouseenter="tip=true" @mouseleave="tip=false">
+            <button @if(!$dirLocked) wire:click="openModal('createDirector')" @endif
+                    wire:loading.attr="disabled" wire:target="openModal('createDirector')"
+                    @disabled($dirLocked)
+                    aria-disabled="{{ $dirLocked ? 'true' : 'false' }}"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition {{ $dirLocked ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:opacity-90 active:scale-95' }}"
                     style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
                 <span wire:loading wire:target="openModal('createDirector')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
-                <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas fa-user-tie text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas {{ $dirLocked ? 'fa-lock' : 'fa-user-tie' }} text-white text-base"></i></span>
             </button>
             <div x-show="tip" x-cloak
                  x-transition:enter="transition ease-out duration-100"
@@ -1895,7 +1952,11 @@ select.mu-filter-input.mu-active {
                  x-transition:enter-end="opacity-100 scale-100"
                  class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
                 <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
-                    <i class="fas fa-user-tie mr-1.5"></i>New Director
+                    @if($dirLocked)
+                        <i class="fas fa-lock mr-1.5"></i>Active Director exists — deactivate first
+                    @else
+                        <i class="fas fa-user-tie mr-1.5"></i>New Director
+                    @endif
                 </div>
                 <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
             </div>

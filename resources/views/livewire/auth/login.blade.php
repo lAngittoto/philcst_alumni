@@ -133,6 +133,49 @@ new #[Layout('app')] class extends Component {
         RateLimiter::clear($this->throttleKey());
     }
 
+    /**
+     * Security alert for an alumnus who has ALREADY been in their account
+     * (password set up / changed) when someone racks up MAX_ATTEMPTS wrong
+     * passwords against their Student ID. Emails the alumnus so they can
+     * tell it wasn't them and reset via Forgot Password.
+     *
+     * - Skipped for brand-new accounts that never logged in / still on the
+     *   temporary password (nobody to warn yet, and the alert's "your
+     *   password" advice wouldn't apply).
+     * - Cache::add() makes it fire ONCE per lockout window, so repeated
+     *   clicks / Livewire retries can't spam the inbox.
+     * - Wrapped in try/catch: a mail problem must never break the login
+     *   page or change the "Account locked" message the user sees.
+     */
+    protected function notifyAlumniOfFailedAttempts(Alumni $alumni, int $attempts): void
+    {
+        try {
+            if ($alumni->needsAccountSetup() || $alumni->hasTemporaryPassword()) {
+                return;
+            }
+
+            $email = trim((string) ($alumni->email ?? ''));
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return;
+            }
+
+            if (!Cache::add('alumni_lock_alert_' . $alumni->id, 1, self::LOCKOUT_SECONDS)) {
+                return;
+            }
+
+            \Mail::to($email)->send(new \App\Mail\AlumniLoginAlert(
+                fullName:    $alumni->getFullName(),
+                attempts:    $attempts,
+                ipAddress:   (string) request()->ip(),
+                device:      Str::limit((string) request()->userAgent(), 120, '…') ?: 'Unknown device',
+                attemptedAt: now()->timezone(config('app.timezone'))->format('M d, Y · h:i A'),
+                lockMinutes: (int) ceil(self::LOCKOUT_SECONDS / 60),
+            ));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('AlumniLoginAlert mail failed: ' . $e->getMessage());
+        }
+    }
+
     protected function formatLockTime(int $seconds): string
     {
         if ($seconds >= 60) {
@@ -288,6 +331,10 @@ new #[Layout('app')] class extends Component {
                 $attempts = $this->recordFailedAttempt();
 
                 if ($attempts >= self::MAX_ATTEMPTS) {
+                    // Warn the real owner by email (only if they've already
+                    // logged in / changed their password before).
+                    $this->notifyAlumniOfFailedAttempts($alumni, $attempts);
+
                     $this->password = '';
                     $this->addError('invalid',
                         "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
