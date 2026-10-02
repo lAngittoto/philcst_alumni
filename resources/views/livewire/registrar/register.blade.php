@@ -1038,8 +1038,8 @@ public function closeImportModal(): void
         transition: background .12s; margin-left: auto;
     }
     .reg-picker-action-btn:hover { background: #E4D0F5; }
-    .reg-course-picker { width: 340px; }
-    .reg-year-picker   { width: 268px; }
+    .reg-course-picker { width: 340px; max-width: calc(100vw - 2rem); }
+    .reg-year-picker   { width: 268px; max-width: calc(100vw - 2rem); left: auto; right: 0; }
 
     /* ── Program trigger: shows code + full program name stacked ── */
     .reg-dropdown-trigger--program { height: 60px; padding-top: 18px; }
@@ -1489,6 +1489,52 @@ public function closeImportModal(): void
             box-shadow: none;
         }
     }
+
+    /* ══ RESPONSIVE — all screen sizes ══ */
+    #reg-page-root { max-width: 100%; }
+    #reg-page-root button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+    #reg-scroll { overflow-x: hidden; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+    .fl-input, .reg-dropdown-trigger { min-width: 0; }
+    .reg-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    /* Phones / small tablets */
+    @media (max-width: 640px) {
+        .reg-course-picker, .reg-year-picker { width: 100%; max-width: 100%; }
+        .reg-picker-list-course { max-height: min(240px, 38dvh); }
+        .reg-suffix-list        { max-height: min(220px, 38dvh); }
+        .reg-picker-search-input { font-size: 16px; } /* prevents iOS zoom-on-focus */
+        .reg-picker-nav-btn { width: 36px; height: 36px; }
+        .reg-picker-cell { padding: 11px 4px; font-size: .85rem; }
+        .reg-picker-course-cell { padding: 11px 10px; }
+        .reg-picker-course-code, .reg-picker-course-name { font-size: .88rem; }
+        .reg-suffix-item { padding: 12px; }
+        .req-col-chip { font-size: .72rem; padding: 3px 8px; }
+        .import-type-btn { padding: 10px 6px; font-size: .8rem; }
+        .import-modal-head {
+            padding-top: max(1rem, env(safe-area-inset-top, 0px));
+            padding-left: max(1.25rem, env(safe-area-inset-left, 0px));
+            padding-right: max(1.25rem, env(safe-area-inset-right, 0px));
+        }
+        .import-modal-foot { padding-bottom: max(.75rem, env(safe-area-inset-bottom, 0px)); }
+    }
+
+    /* Touch devices — bigger tap targets */
+    @media (hover: none) {
+        .reg-picker-clear-btn, .reg-picker-action-btn, .reg-suffix-clear { padding: 8px 12px; }
+    }
+
+    /* Very small phones (≤380px) */
+    @media (max-width: 380px) {
+        .reg-grid-2 { grid-template-columns: minmax(0, 1fr); }
+        .reg-btn-row { flex-direction: column-reverse; }
+        .reg-btn-row > button { flex: none; width: 100%; }
+    }
+
+    /* Short screens / phones in landscape */
+    @media (max-height: 500px) and (orientation: landscape) {
+        .reg-page-height { height: calc(100dvh - 64px); max-height: calc(100dvh - 64px); }
+        .reg-picker-list-course, .reg-suffix-list { max-height: 130px; }
+    }
 </style>
 
 {{-- ══ PAGE ══ --}}
@@ -1496,13 +1542,13 @@ public function closeImportModal(): void
 
     {{-- Header --}}
     <div class="flex items-center justify-between gap-3 mb-3 px-3 sm:px-0 pt-3 sm:pt-0 shrink-0">
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
             <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-user-plus text-white text-base"></i>
             </div>
-            <div>
-                <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Register Alumni</h1>
+            <div class="min-w-0">
+                <h1 class="text-xl sm:text-2xl font-semibold text-[#333333] leading-tight">Register Alumni</h1>
                 <p class="text-xs sm:text-sm font-normal" style="color:#7A3F91;">Add new alumni to the system with their details and credentials</p>
             </div>
         </div>
@@ -1603,7 +1649,7 @@ public function closeImportModal(): void
                                 </p>
                                 </div>
                             </div>
-                            <div class="grid grid-cols-2 gap-3 mt-3">
+                            <div class="grid reg-grid-2 gap-3 mt-3">
                                 <div>
                                     <div class="fl-group">
                                         <span class="fl-icon"><i class="fas fa-user"></i></span>
@@ -1956,10 +2002,10 @@ public function closeImportModal(): void
 
 
                         {{-- Buttons --}}
-                        <div class="flex gap-3 pt-1">
+                        <div class="reg-btn-row flex gap-3 pt-1">
                             <button type="button" wire:click="resetForm"
                                     wire:loading.attr="disabled" wire:target="registerAlumni,resetForm"
-                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2">
+                                    class="flex-1 px-3 sm:px-5 py-3 rounded-xl text-sm sm:text-base font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition text-center active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2">
                                 <span wire:loading wire:target="resetForm" class="inline-flex items-center gap-2">
                                     <i class="fas fa-spinner animate-spin"></i> Resetting...
                                 </span>
@@ -1969,7 +2015,7 @@ public function closeImportModal(): void
                             </button>
                             <button type="submit"
                                     wire:loading.attr="disabled" wire:target="registerAlumni,resetForm"
-                                    class="flex-1 px-5 py-3 rounded-xl text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
+                                    class="flex-1 px-3 sm:px-5 py-3 rounded-xl text-sm sm:text-base font-semibold text-white transition flex items-center justify-center gap-2 disabled:opacity-60 hover:opacity-90 active:scale-[.99]"
                                     style="background:#7A3F91;">
                                 <span wire:loading wire:target="registerAlumni" class="inline-flex items-center gap-2">
                                     <i class="fas fa-spinner animate-spin"></i> Registering...
@@ -1999,8 +2045,8 @@ public function closeImportModal(): void
     <div class="import-modal-box">
 
         {{-- Modal Header --}}
-        <div class="flex items-center justify-between px-5 py-4 shrink-0" style="background:#7A3F91;">
-            <h2 class="text-white font-bold text-xl flex items-center gap-2.5">
+        <div class="import-modal-head flex items-center justify-between px-5 py-4 shrink-0" style="background:#7A3F91;">
+            <h2 class="text-white font-bold text-lg sm:text-xl flex items-center gap-2.5">
                 <i class="fas fa-file-import"></i> Import Alumni Records
             </h2>
             <div class="relative group">
@@ -2025,7 +2071,7 @@ public function closeImportModal(): void
         </div>
 
         {{-- Scrollable body --}}
-        <div class="flex-1 min-h-0 overflow-y-auto p-5 space-y-4 flex flex-col relative">
+        <div class="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4 flex flex-col relative">
 
             {{-- Step Indicator (3 steps only: Upload → Importing → Done) — hidden during
                  processing so the loading spinner can truly center in the modal --}}
@@ -2114,7 +2160,7 @@ public function closeImportModal(): void
             <div x-data="{ uploading: false }" class="shrink-0">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2" x-show="!uploading">Choose File</p>
                 <div x-show="!uploading"
-                     class="border-2 border-dashed border-[#E8E0F0] rounded-xl p-8 text-center cursor-pointer hover:border-[#2563EB] hover:bg-[#eff6ff] hover:shadow-sm transition-all duration-200"
+                     class="border-2 border-dashed border-[#E8E0F0] rounded-xl p-5 sm:p-8 text-center cursor-pointer hover:border-[#2563EB] hover:bg-[#eff6ff] hover:shadow-sm transition-all duration-200"
                      @click="document.getElementById('importFileInput').click()">
                     <div class="w-14 h-14 rounded-2xl mx-auto mb-3 flex items-center justify-center shadow-sm" style="background:rgba(37,99,235,.12);">
                         <i class="fas fa-file-excel text-3xl" style="color:#2563EB;"></i>
@@ -2138,7 +2184,7 @@ public function closeImportModal(): void
             {{-- Shimmer loading state (while file is being read) --}}
             <div x-show="uploading" class="w-full shrink-0" style="display:none;">
                 <p class="text-sm font-bold text-[#555555] uppercase tracking-wide mb-2 text-center">Choose File</p>
-                <div class="w-full border-2 border-dashed border-[#2563EB] rounded-xl p-8 flex flex-col items-center justify-center text-center"
+                <div class="w-full border-2 border-dashed border-[#2563EB] rounded-xl p-5 sm:p-8 flex flex-col items-center justify-center text-center"
                      style="background:linear-gradient(90deg,#eff6ff 25%,#dbeafe 50%,#eff6ff 75%);background-size:200% 100%;animation:regShimmer 1.2s infinite linear;">
                     <div class="w-14 h-14 rounded-2xl mb-3 flex items-center justify-center" style="background:rgba(37,99,235,.15);">
                         <i class="fas fa-spinner animate-spin text-2xl" style="color:#1D4ED8;"></i>
@@ -2163,7 +2209,7 @@ public function closeImportModal(): void
                  in the modal, regardless of the (now-hidden) step indicator above it. --}}
             @elseif($importStep === 'processing')
 
-            <div class="absolute inset-0 flex items-center justify-center p-5">
+            <div class="absolute inset-0 flex items-center justify-center p-4 sm:p-5 overflow-y-auto">
             <div wire:init="processImport" class="py-8 text-center">
                 <div class="relative w-24 h-24 mx-auto mb-6 flex items-center justify-center">
                     <span class="import-scan-ring"></span>
@@ -2178,7 +2224,7 @@ public function closeImportModal(): void
                     </div>
                 </div>
 
-                <p class="font-extrabold text-[#1a2e1a] text-2xl mb-1 tracking-tight">
+                <p class="font-extrabold text-[#1a2e1a] text-xl sm:text-2xl mb-1 tracking-tight">
                     @if($importTotal > 0)
                         Importing Records {{ number_format($importProgress) }} / {{ number_format($importTotal) }}
                     @else
@@ -2270,7 +2316,7 @@ public function closeImportModal(): void
                 </div>
             </div>
 
-            <div class="grid grid-cols-4 gap-2 shrink-0">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 shrink-0">
                 @foreach([
                     ['#f9fafb','#e5e7eb','#4b5563', $importTotal,         'Total'],
                     ['#eff6ff','#bfdbfe','#1D4ED8', $importSuccessCount,   'Imported'],
@@ -2341,7 +2387,7 @@ public function closeImportModal(): void
             <div class="flex gap-3 mt-auto">
                 <button wire:click="resetImport"
                         wire:loading.attr="disabled" wire:target="resetImport,closeImportModal"
-                        class="flex-1 bg-white border border-[#E8E0F0] text-[#333333] px-4 py-3 rounded-xl text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2">
+                        class="flex-1 bg-white border border-[#E8E0F0] text-[#333333] px-3 sm:px-4 py-3 rounded-xl text-sm sm:text-base font-bold hover:bg-[#F5F5F5] transition active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2">
                     <span wire:loading wire:target="resetImport" class="inline-flex items-center gap-2">
                         <i class="fas fa-spinner animate-spin"></i> Restarting...
                     </span>
@@ -2351,7 +2397,7 @@ public function closeImportModal(): void
                 </button>
                 <button wire:click="closeImportModal"
                         wire:loading.attr="disabled" wire:target="resetImport,closeImportModal"
-                        class="flex-1 text-white px-4 py-3 rounded-xl text-base font-bold transition hover:opacity-90 active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2"
+                        class="flex-1 text-white px-3 sm:px-4 py-3 rounded-xl text-sm sm:text-base font-bold transition hover:opacity-90 active:scale-[.99] disabled:opacity-60 flex items-center justify-center gap-2"
                         style="background:#7A3F91;">
                     <span wire:loading wire:target="closeImportModal" class="inline-flex items-center gap-2">
                         <i class="fas fa-spinner animate-spin"></i> Closing...
@@ -2366,7 +2412,7 @@ public function closeImportModal(): void
         </div>
 
         {{-- Modal Footer --}}
-        <div class="shrink-0 px-5 py-3 border-t border-[#E8E0F0] bg-[#FAFAFA]">
+        <div class="import-modal-foot shrink-0 px-4 sm:px-5 py-3 border-t border-[#E8E0F0] bg-[#FAFAFA]">
             <p class="text-sm text-[#888888]">
                 @if($importStep === 'upload')      Choose an Excel file (.xlsx / .xls) — it will be checked and imported automatically.
                 @elseif($importStep === 'processing') Do not close this window while importing.

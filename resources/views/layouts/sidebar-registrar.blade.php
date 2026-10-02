@@ -199,76 +199,19 @@
         }
 
         /* ── Nav link click spinner ──────────────────────────────
-           Same visual language as the alumni table's loading
-           spinner (fa-spinner fa-spin, brand purple) so the whole
-           app has one consistent "loading" interface instead of a
-           different spinner style per screen.
-           Expanded sidebar: sits exactly where the active dot sits
-           (end of the row), icon stays visible. Collapsed sidebar /
-           mobile: centered on top of the icon chip, icon hidden,
-           since there's no label/dot row to show it in. */
-        .reg-nav-spinner {
-            flex-shrink: 0;
-            margin-left: auto;
-            font-size: 13px;
-            color: #fff;
-            line-height: 1;
-        }
-        .reg-nav-link:not(.is-active) .reg-nav-spinner {
-            color: #7A3F91;
-        }
-
-        /* Two spinner copies are rendered: one inline at the end of
-           the row (next to the label, where the dot sits), one
-           inside the icon chip itself. Only one is ever visible at
-           a time — CSS below toggles which, per breakpoint/state —
-           so the icon-anchored copy is always dead-center on the
-           icon regardless of the link's own padding. */
-        .reg-nav-spinner-icon-anchored { display: none; }
+           ONE spinner per link, always rendered INSIDE the icon chip in
+           place of the icon (expanded, collapsed and mobile alike).
+           Previously two copies (end-of-row + chip) were both rendered
+           and CSS toggled which one showed per breakpoint/state — when
+           those rules and Alpine's own show/hide disagreed for a frame,
+           two or three spinners appeared at once. Now the markup itself
+           guarantees a single spinner: the icon and the spinner are
+           swapped with x-show on the same condition. ── */
         .reg-nav-icon { position: relative; }
-
-        /* Icon-only sidebar states: collapsed desktop rail (≥1024px)
-           AND mobile/tablet (<1024px, always icon-only here). Both
-           cases get the exact same treatment — icon-anchored spinner
-           dead-centered on the chip, end-of-row spinner hidden, and
-           the icon itself fully removed from view so nothing peeks
-           out from underneath the spinner. !important on every rule
-           here so nothing else in the sheet can win against it. */
-        .reg-sidebar.is-collapsed .reg-nav-link.is-navigating > .reg-nav-spinner,
-        .reg-nav-link.is-navigating > .reg-nav-spinner {
-            display: none !important;
-        }
-        .reg-sidebar.is-collapsed .reg-nav-link.is-navigating .reg-nav-spinner-icon-anchored,
-        .reg-nav-link.is-navigating .reg-nav-spinner-icon-anchored {
-            display: flex !important;
-            align-items: center;
-            justify-content: center;
-            position: absolute !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate(-50%, -50%) !important;
-            font-size: 16px !important;
-        }
-        .reg-nav-spinner-icon-anchored .reg-nav-spinner {
-            margin-left: 0;
-        }
-        .reg-sidebar.is-collapsed .reg-nav-link.is-navigating .reg-nav-icon i.fa-solid,
-        .reg-nav-link.is-navigating .reg-nav-icon i.fa-solid {
-            display: none !important;
-        }
-        /* On expanded desktop (not collapsed), the end-of-row spinner
-           is the one that should show, with the icon staying visible —
-           so undo the icon-only treatment above in that one case. */
-        @media (min-width: 1024px) {
-            .reg-sidebar:not(.is-collapsed) .reg-nav-link.is-navigating > .reg-nav-spinner {
-                display: flex !important;
-            }
-            .reg-sidebar:not(.is-collapsed) .reg-nav-link.is-navigating .reg-nav-spinner-icon-anchored {
-                display: none !important;
-            }
-            .reg-sidebar:not(.is-collapsed) .reg-nav-link.is-navigating .reg-nav-icon i.fa-solid {
-                display: inline-block !important;
-            }
+        .reg-nav-spinner {
+            font-size: 16px;
+            line-height: 1;
+            color: #7A3F91 !important;
         }
 
         .reg-nav-section-row {
@@ -1697,22 +1640,16 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate.hover
                    title="{{ $link['label'] }}"
-                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
+                   @click="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
                     <div class="reg-nav-icon {{ $link['color'] }}">
                         <i class="fa-solid fa-{{ $link['icon'] }}"
-                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
-                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                            <span class="reg-nav-spinner-icon-anchored">
-                                <i class="fas fa-spinner fa-spin reg-nav-spinner"></i>
-                            </span>
-                        </template>
+                           x-show="navClickedRoute !== '{{ $link['route'] }}'"></i>
+                        <i class="fas fa-spinner fa-spin reg-nav-spinner"
+                           x-show="navClickedRoute === '{{ $link['route'] }}'" x-cloak></i>
                     </div>
                     <span class="reg-nav-label">{{ $link['label'] }}</span>
-                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                        <i class="fas fa-spinner fa-spin reg-nav-spinner"></i>
-                    </template>
                     @if($isActive)
                         <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
                             <span class="reg-nav-dot"></span>
@@ -1726,10 +1663,10 @@
         <div class="p-2 lg:p-4 mt-auto border-t border-[#E5E5E5] shrink-0">
             <form method="POST"
                   action="{{ route('logout') }}"
-                  @submit="loggingOut = true">
+                  @submit="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } loggingOut = true">
                 @csrf
                 <button type="submit"
-                        :disabled="loggingOut"
+                        :disabled="loggingOut || navClickedRoute !== null"
                         title="Logout"
                         class="reg-logout-btn">
                     <template x-if="!loggingOut">
@@ -1770,7 +1707,10 @@
              aria-hidden="true">
         </div>
 
-        <header class="sticky top-0 flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
+        {{-- Top bar: the white box/border was removed on request. It is now a
+             transparent strip (same page background) that only holds the
+             hamburger (mobile) and the notification bell. --}}
+        <header class="sticky top-0 flex items-center justify-between px-4 lg:px-8 h-16 bg-transparent
                        shrink-0 z-30">
             <button @click="sidebarOpen = !sidebarOpen"
                     class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">

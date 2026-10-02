@@ -1380,6 +1380,86 @@ new class extends Component {
 
     /* ── Filter bar ──────────────────────────────────────────────── */
     .ar-filter-label { pointer-events: none; }
+
+    /* ── Responsive filter bar ───────────────────────────────────────
+       Desktop / tablet (≥768px): row 1 = search bar (+ status pills),
+       row 2 = "FILTERS" label + the three dropdowns + Reset. The two
+       wrapper divs use display:contents so their children flow straight
+       into one wrapping flex row — no duplicated markup.
+       Phone (<768px): only the search bar + a filter icon button show.
+       Tapping the icon drops the whole filter panel down; it can be
+       hidden again (slides up) with the icon or the "Hide filters"
+       button at the bottom of the panel. */
+    .ar-fb-inner  { display: flex; flex-direction: column; gap: .5rem; }
+    .ar-fb-top    { display: flex; align-items: center; gap: .5rem; }
+    .ar-fb-search { flex: 1 1 auto; min-width: 0; position: relative; }
+    .ar-fb-panel  {
+        display: flex; flex-direction: column; gap: .625rem;
+        background: #fff; border: 1.5px solid #E8E0F0; border-radius: 12px;
+        padding: 10px;
+    }
+    .ar-fb-divider { display: none; }
+    .ar-fb-pills   { display: flex; gap: .375rem; width: 100%; }
+    .ar-fb-pills .ar-status-pill { flex: 1 1 0; justify-content: center; }
+    .ar-fb-filters { display: flex; flex-direction: column; gap: .5rem; }
+    .ar-fb-filters .ar-dropdown { width: 100%; }
+    .ar-fb-filters .ar-dropdown-trigger { width: 100%; }
+    .ar-fb-filters .ar-dropdown-trigger .ar-chevron { margin-left: auto; }
+    .ar-fb-filters .ar-dropdown-menu {
+        left: 0; right: 0; width: 100%; min-width: 0 !important;
+    }
+    .ar-fb-reset { width: 100%; justify-content: center; }
+    .ar-fb-reset .hidden { display: inline !important; }
+    .ar-fb-search input { font-size: 16px; } /* stops iOS zoom-on-focus */
+
+    .ar-fb-toggle {
+        position: relative; display: inline-flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px; flex-shrink: 0;
+        border: 1.5px solid #E8E0F0; border-radius: 10px;
+        background: #fff; color: #7A3F91; cursor: pointer;
+        transition: background .15s, border-color .15s, transform .12s;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .ar-fb-toggle:active { transform: scale(.94); }
+    .ar-fb-toggle.is-open,
+    .ar-fb-toggle.has-active { border-color: #7A3F91; background: #F9F7FC; }
+    .ar-fb-badge {
+        position: absolute; top: -6px; right: -6px;
+        min-width: 18px; height: 18px; padding: 0 4px; border-radius: 99px;
+        background: #7A3F91; color: #fff; font-size: 10px; font-weight: 800; line-height: 1;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 0 2px #F5F5F5;
+    }
+    .ar-fb-hide {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        width: 100%; padding: 8px; border: none; border-radius: 8px;
+        background: #F5F0FA; color: #7A3F91;
+        font-size: .78rem; font-weight: 700; cursor: pointer;
+    }
+    .ar-fb-hide:active { background: #EADCF5; }
+
+    /* slide-down / slide-up transition (own classes — no Tailwind dependency) */
+    .ar-fb-t-active { transition: opacity .18s ease, transform .18s ease; }
+    .ar-fb-t-hidden { opacity: 0; transform: translateY(-8px); }
+    .ar-fb-t-shown  { opacity: 1; transform: none; }
+
+    @media (min-width: 768px) {
+        .ar-fb-inner { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem; }
+        .ar-fb-top,
+        .ar-fb-panel { display: contents; }
+        .ar-fb-search { flex: 1 1 180px; min-width: 180px; max-width: 24rem; }
+        .ar-fb-search input { font-size: .875rem; }
+        .ar-fb-divider { display: block; height: 20px; width: 1px; background: #E8E0F0; flex-shrink: 0; }
+        .ar-fb-pills   { width: auto; flex-shrink: 0; gap: .375rem; }
+        .ar-fb-pills .ar-status-pill { flex: 0 0 auto; }
+        .ar-fb-filters { flex: 0 0 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: .5rem; }
+        .ar-fb-filters .ar-dropdown,
+        .ar-fb-filters .ar-dropdown-trigger { width: auto; }
+        .ar-fb-filters .ar-dropdown-trigger .ar-chevron { margin-left: 0; }
+        .ar-fb-filters .ar-dropdown-menu { left: 0; right: auto; width: auto; min-width: 100% !important; }
+        .ar-fb-reset { width: auto; margin-left: auto; }
+        .ar-fb-toggle, .ar-fb-hide { display: none; }
+    }
     .ar-dropdown { position: relative; }
     .ar-dropdown-menu {
         position: absolute; top: calc(100% + 4px); left: 0;
@@ -1917,43 +1997,85 @@ new class extends Component {
              together with Reset at the end, then active-filter chips on
              their own row. Keeps every wire:click/x-data binding as-is —
              layout/grouping only, no behavior changes. --}}
-        <div class="ar-filter-bar px-3 sm:px-4 py-3 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2.5 shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
+        <div x-data="{
+                fOpen: false,
+                isDesktop: window.matchMedia('(min-width: 768px)').matches,
+                init() {
+                    const mq = window.matchMedia('(min-width: 768px)');
+                    const onChange = (e) => { this.isDesktop = e.matches; if (e.matches) this.fOpen = false; };
+                    if (mq.addEventListener) mq.addEventListener('change', onChange); else mq.addListener(onChange);
+                },
+                hide() { this.fOpen = false; if ($store.arFilters) $store.arFilters.closeAll(); },
+                toggleFilters() { this.fOpen ? this.hide() : (this.fOpen = true); }
+             }"
+             class="ar-filter-bar px-3 sm:px-4 py-3 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-col gap-2.5 shrink-0 transition-opacity duration-200 {{ !empty($notifScopeIds) ? 'opacity-50 pointer-events-none' : '' }}"
              wire:loading.class="opacity-60 pointer-events-none cursor-wait" wire:target="alumniSearch,alumniProfileFilter,toggleEmploymentStatus,clearEmploymentStatuses,selectAllEmploymentStatuses,applyEmploymentStatuses,setSingleBatchYear,clearFilterBatch,setBatchRange,toggleProgramCode,clearProgramCodes,selectAllProgramCodes,applyProgramCodes,resetAlumniFilters,goToAlumniPage,previousAlumniPage,nextAlumniPage">
 
-            {{-- Row 1: Search (primary action) + Profile status pills --}}
-            <div class="flex flex-wrap items-center gap-2">
-                <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
+            @php
+                $arActiveFilterCount = ($alumniProfileFilter !== 'all' ? 1 : 0)
+                    + (($alumniBatchFrom !== '' && $alumniBatchTo !== '') ? 1 : 0)
+                    + (!empty($alumniEmploymentStatuses) ? 1 : 0)
+                    + (!empty($alumniCourses) ? 1 : 0);
+            @endphp
 
-                <div class="relative flex-1 min-w-[180px] max-w-sm" wire:ignore
-                     x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
-                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
-                    <input type="text" x-model="q" @input.debounce.200ms="$wire.set('alumniSearch',q)"
-                           placeholder="Search name, ID, email…"
-                           aria-label="Search alumni by name, ID, or email"
-                           class="w-full pl-8 pr-8 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
-                                  placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
-                           autocomplete="off" spellcheck="false">
-                    <button type="button" x-show="q" @click="q=''; $wire.set('alumniSearch','')"
-                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#7A3F91] transition"
-                            style="display:none;">
-                        <i class="fas fa-xmark text-xs"></i>
+            <div class="ar-fb-inner">
+
+                {{-- Search bar — always visible. On phones the filter icon button sits beside it. --}}
+                <div class="ar-fb-top">
+                    <div class="ar-fb-search" wire:ignore
+                         x-data="{ q:'', init(){ this.q=$wire.alumniSearch??''; $wire.$watch('alumniSearch',v=>{ if(v!==this.q)this.q=v; }); } }">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[#999999] text-sm pointer-events-none"></i>
+                        <input type="text" x-model="q" @input.debounce.200ms="$wire.set('alumniSearch',q)"
+                               placeholder="Search name, ID, email…"
+                               aria-label="Search alumni by name, ID, or email"
+                               class="w-full pl-8 pr-8 py-2 border border-[#E8E0F0] rounded-lg text-sm bg-white text-[#333333]
+                                      placeholder-[#999999] focus:outline-none focus:border-[#7A3F91] focus:ring-2 focus:ring-[#7A3F91]/10 transition font-normal"
+                               autocomplete="off" spellcheck="false">
+                        <button type="button" x-show="q" @click="q=''; $wire.set('alumniSearch','')"
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#999999] hover:text-[#7A3F91] transition"
+                                style="display:none;">
+                            <i class="fas fa-xmark text-xs"></i>
+                        </button>
+                    </div>
+
+                    {{-- Phones only (hidden ≥768px by CSS): opens / hides the filter panel --}}
+                    <button type="button" @click="toggleFilters()"
+                            :class="{ 'is-open': fOpen }"
+                            class="ar-fb-toggle {{ $arActiveFilterCount > 0 ? 'has-active' : '' }}"
+                            :aria-expanded="fOpen.toString()" aria-controls="ar-filter-panel"
+                            aria-label="Show or hide filters" title="Filters">
+                        <i class="fas fa-sliders" x-show="!fOpen"></i>
+                        <i class="fas fa-chevron-up" x-show="fOpen" style="display:none;"></i>
+                        @if($arActiveFilterCount > 0)
+                        <span class="ar-fb-badge">{{ $arActiveFilterCount }}</span>
+                        @endif
                     </button>
                 </div>
 
-                <div class="h-5 w-px bg-[#E8E0F0] shrink-0 hidden sm:block" aria-hidden="true"></div>
+                {{-- Filter panel: always shown on ≥768px; on phones it drops down / slides up. --}}
+                <div id="ar-filter-panel" class="ar-fb-panel"
+                     x-show="fOpen || isDesktop"
+                     x-transition:enter="ar-fb-t-active"
+                     x-transition:enter-start="ar-fb-t-hidden"
+                     x-transition:enter-end="ar-fb-t-shown"
+                     x-transition:leave="ar-fb-t-active"
+                     x-transition:leave-start="ar-fb-t-shown"
+                     x-transition:leave-end="ar-fb-t-hidden">
 
-                <div class="flex items-center gap-1.5 shrink-0" role="group" aria-label="Filter by profile status">
-                    <button type="button" wire:click="$set('alumniProfileFilter','all')"
-                            :class="{ 'active-all': $wire.alumniProfileFilter==='all' }" :aria-pressed="$wire.alumniProfileFilter==='all'" class="ar-status-pill">All</button>
-                    <button type="button" wire:click="$set('alumniProfileFilter','complete')"
-                            :class="{ 'active-complete': $wire.alumniProfileFilter==='complete' }" :aria-pressed="$wire.alumniProfileFilter==='complete'" class="ar-status-pill">Complete</button>
-                    <button type="button" wire:click="$set('alumniProfileFilter','incomplete')"
-                            :class="{ 'active-incomplete': $wire.alumniProfileFilter==='incomplete' }" :aria-pressed="$wire.alumniProfileFilter==='incomplete'" class="ar-status-pill">Pending</button>
-                </div>
-            </div>
+                    <div class="ar-fb-divider" aria-hidden="true"></div>
 
-            {{-- Row 2: Dropdown filters (Batch / Employment / Program), grouped together, with Reset docked at the end --}}
-            <div class="flex flex-wrap items-center gap-2">
+                    <div class="ar-fb-pills" role="group" aria-label="Filter by profile status">
+                        <button type="button" wire:click="$set('alumniProfileFilter','all')"
+                                :class="{ 'active-all': $wire.alumniProfileFilter==='all' }" :aria-pressed="$wire.alumniProfileFilter==='all'" class="ar-status-pill">All</button>
+                        <button type="button" wire:click="$set('alumniProfileFilter','complete')"
+                                :class="{ 'active-complete': $wire.alumniProfileFilter==='complete' }" :aria-pressed="$wire.alumniProfileFilter==='complete'" class="ar-status-pill">Complete</button>
+                        <button type="button" wire:click="$set('alumniProfileFilter','incomplete')"
+                                :class="{ 'active-incomplete': $wire.alumniProfileFilter==='incomplete' }" :aria-pressed="$wire.alumniProfileFilter==='incomplete'" class="ar-status-pill">Pending</button>
+                    </div>
+
+            {{-- "FILTERS" label + dropdown filters (Batch / Employment / Program), with Reset docked at the end --}}
+            <div class="ar-fb-filters">
+                <span class="ar-filter-label text-xs font-semibold tracking-widest uppercase shrink-0 select-none" style="color:#7A3F91;">FILTERS</span>
 
             {{-- Batch Year — plain year list by default (click a year,
                  done), PLUS an "Add Range" option at the bottom of the
@@ -2278,7 +2400,7 @@ new class extends Component {
 
                 <button wire:click="resetAlumniFilters" wire:loading.attr="disabled" wire:loading.class="opacity-60 cursor-wait" wire:target="resetAlumniFilters"
                         @if($alumniSearch === '' && $alumniProfileFilter === 'all' && $alumniBatchFrom === '' && $alumniBatchTo === '' && empty($alumniEmploymentStatuses) && empty($alumniCourses)) disabled @endif
-                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto"
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white border border-[#E8E0F0] text-[#333333] hover:bg-[#F5F5F5] transition active:scale-95 disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed sm:ml-auto ar-fb-reset"
                         aria-label="Reset all filters">
                     <span wire:loading wire:target="resetAlumniFilters">
                         <i class="fas fa-spinner animate-spin text-sm"></i>
@@ -2286,7 +2408,14 @@ new class extends Component {
                     <i class="fas fa-rotate-left text-sm" wire:loading.remove wire:target="resetAlumniFilters"></i>
                     <span class="hidden sm:inline">Reset</span>
                 </button>
-            </div>
+            </div>{{-- /ar-fb-filters --}}
+
+                    {{-- Phones only: slide the panel back up --}}
+                    <button type="button" class="ar-fb-hide" @click="hide()">
+                        <i class="fas fa-chevron-up" style="font-size:.7rem;"></i> Hide filters
+                    </button>
+                </div>{{-- /ar-fb-panel --}}
+            </div>{{-- /ar-fb-inner --}}
 
             {{-- Row 3: Active-filter summary chips — only rendered when at least one filter is applied --}}
             @if($alumniProfileFilter !== 'all' || ($alumniBatchFrom !== '' && $alumniBatchTo !== '') || !empty($alumniEmploymentStatuses) || !empty($alumniCourses))
