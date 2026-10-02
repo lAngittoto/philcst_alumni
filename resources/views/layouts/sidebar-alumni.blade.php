@@ -1718,7 +1718,7 @@
 
         {{-- Top bar — visible on ALL screen sizes. Hamburger only shows on mobile (lg:hidden).
              Bell always sits on the right, icon-only. --}}
-        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-transparent
+        <header class="flex items-center justify-between px-4 lg:px-8 h-12 lg:h-14 bg-transparent
                        shrink-0 z-30">
             <button @click="open = !open"
                     class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
@@ -1769,7 +1769,7 @@
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8"
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] px-4 pt-0 pb-4 lg:px-8 lg:pt-0 lg:pb-6"
              style="min-height: 0; -webkit-overflow-scrolling: touch;">
             <div class="container mx-auto">
                 @yield('content')

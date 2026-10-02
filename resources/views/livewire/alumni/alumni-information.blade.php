@@ -31,10 +31,11 @@ new class extends Component {
     public bool $genderLocked = false;
     public bool $dobLocked    = false;
 
-    // Parents' names are OPTIONAL. Each individual name field locks the moment
-    // it has a value on record (computed from the DB at mount() and refreshed
-    // after every save). A field that is still empty stays editable so the
-    // alumni can add it later; once filled it can never be changed again.
+    // Parents' names: Last Name + Given Name are REQUIRED for both father and
+    // mother; Middle Name is optional. Each name field locks the moment it has
+    // a value on record (computed from the DB at mount() and refreshed after
+    // every save). A field that is still empty stays editable so the alumni
+    // can add it later; once filled it can never be changed again.
     public array $lockedFields = [];
 
     public bool $mottoLocked  = false;
@@ -345,12 +346,12 @@ new class extends Component {
                 'email'                 => ['required', 'max:255', 'unique:alumni,email,' . $this->alumniId, 'regex:/^[a-zA-Z0-9._%+\-]+@gmail\.com$/i'],
                 'gender'               => 'required|string|in:Male,Female',
                 'date_of_birth'        => 'required|date|before:today',
-                'father_last_name'     => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
-                'father_given_name'    => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'father_last_name'     => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'father_given_name'    => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'father_middle_name'   => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'father_suffix'        => ['nullable', 'string', 'max:20', 'regex:' . self::NAME_REGEX],
-                'mother_last_name'     => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
-                'mother_given_name'    => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'mother_last_name'     => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
+                'mother_given_name'    => ['required', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'mother_middle_name'   => ['nullable', 'string', 'max:100', 'regex:' . self::NAME_REGEX],
                 'dswd_household_no'    => 'nullable|string|max:50',
                 'address_street'       => 'required|string|max:255',
@@ -367,6 +368,10 @@ new class extends Component {
                 'gender.required'               => 'Please select your sex/gender.',
                 'date_of_birth.required'        => 'Birth date is required.',
                 'date_of_birth.before'          => 'Birth date must be in the past.',
+                'father_last_name.required'     => "Father's last name is required.",
+                'father_given_name.required'    => "Father's given name is required.",
+                'mother_last_name.required'     => "Mother's last name is required.",
+                'mother_given_name.required'    => "Mother's given name is required.",
                 'father_last_name.regex'        => "Father's last name must not contain numbers.",
                 'father_given_name.regex'       => "Father's given name must not contain numbers.",
                 'father_middle_name.regex'      => "Father's middle name must not contain numbers.",
@@ -395,6 +400,8 @@ new class extends Component {
             $profileComplete =
                 !empty($this->email)
                 && !empty($this->gender) && !empty($this->date_of_birth)
+                && !empty($this->father_last_name) && !empty($this->father_given_name)
+                && !empty($this->mother_last_name) && !empty($this->mother_given_name)
                 && !empty($this->address_street) && !empty($this->address_barangay)
                 && !empty($this->address_municipality) && !empty($this->address_province)
                 && !empty($this->contact_number);
@@ -1982,11 +1989,11 @@ function phAddress(initial) {
                     {{-- Father's Name --}}
                     <div class="ai-card">
                         <div class="ai-card-header">
-                            <div class="ai-card-header-title"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p> @if(in_array('father_last_name', $lockedFields, true) && in_array('father_given_name', $lockedFields, true) && in_array('father_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
+                            <div class="ai-card-header-title"><i class="fas fa-person" style="color:#7A3F91 !important;"></i><p>Father's Name</p> @if(in_array('father_last_name', $lockedFields, true) && in_array('father_given_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
                         </div>
                         <div class="ai-card-body grid grid-cols-3 gap-1.5">
                             <div class="ai-cell text-center">
-                                <p class="field-label">Last Name @if(in_array('father_last_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                <p class="field-label">Last Name @if($editingProfile && !in_array('father_last_name', $lockedFields, true))<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile && !in_array('father_last_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="father_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_last_name') ? 'field-error' : '' }}">
@@ -1996,7 +2003,7 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Given Name @if(in_array('father_given_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                <p class="field-label">Given Name @if($editingProfile && !in_array('father_given_name', $lockedFields, true))<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile && !in_array('father_given_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="father_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_given_name') ? 'field-error' : '' }}">
@@ -2006,7 +2013,7 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Middle Name @if(in_array('father_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                <p class="field-label">Middle Name</p>
                                 @if($editingProfile && !in_array('father_middle_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="father_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('father_middle_name') ? 'field-error' : '' }}">
@@ -2021,11 +2028,11 @@ function phAddress(initial) {
                     {{-- Mother's Maiden Name --}}
                     <div class="ai-card">
                         <div class="ai-card-header">
-                            <div class="ai-card-header-title"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p> @if(in_array('mother_last_name', $lockedFields, true) && in_array('mother_given_name', $lockedFields, true) && in_array('mother_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
+                            <div class="ai-card-header-title"><i class="fas fa-person-dress" style="color:#7A3F91 !important;"></i><p>Mother's Maiden Name</p> @if(in_array('mother_last_name', $lockedFields, true) && in_array('mother_given_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</div>
                         </div>
                         <div class="ai-card-body grid grid-cols-3 gap-1.5">
                             <div class="ai-cell text-center">
-                                <p class="field-label">Last Name @if(in_array('mother_last_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                <p class="field-label">Last Name @if($editingProfile && !in_array('mother_last_name', $lockedFields, true))<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile && !in_array('mother_last_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="mother_last_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_last_name') ? 'field-error' : '' }}">
@@ -2035,7 +2042,7 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Given Name @if(in_array('mother_given_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                <p class="field-label">Given Name @if($editingProfile && !in_array('mother_given_name', $lockedFields, true))<span class="text-red-500">*</span>@endif</p>
                                 @if($editingProfile && !in_array('mother_given_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="mother_given_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_given_name') ? 'field-error' : '' }}">
@@ -2045,7 +2052,7 @@ function phAddress(initial) {
                                 @endif
                             </div>
                             <div class="ai-cell text-center">
-                                <p class="field-label">Middle Name @if(in_array('mother_middle_name', $lockedFields, true))<i class="fas fa-lock text-[9px] text-gray-400" title="Already on record — not editable"></i>@endif</p>
+                                <p class="field-label">Middle Name</p>
                                 @if($editingProfile && !in_array('mother_middle_name', $lockedFields, true))
                                     <input wire:model.live.debounce.300ms="mother_middle_name" type="text" oninput="this.value=this.value.toUpperCase()"
                                         class="field-input text-center uppercase {{ $errors->has('mother_middle_name') ? 'field-error' : '' }}">

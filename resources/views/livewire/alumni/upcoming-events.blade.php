@@ -573,10 +573,24 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
+<div class="ev-page-root">
 
 <style>
 [x-cloak] { display: none !important; }
+
+/* Full-screen page shell: fills the whole viewport area under the top bar.
+   Top bar = 3rem (mobile) / 3.5rem (lg) and bottom padding = 1rem / 1.5rem
+   from the alumni layout, so total offset = 4rem / 5rem. */
+.ev-page-root {
+    display: flex; flex-direction: column;
+    height: calc(100vh - 4rem);
+    height: calc(100dvh - 4rem);
+    min-height: 420px;
+    overflow: hidden;
+}
+@media (min-width: 1024px) {
+    .ev-page-root { height: calc(100vh - 5rem); height: calc(100dvh - 5rem); }
+}
 
 select.filter-input {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
@@ -996,12 +1010,12 @@ select.filter-input:hover { cursor: default !important; }
     </button>
 </div>
 
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div class="flex flex-col flex-1 gap-3 sm:gap-4 pt-1 w-full min-h-0">
 
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
-                <i class="fas fa-calendar-days text-white text-lg"></i>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 flex-shrink-0">
+        <div class="flex items-center gap-3 sm:gap-4">
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
+                <i class="fas fa-calendar-days text-white text-base sm:text-lg"></i>
             </div>
             <div>
                 <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Upcoming Events</h1>
@@ -1018,80 +1032,107 @@ select.filter-input:hover { cursor: default !important; }
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
          id="ev-content-block">
 
-        <div class="bg-gray-50 border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0">
+        @php $hasActiveFilters = $search !== '' || $filterStatus !== 'upcoming'; @endphp
+        <div class="bg-gray-50 border-b border-[#E8E0F0] px-3 sm:px-3.5 py-2.5 flex-shrink-0"
+             x-data="{ fOpen: false }">
 
-            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
+            <div class="flex flex-wrap items-center gap-2">
 
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
-                       placeholder="Search…"
-                       class="filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                              hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
-                       autocomplete="off" maxlength="100" spellcheck="false">
+                {{-- 1) Search bar --}}
+                <div class="relative flex-1 min-w-0 md:flex-none md:w-72 lg:w-80"
+                     wire:ignore
+                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
+                    <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
+                           placeholder="Search events…"
+                           class="filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                  hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                           autocomplete="off" maxlength="100" spellcheck="false">
+                </div>
+
+                {{-- 2) "Filters" toggle — mobile / small screens only --}}
+                <button type="button"
+                        @click="fOpen = !fOpen"
+                        :aria-expanded="fOpen.toString()"
+                        aria-controls="ev-filter-panel"
+                        class="md:hidden inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-[13px] font-semibold bg-white border transition active:scale-95 flex-shrink-0"
+                        :class="fOpen ? 'border-[#7a3f91] text-[#7a3f91]' : 'border-gray-200 text-gray-700'">
+                    <i class="fas fa-sliders text-xs"></i>
+                    <span>Filters</span>
+                    @if($hasActiveFilters)
+                        <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91]"></span>
+                    @endif
+                    <i class="fas fa-chevron-down text-[9px] transition-transform duration-200" :class="fOpen ? 'rotate-180' : ''"></i>
+                </button>
+
+                {{-- 3) Filters panel: always inline on md+, tap-to-open/hide below md --}}
+                <div id="ev-filter-panel"
+                     class="w-full md:w-auto md:flex-1 items-center gap-2"
+                     :class="fOpen ? 'flex' : 'hidden md:flex'">
+
+                    <span class="hidden md:inline text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
+
+                    <div class="flex-1 md:flex-none min-w-0"
+                         wire:ignore
+                         x-data="{
+                             fs: 'upcoming',
+                             init() {
+                                 this.fs = $wire.filterStatus ?? 'upcoming';
+                                 $wire.$watch('filterStatus', v => { if (v !== this.fs) this.fs = v; });
+                             },
+                             onChange(val) {
+                                 this.fs = val;
+                                 $wire.set('filterStatus', val);
+                             }
+                         }">
+                        <select x-model="fs" @change="onChange($event.target.value)"
+                                aria-label="Filter events by status"
+                                class="filter-input w-full md:w-auto py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                       hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
+                            <option value="">All Events</option>
+                            <option value="upcoming">Upcoming</option>
+                            <option value="completed">Completed</option>
+                        </select>
+                    </div>
+
+                    <button wire:click="resetFilters"
+                            wire:loading.attr="disabled"
+                            wire:loading.class="opacity-60 cursor-wait"
+                            wire:target="resetFilters"
+                            data-ev-reset
+                            @disabled(!$hasActiveFilters)
+                            class="md:ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold flex-shrink-0
+                                   border transition active:scale-95
+                                   {{ $hasActiveFilters
+                                        ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
+                                        : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
+                        <span wire:loading.remove wire:target="resetFilters">
+                            <i class="fas fa-rotate-left text-xs"></i>
+                        </span>
+                        <span wire:loading wire:target="resetFilters">
+                            <i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i>
+                        </span>
+                        <span>Reset</span>
+                    </button>
+                </div>
+
             </div>
-
-            <div wire:ignore
-                 x-data="{
-                     fs: 'upcoming',
-                     init() {
-                         this.fs = $wire.filterStatus ?? 'upcoming';
-                         $wire.$watch('filterStatus', v => { if (v !== this.fs) this.fs = v; });
-                     },
-                     onChange(val) {
-                         this.fs = val;
-                         $wire.set('filterStatus', val);
-                     }
-                 }">
-                <select x-model="fs" @change="onChange($event.target.value)"
-                        class="filter-input py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                               hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
-                    <option value="">All Events</option>
-                    <option value="upcoming">Upcoming</option>
-                    <option value="completed">Completed</option>
-                </select>
-            </div>
-
-            @php $hasActiveFilters = $search !== '' || $filterStatus !== 'upcoming'; @endphp
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    data-ev-reset
-                    @disabled(!$hasActiveFilters)
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold
-                           border transition active:scale-95
-                           {{ $hasActiveFilters
-                                ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
-                                : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-xs"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
-
         </div>
 
         {{-- ── Loading overlay: fixed to viewport so it stays centered
                 regardless of scroll position. Left offset accounts for
                 the sidebar (~284px) so the spinner sits in the content
                 area, not behind the nav. ──── --}}
-        <div class="hidden fixed z-[9999] items-center justify-center pointer-events-none"
-             style="top:0;bottom:0;left:284px;right:0;"
+        <div class="hidden absolute inset-0 z-30 items-center justify-center pointer-events-none"
              wire:loading.flex wire:target="search,filterStatus,previousPage,nextPage,page,resetFilters">
             <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
         </div>
 
-        <div class="bg-white p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
+        <div class="bg-white p-3 sm:p-4 relative flex-1 min-h-0 overflow-y-auto transition-opacity duration-200"
              wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus,previousPage,nextPage,page,resetFilters">
 
             @if($this->pagedEvents->count() > 0)
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
                 @foreach($this->pagedEvents as $event)
                 @php
                     $isCompleted  = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
@@ -1227,7 +1268,7 @@ select.filter-input:hover { cursor: default !important; }
             $pgStart = max(1, $page - 2);
             $pgEnd   = min($tp, $page + 2);
         @endphp
-        <div class="flex items-center justify-between gap-2 flex-wrap px-5 min-h-[48px]
+        <div class="flex items-center justify-center sm:justify-between gap-2 flex-wrap px-3 sm:px-5 py-1.5 min-h-[48px]
                     bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0">
 
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
