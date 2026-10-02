@@ -2015,9 +2015,6 @@ function phAddress(initial) {
                                     @if($father_middle_name)<p class="field-value">{{ strtoupper($father_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
-                            @if($editingProfile && (!in_array('father_last_name', $lockedFields, true) || !in_array('father_given_name', $lockedFields, true) || !in_array('father_middle_name', $lockedFields, true)))
-                                <p class="col-span-3 text-xs text-[#333333] font-normal mt-0.5 m-0">Optional. Once saved, a name can no longer be changed.</p>
-                            @endif
                         </div>
                     </div>
 
@@ -2057,9 +2054,6 @@ function phAddress(initial) {
                                     @if($mother_middle_name)<p class="field-value">{{ strtoupper($mother_middle_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                                 @endif
                             </div>
-                            @if($editingProfile && (!in_array('mother_last_name', $lockedFields, true) || !in_array('mother_given_name', $lockedFields, true) || !in_array('mother_middle_name', $lockedFields, true)))
-                                <p class="col-span-3 text-xs text-[#333333] font-normal mt-0.5 m-0">Optional. Once saved, a name can no longer be changed.</p>
-                            @endif
                         </div>
                     </div>
 
@@ -2108,8 +2102,6 @@ function phAddress(initial) {
                                         <p class="text-xs text-amber-600 font-medium mt-0.5 m-0 flex items-center gap-1">
                                             <i class="fas fa-lock text-[10px]"></i> Locked. Changeable again in {{ $this->emailCooldownDaysLeft }} day(s).
                                         </p>
-                                    @else
-                                        <p class="text-xs text-[#333333] font-normal mt-0.5 m-0">Can only be changed once every 30 days.</p>
                                     @endif
                                 @else
                                     @if($email)<p class="field-value break-all">{{ $email }}</p>@else<p class="field-value-empty">Not provided</p>@endif
@@ -2210,8 +2202,7 @@ function phAddress(initial) {
                 </div>
                 <h3 class="text-base font-semibold text-gray-900">Confirm Profile Update</h3>
                 <p class="text-base text-gray-900 font-medium mt-2 leading-relaxed">
-                    Make sure all information is correct before continuing. Your email can only be changed
-                    once every <strong class="text-gray-900 font-bold">30 days</strong>, and parent names that are already filled in can no longer be changed.
+                    Make sure all information is correct before continuing.
                 </p>
             </div>
             <div class="px-6 pb-6 flex gap-2">

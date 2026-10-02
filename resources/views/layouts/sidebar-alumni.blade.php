@@ -342,59 +342,20 @@
         .alm-nav-icon { transition: transform 0.2s ease; position: relative; }
 
         /* ── Nav link click spinner ──────────────────────────────
-           Same visual language/behavior as the registrar sidebar's
-           loading spinner (fa-spinner fa-spin, brand purple) — icon
-           and notif colors/design stay exactly as-is, only the
-           loading-on-click effect is added. Expanded sidebar: sits
-           at the end of the row (where the active dot sits), icon
-           stays visible. Collapsed sidebar / mobile: centered on
-           top of the icon chip, icon hidden, since there's no
-           label/dot row to show it in. */
+           ONE spinner per link, always rendered INSIDE the icon chip in
+           place of the icon (expanded, collapsed and mobile alike) —
+           same approach as the registrar sidebar. Previously two copies
+           (end-of-row + chip) were rendered and CSS toggled which one
+           showed per breakpoint/state; when those rules and Alpine's
+           own show/hide disagreed for a frame, two spinners appeared.
+           Now the markup itself guarantees a single spinner: the icon
+           and the spinner are swapped with x-show on the same
+           condition, and no CSS decides which one is visible. ── */
+        .alm-nav-link.is-navigating { cursor: wait !important; }
         .alm-nav-spinner {
-            flex-shrink: 0;
-            margin-left: auto;
-            font-size: 13px;
-            color: #7A3F91;
+            font-size: 16px;
             line-height: 1;
-        }
-        .alm-nav-spinner-icon-anchored { display: none; }
-
-        /* Icon-only sidebar states: collapsed desktop rail (≥1024px)
-           AND mobile/tablet (<1024px, always icon-only here). Both
-           get the icon-anchored spinner dead-centered on the chip,
-           end-of-row spinner hidden, and the icon itself hidden so
-           nothing peeks out from underneath the spinner. */
-        .alm-sidebar.is-collapsed .alm-nav-link.is-navigating > .alm-nav-spinner,
-        .alm-nav-link.is-navigating > .alm-nav-spinner {
-            display: none !important;
-        }
-        .alm-sidebar.is-collapsed .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored,
-        .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored {
-            display: flex !important;
-            align-items: center;
-            justify-content: center;
-            position: absolute !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate(-50%, -50%) !important;
-            font-size: 16px !important;
-        }
-        .alm-sidebar.is-collapsed .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid,
-        .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid {
-            display: none !important;
-        }
-        /* On expanded desktop (not collapsed), the end-of-row spinner
-           is the one that should show, with the icon staying visible. */
-        @media (min-width: 1024px) {
-            .alm-sidebar:not(.is-collapsed) .alm-nav-link.is-navigating > .alm-nav-spinner {
-                display: flex !important;
-            }
-            .alm-sidebar:not(.is-collapsed) .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored {
-                display: none !important;
-            }
-            .alm-sidebar:not(.is-collapsed) .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid {
-                display: inline-block !important;
-            }
+            color: #7A3F91 !important;
         }
 
         /* ── Fade/width-collapsible text (labels, brand text, etc.) ──
@@ -595,25 +556,6 @@
                 margin-right: 0 !important;
             }
 
-            /* Mobile is always icon-only regardless of .is-collapsed, so
-               the nav spinner must force the icon-anchored treatment here
-               too — same rule shape as the ≥1024px .is-collapsed case. */
-            #alumni-sidebar-aside .alm-nav-link.is-navigating > .alm-nav-spinner {
-                display: none !important;
-            }
-            #alumni-sidebar-aside .alm-nav-link.is-navigating .alm-nav-spinner-icon-anchored {
-                display: flex !important;
-                align-items: center;
-                justify-content: center;
-                position: absolute !important;
-                top: 50% !important;
-                left: 50% !important;
-                transform: translate(-50%, -50%) !important;
-                font-size: 16px !important;
-            }
-            #alumni-sidebar-aside .alm-nav-link.is-navigating .alm-nav-icon i.fa-solid {
-                display: none !important;
-            }
         }
 
         /* ════════════════════════════════════════════════════════
@@ -743,41 +685,6 @@
             window.location.reload();
         }
     });
-
-    // FIX ("This page has expired" pagka-logout): dati plain native form
-    // POST lang ang logout button. Kapag laos na ang CSRF token (matagal
-    // nang bukas ang tab, lumipas na ang session lifetime, o galing sa
-    // bfcache/Livewire cache na luma na ang baked-in @csrf value), sinasagot
-    // ito ng Laravel ng sarili niyang 419 whoops page - kahit successful
-    // naman talaga ang logout intent ng user.
-    //
-    // Fix: gawing AJAX ang submit. Anuman ang mangyari sa sagot ng server
-    // (200 OK talagang na-logout, o 419 dahil laos na ang session, na
-    // effectively logged-out na rin naman), palaging derecho na lang sa
-    // login page ang user, hindi na makikita ang 419 error screen.
-    //
-    // Nilagay ito dito sa script block (hindi sa loob ng HTML attribute)
-    // para walang panganib na masira ang quoting kapag maraming special
-    // characters o comments.
-    window.__alumniLoginUrl = '{{ route("login") }}';
-
-    window.__alumniLogout = function (isAlreadyLoggingOut, setLoggingOut, formEl) {
-        if (isAlreadyLoggingOut) return;
-        setLoggingOut(true);
-        var tokenMeta = document.querySelector('meta[name="csrf-token"]');
-        var token = tokenMeta ? tokenMeta.content : '';
-        fetch(formEl.action, {
-            method: 'POST',
-            headers: {
-                'X-CSRF-TOKEN': token,
-                'X-Requested-With': 'XMLHttpRequest',
-                'Accept': 'application/json'
-            },
-            credentials: 'same-origin'
-        }).catch(function () {}).finally(function () {
-            window.location.href = window.__alumniLoginUrl;
-        });
-    };
 
     // ─────────────────────────────────────────────────────────────────────────
     //  ROUTE MAP
@@ -1724,7 +1631,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="navClickedRoute = '{{ $link['route'] }}';"
+                   @click="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="alm-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
@@ -1733,22 +1640,15 @@
                          style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
                                 box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
-                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
-                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                            <span class="alm-nav-spinner-icon-anchored">
-                                <i class="fas fa-spinner fa-spin alm-nav-spinner"></i>
-                            </span>
-                        </template>
+                           x-show="navClickedRoute !== '{{ $link['route'] }}'"></i>
+                        <i class="fas fa-spinner fa-spin alm-nav-spinner"
+                           x-show="navClickedRoute === '{{ $link['route'] }}'" x-cloak></i>
                     </div>
 
                     <span class="alm-nav-label alm-collapsible-text font-medium tracking-wide flex-1 text-[14px]
                                  {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
-
-                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                        <i class="fas fa-spinner fa-spin alm-nav-spinner"></i>
-                    </template>
 
                     @if($isActive)
                         <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
@@ -1764,10 +1664,10 @@
         <div class="p-2 lg:p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST"
                   action="{{ route('logout') }}"
-                  @submit.prevent="window.__alumniLogout(loggingOut, function(v){ loggingOut = v; }, $event.target)">
+                  @submit="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } loggingOut = true">
                 @csrf
                 <button type="submit"
-                        :disabled="loggingOut"
+                        :disabled="loggingOut || navClickedRoute !== null"
                         title="Logout"
                         class="alm-logout-btn">
                     <template x-if="!loggingOut">
@@ -1818,7 +1718,7 @@
 
         {{-- Top bar — visible on ALL screen sizes. Hamburger only shows on mobile (lg:hidden).
              Bell always sits on the right, icon-only. --}}
-        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
+        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-transparent
                        shrink-0 z-30">
             <button @click="open = !open"
                     class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">

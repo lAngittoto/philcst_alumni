@@ -553,7 +553,7 @@ new class extends Component {
 
 }; ?>
 
-<div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
+<div class="flex flex-col" style="height:calc(100vh - 180px);height:calc(100dvh - 180px);max-height:calc(100vh - 180px);max-height:calc(100dvh - 180px);overflow:hidden;">
 
 {{-- ── Clean-URL cleanup script ──────────────────────────────────────────
      Strips the "?job=123" query param from the address bar once the job
@@ -594,6 +594,9 @@ select.filter-input {
     -webkit-appearance: none;
     appearance: none;
 }
+
+/* Alpine: hide x-show/x-cloak elements until Alpine boots (no flash of open filter panel on mobile) */
+[x-cloak] { display: none !important; }
 
 @keyframes detailIn { from { opacity: 0; } to { opacity: 1; } }
 .detail-page { animation: detailIn .18s cubic-bezier(.4,0,.2,1) both; }
@@ -1006,55 +1009,103 @@ select.filter-input option {
         <div class="flex flex-col w-full lg:w-[420px] xl:w-[460px] flex-shrink-0 border-r border-[#E8E0F0] bg-white min-h-0">
 
             {{-- Filter bar --}}
-            <div class="bg-gray-50 border-b border-[#E8E0F0] px-3 pt-2.5 pb-2 flex flex-col gap-2 flex-shrink-0 select-none">
-                {{-- Row 1: label + search + dropdowns --}}
-                <div class="flex flex-wrap gap-2 items-center">
-                    <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1 flex-shrink-0">Filters</span>
-                    <div class="relative flex-1 min-w-[120px] max-w-xs"
+            @php
+                $hasActiveFilters  = $search !== '' || $filterType !== '' || $filterLevel !== '' || $filterSort !== 'recent';
+                // badge on the filter icon — counts dropdown filters only (search is visible in the box itself)
+                $activeFilterCount = ($filterType !== '' ? 1 : 0) + ($filterLevel !== '' ? 1 : 0) + ($filterSort !== 'recent' ? 1 : 0);
+            @endphp
+            <div class="bg-gray-50 border-b border-[#E8E0F0] flex-shrink-0 select-none"
+                 x-data="{ open: window.matchMedia('(min-width: 640px)').matches }">
+
+                {{-- Row 1: search bar + filter toggle (icon-only on mobile, icon + text on sm+) --}}
+                <div class="flex items-center gap-2 px-3 py-2.5">
+                    <div class="relative flex-1 min-w-0"
                          wire:ignore
                          x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                         <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
                         <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
-                               placeholder="Search…"
-                               class="filter-input w-full pl-8 pr-3 py-[6px] text-[12px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                               placeholder="Search jobs…"
+                               class="filter-input w-full h-10 sm:h-9 pl-8 pr-8 text-[16px] sm:text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                                       hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
                                style="cursor:text;user-select:text;-webkit-user-select:text;"
                                autocomplete="off" maxlength="100" spellcheck="false">
+                        <button type="button" x-show="q" x-cloak
+                                @click="q=''; $wire.set('search','')"
+                                class="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 inline-flex items-center justify-center rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition"
+                                aria-label="Clear search">
+                            <i class="fas fa-xmark text-[11px]"></i>
+                        </button>
                     </div>
-                    <select wire:model.live="filterType"
-                            class="filter-input flex-shrink-0 py-[6px] px-2.5 text-[12px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                                   hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] transition cursor-pointer">
-                        <option value="">All Types</option>
-                        <option value="Full-Time">Full-Time</option>
-                        <option value="Part-Time">Part-Time</option>
-                        <option value="Contract">Contract</option>
-                        <option value="Freelance">Freelance</option>
-                    </select>
-                    <select wire:model.live="filterLevel"
-                            class="filter-input flex-shrink-0 py-[6px] px-2.5 text-[12px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
-                                   hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] transition cursor-pointer">
-                        <option value="">All Level</option>
-                        <option value="No Experience Required">No Experience Required</option>
-                        <option value="Entry Level (At Least 1 Year)">Entry Level (At Least 1 Year)</option>
-                        <option value="Mid Level (2-3 Years)">Mid Level (2-3 Years)</option>
-                        <option value="Senior Level (4-5 Years)">Senior Level (4-5 Years)</option>
-                        <option value="Expert Level (5+ Years)">Expert Level (5+ Years)</option>
-                    </select>
-                </div>
-                {{-- Row 2: reset button (left-aligned, below) --}}
-                @php $hasActiveFilters = $search !== '' || $filterType !== '' || $filterLevel !== '' || $filterSort !== 'recent'; @endphp
-                <div class="flex items-center px-1">
-                    <button wire:click="resetFilters"
-                            wire:loading.attr="disabled"
-                            wire:loading.class="opacity-60 cursor-wait"
-                            wire:target="resetFilters"
-                            data-jb-reset
-                            @disabled(!$hasActiveFilters)
-                            class="inline-flex items-center gap-1.5 px-3 py-[5px] rounded-lg text-xs font-semibold border transition active:scale-95
-                                   {{ $hasActiveFilters ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
-                        <span wire:loading.remove wire:target="resetFilters"><i class="fas fa-rotate-left text-xs"></i> Reset</span>
-                        <span wire:loading wire:target="resetFilters"><i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i> Reset</span>
+
+                    <button type="button"
+                            @click="open = !open"
+                            :aria-expanded="open.toString()"
+                            aria-controls="jb-filter-panel"
+                            aria-label="Toggle filters"
+                            class="relative flex-shrink-0 inline-flex items-center justify-center gap-1.5 h-10 w-10 sm:h-9 sm:w-auto sm:px-3 rounded-lg border text-xs font-semibold transition active:scale-95"
+                            :class="open ? 'bg-[#7a3f91] border-[#7a3f91] text-white' : 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300'">
+                        <i class="fas fa-sliders text-[13px]"></i>
+                        <span class="hidden sm:inline">Filters</span>
+                        <i class="fas fa-chevron-down hidden sm:inline text-[9px] transition-transform duration-200" :class="open ? 'rotate-180' : ''"></i>
+                        @if($activeFilterCount > 0)
+                            <span class="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none border-2 border-gray-50">{{ $activeFilterCount }}</span>
+                        @endif
                     </button>
+                </div>
+
+                {{-- Row 2: collapsible filters (Filters label + dropdowns + reset) --}}
+                <div id="jb-filter-panel"
+                     x-show="open" x-cloak
+                     x-transition:enter="transition ease-out duration-150"
+                     x-transition:enter-start="opacity-0 -translate-y-1"
+                     x-transition:enter-end="opacity-100 translate-y-0"
+                     x-transition:leave="transition ease-in duration-100"
+                     x-transition:leave-start="opacity-100 translate-y-0"
+                     x-transition:leave-end="opacity-0 -translate-y-1"
+                     class="px-3 pb-3">
+
+                    <div class="flex items-center justify-between gap-2 mb-2 px-0.5">
+                        <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none">Filters</span>
+                        <button wire:click="resetFilters"
+                                wire:loading.attr="disabled"
+                                wire:loading.class="opacity-60 cursor-wait"
+                                wire:target="resetFilters"
+                                data-jb-reset
+                                @disabled(!$hasActiveFilters)
+                                class="inline-flex items-center gap-1.5 px-3 py-[5px] rounded-lg text-xs font-semibold border transition active:scale-95
+                                       {{ $hasActiveFilters ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer' : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
+                            <span wire:loading.remove wire:target="resetFilters"><i class="fas fa-rotate-left text-xs"></i> Reset</span>
+                            <span wire:loading wire:target="resetFilters"><i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i> Reset</span>
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex flex-col gap-1 min-w-0">
+                            <span class="text-[11px] font-semibold text-gray-500 px-0.5">Type</span>
+                            <select wire:model.live="filterType"
+                                    class="filter-input w-full min-w-0 truncate h-10 sm:h-9 px-2.5 text-[16px] sm:text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                           hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
+                                <option value="">All Types</option>
+                                <option value="Full-Time">Full-Time</option>
+                                <option value="Part-Time">Part-Time</option>
+                                <option value="Contract">Contract</option>
+                                <option value="Freelance">Freelance</option>
+                            </select>
+                        </label>
+                        <label class="flex flex-col gap-1 min-w-0">
+                            <span class="text-[11px] font-semibold text-gray-500 px-0.5">Experience</span>
+                            <select wire:model.live="filterLevel"
+                                    class="filter-input w-full min-w-0 truncate h-10 sm:h-9 px-2.5 text-[16px] sm:text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                           hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
+                                <option value="">All Levels</option>
+                                <option value="No Experience Required">No Experience Required</option>
+                                <option value="Entry Level (At Least 1 Year)">Entry Level (At Least 1 Year)</option>
+                                <option value="Mid Level (2-3 Years)">Mid Level (2-3 Years)</option>
+                                <option value="Senior Level (4-5 Years)">Senior Level (4-5 Years)</option>
+                                <option value="Expert Level (5+ Years)">Expert Level (5+ Years)</option>
+                            </select>
+                        </label>
+                    </div>
                 </div>
             </div>
 
