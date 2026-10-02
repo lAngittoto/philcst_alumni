@@ -471,16 +471,6 @@ new class extends Component {
     }
 
     public function openModal(string $m): void {
-        // Hard stop even if someone re-enables the disabled button via devtools.
-        if ($m === 'createDirector' && $this->activeDirectorExists()) {
-            $this->flash('error', 'There is already an active Director. Please deactivate the current Director first.');
-            return;
-        }
-        if ($m === 'createRegistrar' && $this->activeRegistrarExists()) {
-            $this->flash('error', 'There is already an active Registrar. Please deactivate the current Registrar first.');
-            return;
-        }
-
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
         $this->dErrs=[]; $this->dOk='';
@@ -1906,17 +1896,17 @@ select.mu-filter-input.mu-active {
         </div>
         <div class="ml-auto flex items-center gap-2">
 
-        {{-- New Registrar — disabled while an ACTIVE registrar exists (only one allowed) --}}
-        @php $regLocked = $this->hasActiveRegistrar; @endphp
-        <div class="relative" x-data="{tip:false}" @mouseenter="tip=true" @mouseleave="tip=false">
-            <button @if(!$regLocked) wire:click="openModal('createRegistrar')" @endif
-                    wire:loading.attr="disabled" wire:target="openModal('createRegistrar')"
-                    @disabled($regLocked)
-                    aria-disabled="{{ $regLocked ? 'true' : 'false' }}"
-                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition {{ $regLocked ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:opacity-90 active:scale-95' }}"
+        {{-- New Registrar / New Director — always openable. The one-active-account
+             rule is enforced on the modal's "Create" button (disabled while an
+             ACTIVE one exists) and again on the server in createRegistrar() /
+             createDirector(). --}}
+        <div class="relative" x-data="{tip:false}">
+            <button wire:click="openModal('createRegistrar')" wire:loading.attr="disabled" wire:target="openModal('createRegistrar')"
+                    @mouseenter="tip=true" @mouseleave="tip=false"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
                     style="background:linear-gradient(135deg,#027a4f,#10b981);">
                 <span wire:loading wire:target="openModal('createRegistrar')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
-                <span wire:loading.remove wire:target="openModal('createRegistrar')"><i class="fas {{ $regLocked ? 'fa-lock' : 'fa-user-clock' }} text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createRegistrar')"><i class="fas fa-user-clock text-white text-base"></i></span>
             </button>
             <div x-show="tip" x-cloak
                  x-transition:enter="transition ease-out duration-100"
@@ -1924,27 +1914,19 @@ select.mu-filter-input.mu-active {
                  x-transition:enter-end="opacity-100 scale-100"
                  class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
                 <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
-                    @if($regLocked)
-                        <i class="fas fa-lock mr-1.5"></i>Active Registrar exists — deactivate first
-                    @else
-                        <i class="fas fa-user-clock mr-1.5"></i>New Registrar
-                    @endif
+                    <i class="fas fa-user-clock mr-1.5"></i>New Registrar
                 </div>
                 <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
             </div>
         </div>
 
-        {{-- New Director — disabled while an ACTIVE director exists (only one allowed) --}}
-        @php $dirLocked = $this->hasActiveDirector; @endphp
-        <div class="relative" x-data="{tip:false}" @mouseenter="tip=true" @mouseleave="tip=false">
-            <button @if(!$dirLocked) wire:click="openModal('createDirector')" @endif
-                    wire:loading.attr="disabled" wire:target="openModal('createDirector')"
-                    @disabled($dirLocked)
-                    aria-disabled="{{ $dirLocked ? 'true' : 'false' }}"
-                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition {{ $dirLocked ? 'opacity-40 cursor-not-allowed grayscale' : 'hover:opacity-90 active:scale-95' }}"
+        <div class="relative" x-data="{tip:false}">
+            <button wire:click="openModal('createDirector')" wire:loading.attr="disabled" wire:target="openModal('createDirector')"
+                    @mouseenter="tip=true" @mouseleave="tip=false"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
                     style="background:linear-gradient(135deg,#7a3f91,#5e2f72);">
                 <span wire:loading wire:target="openModal('createDirector')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
-                <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas {{ $dirLocked ? 'fa-lock' : 'fa-user-tie' }} text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createDirector')"><i class="fas fa-user-tie text-white text-base"></i></span>
             </button>
             <div x-show="tip" x-cloak
                  x-transition:enter="transition ease-out duration-100"
@@ -1952,11 +1934,7 @@ select.mu-filter-input.mu-active {
                  x-transition:enter-end="opacity-100 scale-100"
                  class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
                 <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
-                    @if($dirLocked)
-                        <i class="fas fa-lock mr-1.5"></i>Active Director exists — deactivate first
-                    @else
-                        <i class="fas fa-user-tie mr-1.5"></i>New Director
-                    @endif
+                    <i class="fas fa-user-tie mr-1.5"></i>New Director
                 </div>
                 <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
             </div>
@@ -3509,6 +3487,16 @@ select.mu-filter-input.mu-active {
             @endif
 
             @if(!$dOk)
+            {{-- Only ONE active Director allowed: warn up front and lock the Create button below. --}}
+            @if($this->hasActiveDirector)
+            <div class="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-3">
+                <i class="fas fa-triangle-exclamation text-amber-600 text-base mt-0.5 shrink-0"></i>
+                <div>
+                    <p class="text-base font-bold text-amber-800 leading-snug">There is already an active Director.</p>
+                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Director can be active at a time. Deactivate the current Director first, then you can create a new account.</p>
+                </div>
+            </div>
+            @endif
             {{-- Full-form loading overlay — appears the instant the button is clicked,
                  before Livewire's round-trip even starts. Covers the whole scroll area
                  so the user gets immediate visual feedback while Mail::send() runs. --}}
@@ -3704,14 +3692,17 @@ select.mu-filter-input.mu-active {
                          disabled states fire before the Livewire round-trip begins —
                          especially important because Mail::send() is synchronous and
                          can take 1-3 s before the server responds. --}}
-                    <button wire:click="createDirector"
-                            @click="submitting = true"
+                    @php $lockDirector = $this->hasActiveDirector; @endphp
+                    <button @if(!$lockDirector) wire:click="createDirector" @click="submitting = true" @endif
                             wire:loading.attr="disabled" wire:target="createDirector"
-                            :disabled="submitting"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
-                            style="background:#7A3F91;">
+                            @disabled($lockDirector)
+                            aria-disabled="{{ $lockDirector ? 'true' : 'false' }}"
+                            title="{{ $lockDirector ? 'There is already an active Director. Deactivate them first.' : '' }}"
+                            :disabled="submitting || {{ $lockDirector ? 'true' : 'false' }}"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn {{ $lockDirector ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90' }}"
+                            style="background:{{ $lockDirector ? '#9ca3af' : '#7A3F91' }};">
                         <span class="flex items-center gap-2">
-                            <i class="fas fa-user-tie text-sm"></i> Create Director
+                            <i class="fas {{ $lockDirector ? 'fa-lock' : 'fa-user-tie' }} text-sm"></i> Create Director
                         </span>
                     </button>
                 </div>
@@ -3801,6 +3792,16 @@ select.mu-filter-input.mu-active {
             @endif
 
             @if(!$rOk)
+            {{-- Only ONE active Registrar allowed: warn up front and lock the Create button below. --}}
+            @if($this->hasActiveRegistrar)
+            <div class="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-3">
+                <i class="fas fa-triangle-exclamation text-amber-600 text-base mt-0.5 shrink-0"></i>
+                <div>
+                    <p class="text-base font-bold text-amber-800 leading-snug">There is already an active Registrar.</p>
+                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Registrar can be active at a time. Deactivate the current Registrar first, then you can create a new account.</p>
+                </div>
+            </div>
+            @endif
             {{-- Full-form loading overlay — appears the instant the button is clicked,
                  before Livewire's round-trip even starts. Covers the whole scroll area
                  so the user gets immediate visual feedback while Mail::send() runs. --}}
@@ -3964,14 +3965,17 @@ select.mu-filter-input.mu-active {
                          disabled states fire before the Livewire round-trip begins —
                          especially important because Mail::send() is synchronous and
                          can take 1-3 s before the server responds. --}}
-                    <button wire:click="createRegistrar"
-                            @click="submitting = true"
+                    @php $lockRegistrar = $this->hasActiveRegistrar; @endphp
+                    <button @if(!$lockRegistrar) wire:click="createRegistrar" @click="submitting = true" @endif
                             wire:loading.attr="disabled" wire:target="createRegistrar"
-                            :disabled="submitting"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
-                            style="background:#7A3F91;">
+                            @disabled($lockRegistrar)
+                            aria-disabled="{{ $lockRegistrar ? 'true' : 'false' }}"
+                            title="{{ $lockRegistrar ? 'There is already an active Registrar. Deactivate them first.' : '' }}"
+                            :disabled="submitting || {{ $lockRegistrar ? 'true' : 'false' }}"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn {{ $lockRegistrar ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90' }}"
+                            style="background:{{ $lockRegistrar ? '#9ca3af' : '#7A3F91' }};">
                         <span class="flex items-center gap-2">
-                            <i class="fas fa-user-clock text-sm"></i> Create Registrar
+                            <i class="fas {{ $lockRegistrar ? 'fa-lock' : 'fa-user-clock' }} text-sm"></i> Create Registrar
                         </span>
                     </button>
                 </div>

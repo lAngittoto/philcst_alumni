@@ -344,10 +344,15 @@
 
         /* ── Top bar bell ── */
         .reg-topbar-bell {
+            -webkit-appearance: none !important;
+            appearance: none !important;
             background: transparent !important;
             border: none !important;
+            border-radius: 0 !important;
             outline: none !important;
             box-shadow: none !important;
+            filter: none !important;
+            -webkit-tap-highlight-color: transparent;
             padding: 0;
             cursor: pointer;
             position: relative;
@@ -355,34 +360,17 @@
             align-items: center;
             justify-content: center;
         }
+        .reg-topbar-bell::before,
+        .reg-topbar-bell::after { display: none !important; content: none !important; }
         .reg-topbar-bell:hover,
         .reg-topbar-bell:focus,
+        .reg-topbar-bell:focus-visible,
         .reg-topbar-bell:active {
             background: transparent !important;
+            border: none !important;
             outline: none !important;
             box-shadow: none !important;
-        }
-
-        /* ── Bell "wave" alert — a soft expanding ring pulse behind the
-           bell, running continuously as long as there is at least one
-           unread notification. Distinct from the existing fa-shake
-           icon wiggle: the ring is the "something needs attention"
-           signal, the shake is just the icon's own accent motion. ── */
-        .reg-bell-wave {
-            position: absolute;
-            inset: -6px;
-            border-radius: 50%;
-            border: 2px solid #DC2626;
-            opacity: 0;
-            pointer-events: none;
-        }
-        .reg-bell-wave.is-active {
-            animation: reg-bell-wave-pulse 2s ease-out infinite;
-        }
-        @keyframes reg-bell-wave-pulse {
-            0%   { transform: scale(0.7); opacity: 0.55; }
-            70%  { transform: scale(1.55); opacity: 0; }
-            100% { transform: scale(1.55); opacity: 0; }
+            filter: none !important;
         }
 
         /* ── Collapsed state (desktop only, manual << >> toggle) ── */
@@ -869,6 +857,7 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            _fetching:  false,
             navigating: false,
             loadingId:  null,
             clickingId: null,
@@ -884,20 +873,34 @@
                 var self = this;
                 this._pollTimer = setInterval(function () {
                     if (window.__notifPollSuspended) return; // paused e.g. during a photo save
+                    if (document.hidden) return;             // don't poll from background tabs
                     self._fetch();
                 }, 5000);
             },
             async _fetch() {
                 if (this._deleting) return; // don't let a poll refresh clobber an in-flight delete
+                // Several boot paths (alpine:init, load, livewire:navigated...) can call
+                // init() back-to-back — only ONE request may be in flight at a time.
+                if (this._fetching) return;
+                this._fetching = true;
                 try {
                     var res = await window.fetch('/registrar/notifications', {
-                        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                        credentials: 'same-origin',
+                        cache: 'no-store',
+                        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
                     });
+                    // Session gone / redirected to login: stop polling instead of
+                    // hammering the server every 5s with requests that can't succeed.
+                    if (res.status === 401 || res.status === 419 || res.redirected) {
+                        if (this._pollTimer) { clearInterval(this._pollTimer); this._pollTimer = null; }
+                        return;
+                    }
                     if (res.ok) {
                         var raw = await res.json();
                         this.items = this._groupByDay(raw);
                     }
                 } catch (e) { /* silently fail */ }
+                finally { this._fetching = false; }
             },
 
             _groupByDay(rows) {
@@ -1567,37 +1570,12 @@
         });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    //  FASTER NAV LINK CLICKS — prefetch on hover/touchstart
-    //  FIX: sidebar links only started loading the next page's data the
-    //  instant they were clicked. Livewire's wire:navigate supports
-    //  prefetching a page on hover so by the time the click actually
-    //  lands, the response is already back (or nearly there) — this
-    //  wires that up for every sidebar link without needing to touch
-    //  the wire:navigate directive itself (Livewire fires this from a
-    //  plain mouseenter/touchstart using its own internal prefetch).
-    // ─────────────────────────────────────────────────────────────────────────
-    document.addEventListener('livewire:init', function () {
-        function prefetchOnIntent(el) {
-            var done = false;
-            function go() {
-                if (done) return;
-                done = true;
-                try {
-                    if (window.Livewire && typeof Livewire.navigate === 'function' && Livewire.navigate.prefetch) {
-                        Livewire.navigate.prefetch(el.href);
-                    } else if (window.Alpine && el.href) {
-                        // Fallback: warm the HTTP cache for the target URL.
-                        fetch(el.href, { headers: { 'X-Livewire-Navigate-Prefetch': 'true' } }).catch(function(){});
-                    }
-                } catch (e) { /* ignore */ }
-            }
-            el.addEventListener('mouseenter', go, { passive: true });
-            el.addEventListener('touchstart', go, { passive: true });
-            el.addEventListener('focus', go, { passive: true });
-        }
-        document.querySelectorAll('.reg-nav-link[href]').forEach(prefetchOnIntent);
-    });
+    // NOTE: the old hover/touch/focus "prefetch" script was removed. It fired a
+    // full-page fetch() (with a fake Livewire header) at the SERVER on every
+    // hover/focus of a sidebar link — each one re-ran the page's controller +
+    // Livewire mount(), in parallel with the 5s notification poll and the real
+    // navigation. Sidebar links now use Livewire's built-in wire:navigate.hover
+    // (one lightweight prefetch, de-duplicated by Livewire itself).
 
     // ── Safety net: if a wire:navigate request errors out or the user
     //    hits back/forward mid-navigation, make sure the sidebar lock
@@ -1605,16 +1583,17 @@
     //    link permanently dimmed and unclickable. livewire:navigated
     //    already clears it on a successful nav — this covers the
     //    failure paths that event doesn't fire for. ──
-    document.addEventListener('livewire:navigate-failed', function () {
-        document.querySelectorAll('[x-data]').forEach(function (el) {
-            if (el.__x) el.__x.$data.navClickedRoute = null;
-        });
-    });
-    window.addEventListener('popstate', function () {
-        document.querySelectorAll('[x-data]').forEach(function (el) {
-            if (el.__x) el.__x.$data.navClickedRoute = null;
-        });
-    });
+    function resetSidebarNavLock() {
+        try {
+            if (window.Alpine && typeof Alpine.$data === 'function') {
+                var d = Alpine.$data(document.body);
+                if (d) d.navClickedRoute = null;
+            }
+        } catch (e) { /* ignore */ }
+    }
+    document.addEventListener('livewire:navigate-failed', resetSidebarNavLock);
+    window.addEventListener('popstate', resetSidebarNavLock);
+    window.addEventListener('pageshow', resetSidebarNavLock);
     </script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
@@ -1716,9 +1695,9 @@
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->routeIs($link['route']); @endphp
                 <a href="{{ route($link['route']) }}"
-                   wire:navigate
+                   wire:navigate.hover
                    title="{{ $link['label'] }}"
-                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}';"
+                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="reg-nav-link {{ $isActive ? 'is-active' : '' }}">
                     <div class="reg-nav-icon {{ $link['color'] }}">
@@ -1814,10 +1793,6 @@
                 title="Notifications"
                 aria-label="Open notifications"
                 class="reg-topbar-bell">
-                {{-- FIX: expanding "wave" ring behind the bell — pulses
-                     continuously whenever there's at least one unread
-                     notification, instead of only the icon's own shake. --}}
-                <span class="reg-bell-wave" :class="$store.notifs && $store.notifs.unread > 0 ? 'is-active' : ''"></span>
                 <i class="bell-icon fas fa-bell"
                    :class="$store.notifs && $store.notifs.unread > 0 ? 'fa-shake' : ''"
                    style="font-size:20px; color:#7A3F91; position:relative;

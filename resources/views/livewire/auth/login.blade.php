@@ -168,7 +168,7 @@ new #[Layout('app')] class extends Component {
                 attempts:    $attempts,
                 ipAddress:   (string) request()->ip(),
                 device:      Str::limit((string) request()->userAgent(), 120, '…') ?: 'Unknown device',
-                attemptedAt: now()->timezone(config('app.timezone'))->format('M d, Y · h:i A'),
+                attemptedAt: now(),   // converted to Asia/Manila in the email view
                 lockMinutes: (int) ceil(self::LOCKOUT_SECONDS / 60),
             ));
         } catch (\Throwable $e) {

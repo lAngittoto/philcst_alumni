@@ -39,7 +39,9 @@
                                 <td style="padding:16px 18px;">
                                     <p style="margin:0 0 6px;font-size:12px;font-weight:700;color:#991b1b;">Attempt Details</p>
                                     <p style="margin:0;font-size:12px;color:#7f1d1d;line-height:1.8;">
-                                        Time: <strong>{{ $attemptedAt }}</strong><br>
+                                        @php $phTime = $attemptedAt->copy()->timezone('Asia/Manila'); @endphp
+                                        Date: <strong>{{ $phTime->format('F d, Y') }}</strong><br>
+                                        Time: <strong>{{ $phTime->format('h:i A') }} (PH Time)</strong><br>
                                         IP address: <strong>{{ $ipAddress }}</strong><br>
                                         Device / browser: <strong>{{ $device }}</strong>
                                     </p>

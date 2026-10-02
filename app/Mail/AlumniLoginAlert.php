@@ -16,7 +16,7 @@ class AlumniLoginAlert extends Mailable
     public int    $attempts;
     public string $ipAddress;
     public string $device;
-    public string $attemptedAt;
+    public \Carbon\CarbonInterface $attemptedAt;
     public int    $lockMinutes;
 
     public function __construct(
@@ -24,7 +24,7 @@ class AlumniLoginAlert extends Mailable
         int    $attempts,
         string $ipAddress,
         string $device,
-        string $attemptedAt,
+        \Carbon\CarbonInterface $attemptedAt,
         int    $lockMinutes
     ) {
         $this->fullName    = $fullName;
