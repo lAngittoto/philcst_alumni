@@ -35,27 +35,24 @@ new #[Layout('app')] class extends Component {
     public int $otpExpiresAtMs = 0;
 
     // ── Resend cooldown (separate from the 10-min OTP expiry) ────
-    // Epoch ms when the "Resend Code" button becomes available again.
-    // Only RESEND_COOLDOWN_SECONDS (60s) after each send — the OTP itself
-    // still expires after 10 minutes, and the 3-sends-then-24-hour-lock
-    // security is untouched.
+    // Epoch ms when the "Resend Code" button becomes available again. That
+    // is the LATER of: the 30s cooldown after each send, the 10-minute
+    // resend block (after the 3rd resend), or the daily-cap reset time.
     public int $resendAvailableAtMs = 0;
 
-    // ── "Request New Code" lockout (Step 1 + Step 2 resend) ───────
-    // After MAX_RESEND_ATTEMPTS (3) sends within the current window — the
-    // very first "Send Verification Code" from Step 1 AND every "Resend
-    // Code" from Step 2 all count toward the same limit — the account is
-    // locked for RESEND_LOCK_MINUTES (now 24 hours, mirroring
-    // forgot-password.blade.php's lockout severity). Unlike
-    // forgot-password.blade.php (which has to track this via a session key
-    // because the alumni isn't known until Step 1 is submitted), here the
-    // alumni is always resolvable straight from auth()->id(), so the lock
-    // state can just be synced directly off the DB/cache any time —
-    // including on mount(), so Step 1's send button reflects a real,
-    // still-active lock immediately.
+    // ── "Request New Code" block (Step 1 + Step 2 resend) ─────────
+    // Initial send -> 30s -> Resend #1 -> 30s -> Resend #2 -> 30s -> Resend #3
+    // -> resend BLOCKED for 10 min -> resend allowed again (fresh 3 resends).
+    // The initial send from Step 1 is NOT counted as a resend. On top of
+    // that, a daily cap of 12 sends per rolling 24h. The alumni is always
+    // resolvable straight from auth()->id(), so this state can be synced
+    // directly off the cache any time — including on mount(), so Step 1's
+    // send button reflects a real, still-active block immediately.
     public bool $sendLocked            = false;
     public int  $sendLockedUntilMs     = 0;
     public bool $showResendLockedModal = false;
+    // 'resend' = 10-min block after the 3rd resend, 'daily' = 12 sends / 24h cap reached.
+    public string $sendLockType        = '';
 
     // ── Password (Step 3) ────────────────────────────────────────
     public string $password              = '';
@@ -69,17 +66,19 @@ new #[Layout('app')] class extends Component {
     public string $successMessage   = '';
     public bool   $showSuccessModal = false;
 
-    private const MAX_RESEND_ATTEMPTS = 3;
-    private const RESEND_COOLDOWN_SECONDS = 60;
-
-    // FIX: previously 30 minutes. To mirror the seriousness of 3 failed
-    // "send verification code" attempts — same shape as
-    // forgot-password.blade.php's own fix — the 4th attempt now locks the
-    // account for a full 24 hours instead of just 30 minutes. Same single
-    // choke point (_sendOtp) enforces this uniformly whether the send came
-    // from Step 1's initial "Send Verification Code" or Step 2's "Resend
-    // Code" — there is no separate path that could bypass the 24-hour lock.
-    private const RESEND_LOCK_MINUTES = 1440; // 24 hours
+    // ── Resend rules ─────────────────────────────────────────────
+    // Initial send (Step 1) is NOT counted as a resend. After the 3rd resend,
+    // resending is blocked for RESEND_BLOCK_MINUTES (same length as the OTP
+    // expiry), then 3 more resends are allowed. A hard cap of MAX_DAILY_SENDS
+    // (initial + resends) per rolling 24h window protects the registered
+    // inbox from being spammed. Every send — Step 1 or Step 2 — passes
+    // through _sendOtp(), so no path can skip these rules.
+    private const MAX_RESEND_ATTEMPTS     = 3;
+    private const RESEND_COOLDOWN_SECONDS = 30;
+    private const RESEND_BLOCK_MINUTES    = 10;
+    private const MAX_DAILY_SENDS         = 12;
+    private const DAILY_WINDOW_HOURS      = 24;
+    private const MAX_OTP_ATTEMPTS        = 5;
 
     // ─────────────────────────────────────────────────────────────
     // Private Helpers
@@ -103,6 +102,8 @@ new #[Layout('app')] class extends Component {
     private function cacheResendLockKey(int $id): string      { return "alumni_resend_locked:{$id}"; }
     private function cacheResendCooldownKey(int $id): string  { return "alumni_resend_cooldown:{$id}"; }
     private function cacheOtpSigKey(int $id): string          { return "alumni_otp_sig:{$id}"; }
+    private function cacheResendRoundKey(int $id): string     { return "alumni_resend_round:{$id}"; }
+    private function cacheDailySendsKey(int $id): string      { return "alumni_send_daily:{$id}"; }
 
     /**
      * NEW: persistent, session-INDEPENDENT "OTP already verified" flag —
@@ -153,49 +154,134 @@ new #[Layout('app')] class extends Component {
             : 0;
 
         // Resend cooldown comes from the server cache (not guessed on the
-        // front-end), so refresh / browser back-forward can't skip the 60s.
+        // front-end), so refresh / browser back-forward can't skip the
+        // cooldown or an active resend block / daily cap.
         $cooldownUntil = cache()->get($this->cacheResendCooldownKey($alumni->id));
-        $this->resendAvailableAtMs = ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp())
-            ? (int) $cooldownUntil * 1000
+        $availableAt   = ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp())
+            ? (int) $cooldownUntil
             : 0;
+        $block = $this->getActiveSendBlock($alumni->id);
+        if ($block) {
+            $availableAt = max($availableAt, $block['until']->getTimestamp());
+        }
+        $this->resendAvailableAtMs = $availableAt * 1000;
     }
 
     /**
-     * Sync the "Request New Code" lockout state from cache. The cache
-     * value under cacheResendLockKey() stores the ISO8601 expiry timestamp
-     * itself (not just `true`), so the exact remaining time can be shown
-     * instead of a static message. Safe to call any time — including on
-     * every mount() — since the alumni is always known here. With the lock
-     * now lasting 24 hours, the front-end timer formats this as
-     * "Hh MMm SSs" instead of raw MM:SS (see sendLockTimer below).
+     * Returns the send block currently active for this alumni, or null.
+     *   'resend' -> 10-minute block after the 3rd resend
+     *   'daily'  -> 12-sends-per-24h cap reached
+     * If both apply, the longer one wins.
+     */
+    private function getActiveSendBlock(int $alumniId): ?array
+    {
+        $block = null;
+
+        $resendUntil = cache()->get($this->cacheResendLockKey($alumniId));
+        if ($resendUntil) {
+            $until = \Carbon\Carbon::parse($resendUntil);
+            if ($until->isFuture()) {
+                $block = ['type' => 'resend', 'until' => $until];
+            }
+        }
+
+        $daily = cache()->get($this->cacheDailySendsKey($alumniId));
+        if (is_array($daily) && (int) ($daily['count'] ?? 0) >= self::MAX_DAILY_SENDS && !empty($daily['until'])) {
+            $until = \Carbon\Carbon::parse($daily['until']);
+            if ($until->isFuture() && (!$block || $until->greaterThan($block['until']))) {
+                $block = ['type' => 'daily', 'until' => $until];
+            }
+        }
+
+        return $block;
+    }
+
+    /**
+     * Sync the send-button lock state (and countdown) from the real cache
+     * values. Safe to call any time — including on every mount() — since
+     * the alumni is always known here.
      */
     private function checkAndSyncSendLock(\App\Models\Alumni $alumni): void
     {
-        $expiry = cache()->get($this->cacheResendLockKey($alumni->id));
+        $block = $this->getActiveSendBlock($alumni->id);
 
-        if ($expiry && \Carbon\Carbon::parse($expiry)->isFuture()) {
+        if ($block) {
             $this->sendLocked        = true;
-            $this->sendLockedUntilMs = \Carbon\Carbon::parse($expiry)->getTimestamp() * 1000;
+            $this->sendLockedUntilMs = $block['until']->getTimestamp() * 1000;
+            $this->sendLockType      = $block['type'];
         } else {
             $this->sendLocked        = false;
             $this->sendLockedUntilMs = 0;
+            $this->sendLockType      = '';
         }
     }
 
-    /**
-     * Marks the given alumni as locked out of sending any new code (fresh
-     * OR resend) for RESEND_LOCK_MINUTES (now 24 hours), and immediately
-     * syncs the front-end lock state so Step 1's button reflects it right
-     * away.
-     */
-    private function lockSending(\App\Models\Alumni $alumni): void
+    /** Syncs the countdown state and opens the lock modal for the active block. */
+    private function showSendBlock(\App\Models\Alumni $alumni): void
     {
-        $expiry = now()->addMinutes(self::RESEND_LOCK_MINUTES);
-        cache()->put($this->cacheResendLockKey($alumni->id), $expiry->toIso8601String(), $expiry);
-        cache()->forget($this->cacheResendAttemptsKey($alumni->id));
-
         $this->checkAndSyncSendLock($alumni);
-        $this->showResendLockedModal = true;
+        $this->showResendLockedModal = $this->sendLocked;
+    }
+
+    public function closeResendLockedModal(): void
+    {
+        $this->showResendLockedModal = false;
+    }
+
+    /**
+     * Called ONLY after an email has genuinely left the server. Updates the
+     * rolling 24h send counter and the resend round. Returns true when this
+     * send just triggered a block (3rd resend -> 10-min block, or the daily
+     * cap was reached) so the caller can show the lock modal.
+     *
+     * Round logic: the very first send of a round (the Step 1 send) is free
+     * and is NOT a resend. Every send after that is a resend — even if it
+     * comes through Step 1 again (e.g. after the code expired and the alumni
+     * landed back on Step 1) — so Step 1 can never be used to dodge the
+     * resend limit.
+     */
+    private function recordSend(int $alumniId): bool
+    {
+        $blocked = false;
+
+        // ── Daily window ────────────────────────────────────────────
+        $dailyKey = $this->cacheDailySendsKey($alumniId);
+        $daily    = cache()->get($dailyKey);
+        if (!is_array($daily) || empty($daily['until']) || \Carbon\Carbon::parse($daily['until'])->isPast()) {
+            $daily = [
+                'count' => 0,
+                'until' => now()->addHours(self::DAILY_WINDOW_HOURS)->toIso8601String(),
+            ];
+        }
+        $daily['count'] = (int) $daily['count'] + 1;
+        cache()->put($dailyKey, $daily, \Carbon\Carbon::parse($daily['until']));
+        if ($daily['count'] >= self::MAX_DAILY_SENDS) {
+            $blocked = true;
+        }
+
+        // ── Resend round ────────────────────────────────────────────
+        $roundKey    = $this->cacheResendRoundKey($alumniId);
+        $attemptsKey = $this->cacheResendAttemptsKey($alumniId);
+
+        if (!cache()->has($roundKey)) {
+            // First send of the round — free, not a resend.
+            cache()->put($roundKey, true, now()->addHours(self::DAILY_WINDOW_HOURS));
+            cache()->forget($attemptsKey);
+            return $blocked;
+        }
+
+        $resends = (int) cache()->get($attemptsKey, 0) + 1;
+        if ($resends >= self::MAX_RESEND_ATTEMPTS) {
+            // 3rd resend just went out -> block resending for 10 minutes.
+            $until = now()->addMinutes(self::RESEND_BLOCK_MINUTES);
+            cache()->put($this->cacheResendLockKey($alumniId), $until->toIso8601String(), $until);
+            cache()->forget($attemptsKey);
+            $blocked = true;
+        } else {
+            cache()->put($attemptsKey, $resends, now()->addHours(self::DAILY_WINDOW_HOURS));
+        }
+
+        return $blocked;
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -469,7 +555,7 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── "Request New Code" lockout — checked FIRST, before sending
+        // ── Resend block / daily cap — checked FIRST, before sending
         //    anything. This mirrors the state already shown (disabled
         //    button + countdown) on Step 1, so it can't be bypassed by
         //    just clicking through anyway.
@@ -485,29 +571,28 @@ new #[Layout('app')] class extends Component {
     /**
      * SINGLE choke point for every actual OTP send — both the initial send
      * from Step 1 (sendOtp) and every resend from Step 2 ("Resend Code" /
-     * "Request New Code") pass through here. That means the 3-sends-then-
-     * lock-24-hours rule applies uniformly no matter which button
-     * triggered the send — the very first send from Step 1 counts toward
-     * the same limit as resends, so the lock can't be bypassed by starting
-     * the wizard fresh.
+     * "Request New Code") pass through here. That means the resend block
+     * (3 resends -> 10 min), the 30s cooldown and the 12-per-24h daily cap
+     * apply uniformly no matter which button triggered the send. The very
+     * first send of a round is free (not counted as a resend), but any
+     * later send — even via Step 1 — counts, so starting the wizard fresh
+     * can't be used to dodge the limit.
      */
     private function _sendOtp(\App\Models\Alumni $alumni, string $targetEmail): void
     {
-        $resendLockKey     = $this->cacheResendLockKey($alumni->id);
-        $resendAttemptsKey = $this->cacheResendAttemptsKey($alumni->id);
-
-        // Already locked out from a previous 4th attempt.
-        if (cache()->has($resendLockKey)) {
-            $this->checkAndSyncSendLock($alumni);
-            $this->showResendLockedModal = true;
+        // Resend block (10 min) or daily cap still active.
+        if ($this->getActiveSendBlock($alumni->id)) {
+            $this->showSendBlock($alumni);
             return;
         }
 
-        // Enforce max 3 OTP sends per rolling window — the 4th attempt
-        // locks the account for 24 hours instead of sending anything.
-        $sendAttempts = cache()->get($resendAttemptsKey, 0);
-        if ($sendAttempts >= self::MAX_RESEND_ATTEMPTS) {
-            $this->lockSending($alumni);
+        // Cooldown between sends — enforced here for EVERY send path so it
+        // can't be skipped by going back to Step 1 or poking the browser.
+        $cooldownUntil = cache()->get($this->cacheResendCooldownKey($alumni->id));
+        if ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp()) {
+            $wait = (int) $cooldownUntil - now()->getTimestamp();
+            $this->resendAvailableAtMs = (int) $cooldownUntil * 1000;
+            $this->errorMessage = "Please wait {$wait} second(s) before requesting a new code.";
             return;
         }
 
@@ -529,12 +614,12 @@ new #[Layout('app')] class extends Component {
             // visible countdown always reflects the moment the user clicked
             // "Send", never however long the send itself took.
             //
-            // The 60-second resend cooldown is derived from this SAME instant
+            // The 30-second resend cooldown is derived from this SAME instant
             // (not from a later now() after Mail::send() returns). Before,
             // the cooldown started a few seconds after the expiry clock
             // because it was stamped after the email finished sending, so
             // the two timers were never in sync. Now: both start together,
-            // so "Resend in 00:00" lands exactly 60s into "Code Expires In".
+            // so the cooldown and the expiry clock always start together.
             $sentAt        = now();
             $exactExpiry   = $sentAt->copy()->addMinutes(10);
             $cooldownUntil = $sentAt->copy()->addSeconds(self::RESEND_COOLDOWN_SECONDS);
@@ -577,9 +662,11 @@ new #[Layout('app')] class extends Component {
             }
             Log::info("Alumni OTP sent to: {$targetEmail}");
 
-            // Count the successful send attempt. Counter lives for
-            // RESEND_LOCK_MINUTES (24 h) so it resets naturally.
-            cache()->put($resendAttemptsKey, $sendAttempts + 1, now()->addMinutes(self::RESEND_LOCK_MINUTES));
+            // Count this send only once the email has genuinely left the
+            // server — a failed send above does NOT burn a resend or a daily
+            // send. recordSend() also tells us whether this send just
+            // triggered the 10-min block / daily cap.
+            $blockStarted = $this->recordSend($alumni->id);
 
             // generateOtp() internally saves otp_expires_at to the DB
             // (possibly with a small extra buffer like +20 s).  Using
@@ -593,7 +680,7 @@ new #[Layout('app')] class extends Component {
             ]);
             $alumni->refresh(); // ensure syncOtpExpiry() reads the just-written value
 
-            // Start the 60-second resend cooldown — same instant as the expiry above.
+            // Start the 30-second resend cooldown — same instant as the expiry above.
             cache()->put($this->cacheResendCooldownKey($alumni->id), $cooldownUntil->getTimestamp(), $cooldownUntil);
 
             // A fresh code being sent means any previously-verified flag
@@ -614,6 +701,12 @@ new #[Layout('app')] class extends Component {
             $this->syncOtpExpiry($alumni);
             Log::info("DEBUG otp timer: now=" . now()->toDateTimeString() . " expires_at=" . $alumni->otp_expires_at->toDateTimeString() . " diff_seconds=" . now()->diffInSeconds($alumni->otp_expires_at, false));
             $this->successMessage = "Verification code sent to {$this->maskedEmail}. Please check your inbox.";
+
+            // 3rd resend (or the daily cap) was just used up — tell the user
+            // right away instead of waiting for their next click.
+            if ($blockStarted) {
+                $this->showSendBlock($alumni);
+            }
 
         } catch (\Exception $e) {
             Log::error("_sendOtp error: " . $e->getMessage());
@@ -649,14 +742,14 @@ new #[Layout('app')] class extends Component {
 
         if (cache()->has($lockKey)) {
             $this->otpLocked = true;
-            $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire, then request a new code.';
+            $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
             return;
         }
 
-        if ($attempts >= 3) {
-            cache()->put($lockKey, true, 700);
+        if ($attempts >= self::MAX_OTP_ATTEMPTS) {
+            cache()->put($lockKey, true, now()->addHours(24));
             $this->otpLocked    = true;
-            $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire.';
+            $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
             return;
         }
 
@@ -671,11 +764,13 @@ new #[Layout('app')] class extends Component {
         if (!$isLatestCode || !$alumni->isOtpValid($trimmed)) {
             $new = $attempts + 1;
             cache()->put($attemptsKey, $new, 700);
-            $rem = 3 - $new;
+            $rem = self::MAX_OTP_ATTEMPTS - $new;
             if ($rem <= 0) {
-                cache()->put($lockKey, true, 700);
+                // Locked until a NEW code is sent (_sendOtp clears this lock),
+                // so waiting out the old code's timer is no longer needed.
+                cache()->put($lockKey, true, now()->addHours(24));
                 $this->otpLocked    = true;
-                $this->errorMessage = 'Too many failed attempts. Wait for the timer to expire, then request a new code.';
+                $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
             } else {
                 $this->errorMessage = "Invalid or expired code. You have {$rem} attempt(s) remaining.";
             }
@@ -725,15 +820,15 @@ new #[Layout('app')] class extends Component {
             $this->errorMessage = 'Session expired. Please start over.'; $this->step = 1; return;
         }
 
-        // Same 3x + 24-hour-lock rule as Step 1's send — enforced uniformly
-        // inside _sendOtp(), which this now also passes through.
+        // Same block / cooldown / daily-cap rules as Step 1's send — enforced
+        // uniformly inside _sendOtp(), which this also passes through.
         $this->checkAndSyncSendLock($alumni);
         if ($this->sendLocked) {
             $this->showResendLockedModal = true;
             return;
         }
 
-        // 60-second cooldown between sends — enforced server-side too, so it
+        // 30-second cooldown between sends — enforced server-side too, so it
         // can't be bypassed by poking the button from the browser console.
         $cooldownUntil = cache()->get($this->cacheResendCooldownKey($alumni->id));
         if ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp()) {
@@ -851,6 +946,10 @@ new #[Layout('app')] class extends Component {
             // no longer mid-setup, so there's nothing left to route back to
             // on a future login).
             $this->clearWizardCache($alumni->id);
+            // Reset the resend round + block. The daily cap is intentionally kept.
+            cache()->forget($this->cacheResendRoundKey($alumni->id));
+            cache()->forget($this->cacheResendAttemptsKey($alumni->id));
+            cache()->forget($this->cacheResendLockKey($alumni->id));
 
             Log::info("Alumni account setup completed: alumni_id #{$alumni->id}");
 
@@ -999,15 +1098,38 @@ new #[Layout('app')] class extends Component {
                         </div>
                     </div>
 
+                    @php $isDailyLock = $sendLockType === 'daily'; @endphp
                     <div class="space-y-1.5">
-                        <h2 class="text-xl sm:text-2xl font-bold" style="color: #333333;">Too Many Code Requests</h2>
-                        <p class="text-sm sm:text-base font-medium" style="color: #333333;">You've reached the maximum number of code requests (3).</p>
+                        <h2 class="text-xl sm:text-2xl font-bold" style="color: #333333;">{{ $isDailyLock ? 'Daily Limit Reached' : 'Resend Limit Reached' }}</h2>
+                        <p class="text-sm sm:text-base font-medium" style="color: #333333;">
+                            {{ $isDailyLock ? "You've reached the maximum of 12 code requests in 24 hours." : "You've used all 3 resends for now." }}
+                        </p>
                         <p class="text-sm" style="color: #555555; line-height: 1.6;">
-                            For your account's security, sending a new code has been disabled for 24 hours.
+                            {{ $isDailyLock
+                                ? "For your account's security, sending a new code is disabled until the limit resets."
+                                : "For your account's security, requesting a new code is paused for 10 minutes." }}
                             <span x-show="locked">You can try again in <strong class="font-mono" x-text="formattedTime"></strong>.</span>
                         </p>
+                        @unless($isDailyLock)
+                            <p class="text-xs" style="color: #777777; line-height: 1.5;">If you already received a code, you can still use it until it expires.</p>
+                        @endunless
                     </div>
 
+                    @if(!$isDailyLock)
+                    <button wire:click="closeResendLockedModal"
+                            class="w-full text-white py-3 sm:py-3.5 rounded-xl font-bold text-sm sm:text-base shadow-lg hover:opacity-90 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                            style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                        Got it
+                    </button>
+                    @else
+                    <button wire:click="closeResendLockedModal"
+                            class="w-full py-2.5 rounded-xl font-semibold text-sm border transition-all flex items-center justify-center gap-2"
+                            style="background:#FFFFFF; border-color:#E8E8E8; color:#555555;">
+                        Close
+                    </button>
+                    @endif
+
+                    @if($isDailyLock)
                     <button wire:click="backToLogin"
                             wire:loading.attr="disabled"
                             wire:target="backToLogin"
@@ -1023,6 +1145,7 @@ new #[Layout('app')] class extends Component {
                             <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Redirecting</span>
                         </span>
                     </button>
+                    @endif
                 </div>
             </div>
         </div>
@@ -1181,7 +1304,7 @@ new #[Layout('app')] class extends Component {
                             <p x-show="expired" x-cloak class="text-red-600 text-xs mt-1.5 font-semibold">Code expired.</p>
                             @if (!$otpLocked)
                                 <p class="text-xs mt-1.5" style="color: #999999;" x-show="!expired">
-                                    <i class="fa-solid fa-shield-halved mr-1" style="color: #7A3F91;"></i>Max 3 attempts
+                                    <i class="fa-solid fa-shield-halved mr-1" style="color: #7A3F91;"></i>Max 5 attempts
                                 </p>
                             @endif
                         </div>
@@ -1210,7 +1333,7 @@ new #[Layout('app')] class extends Component {
                             <i class="fa-solid fa-lock text-red-500 text-base flex-shrink-0 mt-0.5"></i>
                             <div>
                                 <p class="text-sm font-bold text-red-700">Verification Locked</p>
-                                <p class="text-xs text-red-600">Wait for the timer to expire, then request a new code.</p>
+                                <p class="text-xs text-red-600">Too many incorrect attempts. Request a new code to continue.</p>
                             </div>
                         </div>
                     @endif
@@ -1526,9 +1649,12 @@ new #[Layout('app')] class extends Component {
             },
 
             get resendFormattedTime() {
-                const m = String(Math.floor(this.resendSeconds / 60)).padStart(2, '0');
-                const s = String(this.resendSeconds % 60).padStart(2, '0');
-                return `${m}:${s}`;
+                // Can be a 30s cooldown, a 10-min block, or (daily cap) hours.
+                const t = this.resendSeconds;
+                const h = Math.floor(t / 3600);
+                const m = String(Math.floor((t % 3600) / 60)).padStart(2, '0');
+                const s = String(t % 60).padStart(2, '0');
+                return h > 0 ? `${h}h ${m}m ${s}s` : `${m}:${s}`;
             },
 
             init() {
@@ -1557,18 +1683,15 @@ new #[Layout('app')] class extends Component {
                     }
                 }
 
-                // "Resend in" — only the 60-second cooldown after each send.
-                // A wrong-code lockout (otpLocked) still has to wait for the
-                // OTP to expire first, same as before.
+                // "Resend in" — the server sends us the LATER of the 30s
+                // cooldown, the 10-min resend block, or the daily-cap reset.
+                // A wrong-code lockout (otpLocked) no longer waits for the OTP
+                // to expire — it only needs resend to become available.
                 const resendRemaining = this.resendAtMs
                     ? Math.ceil((this.resendAtMs - Date.now()) / 1000)
                     : 0;
                 this.resendSeconds = resendRemaining > 0 ? resendRemaining : 0;
-                this.canResend = this.resendSeconds === 0 && (!this.otpLocked || this.expired);
-                if (!this.canResend && this.resendSeconds === 0) {
-                    // Locked + still within the OTP window: show the OTP countdown.
-                    this.resendSeconds = this.seconds;
-                }
+                this.canResend = this.resendSeconds === 0;
             },
 
             destroy() {
@@ -1580,8 +1703,8 @@ new #[Layout('app')] class extends Component {
         }));
 
         // ── "Request New Code" lockout countdown (Step 1 button + modal) ───
-        // FIX: the lock now lasts 24 hours instead of 30 minutes, so a
-        // plain "MM:SS" readout would show something ugly like "1439:58".
+        // The block can be 10 minutes (resend block) or up to 24 hours (daily
+        // cap), so a plain "MM:SS" readout would show something ugly like "1439:58".
         // formattedTime now renders as "Hh MMm SSs" once past an hour, and
         // falls back to plain "MM:SS" once under an hour remains — same
         // reactive pattern as before, still driven entirely by

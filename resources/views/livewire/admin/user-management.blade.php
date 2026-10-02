@@ -1811,6 +1811,12 @@ select.mu-filter-input.mu-active {
     border-radius: 3px;
     padding: 0 2px;
 }
+/* ── Purple icons across the Alumni Profile modal + filter bar ── */
+.mu-vp-scroll .mua-card-header i,
+.mu-vp-scroll .mua-card-header i::before,
+.mu-vp-scroll .mua-card-header svg { color: #7A3F91 !important; fill: #7A3F91; }
+.mu-vp-scroll .mua-card-header span i { color: #7A3F91 !important; }
+.mu-filter-icon { color: #7a3f91 !important; }
 </style>
 
 {{-- FLASH TOAST --}}
@@ -1961,7 +1967,7 @@ select.mu-filter-input.mu-active {
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#000000;z-index:1;"></i>
+                <i class="fas fa-search mu-filter-icon absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none" style="color:#7a3f91;z-index:1;"></i>
                 <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
                        placeholder="Search…"
                        class="mu-filter-input w-full" style="padding-left:2.25rem;padding-right:1rem;"
@@ -1969,7 +1975,7 @@ select.mu-filter-input.mu-active {
             </div>
 
             <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"
-                 style="color:#7a3f91;">Filters</div>
+                 style="color:#7a3f91;"><i class="fas fa-filter mu-filter-icon text-xs"></i>Filters</div>
 
             <div class="flex gap-1 bg-gray-100 p-0.5 rounded-xl flex-shrink-0">
                 @foreach([
@@ -2762,7 +2768,7 @@ select.mu-filter-input.mu-active {
                             @endif
                             <div class="flex gap-2">
                                 <div class="relative flex-1">
-                                    <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                                    <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                                     <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
                                            @if($ueCooldown > 0) disabled @endif
                                            class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
@@ -3038,7 +3044,7 @@ select.mu-filter-input.mu-active {
                                 @endif
                                 <div class="flex gap-2">
                                     <div class="relative flex-1">
-                                        <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                                        <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                                         <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
                                                class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
                                     </div>
@@ -3244,7 +3250,7 @@ select.mu-filter-input.mu-active {
                     @endif
                     <div class="flex gap-2">
                         <div class="relative flex-1">
-                            <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                            <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
                                    @if($ueCooldown > 0) disabled @endif
                                    class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
@@ -3370,10 +3376,11 @@ select.mu-filter-input.mu-active {
                     <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
                 </div>
             </div>
-            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting"
+            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting" wire:loading.attr="disabled" wire:target="closeModal"
                     :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/30'"
                     class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center transition text-white shrink-0">
-                <i class="fa-solid fa-xmark text-lg"></i>
+                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-lg"></i>
+                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-base"></i>
             </button>
         </div>
 
@@ -3629,7 +3636,8 @@ select.mu-filter-input.mu-active {
                             :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
                             style="color:#000000;border-color:#E5E5E5;">
-                        <span>Cancel</span>
+                        <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
+<span>Cancel</span>
                     </button>
                     {{-- Set submitting=true immediately on click so the overlay and
                          disabled states fire before the Livewire round-trip begins —
@@ -3677,10 +3685,11 @@ select.mu-filter-input.mu-active {
                     <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
                 </div>
             </div>
-            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting"
+            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting" wire:loading.attr="disabled" wire:target="closeModal"
                     :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/30'"
                     class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center transition text-white shrink-0">
-                <i class="fa-solid fa-xmark text-lg"></i>
+                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-lg"></i>
+                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-base"></i>
             </button>
         </div>
 
@@ -3887,7 +3896,8 @@ select.mu-filter-input.mu-active {
                             :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
                             style="color:#000000;border-color:#E5E5E5;">
-                        <span>Cancel</span>
+                        <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
+<span>Cancel</span>
                     </button>
                     {{-- Set submitting=true immediately on click so the overlay and
                          disabled states fire before the Livewire round-trip begins —
@@ -3959,7 +3969,8 @@ select.mu-filter-input.mu-active {
                 <button @click="$wire.closeModal(); muClosing = true"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
                         style="color:#000000;border-color:#E8E0F0;">
-                    <span>Cancel</span>
+                    <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
+<span>Cancel</span>
                 </button>
                 {{-- Close modal animation IMMEDIATELY on click — don't wait for the
                      full Livewire round-trip (DB update + cache bust + re-render).
