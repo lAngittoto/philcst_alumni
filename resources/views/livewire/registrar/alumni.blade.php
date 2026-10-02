@@ -364,14 +364,15 @@ new class extends Component {
      *  on the profile_completed DB flag, which can go stale (e.g. an
      *  alumnus edits their profile down to blank fields after the flag was
      *  already set, or the flag was never backfilled for older records).
-     *  date_of_birth is a DATE column, so only IS NOT NULL applies to it —
+     *  Parents' middle names are optional, so they're not part of the
+     *  required set. date_of_birth is a DATE column, so only IS NOT NULL applies to it —
      *  comparing a DATE column to '' throws in MySQL strict mode. */
     protected function applyProfileCompletionFilter($q, string $mode): void
     {
         $required = [
             'email', 'gender', 'contact_number',
-            'father_last_name', 'father_given_name', 'father_middle_name',
-            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'father_last_name', 'father_given_name',
+            'mother_last_name', 'mother_given_name',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
         ];
 
@@ -832,7 +833,8 @@ new class extends Component {
      * Derive profile completeness from required fields regardless of DB flag.
      * Mirrors the same required-field set the alumni's own profile editor
      * uses to compute `profile_completed` on save: contact info, DOB,
-     * gender, both parents' names, and full home address. A freshly
+     * gender, both parents' last + given names (middle names are
+     * optional and NOT required), and full home address. A freshly
      * registered alumnus only has name/student ID/course/batch/email on
      * file — none of the above — so they correctly read as Pending until
      * they actually fill out the rest of their profile.
@@ -843,8 +845,8 @@ new class extends Component {
 
         $required = [
             'email', 'gender', 'date_of_birth', 'contact_number',
-            'father_last_name', 'father_given_name', 'father_middle_name',
-            'mother_last_name', 'mother_given_name', 'mother_middle_name',
+            'father_last_name', 'father_given_name',
+            'mother_last_name', 'mother_given_name',
             'address_street', 'address_barangay', 'address_municipality', 'address_province',
         ];
         foreach ($required as $field) {

@@ -1078,9 +1078,55 @@ new class extends Component {
     }
 }; ?>
 
-<div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
+<div class="ai-page flex flex-col">
 
 <style>
+/* ═══════════ PAGE SHELL — centered + responsive ═══════════
+   • Desktop (≥1024px): app-style fixed height, content scrolls inside.
+   • Phone/tablet: normal page flow (no fixed height, no inner scrollbar).
+   • .ai-container: centered, width-capped so it never stretches edge-to-edge.
+   • .ai-scroll / .ai-card are CSS containers, so the grids react to the
+     REAL available width (sidebar open/collapsed included). */
+.ai-page { display: flex; flex-direction: column; }
+@media (min-width: 1024px) {
+    .ai-page {
+        height: calc(100vh - 180px);
+        max-height: calc(100vh - 180px);
+        overflow: hidden;
+    }
+}
+.ai-container { max-width: 1200px; }
+@media (min-width: 1700px) {
+    .ai-container { max-width: 1320px; }
+}
+.ai-scroll { container-type: inline-size; container-name: ai; }
+
+/* 3-cell rows (Father / Mother / etc.): 3 cols → 2 cols + full-width last → 1 col */
+@container aicard (max-width: 399.98px) {
+    .ai-card .grid-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ai-card .grid-cols-3 > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+@container aicard (max-width: 279.98px) {
+    .ai-card .grid-cols-2,
+    .ai-card .grid-cols-3 { grid-template-columns: minmax(0, 1fr); }
+    .ai-card .grid-cols-3 > :last-child:nth-child(odd) { grid-column: auto; }
+}
+
+/* Employment fullscreen editor — content centered + width-capped */
+div.emp-editor-header { padding-inline: max(1rem, calc((100% - 1200px) / 2)); }
+@media (min-width: 640px) {
+    div.emp-editor-header { padding-inline: max(2rem, calc((100% - 1200px) / 2)); }
+}
+div.emp-editor-body > .grid,
+div.emp-editor-body > .rounded-lg {
+    width: 100%;
+    max-width: 1200px;
+    margin-inline: auto;
+}
+@media (min-width: 768px) and (max-width: 1023.98px) {
+    div.emp-editor-body > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .ai-tooltip {
     position: absolute; top: calc(100% + 8px); right: 0;
     background: #111827; color: #fff; font-size: 13px; font-weight: 700;
@@ -1206,8 +1252,8 @@ input[type="date"].field-input:disabled {
     grid-template-columns: 1fr;
     gap: 14px;
 }
-@media (min-width: 1024px) {
-    .ai-info-grid { grid-template-columns: 1fr 1fr; align-items: start; }
+@container ai (min-width: 880px) {
+    .ai-info-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
 }
 .ai-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .ai-card {
@@ -1216,6 +1262,8 @@ input[type="date"].field-input:disabled {
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    container-type: inline-size;
+    container-name: aicard;
 }
 .ai-card-header {
     padding: 10px 14px;
@@ -1600,7 +1648,7 @@ function phAddress(initial) {
 </script>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-3 px-4 sm:px-6 lg:px-10 pt-3 sm:pt-4 pb-3 max-w-screen-2xl mx-auto w-full min-h-0"
+<div class="flex flex-col flex-1 gap-3 px-4 sm:px-6 lg:px-10 pt-3 sm:pt-4 pb-3 ai-container mx-auto w-full min-h-0"
      x-data="{ showProfileConfirm: false, showEmpConfirm: false }"
      x-on:profile-updated.window="showProfileConfirm = false"
      x-on:profile-save-failed.window="showProfileConfirm = false"
@@ -1730,7 +1778,7 @@ function phAddress(initial) {
     {{-- ══ CONTENT BLOCK ══ --}}
     <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
-        <div class="bg-white flex-1 overflow-y-auto">
+        <div class="ai-scroll bg-white flex-1 overflow-y-auto">
 
             <div class="ai-info-grid p-3 sm:p-4">
 
