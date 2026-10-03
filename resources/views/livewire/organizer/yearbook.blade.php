@@ -333,24 +333,7 @@ new class extends Component {
 };
 ?>
 
-<div class="yb-noselect flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full yb-root-height"
-     x-data="{
-        setAvailHeight() {
-            const rect = this.$el.getBoundingClientRect();
-            const bottomSafe = 8;
-            const avail = window.innerHeight - rect.top - bottomSafe;
-            this.$el.style.setProperty('--yb-avail-h', avail + 'px');
-        }
-     }"
-     x-init="
-        setAvailHeight();
-        window.addEventListener('resize', () => setAvailHeight());
-        window.addEventListener('orientationchange', () => setTimeout(() => setAvailHeight(), 150));
-        // Re-measure after every Livewire update too — not just on
-        // actual window resize — since this fixes the bug where the
-        // pagination bar was missing before any resize ever happened.
-        Livewire.hook('morph.updated', () => setAvailHeight());
-     ">
+<div class="yb-noselect yb-root-height flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full">
 
 <style>
 /* ── Disable text selection/copy across the whole Alumni Yearbook page ── */
@@ -748,12 +731,27 @@ new class extends Component {
 /* ─────────────────────────────────────────────────────────
    ROOT HEIGHT — JS-measured available space
 ───────────────────────────────────────────────────────── */
+/* Pure CSS (no JS measuring): fills the screen exactly, same as Job / Event / Employment pages.
+   Mobile/tablet: top bar 48px + bottom padding 16px = 64px. Desktop: 56px + 24px = 80px.
+   100dvh follows the phone browser bars (address bar showing/hiding) so nothing gets cut off. */
 .yb-root-height {
-    height: calc(100vh - 180px);
-    max-height: calc(100vh - 180px);
+    height: calc(100vh - 64px);
+    height: calc(100dvh - 64px);
+    max-height: calc(100dvh - 64px);
     overflow: hidden;
-    height: var(--yb-avail-h, calc(100vh - 180px));
-    max-height: var(--yb-avail-h, calc(100vh - 180px));
+}
+html:has(.yb-root-height), body:has(.yb-root-height) { overflow: hidden !important; scrollbar-width: none; }
+html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit-scrollbar { display: none; }
+@media (min-width: 1024px) {
+    .yb-root-height {
+        height: calc(100vh - 80px);
+        height: calc(100dvh - 80px);
+        max-height: calc(100dvh - 80px);
+        padding-top: 1.25rem !important; padding-bottom: 1.25rem !important;
+    }
+}
+@media (min-width: 1024px) and (max-height: 800px) {
+    .yb-root-height { gap: .6rem !important; padding-top: .75rem !important; padding-bottom: .75rem !important; }
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -762,11 +760,15 @@ new class extends Component {
 @media (max-width: 767px) {
     html, body { overflow: hidden !important; }
 
+    /* Full screen on phones: the page wrapper has 1rem side padding — cancel it so the block spans edge to edge,
+       and the block fills all remaining height down to the bottom of the screen. */
     .yb-root-height {
-        height: var(--yb-avail-h, 100dvh) !important;
-        max-height: var(--yb-avail-h, 100dvh) !important;
+        margin-left: -1rem; margin-right: -1rem; width: calc(100% + 2rem) !important; max-width: none !important;
+        padding: .5rem 0 0 !important; gap: .5rem !important;
         overflow: hidden !important;
     }
+    .yb-root-height > div:first-of-type { padding: 0 .75rem; }
+    .yb-table-block { border-radius: 1rem 1rem 0 0; border-left: 0; border-right: 0; border-bottom: 0; box-shadow: none; }
 
     /* Compact page header */
     .yb-mobile-subtitle      { display: none; }
@@ -785,6 +787,10 @@ new class extends Component {
     /* Truncate dropdown labels on very small screens */
     .yb-dd-btn { font-size: 0.8rem; padding-right: 2rem; max-width: 110px; }
     .yb-dd-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+    .yb-root-height { padding-top: .75rem !important; padding-bottom: .5rem !important; gap: .6rem !important; }
 }
 
 /* ─────────────────────────────────────────────────────────

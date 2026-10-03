@@ -930,6 +930,29 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 .ae-table-noselect:has(.ae-row-busy) * { cursor: default !important; }
 .ae-table-noselect:has(.ae-row-busy) [data-ae-row] { pointer-events: none; }
 
+/* ── Desktop page frame — same as Job / Event Management: fits the screen with NO page scrollbar,
+   and the table card has the SAME height as theirs (8 rows + filter bar + pagination),
+   vertically centered under the header. top bar 56px + bottom padding 24px = 80px. ── */
+@media (min-width: 1024px) {
+    .ae-page-root {
+        height: calc(100vh - 80px); height: calc(100dvh - 80px);
+        max-height: calc(100dvh - 80px);
+        overflow: hidden;
+        padding-top: 1.25rem !important; padding-bottom: 1.25rem !important;
+    }
+    html:has(.ae-page-root), body:has(.ae-page-root) { overflow: hidden !important; scrollbar-width: none; }
+    html:has(.ae-page-root)::-webkit-scrollbar, body:has(.ae-page-root)::-webkit-scrollbar { display: none; }
+    .ae-main-row {
+        flex: 0 1 auto; margin-top: auto; margin-bottom: auto; max-height: 100%;
+        /* = Job/Event table card height: header+filter+pagination + 8 rows (scales with screen height) */
+        height: min(calc(454px + 24dvh), calc(100dvh - 215px)) !important;
+    }
+}
+@media (min-width: 1024px) and (max-height: 800px) {
+    .ae-page-root { gap: .6rem !important; padding-top: .75rem !important; padding-bottom: .75rem !important; }
+    .ae-main-row  { height: min(556px, calc(100dvh - 200px)) !important; }
+}
+
 /* ── Mobile filter toggle + full-screen modal ─────────────────────── */
 @media (max-width: 1023px) {
     .ae-filter-bar { display: none !important; }
@@ -966,7 +989,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 </div>
 
 {{-- MAIN LAYOUT --}}
-<div class="flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full transition-all duration-300 ease-in-out">
+<div class="ae-page-root flex flex-col gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full transition-all duration-300 ease-in-out">
 
     {{-- PAGE HEADER --}}
     <div class="ae-page-header-noselect flex items-center justify-between gap-4 flex-shrink-0 flex-wrap"
@@ -1131,7 +1154,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
          just wrap in the grid) and ONLY the table block below gets a
          capped height so it scrolls on its own instead of the whole page
          growing tall. --}}
-    <div class="flex flex-col lg:flex-row gap-4 w-full lg:h-[calc(100vh-280px)] transition-all duration-300 ease-in-out">
+    <div class="ae-main-row flex flex-col lg:flex-row gap-4 w-full lg:h-[calc(100vh-280px)] transition-all duration-300 ease-in-out">
 
         {{-- STAT CARDS — side column, ordered AFTER the table (right side)
              on large screens via lg:order-2. Always visible, no toggle.
@@ -2146,7 +2169,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 {{-- MODAL POPUP — centered dialog with backdrop, no fullscreen, no scroll.
      Compact two-column layout so all info fits without scrolling on most screens.
      Responsive: stacks to single column on mobile. --}}
-<div class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-6"
+<div class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4"
      x-data="{ open: false, isClosing: false, closing(){ if (this.isClosing) return; this.isClosing = true; this.open = false; window.dispatchEvent(new CustomEvent('open-sidebar')); setTimeout(() => $wire.closeModal(), 180); } }"
      x-init="requestAnimationFrame(() => open = true)"
      x-show="open"
@@ -2163,8 +2186,8 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px]" @click="closing()"></div>
 
     {{-- Modal panel --}}
-    <div class="ae-modal-panel relative z-10 w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
-                h-[100dvh] max-h-[100dvh] sm:h-[94dvh] sm:max-h-[94dvh]"
+    <div class="ae-modal-panel relative z-10 w-full max-w-6xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
+                h-[100dvh] max-h-[100dvh] sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95 translate-y-2"
          x-transition:enter-end="opacity-100 scale-100 translate-y-0"
@@ -2173,7 +2196,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
          x-transition:leave-end="opacity-0 scale-95">
 
         {{-- Header --}}
-        <div class="flex items-center justify-between px-6 py-4 flex-shrink-0 bg-[#7A3F91]">
+        <div class="flex items-center justify-between px-6 lg:px-8 py-4 lg:py-5 flex-shrink-0 bg-[#7A3F91]">
             <div class="flex items-center gap-3.5 min-w-0">
                 <img src="{{ $modalPhotoUrl }}"
                      alt="{{ $md['full_name'] ?? '' }}"
@@ -2192,13 +2215,13 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
         </div>
 
         {{-- Body — scrollable only if content overflows, otherwise fits naturally --}}
-        <div class="overflow-y-auto flex-1 min-h-0 p-5 sm:p-6 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
+        <div class="overflow-y-auto flex-1 min-h-0 p-5 sm:p-6 lg:p-8 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
 
             {{-- Two-column grid on sm+: Student Info left, Employment right --}}
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-7">
 
                 {{-- LEFT: Student Information --}}
-                <div class="border border-[#E8E0F0] rounded-xl p-4 bg-white">
+                <div class="border border-[#E8E0F0] rounded-xl p-4 lg:p-6 bg-white">
                     <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest mb-3.5">Student Information</p>
                     <div class="space-y-2.5">
                         <div class="grid grid-cols-2 gap-2.5">
@@ -2223,7 +2246,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                 </div>
 
                 {{-- RIGHT: Employment Information --}}
-                <div class="border border-[#E8E0F0] rounded-xl p-4 bg-white">
+                <div class="border border-[#E8E0F0] rounded-xl p-4 lg:p-6 bg-white">
                     <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest mb-3.5">Employment Information</p>
 
                     {{-- Status + updated --}}

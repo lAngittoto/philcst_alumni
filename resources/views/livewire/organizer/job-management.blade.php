@@ -2024,6 +2024,10 @@ body:has(.jm-page-root)::-webkit-scrollbar { display: none; }
     .jm-main-layout { padding-top: 1.25rem !important; padding-bottom: 1.25rem !important; }
     .jm-table-card  { flex: 0 1 auto !important; margin-top: auto; margin-bottom: auto; max-height: 100%; }
 }
+/* Same row sizing as Event Management so both tables have the same height. Scales with screen height (clamped) */
+@media (min-width: 1024px) and (min-height: 801px) {
+    .jm-table-card tbody td { padding-top: clamp(.625rem, 1.5vh, 1.05rem) !important; padding-bottom: clamp(.625rem, 1.5vh, 1.05rem) !important; }
+}
 @media (min-width: 1024px) and (max-height: 800px) {
     .jm-table-card tbody td { padding-top: .4rem !important; padding-bottom: .4rem !important; }
     .jm-main-layout { gap: .6rem !important; padding-top: .75rem !important; padding-bottom: .75rem !important; }
@@ -2780,11 +2784,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <table class="w-full bg-white border-collapse table-fixed">
                     <thead class="sticky top-0 z-10 bg-white">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Job Title</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Type</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Employer</th>
-                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest w-36 text-[#555555]"></th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Job Title</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Type</th>
+                            <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Company/Organization</th>
+                            <th class="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
+                            <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-36 text-[#555555]">Action</th>
                         </tr>
                     </thead>
                     <tbody>

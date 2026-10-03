@@ -1854,6 +1854,11 @@ body:has(.eo-page-root)::-webkit-scrollbar { display: none; }
     .eo-main-layout { padding-top: 1.25rem !important; padding-bottom: 1.25rem !important; }
     .eo-table-card  { flex: 0 1 auto !important; margin-top: auto; margin-bottom: auto; max-height: 100%; }
 }
+/* Taller screens: slightly roomier rows so the table card is taller and there's less empty space
+   above/below it. Scales with screen height (clamped) so 8 rows always still fit without scrolling. */
+@media (min-width: 1024px) and (min-height: 801px) {
+    .eo-table-card tbody td { padding-top: clamp(.625rem, 1.5vh, 1.05rem) !important; padding-bottom: clamp(.625rem, 1.5vh, 1.05rem) !important; }
+}
 /* Short laptop screens: tighter rows so 8 rows still fit */
 @media (min-width: 1024px) and (max-height: 800px) {
     .eo-table-card tbody td { padding-top: .4rem !important; padding-bottom: .4rem !important; }
@@ -2499,7 +2504,7 @@ select.tw-select-arrow {
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Program</th>
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden xl:table-cell text-[#555555]">Batch</th>
                             <th class="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]"></th>
+                            <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-28 text-[#555555]">Action</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-[#F5F5F5] transition-opacity duration-200"

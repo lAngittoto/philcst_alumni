@@ -2649,8 +2649,66 @@ new class extends Component {
     x-data="{ mobileChatOpen: false }"
     @chat-open-mobile.window="mobileChatOpen = true"
     @chat-close-mobile.window="mobileChatOpen = false"
-    class="flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
-    style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;"
+    class="mh-page-root flex flex-col">
+
+<style>
+/* ── Page frame — same as Job / Event / Employment pages: fits the screen with NO page scrollbar.
+   Desktop: top bar 56px + bottom padding 24px = 80px. Mobile/tablet: 48px + 16px = 64px (fills the screen). ── */
+.mh-page-root { height: calc(100vh - 64px); height: calc(100dvh - 64px); max-height: calc(100dvh - 64px); overflow: hidden; }
+html:has(.mh-page-root), body:has(.mh-page-root) { overflow: hidden !important; scrollbar-width: none; }
+html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scrollbar { display: none; }
+.mh-main-layout { min-height: 0; }
+.mh-chat-card { min-height: 0; }
+.mh-page-header-noselect, .mh-page-header-noselect * { -webkit-user-select: none; user-select: none; }
+
+/* Desktop / laptop: chat card has the SAME height as the Job / Event / Employment table cards, centered under the header */
+@media (min-width: 1024px) {
+    .mh-page-root { height: calc(100vh - 80px); height: calc(100dvh - 80px); max-height: calc(100dvh - 80px); }
+    .mh-main-layout { padding-top: 1.25rem !important; padding-bottom: 1.25rem !important; }
+    .mh-chat-card { flex: 0 1 auto; margin-top: auto; margin-bottom: auto; max-height: 100%;
+                    height: min(calc(454px + 24dvh), calc(100dvh - 215px)); }
+}
+@media (min-width: 1024px) and (max-height: 800px) {
+    .mh-main-layout { gap: .6rem !important; padding-top: .75rem !important; padding-bottom: .75rem !important; }
+    .mh-chat-card { height: min(556px, calc(100dvh - 200px)); }
+}
+/* Tablet + phone: edge-to-edge, the chat fills the whole screen (header hides while a chat is open) */
+@media (max-width: 1023px) {
+    .mh-main-layout { padding: .75rem .5rem .5rem !important; gap: .6rem !important; }
+    .mh-chat-card { flex: 1 1 0%; height: auto; }
+}
+@media (max-width: 639px) {
+    .mh-main-layout { padding: .6rem 0 0 !important; }
+    .mh-page-header-noselect { padding: 0 .75rem; gap: .75rem !important; }
+    .mh-page-header-noselect h1 { font-size: 1.2rem !important; }
+    .mh-chat-card { border-radius: 1rem 1rem 0 0 !important; border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important; }
+}
+</style>
+
+<div class="mh-main-layout flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+
+    {{-- PAGE HEADER (same style as Event / Job / Employment pages). Hidden on mobile while a chat is open so the chat gets the full screen. --}}
+    <div class="mh-page-header-noselect flex items-center gap-4 flex-shrink-0" :class="mobileChatOpen ? 'max-lg:hidden' : ''">
+        <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md"
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+            <i class="fas fa-comments text-white text-lg"></i>
+        </div>
+        <div class="min-w-0">
+            <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Message Hub</h1>
+            <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                Chat with coordinators, directors and alumni batches
+                @if($department)
+                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
+                        <i class="fas fa-building-columns text-[9px]"></i>
+                        {{ $department }}
+                    </span>
+                @endif
+            </p>
+        </div>
+    </div>
+
+<div
+    class="mh-chat-card flex rounded-2xl border border-[#ddd3e8] bg-white shadow-sm overflow-hidden"
     @if(! $confirmDeleteId && ! $reactionsPopupMsgId && ! $editingId) wire:poll.1500ms="unifiedPoll" @endif>
 
     <style>
@@ -4363,3 +4421,6 @@ new class extends Component {
     @endif
 
 </div>
+
+</div>{{-- /mh-main-layout --}}
+</div>{{-- /mh-page-root --}}

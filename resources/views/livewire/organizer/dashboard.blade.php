@@ -497,8 +497,8 @@ new class extends Component {
        Previously this was 0px, so the root was taller than the visible area and the
        auto margins / margin-top below had no visible effect. */
     --org-top-offset: 5rem;
-    /* ▼▼ PAG-BABA NG PROFILE + CARDS: dito mo i-adjust (header/date hindi gagalaw) ▼▼ */
-    --org-grid-shift: clamp(1.5rem, 5vh, 3rem);
+    /* Extra breathing room under the header. Equal space above & below the cards = this + auto margins. */
+    --org-grid-gap: 1rem;
     box-sizing: border-box;
 }
 @media (min-width: 1024px) {
@@ -519,7 +519,7 @@ new class extends Component {
         max-height: calc(100dvh - var(--org-top-offset));
         overflow: hidden;
         padding-top: 0.75rem !important;
-        padding-bottom: 1.25rem !important;
+        padding-bottom: 0 !important;
     }
 }
 
@@ -531,7 +531,9 @@ new class extends Component {
     gap: 1rem; align-items: stretch; margin-top: 1rem;
 }
 @media (min-width: 1024px) {
-    .org-main-grid { margin-top: var(--org-grid-shift) !important; margin-bottom: auto; padding-bottom: 0.5rem; min-height: 0; }
+    /* Auto margins on BOTH sides → the grid sits dead-center between the header and the bottom of the screen
+       (equal space above and below). padding-top mirrors the 1.5rem page padding under the root. */
+    .org-main-grid { margin-top: auto !important; margin-bottom: auto !important; padding-top: var(--org-grid-gap); padding-bottom: 0; min-height: 0; }
 }
 @media (min-width: 1280px) {
     .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); }
@@ -1264,6 +1266,26 @@ new class extends Component {
 </div>
 
 </div>
+
+<script>
+(function () {
+    'use strict';
+    // Desktop dashboard is a fixed one-screen layout. If anything (focus, restored
+    // scroll, navigate) nudges the document, snap it back so the header never gets cut off.
+    function lockTop() {
+        if (window.innerWidth < 1024 || !document.querySelector('.org-dashboard-root')) return;
+        if (window.scrollY !== 0 || document.documentElement.scrollTop !== 0) window.scrollTo(0, 0);
+        document.querySelectorAll('.coord-app-shell, .coord-app-shell > main').forEach(function (el) {
+            if (el.scrollTop !== 0) el.scrollTop = 0;
+        });
+    }
+    window.addEventListener('scroll', lockTop, { passive: true });
+    document.addEventListener('livewire:navigated', function () { setTimeout(lockTop, 0); });
+    window.addEventListener('load', lockTop);
+    window.addEventListener('resize', lockTop);
+    lockTop();
+})();
+</script>
 
 <script>
 (function () {
