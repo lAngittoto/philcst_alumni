@@ -2155,13 +2155,13 @@ select.tw-select-arrow {
     color: #C9C9C9 !important;
 }
 
-/* ══ FILL-IN FIELDS: super light gray bg on every input the user can type/select
+/* ══ FILL-IN FIELDS: white bg on every input the user can type/select
    in the Create / Edit / Resubmit event form (required AND optional).
    The color stays the SAME on hover / focus / active (no darker or white
    state, no purple border or ring). Error fields keep their red bg
    (bg-red-50); locked contact fields (name/email) stay white. ══ */
 .eo-form-modal {
-    --eo-fill:        #f8f8fa;   /* super light gray */
+    --eo-fill:        #ffffff;   /* white */
     --eo-fill-border: #e5e7eb;
 }
 .eo-form-modal input[type="text"]:not(.bg-red-50),
@@ -2239,17 +2239,6 @@ select.tw-select-arrow {
     .eo-left-col.eo-left-open { display: block; }
     .eo-form-modal .eo-left-col.eo-left-open { max-height: 55vh; overflow-y: auto; }
 }
-
-/* ── Page header matches Dashboard header size ── */
-.eo-page-header-noselect > div:first-child h1 { font-size: 1.5rem; line-height: 2rem; }
-.eo-page-header-noselect > div:first-child p { font-size: 0.875rem; line-height: 1.25rem; min-height: 1.25rem; }
-.eo-page-header-noselect > div:first-child p > span { font-size: 0.7rem; line-height: 1; padding-top: 2px; padding-bottom: 2px; }
-
-/* ── Inputs white, containers only a very light tint ── */
-.eo-form-modal { --eo-fill: #ffffff; --eo-fill-border: #e5e7eb; }
-.eo-form-modal.bg-gray-100 { background-color: #fbfbfc !important; }
-.eo-form-modal .bg-gray-50 { background-color: #fcfcfd !important; }
-.eo-form-modal .bg-gray-100 { background-color: #fbfbfc !important; }
 </style>
 
 {{-- Hover tooltip (desktop only — hidden on mobile via CSS above) --}}
@@ -2337,7 +2326,7 @@ select.tw-select-arrow {
     @endif
 
     {{-- ══ UNIFIED TABLE BLOCK (fixed-height card, scrolls internally — same pattern as Alumni Records) ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0" style="margin-top:clamp(1rem,6vh,3rem);">
+    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
 
         {{-- ── FILTER BAR ── --}}
         <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"

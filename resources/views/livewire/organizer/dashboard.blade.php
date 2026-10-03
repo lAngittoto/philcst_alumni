@@ -487,21 +487,43 @@ new class extends Component {
     .org-mini-card .org-mini-tip { display: none !important; }
 }
 
-/* ── Main grid — align-items: stretch so the profile card grows to
-     match the right column's full height instead of stopping short ── */
-.org-main-grid { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 1rem; align-items: stretch; margin-top: clamp(1.5rem, 8vh, 3rem); }
+/* ── Root: on desktop the page is a full-height column. Header stays at
+     the top, and the main grid is vertically CENTERED in the remaining
+     space (auto margins) — no more huge empty gap above it and no more
+     content spilling off the bottom. Tweak --org-top-offset if your
+     layout has a fixed top bar that eats viewport height. ── */
+.org-dashboard-root { --org-top-offset: 0px; box-sizing: border-box; }
 @media (min-width: 1024px) {
-    .org-main-grid { margin-top: clamp(3rem, 14vh, 6rem); }
+    .org-dashboard-root {
+        display: flex; flex-direction: column;
+        min-height: calc(100dvh - var(--org-top-offset));
+    }
+}
+
+/* ── Main grid — stretch so the profile card matches the right column's
+     height. margin-block:auto centers it between the header and the
+     bottom of the screen on desktop. ── */
+.org-main-grid {
+    display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr);
+    gap: 1rem; align-items: stretch; margin-top: 1rem;
+}
+@media (min-width: 1024px) {
+    .org-main-grid { margin-top: auto; margin-bottom: auto; padding-bottom: 0.5rem; }
 }
 @media (min-width: 1280px) {
-    .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); margin-top: clamp(4rem, 17vh, 8rem); }
-}
-@media (min-width: 1536px) {
-    .org-main-grid { margin-top: clamp(5rem, 20vh, 9rem); }
+    .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); }
 }
 @media (max-width: 1023px) {
-    .org-main-grid { grid-template-columns: minmax(0, 1fr); gap: 0.85rem; align-items: start; margin-top: clamp(1rem, 4vh, 2.5rem); }
+    .org-main-grid { grid-template-columns: minmax(0, 1fr); gap: 0.85rem; align-items: start; margin-top: 1rem; }
 }
+
+/* ── Short desktop screens (laptops): compact the photo + tiles a bit so
+     everything fits in one screen without scrolling ── */
+@media (min-width: 1024px) and (max-height: 900px) {
+    .org-photo-banner { height: 200px !important; }
+    .org-stat-grid .org-stat-card { padding: 0.9rem !important; }
+    .org-info-row { padding-top: 0.45rem; padding-bottom: 0.45rem; }
+    .org-chips-section { padding-top: 0.5rem; padding-bottom: 0.5rem; }
 }
 
 /* ── Profile column — stretches to full grid row height on desktop;
@@ -654,7 +676,7 @@ new class extends Component {
 </style>
 
 {{-- ── PAGE HEADER ── --}}
-<div class="flex items-center gap-3 mb-5 org-fade-up">
+<div class="flex items-center gap-3 mb-2 org-fade-up shrink-0">
     <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
          style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
         <i class="fas fa-gauge-high text-white text-base"></i>
@@ -766,7 +788,7 @@ new class extends Component {
                      }
                  }">
 
-                <div class="relative w-full overflow-hidden h-[400px] sm:h-[240px] bg-[#EDE0F5]"
+                <div class="relative w-full overflow-hidden h-[400px] sm:h-[240px] org-photo-banner bg-[#EDE0F5]"
                      @pointerenter.once="warmUp()">
                     <img :src="previewSrc"
                          alt="{{ $this->organizerName }}"

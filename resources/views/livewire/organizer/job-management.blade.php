@@ -2461,20 +2461,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     .jm-left-col { display: none; }
     .jm-left-col.jm-left-open { display: flex; max-height: 55vh; }
 }
-
-/* ── Inputs white, containers only a very light tint ── */
-.jm-form-modal.bg-gray-100 { background-color: #fbfbfc !important; }
-.jm-form-modal .bg-gray-50 { background-color: #fcfcfd !important; }
-.jm-form-modal .bg-gray-100 { background-color: #fbfbfc !important; }
-.jm-form-modal input[type="text"],
-.jm-form-modal input[type="date"],
-.jm-form-modal input[type="number"],
-.jm-form-modal input[type="url"],
-.jm-form-modal input[type="email"],
-.jm-form-modal textarea,
-.jm-form-modal select {
-    background-color: #ffffff !important;
-}
 </style>
 
 {{-- ── Reactive flag: photo-upload-in-progress (Post Job modal) ──
