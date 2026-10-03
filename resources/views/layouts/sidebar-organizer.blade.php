@@ -94,33 +94,23 @@
 
         .bell-badge { pointer-events: none; }
 
-        /* ── Notif "bubbles" (same as alumni) — small bubbles rise off the
-             badge and pop, looping, only while there are unread notifs. ── */
-        .bell-bubbles {
-            position: absolute;
-            top: -10px;
-            right: -10px;
-            width: 42px;
-            height: 42px;
-            pointer-events: none;
+        /* ── Bell ringing: bell swings like it's ringing while there are
+             unread notifs (no more blue bubbles). ── */
+        .bell-icon {
+            display: inline-block;
+            transform-origin: 50% 10%;
         }
-        .bell-bubble {
-            position: absolute;
-            bottom: 10px;
-            right: 12px;
-            border-radius: 50%;
-            background: #2563EB;
-            opacity: 0;
-            animation: bellBubbleRise 2.6s ease-in infinite;
+        .bell-icon.bell-ringing {
+            animation: bellSwing 2.4s ease-in-out infinite;
         }
-        .bell-bubble:nth-child(1) { width: 9px; height: 9px; right: 16px; animation-delay: 0s;    }
-        .bell-bubble:nth-child(2) { width: 6px; height: 6px; right: 4px;  animation-delay: 0.55s; }
-        .bell-bubble:nth-child(3) { width: 7px; height: 7px; right: 24px; animation-delay: 1.1s;  }
-        @keyframes bellBubbleRise {
-            0%   { opacity: 0;   transform: translateY(0) scale(0.4); }
-            12%  { opacity: 1;   transform: translateY(-5px) scale(1.1); }
-            70%  { opacity: 0.6; transform: translateY(-28px) scale(0.9); }
-            100% { opacity: 0;   transform: translateY(-38px) scale(0.35); }
+        @keyframes bellSwing {
+            0%, 100% { transform: rotate(0deg); }
+            8%  { transform: rotate(14deg); }
+            16% { transform: rotate(-12deg); }
+            24% { transform: rotate(9deg); }
+            32% { transform: rotate(-7deg); }
+            40% { transform: rotate(4deg); }
+            48% { transform: rotate(0deg); }
         }
 
         /* ── Disable text selection/copy inside the notif panel ───
@@ -1993,36 +1983,48 @@
                     [
                         'route'   => 'organizer.dashboard',
                         'icon'    => 'gauge-high',
+                        'color'   => '#2563EB',
+                        'tint'    => '#EAF1FE',
                         'label'   => 'Dashboard',
                         'pattern' => 'coordinator/dashboard*',
                     ],
                     [
                         'route'   => 'organizer.event/organizer',
                         'icon'    => 'calendar-check',
+                        'color'   => '#059669',
+                        'tint'    => '#E6F7F0',
                         'label'   => 'Event Management',
                         'pattern' => 'coordinator/event/management*',
                     ],
                     [
                         'route'   => 'organizer.job/management',
                         'icon'    => 'briefcase',
+                        'color'   => '#EA580C',
+                        'tint'    => '#FDF0E7',
                         'label'   => 'Job Management',
                         'pattern' => 'coordinator/job/management*',
                     ],
                     [
                         'route'   => 'organizer.alumni/employment',
                         'icon'    => 'chart-line',
+                        'color'   => '#DB2777',
+                        'tint'    => '#FCE9F2',
                         'label'   => 'Alumni Tracking',
                         'pattern' => 'coordinator/alumni/employment*',
                     ],
                     [
                         'route'   => 'organizer.chat/alumni',
                         'icon'    => 'comments',
+                        'color'   => '#0891B2',
+                        'tint'    => '#E4F6FA',
                         'label'   => 'Message Hub',
                         'pattern' => 'coordinator/message/hub*',
                     ],
                     [
                         'route'   => 'organizer.yearbook',
                         'icon'    => 'book-open',
+                        'color'   => '#CA8A04',
+                        'tint'    => '#FBF5E0',
                         'label'   => 'Alumni Yearbook',
                         'pattern' => 'coordinator/yearbook*',
                     ],
@@ -2040,11 +2042,12 @@
                           flex items-center px-4 py-3 rounded-xl group">
 
                     <div class="coord-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
-                         style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
+                         style="background-color:{{ $isActive ? '#FFFFFF' : $link['tint'] }};color:{{ $link['color'] }};
                                 box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
                            x-show="navClickedRoute !== '{{ $link['route'] }}'"></i>
                         <i class="fas fa-spinner fa-spin coord-nav-spinner"
+                           style="color:{{ $link['color'] }} !important;"
                            x-show="navClickedRoute === '{{ $link['route'] }}'" x-cloak></i>
                     </div>
 
@@ -2172,15 +2175,8 @@
                 aria-label="Open notifications"
                 class="coord-topbar-bell">
                 <i class="bell-icon fas fa-bell"
+                   :class="$store.coordNotifs && $store.coordNotifs.unread > 0 ? 'bell-ringing' : ''"
                    style="font-size:20px; color:#7A3F91; pointer-events:none;"></i>
-                <span
-                    x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
-                    x-cloak
-                    class="bell-bubbles">
-                    <span class="bell-bubble"></span>
-                    <span class="bell-bubble"></span>
-                    <span class="bell-bubble"></span>
-                </span>
                 <span
                     x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
                     x-cloak

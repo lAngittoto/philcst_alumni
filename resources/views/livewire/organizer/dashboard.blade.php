@@ -489,9 +489,18 @@ new class extends Component {
 
 /* ── Main grid — align-items: stretch so the profile card grows to
      match the right column's full height instead of stopping short ── */
-.org-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: stretch; }
+.org-main-grid { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 1rem; align-items: stretch; margin-top: 1.25rem; }
+@media (min-width: 1280px) {
+    .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); margin-top: 2.5rem; }
+}
+@media (min-width: 1024px) and (max-width: 1279px) {
+    .org-main-grid { margin-top: 2rem; }
+}
 @media (max-width: 1023px) {
-    .org-main-grid { grid-template-columns: 1fr; gap: 0.85rem; align-items: start; }
+    .org-main-grid { grid-template-columns: minmax(0, 1fr); gap: 0.85rem; align-items: start; margin-top: 1rem; }
+}
+@media (min-width: 1536px) {
+    .org-main-grid { margin-top: 3rem; }
 }
 
 /* ── Profile column — stretches to full grid row height on desktop;

@@ -929,6 +929,15 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 .ae-table-noselect:has(.ae-row-busy),
 .ae-table-noselect:has(.ae-row-busy) * { cursor: default !important; }
 .ae-table-noselect:has(.ae-row-busy) [data-ae-row] { pointer-events: none; }
+
+/* ── Mobile filter toggle + full-screen modal ─────────────────────── */
+@media (max-width: 1023px) {
+    .ae-filter-bar { display: none !important; }
+    .ae-filter-bar.ae-filter-open { display: flex !important; }
+}
+@media (max-width: 639px) {
+    .ae-modal-panel { border-radius: 0 !important; max-width: 100% !important; }
+}
 </style>
 
 {{-- FLASH TOAST --}}
@@ -1322,12 +1331,26 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     [container-type:inline-size] [container-name:ae-tbl]
                     max-lg:h-[calc(100dvh-360px)] max-lg:max-h-[calc(100dvh-360px)] max-lg:min-h-[380px]
                     max-sm:h-[calc(100dvh-380px)] max-sm:max-h-[calc(100dvh-380px)] max-sm:min-h-[360px]"
-             x-data="{ fullscreen: false }"
+             x-data="{ fullscreen: false, mobileFilters: false }"
              :class="fullscreen ? 'fixed! inset-0! z-[999]! h-dvh! max-h-dvh! min-h-dvh! w-screen! rounded-none! border-none!' : ''"
              @keydown.escape.window="fullscreen = false">
 
+            {{-- MOBILE FILTER TOGGLE (hidden on lg+, where the filter bar is always visible) --}}
+            <div class="lg:hidden flex items-center justify-between gap-2 px-3.5 py-2.5 bg-white border-b border-[#E8E0F0] flex-shrink-0">
+                <button type="button" @click="mobileFilters = !mobileFilters"
+                        :aria-expanded="mobileFilters.toString()"
+                        class="inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition active:scale-95"
+                        :class="mobileFilters ? 'bg-[#7a3f91] text-white border-[#7a3f91]' : 'bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]'">
+                    <i class="fas fa-sliders text-[11px]"></i>
+                    <span x-text="mobileFilters ? 'Hide Filters' : 'Show Filters'"></span>
+                    <i class="fas text-[10px]" :class="mobileFilters ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                </button>
+                <span class="text-[11px] font-semibold text-[#777777] truncate">{{ $search !== '' || !empty($filterStatuses) || !empty($filterCourses) || $filterBatchFrom !== '' || $filterBatchTo !== '' ? 'Filtered' : 'All alumni' }}</span>
+            </div>
+
             {{-- FILTER BAR --}}
-            <div class="ae-filter-bar-noselect bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+            <div class="ae-filter-bar ae-filter-bar-noselect bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+                 :class="{ 'ae-filter-open': mobileFilters }"
                  style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
                  onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;"
                  wire:loading.class="opacity-60" wire:loading.attr="data-ae-busy"
@@ -2123,7 +2146,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 {{-- MODAL POPUP — centered dialog with backdrop, no fullscreen, no scroll.
      Compact two-column layout so all info fits without scrolling on most screens.
      Responsive: stacks to single column on mobile. --}}
-<div class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6"
+<div class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-6"
      x-data="{ open: false, isClosing: false, closing(){ if (this.isClosing) return; this.isClosing = true; this.open = false; window.dispatchEvent(new CustomEvent('open-sidebar')); setTimeout(() => $wire.closeModal(), 180); } }"
      x-init="requestAnimationFrame(() => open = true)"
      x-show="open"
@@ -2140,8 +2163,8 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px]" @click="closing()"></div>
 
     {{-- Modal panel --}}
-    <div class="relative z-10 w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
-                max-h-[90dvh] sm:max-h-[88dvh]"
+    <div class="ae-modal-panel relative z-10 w-full max-w-4xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
+                h-[100dvh] max-h-[100dvh] sm:h-[94dvh] sm:max-h-[94dvh]"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95 translate-y-2"
          x-transition:enter-end="opacity-100 scale-100 translate-y-0"

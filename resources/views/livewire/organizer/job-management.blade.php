@@ -2443,6 +2443,24 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 }
 .jm-form-modal input::placeholder,
 .jm-form-modal textarea::placeholder { color: #a1a1aa; }
+
+/* ── Professional UI pass (job modals) ───────────────────────────── */
+.jm-form-modal [class~="border"]:not([class*="red-"]):not([class*="purple-"]):not([class*="emerald-"]):not([class*="amber-"]):not([class*="yellow-"]):not([class*="orange-"]):not([class*="green-"]):not([class*="blue-"]) {
+    border-color: #e5e7eb;
+}
+.jm-form-modal .bg-white {
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.jm-form-modal input[type="text"]:not(.bg-red-50),
+.jm-form-modal textarea:not(.bg-red-50) {
+    border: 1px solid #e5e7eb;
+}
+/* Mobile: photo/company panel hidden until the Filter button opens it */
+@media (max-width: 1023px) {
+    .jm-left-col { display: none; }
+    .jm-left-col.jm-left-open { display: flex; max-height: 55vh; }
+}
 </style>
 
 {{-- ── Reactive flag: photo-upload-in-progress (Post Job modal) ──
@@ -2958,6 +2976,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 {{-- ══ POST JOB — FULL SCREEN 3-COLUMN ══ --}}
 @if($showPostModal)
 <div class="jm-form-modal fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+     x-data="{ mobilePanel: false }"
      @keydown.escape.window="$wire.closePostModal()">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg">
@@ -2971,6 +2990,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
         </div>
         <div class="flex items-center gap-1.5">
+            <button type="button" @click="mobilePanel = !mobilePanel"
+                    class="jm-mobile-filter-btn lg:hidden inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-semibold transition active:scale-95"
+                    :aria-expanded="mobilePanel.toString()" aria-label="Toggle photo and company panel">
+                <i class="fas fa-sliders text-[11px]" x-show="!mobilePanel"></i>
+                <i class="fas fa-xmark text-[11px]" x-show="mobilePanel" x-cloak></i>
+                <span x-text="mobilePanel ? 'Hide' : 'Filter'"></span>
+            </button>
             {{-- Reset Post Form --}}
             <button wire:click="resetPostForm" type="button"
                     wire:loading.attr="disabled" wire:target="resetPostForm,savePost"
@@ -3005,7 +3031,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     <div class="jm-modal-body-scroll flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- LEFT: Photo first, then Company --}}
-        <div class="jm-modal-col w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-hidden bg-white flex flex-col">
+        <div class="jm-left-col jm-modal-col w-full lg:w-[280px] xl:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-hidden bg-white flex flex-col"
+             :class="{ 'jm-left-open': mobilePanel }">
             <div class="p-3 space-y-3 overflow-y-auto scroll-c flex-1 min-h-0">
 
                 {{-- Job Photo — shown first so the default photo is visible immediately at the top --}}
@@ -3482,7 +3509,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 <div class="jm-form-modal fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
      wire:key="edit-modal-{{ $editingJobId }}-{{ $editJobIsActive ? 'active' : 'inactive' }}-{{ $editIsAlumniDirectorJob ? 'dir' : 'org' }}"
-     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }">
+     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }}, mobilePanel: false }">
 
     <div class="flex items-center justify-between px-4 sm:px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg jm-modal-header-row">
         <div class="flex items-center gap-3 min-w-0">
@@ -3509,6 +3536,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
         </div>
         <div class="flex items-center gap-1.5 flex-shrink-0">
+            <button type="button" @click="mobilePanel = !mobilePanel"
+                    class="jm-mobile-filter-btn lg:hidden inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-semibold transition active:scale-95"
+                    :aria-expanded="mobilePanel.toString()" aria-label="Toggle photo and company panel">
+                <i class="fas fa-sliders text-[11px]" x-show="!mobilePanel"></i>
+                <i class="fas fa-xmark text-[11px]" x-show="mobilePanel" x-cloak></i>
+                <span x-text="mobilePanel ? 'Hide' : 'Filter'"></span>
+            </button>
             @if($editingJob && !$editIsAlumniDirectorJob)
                 @php
                     $editJobDeadlinePassed = $editingJob->deadline && \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay());
@@ -3656,7 +3690,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     <div class="jm-modal-body-scroll flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- LEFT: Company Details + Job Info --}}
-        <div class="jm-modal-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
+        <div class="jm-left-col jm-modal-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c"
+             :class="{ 'jm-left-open': mobilePanel }">
             <div class="p-3 space-y-3">
 
                 @if($editingJob)

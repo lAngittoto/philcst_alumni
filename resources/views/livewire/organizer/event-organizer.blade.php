@@ -2216,6 +2216,29 @@ select.tw-select-arrow {
     background-color: var(--eo-fill) !important;
     border-color: var(--eo-fill-border) !important;
 }
+
+/* ── Professional UI pass ─────────────────────────────────────────── */
+.eo-form-modal [class~="border"]:not([class*="red-"]):not([class*="purple-"]):not([class*="emerald-"]):not([class*="amber-"]):not([class*="yellow-"]):not([class*="orange-"]):not([class*="green-"]):not([class*="blue-"]) {
+    border-color: #e5e7eb;
+}
+.eo-form-modal .bg-white {
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.eo-form-modal .bg-white.border-b { border-bottom-color: #e5e7eb; }
+.eo-form-modal input[type="text"]:not(.bg-red-50),
+.eo-form-modal input[type="date"]:not(.bg-red-50),
+.eo-form-modal textarea:not(.bg-red-50) {
+    border: 1px solid #e5e7eb;
+}
+.eo-form-modal .eo-batch-trigger { border: 1px solid #e5e7eb; }
+
+/* Mobile: photo/programs panel hidden until the Filter button opens it */
+@media (max-width: 1023px) {
+    .eo-left-col { display: none; }
+    .eo-left-col.eo-left-open { display: block; }
+    .eo-form-modal .eo-left-col.eo-left-open { max-height: 55vh; overflow-y: auto; }
+}
 </style>
 
 {{-- Hover tooltip (desktop only — hidden on mobile via CSS above) --}}
@@ -2790,6 +2813,7 @@ select.tw-select-arrow {
 {{-- ══ CREATE / EDIT / RESUBMIT — FULL SCREEN ══ --}}
 @if($showFormModal)
 <div class="eo-form-modal fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
+     x-data="{ mobilePanel: false }"
      @keydown.escape.window="$wire.closeFormModal()">
 
     <div class="flex items-center justify-between px-6 lg:px-10 py-3 flex-shrink-0 shadow-lg"
@@ -2821,6 +2845,13 @@ select.tw-select-arrow {
         </div>
 
         <div class="flex items-center gap-1.5">
+            <button type="button" @click="mobilePanel = !mobilePanel"
+                    class="eo-mobile-filter-btn lg:hidden inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-semibold transition active:scale-95"
+                    :aria-expanded="mobilePanel.toString()" aria-label="Toggle photo and program filters">
+                <i class="fas fa-sliders text-[11px]" x-show="!mobilePanel"></i>
+                <i class="fas fa-xmark text-[11px]" x-show="mobilePanel" x-cloak></i>
+                <span x-text="mobilePanel ? 'Hide' : 'Filter'"></span>
+            </button>
             @if(!$isEditing && !$isResubmitting)
             <div class="relative inline-flex group">
                 <button wire:click="resetForm" type="button"
@@ -2924,7 +2955,8 @@ select.tw-select-arrow {
     <div class="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden">
 
         {{-- LEFT COLUMN --}}
-        <div class="w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-visible lg:overflow-y-auto bg-white"
+        <div class="eo-left-col w-full lg:w-72 xl:w-76 flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-visible lg:overflow-y-auto bg-white"
+             :class="{ 'eo-left-open': mobilePanel }"
              style="scrollbar-width:thin;">
             <div class="p-3 space-y-3">
 
