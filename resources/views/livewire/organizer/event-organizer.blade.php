@@ -604,7 +604,7 @@ new class extends Component {
         // whatever just got approved/rejected/completed) always floats to
         // the top of the table instead of staying pinned by creation date.
         $q->orderBy('updated_at', 'desc');
-        return $q->paginate(20);
+        return $q->paginate(8);
     }
 
     #[Computed]
@@ -1833,7 +1833,7 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
    the table card is vertically CENTERED in the remaining space.
    Raise --eo-top-offset if your layout has a fixed bar eating height. ── */
 .eo-page-root {
-    --eo-top-offset: 56px;
+    --eo-top-offset: 80px; /* top bar 56px + page bottom padding 24px (desktop) */
     height: calc(100vh - var(--eo-top-offset));
     height: calc(100dvh - var(--eo-top-offset));
     max-height: calc(100dvh - var(--eo-top-offset));
@@ -1861,7 +1861,7 @@ body:has(.eo-page-root)::-webkit-scrollbar { display: none; }
 }
 /* Tablet + phone: edge-to-edge, card fills the screen, rows scroll inside */
 @media (max-width: 1023px) {
-    .eo-page-root { --eo-top-offset: 0px; }
+    .eo-page-root { --eo-top-offset: 64px; } /* mobile: top bar 48px + bottom padding 16px — fills the screen exactly */
     .eo-main-layout { padding: .75rem .5rem .5rem !important; gap: .6rem !important; }
     .eo-table-card  { flex: 1 1 auto !important; border-radius: 1rem; }
 }
@@ -1873,6 +1873,15 @@ body:has(.eo-page-root)::-webkit-scrollbar { display: none; }
     .eo-table-card thead th, .eo-table-card tbody td { padding-left: .7rem !important; padding-right: .7rem !important; }
     .eo-pagination-bar { justify-content: center !important; padding-bottom: env(safe-area-inset-bottom, 0px); }
 }
+
+/* ── Event table: no visible scrollbar (rows are paged so everything fits; wheel/touch scroll still works) ── */
+#eo-table-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+#eo-table-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* ── Modal header buttons (Reset / Activate / Close / Share): same clearer white border as Job Management ── */
+.modal-top-btn { background: transparent !important; border: 1px solid rgba(255,255,255,.35) !important; }
+.modal-top-btn:hover { background: rgba(255,255,255,.12) !important; border-color: rgba(255,255,255,.55) !important; }
+.modal-top-btn:active { transform: scale(.93); }
 
 /* ── Pagination buttons: same look as the Reset / Close buttons ── */
 .eo-pg-btn {
@@ -2755,16 +2764,17 @@ select.tw-select-arrow {
             <p class="font-semibold text-[#333333] text-base mb-4 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg leading-snug">
                 {{ $pendingToggleTitle }}
             </p>
+            @if($pendingToggleActivate)
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
+                <i class="fas fa-circle-info text-emerald-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                <span class="text-sm text-emerald-900">Once activated, the Alumni Director will be able to see this event and approve it. You can deactivate it anytime to hide it again.</span>
+            </div>
+            @else
             <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-5 flex items-start gap-2">
                 <i class="fas fa-circle-info text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
-                <span class="text-sm text-amber-800">
-                    @if($pendingToggleActivate)
-                        The event will be visible to the Alumni Director for review and approval.
-                    @else
-                        The event will be hidden from the Alumni Director. You can activate it again anytime.
-                    @endif
-                </span>
+                <span class="text-sm text-amber-900">The Alumni Director won't see this event until you re-activate it. Since it isn't approved yet, you can still edit this event while it's inactive.</span>
             </div>
+            @endif
             <div class="flex gap-2">
                 <button wire:click="cancelToggle"
                         wire:loading.attr="disabled" wire:target="toggleActive"
@@ -2906,7 +2916,7 @@ select.tw-select-arrow {
             <div class="relative inline-flex group">
                 <button wire:click="resetForm" type="button"
                         wire:loading.attr="disabled" wire:target="resetForm"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 modal-top-btn disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Reset form">
                     <span wire:loading.remove wire:target="resetForm">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2926,7 +2936,7 @@ select.tw-select-arrow {
             <div class="relative inline-flex group">
                 <button wire:click="resetForm" type="button"
                         wire:loading.attr="disabled" wire:target="resetForm,saveEvent"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 modal-top-btn disabled:opacity-60 disabled:cursor-wait"
                         aria-label="Reset form">
                     <span wire:loading.remove wire:target="resetForm,saveEvent">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -2953,7 +2963,7 @@ select.tw-select-arrow {
             <div class="relative inline-flex group">
                 <button wire:click="confirmToggleActive({{ $editingEventId }})" type="button"
                         wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $editingEventId }})"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 modal-top-btn disabled:opacity-60 disabled:cursor-wait"
                         aria-label="{{ $editRowActive ? 'Deactivate event' : 'Activate event' }}">
                     <i class="fas {{ $editRowActive ? 'fa-circle-pause' : 'fa-circle-play' }} text-white text-base" wire:loading.remove wire:target="confirmToggleActive({{ $editingEventId }})"></i>
                     <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="confirmToggleActive({{ $editingEventId }})"></i>
@@ -2968,7 +2978,7 @@ select.tw-select-arrow {
             <div class="relative inline-flex group">
                 <button wire:click="closeFormModal" type="button"
                         wire:loading.attr="disabled" wire:target="closeFormModal"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 modal-top-btn"
                         aria-label="Close">
                     <i class="fas fa-xmark text-white text-base" wire:loading.remove wire:target="closeFormModal"></i>
                     <i class="fas fa-spinner fa-spin text-white text-base" wire:loading wire:target="closeFormModal"></i>
@@ -4074,7 +4084,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             <div class="relative inline-flex group">
                 <button type="button" wire:click="openShareModal({{ $ev->id }})"
                         wire:loading.attr="disabled" wire:target="openShareModal({{ $ev->id }})"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait">
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 modal-top-btn disabled:opacity-60 disabled:cursor-wait">
                     <i class="fas fa-share-nodes text-white text-sm" wire:loading.remove wire:target="openShareModal({{ $ev->id }})"></i>
                     <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="openShareModal({{ $ev->id }})"></i>
                 </button>
@@ -4089,7 +4099,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             <div class="relative inline-flex group">
                 <button wire:click="confirmToggleActive({{ $ev->id }})" type="button"
                         wire:loading.attr="disabled" wire:target="confirmToggleActive({{ $ev->id }})"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22 disabled:opacity-60 disabled:cursor-wait">
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 modal-top-btn disabled:opacity-60 disabled:cursor-wait">
                     <i class="fas {{ $viewRowActive ? 'fa-circle-pause' : 'fa-circle-play' }} text-white text-sm" wire:loading.remove wire:target="confirmToggleActive({{ $ev->id }})"></i>
                     <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmToggleActive({{ $ev->id }})"></i>
                 </button>
@@ -4102,7 +4112,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             <div class="relative inline-flex group">
                 <button wire:click="closeViewModal" type="button"
                         wire:loading.attr="disabled" wire:target="closeViewModal"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22">
+                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 modal-top-btn">
                     <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeViewModal"></i>
                     <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeViewModal"></i>
                 </button>

@@ -492,7 +492,15 @@ new class extends Component {
      space (auto margins) — no more huge empty gap above it and no more
      content spilling off the bottom. Tweak --org-top-offset if your
      layout has a fixed top bar that eats viewport height. ── */
-.org-dashboard-root { --org-top-offset: 0px; box-sizing: border-box; }
+.org-dashboard-root {
+    /* Layout shell eats: top bar (lg:h-14 = 3.5rem) + page-content bottom padding (pb-6 = 1.5rem).
+       Previously this was 0px, so the root was taller than the visible area and the
+       auto margins / margin-top below had no visible effect. */
+    --org-top-offset: 5rem;
+    /* ▼▼ PAG-BABA NG PROFILE + CARDS: dito mo i-adjust (header/date hindi gagalaw) ▼▼ */
+    --org-grid-shift: clamp(1.5rem, 5vh, 3rem);
+    box-sizing: border-box;
+}
 @media (min-width: 1024px) {
     /* Desktop: fixed to the screen height, NO page scrollbar. Header on top,
        cards sit right under it (raised), leftover space goes to the bottom. */
@@ -523,7 +531,7 @@ new class extends Component {
     gap: 1rem; align-items: stretch; margin-top: 1rem;
 }
 @media (min-width: 1024px) {
-    .org-main-grid { margin-top: 0.25rem; margin-bottom: auto; padding-bottom: 0.5rem; min-height: 0; }
+    .org-main-grid { margin-top: var(--org-grid-shift) !important; margin-bottom: auto; padding-bottom: 0.5rem; min-height: 0; }
 }
 @media (min-width: 1280px) {
     .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); }

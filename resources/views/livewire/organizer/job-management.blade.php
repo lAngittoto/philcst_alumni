@@ -779,7 +779,7 @@ new class extends Component {
     public function jobPostings()
     {
         $org = auth()->user()?->organizer;
-        if (!$org) return JobPosting::whereRaw('0=1')->paginate(20);
+        if (!$org) return JobPosting::whereRaw('0=1')->paginate(8);
 
         $orgCollege = $this->organizerCollege;
         $today      = now('Asia/Manila')->startOfDay()->toDateString();
@@ -870,7 +870,7 @@ new class extends Component {
 
         $q->orderBy('updated_at', 'desc');
 
-        $paginated = $q->paginate(20);
+        $paginated = $q->paginate(8);
 
         $nowDate = now('Asia/Manila')->startOfDay();
         $paginated->getCollection()->transform(function ($job) use ($nowDate) {
@@ -2004,7 +2004,7 @@ public function openEditModal(int $id): void
    table card is vertically CENTERED in the remaining space.
    Raise --jm-top-offset if your layout has a fixed bar eating height. ── */
 .jm-page-root {
-    --jm-top-offset: 56px;
+    --jm-top-offset: 80px; /* top bar 56px + page bottom padding 24px (desktop) */
     height: calc(100vh - var(--jm-top-offset));
     height: calc(100dvh - var(--jm-top-offset));
     max-height: calc(100dvh - var(--jm-top-offset));
@@ -2029,7 +2029,7 @@ body:has(.jm-page-root)::-webkit-scrollbar { display: none; }
     .jm-main-layout { gap: .6rem !important; padding-top: .75rem !important; padding-bottom: .75rem !important; }
 }
 @media (max-width: 1023px) {
-    .jm-page-root { --jm-top-offset: 0px; }
+    .jm-page-root { --jm-top-offset: 64px; } /* mobile: top bar 48px + bottom padding 16px — fills the screen exactly, no overflow */
     .jm-main-layout { padding: .75rem .5rem .5rem !important; gap: .6rem !important; }
     .jm-table-card  { flex: 1 1 auto !important; border-radius: 1rem; }
 }
@@ -2066,6 +2066,11 @@ body:has(.jm-page-root)::-webkit-scrollbar { display: none; }
 }
 .m-in  { animation: modalIn .2s cubic-bezier(.25,.8,.25,1) both; }
 .fs-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
+
+/* ── Job table: no visible scrollbar (rows are paged so everything fits;
+   scrolling by wheel / touch still works as a safety net on very short screens) ── */
+#jm-table-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+#jm-table-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: transparent; border-radius: 99px; }
