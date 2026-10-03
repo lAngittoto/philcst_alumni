@@ -1997,9 +1997,65 @@ public function openEditModal(int $id): void
 };
 ?>
 
-<div class="flex flex-col" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
+<div class="jm-page-root flex flex-col">
 
 <style>
+/* ── Page frame: fits the screen, NO page scrollbar. Header on top, the
+   table card is vertically CENTERED in the remaining space.
+   Raise --jm-top-offset if your layout has a fixed bar eating height. ── */
+.jm-page-root {
+    --jm-top-offset: 56px;
+    height: calc(100vh - var(--jm-top-offset));
+    height: calc(100dvh - var(--jm-top-offset));
+    max-height: calc(100dvh - var(--jm-top-offset));
+    overflow: hidden;
+}
+html:has(.jm-page-root),
+body:has(.jm-page-root) { overflow: hidden !important; scrollbar-width: none; }
+html:has(.jm-page-root)::-webkit-scrollbar,
+body:has(.jm-page-root)::-webkit-scrollbar { display: none; }
+
+.jm-main-layout { min-height: 0; }
+.jm-table-card  { display: flex; flex-direction: column; min-height: 0; }
+.jm-table-wrap  { display: flex; flex-direction: column; min-height: 0; position: relative; background: #fff; flex: 1 1 auto; }
+.jm-table-wrap #jm-table-scroll { height: auto !important; flex: 1 1 auto; min-height: 0; }
+
+@media (min-width: 1024px) {
+    .jm-main-layout { padding-top: 1.25rem !important; padding-bottom: 1.25rem !important; }
+    .jm-table-card  { flex: 0 1 auto !important; margin-top: auto; margin-bottom: auto; max-height: 100%; }
+}
+@media (min-width: 1024px) and (max-height: 800px) {
+    .jm-table-card tbody td { padding-top: .4rem !important; padding-bottom: .4rem !important; }
+    .jm-main-layout { gap: .6rem !important; padding-top: .75rem !important; padding-bottom: .75rem !important; }
+}
+@media (max-width: 1023px) {
+    .jm-page-root { --jm-top-offset: 0px; }
+    .jm-main-layout { padding: .75rem .5rem .5rem !important; gap: .6rem !important; }
+    .jm-table-card  { flex: 1 1 auto !important; border-radius: 1rem; }
+}
+@media (max-width: 639px) {
+    .jm-main-layout { padding: .6rem 0 0 !important; }
+    .jm-page-header-noselect { padding: 0 .75rem; gap: .6rem !important; }
+    .jm-page-header-noselect h1 { font-size: 1.2rem !important; }
+    .jm-table-card  { border-radius: 1rem 1rem 0 0; border-left: 0; border-right: 0; border-bottom: 0; }
+    .jm-table-card thead th, .jm-table-card tbody td { padding-left: .7rem !important; padding-right: .7rem !important; }
+    .jm-pagination-bar { justify-content: center !important; padding-bottom: env(safe-area-inset-bottom, 0px); }
+}
+
+/* ── Pagination buttons: same look as the Reset / Close buttons ── */
+.jm-pg-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 2rem; height: 2rem; padding: 0 .5rem; border-radius: .5rem;
+    font-size: .75rem; font-weight: 700; color: #fff; cursor: pointer;
+    background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.15);
+    transition: background .15s, transform .1s;
+}
+.jm-pg-btn:hover:not(:disabled) { background: rgba(255,255,255,.22); }
+.jm-pg-btn:active:not(:disabled) { transform: scale(.95); }
+.jm-pg-btn:disabled { opacity: .6; cursor: not-allowed; }
+.jm-pg-btn i { color: #fff; font-size: 11px; }
+.jm-pg-btn.is-active { background: #fff; color: #7a3f91; border-color: #fff; cursor: default; }
+
 @keyframes modalIn {
     from { opacity:0; transform:translateY(14px) scale(.97); }
     to   { opacity:1; transform:none; }
@@ -2417,8 +2473,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
    or white state, no purple border or ring). Error fields keep their red
    bg (bg-red-50); read-only / disabled fields keep their own locked look. ══ */
 .jm-form-modal {
-    --jm-fill:        #f8f8fa;   /* super light gray */
-    --jm-fill-border: #e5e7eb;
+    --jm-fill:        #ffffff;   /* white */
+    --jm-fill-border: #d1d5db;
 }
 .jm-form-modal input[type="text"]:not(.bg-red-50):not([readonly]):not(:disabled),
 .jm-form-modal input[type="date"]:not(.bg-red-50):not([readonly]):not(:disabled),
@@ -2553,7 +2609,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div class="jm-main-layout flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ══ PAGE HEADER ══ --}}
     <div class="jm-page-header-noselect flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0"
@@ -2600,7 +2656,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     </div>
 
     {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
+    <div class="jm-table-card rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
 
         {{-- ── FILTER BAR ── --}}
         <div class="jm-filter-bar bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
@@ -2698,7 +2754,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
 
         {{-- ── TABLE WRAPPER ── --}}
-        <div class="relative flex-1 min-h-0 bg-white">
+        <div class="jm-table-wrap">
 
             {{-- Centered loading spinner — big icon over the table itself,
                  same pattern as the alumni-facing yearbook, instead of only
@@ -2854,7 +2910,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             $pgStart = max(1, $cp - 2);
             $pgEnd   = min($lp, $cp + 2);
         @endphp
-        <div class="flex-shrink-0 border-t border-purple-800/30 px-4 flex items-center justify-between gap-2 flex-wrap min-h-[48px] py-1"
+        <div class="jm-pagination-bar flex-shrink-0 border-t border-purple-800/30 px-4 flex items-center justify-between gap-2 flex-wrap min-h-[48px] py-1"
              style="background: linear-gradient(to right, #7a3f91, #9b59b6);">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
@@ -2865,38 +2921,38 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
             <div class="flex items-center gap-1 flex-wrap py-2">
                 <button wire:click="previousPage"
-                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        class="jm-pg-btn"
                         @if($this->jobPostings->onFirstPage()) disabled @endif
                         aria-label="Previous">
-                    <i class="fas fa-chevron-left text-[9px]"></i>
+                    <i class="fas fa-chevron-left "></i>
                 </button>
 
                 @if($pgStart > 1)
                     <button wire:click="gotoPage(1)"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                            class="jm-pg-btn">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
 
                 @for($p = $pgStart; $p <= $pgEnd; $p++)
                     @if($p === $cp)
-                        <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
+                        <span class="jm-pg-btn is-active">{{ $p }}</span>
                     @else
                         <button wire:click="gotoPage({{ $p }})"
-                                class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                                class="jm-pg-btn">{{ $p }}</button>
                     @endif
                 @endfor
 
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                     <button wire:click="gotoPage({{ $lp }})"
-                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
+                            class="jm-pg-btn">{{ $lp }}</button>
                 @endif
 
                 <button wire:click="nextPage"
-                        class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
+                        class="jm-pg-btn"
                         @if(!$this->jobPostings->hasMorePages()) disabled @endif
                         aria-label="Next">
-                    <i class="fas fa-chevron-right text-[9px]"></i>
+                    <i class="fas fa-chevron-right "></i>
                 </button>
 
                 <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">

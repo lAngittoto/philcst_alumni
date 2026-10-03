@@ -494,9 +494,24 @@ new class extends Component {
      layout has a fixed top bar that eats viewport height. ── */
 .org-dashboard-root { --org-top-offset: 0px; box-sizing: border-box; }
 @media (min-width: 1024px) {
+    /* Desktop: fixed to the screen height, NO page scrollbar. Header on top,
+       cards sit right under it (raised), leftover space goes to the bottom. */
+    html:has(.org-dashboard-root),
+    body:has(.org-dashboard-root) {
+        overflow: hidden !important;
+        height: 100dvh;
+        scrollbar-width: none;
+    }
+    html:has(.org-dashboard-root)::-webkit-scrollbar,
+    body:has(.org-dashboard-root)::-webkit-scrollbar { display: none; }
+
     .org-dashboard-root {
         display: flex; flex-direction: column;
-        min-height: calc(100dvh - var(--org-top-offset));
+        height: calc(100dvh - var(--org-top-offset));
+        max-height: calc(100dvh - var(--org-top-offset));
+        overflow: hidden;
+        padding-top: 0.75rem !important;
+        padding-bottom: 1.25rem !important;
     }
 }
 
@@ -508,7 +523,7 @@ new class extends Component {
     gap: 1rem; align-items: stretch; margin-top: 1rem;
 }
 @media (min-width: 1024px) {
-    .org-main-grid { margin-top: auto; margin-bottom: auto; padding-bottom: 0.5rem; }
+    .org-main-grid { margin-top: 0.25rem; margin-bottom: auto; padding-bottom: 0.5rem; min-height: 0; }
 }
 @media (min-width: 1280px) {
     .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); }
@@ -519,6 +534,13 @@ new class extends Component {
 
 /* ── Short desktop screens (laptops): compact the photo + tiles a bit so
      everything fits in one screen without scrolling ── */
+@media (min-width: 1024px) and (max-height: 760px) {
+    .org-photo-banner { height: 150px !important; }
+    .org-stat-grid .org-stat-card { padding: 0.65rem !important; }
+    .org-stat-grid .org-stat-card .org-stat-num { font-size: 1.9rem !important; }
+    .org-info-row { padding-top: 0.3rem; padding-bottom: 0.3rem; }
+    .org-chips-section { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+}
 @media (min-width: 1024px) and (max-height: 900px) {
     .org-photo-banner { height: 200px !important; }
     .org-stat-grid .org-stat-card { padding: 0.9rem !important; }
