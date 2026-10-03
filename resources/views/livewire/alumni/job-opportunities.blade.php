@@ -553,7 +553,7 @@ new class extends Component {
 
 }; ?>
 
-<div class="flex flex-col jb-page-height">
+<div class="jb-page-height">
 
 {{-- ── Clean-URL cleanup script ──────────────────────────────────────────
      Strips the "?job=123" query param from the address bar once the job
@@ -587,29 +587,65 @@ new class extends Component {
    "- 180px" subtraction that made the page look
    too short/cramped on small mobile screens.
 ───────────────────────────────────────────── */
+/* Layout page area = topbar (4rem) + padding (p-4 mobile / lg:p-8) and its
+   inner .container has no height, so this page sizes itself exactly.
+   If the layout's topbar/padding changes, edit ONLY the two vars below.
+   Plain CSS on purpose (works even if Tailwind wasn't rebuilt). */
 .jb-page-height {
-    height: calc(100vh - 120px);
-    height: calc(100dvh - 120px);
-    max-height: calc(100vh - 120px);
-    max-height: calc(100dvh - 120px);
+    --jb-topbar: 4rem;
+    --jb-page-pad: 0rem;
+    display: flex; flex-direction: column;
+    height: calc(100vh - var(--jb-topbar) - var(--jb-page-pad));
+    height: calc(100dvh - var(--jb-topbar) - var(--jb-page-pad));
+    max-height: calc(100dvh - var(--jb-topbar) - var(--jb-page-pad));
     overflow: hidden;
+    margin: -1rem;               /* phones: cancel layout p-4 → true full screen */
 }
 @media (min-width: 640px) {
-    .jb-page-height {
-        height: calc(100vh - 150px);
-        height: calc(100dvh - 150px);
-        max-height: calc(100vh - 150px);
-        max-height: calc(100dvh - 150px);
-    }
+    .jb-page-height { --jb-page-pad: 2rem; margin: 0; }
 }
 @media (min-width: 1024px) {
-    .jb-page-height {
-        height: calc(100vh - 180px);
-        height: calc(100dvh - 180px);
-        max-height: calc(100vh - 180px);
-        max-height: calc(100dvh - 180px);
+    .jb-page-height { --jb-page-pad: 4rem; }
+}
+
+.jb-main {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    gap: .75rem; width: 100%; max-width: 96rem; margin: 0 auto;
+    padding: 1rem 1rem 0;
+}
+@media (min-width: 640px)  { .jb-main { padding: 1.5rem 1.75rem 1.5rem; gap: 1rem; } }
+@media (min-width: 1024px) { .jb-main { padding: 1.5rem 2.5rem 1.5rem; } }
+
+/* Header: icon + text on the left (same pattern as Alumni Dashboard) */
+.jb-header { display: flex; align-items: center; gap: .75rem 1rem; flex-shrink: 0; width: 100%; }
+.jb-header-icon {
+    width: 2.75rem; height: 2.75rem; border-radius: 1rem; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #7A3F91; color: #ffffff; font-size: 1.05rem;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1);
+}
+.jb-header-text { min-width: 0; text-align: left; }
+@media (max-width: 639px) {
+    .jb-header-icon { width: 2.5rem; height: 2.5rem; border-radius: .85rem; font-size: .95rem; }
+    .jb-header h1 { font-size: 1.05rem; line-height: 1.3; }
+    .jb-header p  { font-size: .8rem; }
+    /* list panel goes edge to edge on phones */
+    .jb-block {
+        margin-left: -1rem; margin-right: -1rem; margin-top: 0 !important;
+        border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important;
+        border-radius: 0 !important; box-shadow: none !important;
     }
 }
+
+/* Filters toggle button exists on phones only; from 640px up the filter
+   panel is always visible so the button is hidden. */
+@media (min-width: 640px) {
+    .jb-filter-toggle { display: none !important; }
+}
+
+/* Spinner overlay centers over the page area (sidebar only exists on lg+) */
+.jb-loading-overlay { top: 0; bottom: 0; left: 0; right: 0; }
+@media (min-width: 1024px) { .jb-loading-overlay { left: 284px; } }
 
 /* ─────────────────────────────────────────────
    FILTER SELECTS
@@ -1010,28 +1046,26 @@ select.filter-input option {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div class="jb-main">
 
-    {{-- PAGE HEADER --}}
-    <div class="flex flex-col items-center justify-center text-center gap-2 flex-shrink-0">
-        <div class="flex flex-col items-center gap-2 sm:gap-3">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
-                <i class="fas fa-briefcase text-white text-lg"></i>
-            </div>
-            <div class="flex flex-col items-center text-center">
-                <h1 class="text-xl font-semibold tracking-tight text-gray-900 text-center" style="user-select:none;-webkit-user-select:none;">Job Opportunities</h1>
-                <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700 text-center" style="user-select:none;-webkit-user-select:none;">
-                    Openings available for
-                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
-                        {{ $alumniCollege ?: 'your college' }}
-                    </span>
-                </p>
-            </div>
+    {{-- PAGE HEADER — icon + text on the left, like Alumni Dashboard --}}
+    <div class="jb-header">
+        <div class="jb-header-icon">
+            <i class="fas fa-briefcase"></i>
+        </div>
+        <div class="jb-header-text">
+            <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Job Opportunities</h1>
+            <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+                Openings available for
+                <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
+                    {{ $alumniCollege ?: 'your college' }}
+                </span>
+            </p>
         </div>
     </div>
 
     {{-- ══ SEEK-STYLE 2-COLUMN LAYOUT ══ --}}
-    <div class="flex-1 min-h-0 flex gap-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative mt-1 sm:mt-2"
+    <div class="jb-block flex-1 min-h-0 flex gap-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative mt-1 sm:mt-2"
          id="jb-content-block">
 
         {{-- ── LEFT PANEL: Filter bar + List + Pagination ── --}}
@@ -1044,7 +1078,8 @@ select.filter-input option {
                 $activeFilterCount = ($filterType !== '' ? 1 : 0) + ($filterLevel !== '' ? 1 : 0) + ($filterSort !== 'recent' ? 1 : 0);
             @endphp
             <div class="bg-gray-50 border-b border-[#E8E0F0] flex-shrink-0 select-none"
-                 x-data="{ open: window.matchMedia('(min-width: 640px)').matches }">
+                 x-data="{ open: window.matchMedia('(min-width: 640px)').matches }"
+                 @resize.window="if (window.matchMedia('(min-width: 640px)').matches) open = true">
 
                 {{-- Row 1: search bar + filter toggle (icon-only on mobile, icon + text on sm+) --}}
                 <div class="flex items-center gap-2 px-3 py-2.5">
@@ -1071,11 +1106,9 @@ select.filter-input option {
                             :aria-expanded="open.toString()"
                             aria-controls="jb-filter-panel"
                             aria-label="Toggle filters"
-                            class="relative flex-shrink-0 inline-flex items-center justify-center gap-1.5 h-10 w-10 sm:h-9 sm:w-auto sm:px-3 rounded-lg border text-xs font-semibold transition active:scale-95"
+                            class="jb-filter-toggle relative flex-shrink-0 inline-flex items-center justify-center gap-1.5 h-10 w-10 rounded-lg border text-xs font-semibold transition active:scale-95"
                             :class="open ? 'bg-[#7a3f91] border-[#7a3f91] text-white' : 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300'">
                         <i class="fas fa-sliders text-[13px]"></i>
-                        <span class="hidden sm:inline">Filters</span>
-                        <i class="fas fa-chevron-down hidden sm:inline text-[9px] transition-transform duration-200" :class="open ? 'rotate-180' : ''"></i>
                         @if($activeFilterCount > 0)
                             <span class="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 inline-flex items-center justify-center rounded-full bg-rose-500 text-white text-[10px] font-bold leading-none border-2 border-gray-50">{{ $activeFilterCount }}</span>
                         @endif
@@ -1139,8 +1172,7 @@ select.filter-input option {
             </div>
 
             {{-- Loading overlay --}}
-            <div class="hidden fixed z-[9999] items-center justify-center pointer-events-none"
-                 style="top:0;bottom:0;left:284px;right:0;"
+            <div class="jb-loading-overlay hidden fixed z-[9999] items-center justify-center pointer-events-none"
                  wire:loading.flex wire:target="search,filterType,filterLevel,filterSort,previousPage,nextPage,page,resetFilters">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>

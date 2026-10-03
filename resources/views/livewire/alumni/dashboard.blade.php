@@ -393,6 +393,36 @@ new class extends Component {
         .close-btn-wrap:hover .close-tooltip { opacity: 1; }
     }
 
+    /* ── Vertical centering of the stat grid ─────────────────────────
+       The layout's page area is:  <div class="flex-1 overflow-y-auto p-4 lg:p-8">
+                                     <div class="container mx-auto"> ...content... </div>
+                                   </div>
+       That inner .container has NO height, so the dashboard has to size
+       itself. Available height = 100vh - topbar (4rem) - page padding
+       (2rem mobile / 4rem desktop). The old value (100vh - 4rem) forgot
+       the padding, so the box was taller than the viewport and the grid
+       never looked centered. Plain CSS here (not Tailwind arbitrary
+       classes) so it works even if the Tailwind build wasn't re-run.
+       If the layout's topbar/padding ever changes, edit ONLY these two vars. */
+    .dash-root {
+        --dash-topbar: 4rem;
+        --dash-page-pad: 2rem;               /* p-4 top + bottom (mobile) */
+        display: flex;
+        flex-direction: column;
+        min-height: calc(100vh - var(--dash-topbar) - var(--dash-page-pad));
+        min-height: calc(100dvh - var(--dash-topbar) - var(--dash-page-pad));
+    }
+    @media (min-width: 1024px) {
+        .dash-root { --dash-page-pad: 4rem; } /* lg:p-8 top + bottom */
+    }
+    .dash-center {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 0;
+    }
+
     /* ── Equal-height main grid ── */
     .dash-main-grid {
         display: grid;
@@ -545,7 +575,7 @@ new class extends Component {
 </style>
 
 {{-- ═══ DASHBOARD ROOT ════════════════════════════════════════════ --}}
-<div class="px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto min-h-[calc(100vh-4rem)] flex flex-col">
+<div class="dash-root px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto">
 
     {{-- ═══ PAGE HEADER ════════════════════════════════════════════ --}}
     <div class="flex items-center gap-4 mb-5 flex-wrap shrink-0">
@@ -576,7 +606,7 @@ new class extends Component {
     {{-- ═══ MAIN GRID ══════════════════════════════════════════════ --}}
     @php $photoUrl = $this->getProfilePhotoUrl(); @endphp
 
-    <div class="flex-1 flex flex-col justify-center">
+    <div class="dash-center">
     <div class="dash-main-grid">
 
         {{-- ══ LEFT: Profile Card ═══ --}}

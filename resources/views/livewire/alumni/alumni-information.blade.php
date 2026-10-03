@@ -1078,7 +1078,7 @@ new class extends Component {
     }
 }; ?>
 
-<div class="flex flex-col" style="height:calc(100vh - 180px);max-height:calc(100vh - 180px);overflow:hidden;">
+<div class="ai-root">
 
 <style>
 .ai-tooltip {
@@ -1395,6 +1395,67 @@ input[type="date"].field-input:disabled {
     display: block; font-size: 0.85rem; font-weight: 600; text-transform: uppercase;
     letter-spacing: .025em; color: #333333; margin-bottom: 0.35rem;
 }
+
+/* ═══════════ PAGE FRAME / RESPONSIVE LAYOUT ═══════════
+   Layout page area = topbar (4rem) + padding (p-4 mobile / lg:p-8), and its
+   inner .container has no height, so this page sizes itself.
+   If the layout's topbar/padding changes, edit ONLY the two vars on .ai-root.
+   Plain CSS on purpose (works even if Tailwind wasn't rebuilt). */
+.ai-root {
+    --ai-topbar: 4rem;
+    --ai-page-pad: 2rem;
+    display: flex; flex-direction: column;
+    min-height: calc(100vh - var(--ai-topbar) - var(--ai-page-pad));
+    min-height: calc(100dvh - var(--ai-topbar) - var(--ai-page-pad));
+}
+.ai-main {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    gap: .75rem; width: 100%; max-width: 96rem; margin: 0 auto;
+    padding: 1rem 1rem 0;
+}
+.ai-header { display: flex; align-items: center; gap: .75rem 1rem; flex-shrink: 0; width: 100%; margin-bottom: .25rem; }
+.ai-header-icon {
+    width: 2.75rem; height: 2.75rem; border-radius: 1rem; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #7A3F91; color: #ffffff; font-size: 1rem;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1);
+}
+.ai-header-text { min-width: 0; flex: 1 1 auto; text-align: left; }
+.ai-header-titlerow { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .625rem; }
+.ai-header-actions { margin-left: auto; }
+
+/* Phones: full-screen feel — cancel the layout padding, card goes edge to edge,
+   page scrolls naturally (no inner scroll box). */
+@media (max-width: 639px) {
+    .ai-root { --ai-page-pad: 0rem; margin: -1rem; }
+    .ai-header-icon { width: 2.5rem; height: 2.5rem; border-radius: .85rem; font-size: .95rem; }
+    .ai-header h1 { font-size: 1.05rem; line-height: 1.3; }
+    .ai-header p  { font-size: .8rem; }
+    .ai-header-actions > button { width: 2.5rem; height: 2.5rem; }
+    .ai-block { margin-left: -1rem; margin-right: -1rem; border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
+    .field-value { font-size: 1rem; }
+    .field-label { font-size: .72rem; }
+    .ai-card-body { padding: 8px; }
+    .ai-cell { padding: 8px 10px; }
+}
+@media (min-width: 640px) {
+    .ai-main { padding: 1.5rem 1.75rem 1.5rem; }
+}
+/* 3 name columns are too cramped on small phones — stack them */
+@media (max-width: 519px) {
+    .ai-card-body.grid-cols-3 { grid-template-columns: 1fr; }
+}
+/* Desktop: exact-fit height, only the card body scrolls */
+@media (min-width: 1024px) {
+    .ai-root {
+        --ai-page-pad: 4rem;
+        height: calc(100vh - var(--ai-topbar) - var(--ai-page-pad));
+        height: calc(100dvh - var(--ai-topbar) - var(--ai-page-pad));
+        max-height: calc(100dvh - var(--ai-topbar) - var(--ai-page-pad));
+        overflow: hidden;
+    }
+    .ai-main { padding: 1.5rem 2.5rem 1.5rem; }
+}
 </style>
 
 {{-- ── TOAST ── --}}
@@ -1600,43 +1661,41 @@ function phAddress(initial) {
 </script>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-3 px-4 sm:px-6 lg:px-10 pt-3 sm:pt-4 pb-3 max-w-screen-2xl mx-auto w-full min-h-0"
+<div class="ai-main"
      x-data="{ showProfileConfirm: false, showEmpConfirm: false }"
      x-on:profile-updated.window="showProfileConfirm = false"
      x-on:profile-save-failed.window="showProfileConfirm = false"
      x-on:employment-updated.window="showEmpConfirm = false">
 
-    {{-- ── PAGE HEADER ── --}}
-    <div class="flex flex-col items-center justify-center text-center gap-2 flex-shrink-0 w-full">
-
-        <div class="flex flex-col items-center gap-2 sm:gap-3 w-full">
-            <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
-                <i class="fa-solid fa-id-card-clip text-white text-sm sm:text-base"></i>
-            </div>
-            <div class="flex flex-col items-center text-center">
-                <div class="flex flex-col items-center gap-2.5 flex-wrap">
-                    <h1 class="text-xl font-semibold tracking-tight text-gray-900 text-center" style="user-select:none;-webkit-user-select:none;">Professional &amp; Personal Information</h1>
-                    @if($editingProfile)
-                        <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-300">
-                            <i class="fas fa-pen text-[9px]"></i> Edit Mode
-                        </span>
-                    @endif
-                </div>
-                <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700 text-center" style="user-select:none;-webkit-user-select:none;">
-                    @if($editingProfile)
-                        Complete your details below. Fields marked <span class="text-red-500 font-semibold">*</span> are required.
-                        <span class="inline-flex items-center gap-1 text-amber-700 font-semibold">
-                            <i class="fas fa-lock text-[10px]"></i> School Record — Not Editable
-                        </span>
-                    @else
-                        Keep your alumni profile accurate and up to date.
-                    @endif
-                </p>
-            </div>
+    {{-- ── PAGE HEADER ── icon + title/subtitle on the left (same pattern as Alumni Dashboard), action buttons at the far end ── --}}
+    <div class="ai-header">
+        <div class="ai-header-icon">
+            <i class="fa-solid fa-id-card-clip"></i>
         </div>
 
-        {{-- Right: action buttons --}}
-        <div class="flex items-center justify-center gap-2 flex-shrink-0">
+        <div class="ai-header-text">
+            <div class="ai-header-titlerow">
+                <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Professional &amp; Personal Information</h1>
+                @if($editingProfile)
+                    <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-widest bg-amber-100 text-amber-700 border border-amber-300">
+                        <i class="fas fa-pen text-[9px]"></i> Edit Mode
+                    </span>
+                @endif
+            </div>
+            <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+                @if($editingProfile)
+                    Complete your details below. Fields marked <span class="text-red-500 font-semibold">*</span> are required.
+                    <span class="inline-flex items-center gap-1 text-amber-700 font-semibold">
+                        <i class="fas fa-lock text-[10px]"></i> School Record — Not Editable
+                    </span>
+                @else
+                    Keep your alumni profile accurate and up to date.
+                @endif
+            </p>
+        </div>
+
+        {{-- Action buttons — pushed to the far end of the header row --}}
+        <div class="ai-header-actions flex items-center gap-2 flex-shrink-0">
             @if(!$editingProfile)
                 {{-- Edit Profile --}}
                 <button wire:click="startEditingProfile"
@@ -1693,7 +1752,6 @@ function phAddress(initial) {
                 @endif
             @endif
         </div>
-
     </div>
 
     {{-- ══ INLINE ALERTS ══ --}}
@@ -1728,7 +1786,7 @@ function phAddress(initial) {
     @endif
 
     {{-- ══ CONTENT BLOCK ══ --}}
-    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
+    <div class="ai-block flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         <div class="bg-white flex-1 overflow-y-auto">
 
