@@ -4,18 +4,24 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
     <title>{{ config('app.name', 'Philcst') }} - Coordinator</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 
     <style>
-        /* ── Disable Livewire wire:navigate top progress bar (nprogress) ── */
-        #nprogress {
+        /* Hide Livewire's default wire:navigate progress bar (nprogress). */
+        #livewire-navigate-progress-bar,
+        .livewire-progress-bar,
+        nprogress,
+        #nprogress,
+        #nprogress .bar,
+        #nprogress .spinner,
+        #nprogress .peg {
             display: none !important;
+            opacity: 0 !important;
+            height: 0 !important;
+            pointer-events: none !important;
         }
 
         [x-cloak] { display: none !important; }
@@ -88,6 +94,35 @@
 
         .bell-badge { pointer-events: none; }
 
+        /* ── Notif "bubbles" (same as alumni) — small bubbles rise off the
+             badge and pop, looping, only while there are unread notifs. ── */
+        .bell-bubbles {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            width: 42px;
+            height: 42px;
+            pointer-events: none;
+        }
+        .bell-bubble {
+            position: absolute;
+            bottom: 10px;
+            right: 12px;
+            border-radius: 50%;
+            background: #2563EB;
+            opacity: 0;
+            animation: bellBubbleRise 2.6s ease-in infinite;
+        }
+        .bell-bubble:nth-child(1) { width: 9px; height: 9px; right: 16px; animation-delay: 0s;    }
+        .bell-bubble:nth-child(2) { width: 6px; height: 6px; right: 4px;  animation-delay: 0.55s; }
+        .bell-bubble:nth-child(3) { width: 7px; height: 7px; right: 24px; animation-delay: 1.1s;  }
+        @keyframes bellBubbleRise {
+            0%   { opacity: 0;   transform: translateY(0) scale(0.4); }
+            12%  { opacity: 1;   transform: translateY(-5px) scale(1.1); }
+            70%  { opacity: 0.6; transform: translateY(-28px) scale(0.9); }
+            100% { opacity: 0;   transform: translateY(-38px) scale(0.35); }
+        }
+
         /* ── Disable text selection/copy inside the notif panel ───
            Applies to the whole panel: header label, item titles,
            messages, timestamps, footer hint. Buttons still work
@@ -109,15 +144,13 @@
             -webkit-touch-callout: none;
         }
 
-        /* ── Unread indicator dot — red here (registrar's is blue), same
-           hover behavior: grows and gets a soft expanding "wave" ring
-           behind it on hover, so hovering the row makes clear this dot
-           is a live unread indicator and not just decoration. ── */
+        /* ── Per-notification unread dot — blue, scales on hover, pulses a
+             soft "wave" ring while unread (same as alumni). ── */
         .notif-unread-dot {
             position: relative;
             width: 8px; height: 8px;
             border-radius: 50%;
-            background: #DC2626;
+            background: #2563EB;
             flex-shrink: 0;
             margin-top: 4px;
             transition: transform 0.15s ease;
@@ -130,10 +163,7 @@
             position: absolute;
             inset: 0;
             border-radius: 50%;
-            background: #DC2626;
-            opacity: 0;
-        }
-        .notif-item:hover .notif-unread-dot::after {
+            background: #2563EB;
             animation: notif-dot-wave 1.6s ease-out infinite;
         }
         @keyframes notif-dot-wave {
@@ -273,7 +303,7 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 10px 18px 6px;
+            padding: 10px 20px 6px;
         }
         .coord-notif-divider::before,
         .coord-notif-divider::after {
@@ -303,6 +333,11 @@
             transition: width 0.2s ease, min-width 0.2s ease, opacity 0.22s ease, transform 0.22s ease;
             opacity: 1;
             transform: translateX(0);
+        }
+        /* Kill the transition on first paint / hard refresh so the sidebar
+           snaps straight to its correct state (same fix as alumni). */
+        .coord-sidebar.no-transition {
+            transition: none !important;
         }
 
         @media (min-width: 1024px) {
@@ -369,112 +404,21 @@
         .coord-nav-link:not(.is-active):hover .coord-nav-icon {
             transform: scale(1.07);
         }
-
-        /* ── Lock the rest of the sidebar while one link is navigating ──
-           Only the link the user actually clicked (.is-navigating) stays
-           clickable/full-opacity; every other link is dimmed and its
-           clicks are blocked until the destination page lands
-           (livewire:navigated) or the navigation fails/times out. ── */
-        nav.coord-nav-locked .coord-nav-link:not(.is-navigating) {
-            pointer-events: none !important;
-            opacity: 0.45;
-            cursor: default !important;
-        }
-        nav.coord-nav-locked .coord-nav-link:not(.is-navigating):hover {
-            background: inherit;
-        }
-        .coord-nav-link.is-navigating {
-            cursor: wait;
-        }
         .coord-nav-link.is-active {
             background: #F3EBFA;
             border: 1px solid #E0CFEE;
         }
-        .coord-nav-icon { transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease; }
+        .coord-nav-icon { transition: transform 0.2s ease; position: relative; }
 
-        /* ── Color-coded nav icons — each destination gets its own accent
-           so the sidebar can be scanned by color, not just by label. ── */
-        .coord-nav-icon.clr-dashboard  { background: #DBEAFE !important; color: #2563EB !important; }
-        .coord-nav-icon.clr-event      { background: #DCFCE7 !important; color: #16A34A !important; }
-        .coord-nav-icon.clr-job        { background: #FEF3C7 !important; color: #C08A00 !important; }
-        .coord-nav-icon.clr-employment { background: #FFE4E6 !important; color: #E11D48 !important; }
-        .coord-nav-icon.clr-chat       { background: #E0E7FF !important; color: #4F46E5 !important; }
-        .coord-nav-icon.clr-yearbook   { background: #EDE9FE !important; color: #7C3AED !important; }
-
-        .coord-nav-link.is-active .coord-nav-icon {
-            background: #FFFFFF !important;
+        /* Nav link click spinner — ONE spinner per link, rendered inside the
+           icon chip in place of the icon (same approach as alumni). */
+        .coord-nav-link.is-navigating { cursor: wait !important; }
+        .coord-nav-spinner {
+            font-size: 16px;
+            line-height: 1;
             color: #7A3F91 !important;
         }
 
-        /* ── Icon keeps its accent color while navigating ───────────
-           Previously this stripped the clr-* color to neutral gray
-           while the spinner showed. Per request, the icon chip now
-           keeps its normal color at all times — only the spinner
-           overlay indicates the loading state. ── */
-
-        /* ── Nav link click spinner ──────────────────────────────
-           Expanded sidebar: sits at the end of the row (where the
-           active dot sits), icon stays visible. Collapsed sidebar /
-           mobile: centered on top of the icon chip, icon hidden. ── */
-        .coord-nav-spinner {
-            flex-shrink: 0;
-            margin-left: auto;
-            font-size: 13px;
-            color: #7A3F91;
-            line-height: 1;
-        }
-        .coord-nav-spinner-icon-anchored { display: none; }
-        .coord-nav-icon { position: relative; }
-
-        .coord-sidebar.is-collapsed .coord-nav-link.is-navigating > .coord-nav-spinner,
-        .coord-nav-link.is-navigating > .coord-nav-spinner {
-            display: none !important;
-        }
-        .coord-sidebar.is-collapsed .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored,
-        .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored {
-            display: flex !important;
-            align-items: center;
-            justify-content: center;
-            position: absolute !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate(-50%, -50%) !important;
-            font-size: 16px !important;
-        }
-        .coord-nav-spinner-icon-anchored .coord-nav-spinner {
-            margin-left: 0;
-        }
-
-        @media (min-width: 1024px) {
-            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating > .coord-nav-spinner {
-                display: inline-block !important;
-            }
-            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating .coord-nav-spinner-icon-anchored {
-                display: none !important;
-            }
-            .coord-sidebar:not(.is-collapsed) .coord-nav-link.is-navigating .coord-nav-icon i.fa-solid {
-                display: none !important;
-            }
-        }
-
-        /* ── Bell "wave" alert — soft expanding ring pulse behind the bell,
-           runs continuously while there is at least one unread notification. ── */
-        .coord-bell-wave {
-            position: absolute;
-            inset: -6px;
-            border-radius: 50%;
-            border: 2px solid #DC2626;
-            opacity: 0;
-            pointer-events: none;
-        }
-        .coord-bell-wave.is-active {
-            animation: coord-bell-wave-pulse 2s ease-out infinite;
-        }
-        @keyframes coord-bell-wave-pulse {
-            0%   { transform: scale(0.7); opacity: 0.55; }
-            70%  { transform: scale(1.55); opacity: 0; }
-            100% { transform: scale(1.55); opacity: 0; }
-        }
 
         .coord-collapsible-text {
             opacity: 1;
@@ -581,12 +525,22 @@
             .coord-sidebar.is-collapsed .coord-nav-icon {
                 margin-right: 0 !important;
             }
-            .coord-sidebar.is-collapsed .coord-nav-link.is-navigating .coord-nav-icon i.fa-solid {
-                display: none !important;
+            .coord-sidebar.is-collapsed nav.flex-1 {
+                padding-left: 0;
+                padding-right: 0;
             }
             .coord-sidebar.is-collapsed .coord-nav-section-row {
                 justify-content: center;
-                padding: 0 0.5rem;
+                padding: 0;
+                position: relative;
+            }
+            /* Collapse toggle stays in the same column as the header badge. */
+            .coord-sidebar.is-collapsed .coord-nav-section-row .coord-collapse-icon-btn {
+                position: absolute;
+                left: 50%;
+                top: 50%;
+                transform: translate(-50%, -50%);
+                margin: 0;
             }
             .coord-sidebar.is-collapsed .coord-logout-btn {
                 gap: 0;
@@ -620,9 +574,6 @@
             }
             #coord-sidebar-aside .coord-nav-icon {
                 margin-right: 0 !important;
-            }
-            #coord-sidebar-aside .coord-nav-link.is-navigating .coord-nav-icon i.fa-solid {
-                display: none !important;
             }
 
             #coord-sidebar-aside .coord-logout-btn {
@@ -661,78 +612,20 @@
                 border: none !important;
             }
             #coord-notif-panel .notif-list-scroll {
-                max-height: calc(100vh - 190px) !important;
+                max-height: none !important;
+                flex: 1;
             }
         }
 
-        /* ════════════════════════════════════════════════════════
-           SESSION-EXPIRED SOFT MODAL (replaces raw "Page Expired" page)
-        ════════════════════════════════════════════════════════ */
-        #coord-session-expired-modal {
-            position: fixed;
-            inset: 0;
-            z-index: 999999;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            background: rgba(0,0,0,0.55);
-            backdrop-filter: blur(1px);
-        }
-        #coord-session-expired-modal.is-visible { display: flex; }
-        .coord-sem-card {
-            background: #fff;
-            border-radius: 18px;
-            width: 100%;
-            max-width: 360px;
-            margin: 16px;
-            padding: 28px 24px 24px;
-            text-align: center;
-            box-shadow: 0 30px 70px rgba(0,0,0,0.35);
-            animation: coordSemIn 0.22s cubic-bezier(.25,.8,.25,1) both;
-        }
-        @keyframes coordSemIn {
-            from { opacity: 0; transform: translateY(10px) scale(.97); }
-            to   { opacity: 1; transform: none; }
-        }
-        .coord-sem-icon {
-            width: 56px; height: 56px;
-            border-radius: 16px;
-            background: #F3EBFA;
-            color: #7A3F91;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 22px;
-            margin: 0 auto 14px;
-        }
-        .coord-sem-title { font-weight: 800; font-size: 16px; color: #1a1a1a; }
-        .coord-sem-sub { font-size: 13px; color: #666; margin-top: 6px; line-height: 1.5; }
-        .coord-sem-btn {
-            margin-top: 18px;
-            width: 100%;
-            padding: 11px 16px;
-            border-radius: 12px;
-            border: none;
-            background: #7A3F91;
-            color: #fff;
-            font-weight: 700;
-            font-size: 13px;
-            letter-spacing: .03em;
-            text-transform: uppercase;
-            cursor: pointer;
-            transition: background-color .15s ease, transform .1s ease;
-        }
-        .coord-sem-btn:hover { background: #6A3580; }
-        .coord-sem-btn:active { transform: scale(0.97); }
     </style>
 
     <script>
     // ─────────────────────────────────────────────────────────────────────────
     //  LOGOUT-IN-PROGRESS FLAG
     //  Set to true the instant the Logout button is clicked (before the
-    //  POST /logout request is even sent). Every 419-handling path below
-    //  checks this flag first and bails out silently if it's true — because
-    //  once we're logging out, a 419 is EXPECTED (session is being killed)
-    //  and should never trigger the session-expired modal or any fallback
-    //  page content, soft or raw.
+    //  POST /logout request is even sent). Polling and notification fetches
+    //  below check this flag first and bail out silently, so nothing races
+    //  the session being torn down.
     // ─────────────────────────────────────────────────────────────────────────
     window.__coordLoggingOut = false;
 
@@ -746,54 +639,12 @@
     });
 
     // ─────────────────────────────────────────────────────────────────────────
-    //  SESSION / CSRF EXPIRED (419) — SOFT RECOVERY
-    //  Instead of letting Livewire swap in Laravel's raw "Page Expired" HTML
-    //  (which looks like the whole app broke), we intercept the failed
-    //  request, suppress the default full-page replace, and show a small
-    //  branded modal asking the user to refresh. Clicking refresh does a
-    //  normal location.reload(), which mints a fresh session + CSRF token.
-    //
-    //  EXCEPTION: if the user is actively logging out (__coordLoggingOut),
-    //  we suppress this entirely — a 419 during logout is expected (the
-    //  session was just destroyed server-side) and should not surface
-    //  anything to the user, since they're already being redirected to
-    //  the login page.
-    // ─────────────────────────────────────────────────────────────────────────
-    window.__coordShowSessionExpired = function () {
-        if (window.__coordLoggingOut) return;
-        var modal = document.getElementById('coord-session-expired-modal');
-        if (modal) modal.classList.add('is-visible');
-    };
-
-    document.addEventListener('livewire:init', function () {
-        if (!window.Livewire || typeof Livewire.hook !== 'function') return;
-
-        Livewire.hook('request', function ({ fail }) {
-            fail(({ status, preventDefault }) => {
-                if (status === 419) {
-                    // Stop Livewire from dumping the raw expired-page HTML
-                    // into the DOM — show our own modal instead (unless
-                    // we're logging out, in which case show nothing).
-                    preventDefault();
-                    window.__coordShowSessionExpired();
-                }
-            });
-        });
-    });
-
-    // ─────────────────────────────────────────────────────────────────────────
     //  SWALLOW LIVEWIRE'S DUPLICATE PROMISE REJECTION
     //  Livewire 3 rejects its internal request promise with a
-    //  { status, body, json, errors } error object on EVERY failed request,
-    //  even after our `fail()` hook above has already handled it (419s) or
-    //  a page navigation/reload is about to happen anyway (network errors,
-    //  aborted requests, 500s, etc). `preventDefault()` only stops Livewire
-    //  from swapping in the raw failure HTML — it does NOT stop this
-    //  rejection from propagating, so it always surfaces as
-    //  "Uncaught (in promise)" in the console even though the UI is
-    //  behaving correctly (soft modal shown, or reload in progress).
-    //  We recognize this specific error shape and silence only that one,
-    //  so genuine unrelated promise rejections still surface normally.
+    //  { status, body, json, errors } object on every failed request, even
+    //  after the failure is already handled (the session guard near the end
+    //  of this file reloads / redirects quietly). Silence only that shape so
+    //  genuine unrelated rejections still surface.
     // ─────────────────────────────────────────────────────────────────────────
     window.addEventListener('unhandledrejection', function (event) {
         var reason = event.reason;
@@ -806,21 +657,13 @@
         }
     });
 
-    // Fallback for older Livewire versions / plain fetch-based failures
-    // that don't go through the hook above (defensive double-cover).
-    window.addEventListener('livewire:navigate:failed', function () {
-        window.__coordShowSessionExpired();
-    });
-
     // ── Sidebar nav lock safety net ─────────────────────────────────
     // navClickedRoute is normally cleared by the `livewire:navigated`
     // handler on the sidebar root once the destination page lands. If a
     // navigation instead fails outright (offline, aborted, etc.) that
     // event never fires, which would leave every OTHER sidebar link
-    // permanently disabled. A page reload is already in progress in that
-    // case (see __coordShowSessionExpired above / navigate:failed), but
-    // clear the lock too so the sidebar is never left stuck if the reload
-    // is delayed or cancelled by the browser.
+    // permanently disabled. Clear the lock here so the sidebar is never
+    // left stuck.
     window.addEventListener('livewire:navigate:failed', function () {
         if (document.body && document.body.__x) {
             document.body.__x.$data.navClickedRoute = null;
@@ -953,10 +796,7 @@
                     var res = await window.fetch('/coordinator/notifications', {
                         headers: { 'X-Requested-With': 'XMLHttpRequest' }
                     });
-                    if (res.status === 419) {
-                        window.__coordShowSessionExpired();
-                        return;
-                    }
+                    if (res.status === 419) return;
                     if (res.ok) {
                         var raw = await res.json();
                         this.items = this._processNotifs(raw);
@@ -1366,7 +1206,7 @@
                                 'X-Requested-With': 'XMLHttpRequest',
                             }
                         });
-                        if (r.status === 419) { window.__coordShowSessionExpired(); return; }
+                        if (r.status === 419) return;
                     } catch (e) { /* ignore */ }
                 }
                 if (deferResort) return;
@@ -1529,7 +1369,6 @@
                             'X-Requested-With': 'XMLHttpRequest',
                         }
                     });
-                    if (r.status === 419) { window.__coordShowSessionExpired(); }
                 } catch (e) { /* ignore */ }
             },
 
@@ -1554,7 +1393,7 @@
                                     'X-Requested-With': 'XMLHttpRequest',
                                 }
                             });
-                            if (r.status === 419) { window.__coordShowSessionExpired(); return; }
+                            if (r.status === 419) return;
                         } catch (e) { /* ignore */ }
                     }
                 }
@@ -1608,7 +1447,6 @@
                                 'X-Requested-With': 'XMLHttpRequest',
                             }
                         });
-                        if (res.status === 419) { window.__coordShowSessionExpired(); }
                         if (!res.ok) failedIds.push(ids[i]);
                     } catch (e) {
                         failedIds.push(ids[i]);
@@ -1787,7 +1625,7 @@
                     },
                     body: JSON.stringify(payload),
                 });
-                if (res.status === 419) { window.__coordShowSessionExpired(); return; }
+                if (res.status === 419) return;
                 await new Promise(function (r) { setTimeout(r, 300); });
                 if (window.__coordLoggingOut) return;
                 var s = window.__safeCoordNotifsStore();
@@ -2034,20 +1872,39 @@
     class="antialiased"
     x-data="{
         open: false,
-        sidebarCollapsed: localStorage.getItem('coord_sidebar_collapsed') === '1',
+        // Collapsed state persists per logged-in user (same as alumni), so one
+        // account's preference never leaks into another on the same browser.
+        sidebarStorageKey: 'coord_sidebar_collapsed_{{ auth()->id() }}',
+        sidebarCollapsed: localStorage.getItem('coord_sidebar_collapsed_{{ auth()->id() }}') === '1',
+        sidebarSettled: false,
         sidebarHiddenByModal: false,
         sidebarWasOpenBeforeModal: false,
         loggingOut: false,
         navClickedRoute: null,
+        doLogout(form) {
+            if (this.navClickedRoute !== null || this.loggingOut) return;
+            this.loggingOut = true;
+            window.dispatchEvent(new CustomEvent('stop-coord-polling'));
+            window.__doLogout(form, this);
+        },
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
+        },
+        settleSidebar() {
+            this.sidebarSettled = false;
+            requestAnimationFrame(() => {
+                setTimeout(() => { this.sidebarSettled = true; }, 50);
+            });
         }
     }"
-    x-init="$watch('sidebarCollapsed', function (val) { localStorage.setItem('coord_sidebar_collapsed', val ? '1' : '0'); })"
+    x-init="
+        $watch('sidebarCollapsed', function (val) { localStorage.setItem(sidebarStorageKey, val ? '1' : '0'); });
+        settleSidebar();
+    "
     @click="$store.coordNotifs && $store.coordNotifs.open && $store.coordNotifs.close()"
     @close-sidebar.window="sidebarWasOpenBeforeModal = open; sidebarHiddenByModal = true; open = false;"
     @open-sidebar.window="sidebarHiddenByModal = false; open = sidebarWasOpenBeforeModal;"
-    @@livewire:navigated.window="navClickedRoute = null; if (window.innerWidth < 1024) { open = false; }">
+    @@livewire:navigated.window="navClickedRoute = null; if (window.innerWidth < 1024) { open = false; } settleSidebar();">
 
 <div class="coord-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
@@ -2070,11 +1927,25 @@
             'translate-x-0': open,
             '-translate-x-full': !open,
             'is-collapsed': sidebarCollapsed,
-            'coord-sidebar-modal-hidden': sidebarHiddenByModal
+            'coord-sidebar-modal-hidden': sidebarHiddenByModal,
+            'no-transition': !sidebarSettled
         }"
         class="coord-sidebar fixed inset-y-0 left-0 z-[60] transform
                lg:translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0">
+
+    <script>
+        // Apply collapsed / no-transition state to the raw node synchronously,
+        // before first paint, so a hard refresh never shows the sidebar
+        // opening/closing (same fix as alumni).
+        (function () {
+            var aside = document.getElementById('coord-sidebar-aside');
+            if (!aside) return;
+            var collapsed = localStorage.getItem('coord_sidebar_collapsed_{{ auth()->id() }}') === '1';
+            aside.classList.add('no-transition');
+            if (collapsed) aside.classList.add('is-collapsed');
+        })();
+    </script>
 
         {{-- Sidebar header --}}
         <div class="coord-sidebar-header h-24 px-5 shrink-0">
@@ -2094,8 +1965,7 @@
         </div>
 
         {{-- Navigation --}}
-        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar"
-             :class="{ 'coord-nav-locked': navClickedRoute !== null }">
+        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
 
             <div class="coord-nav-section-row">
                 <p class="coord-section-label coord-collapsible-text">MENU</p>
@@ -2125,42 +1995,36 @@
                         'icon'    => 'gauge-high',
                         'label'   => 'Dashboard',
                         'pattern' => 'coordinator/dashboard*',
-                        'color'   => 'clr-dashboard',
                     ],
                     [
                         'route'   => 'organizer.event/organizer',
                         'icon'    => 'calendar-check',
                         'label'   => 'Event Management',
                         'pattern' => 'coordinator/event/management*',
-                        'color'   => 'clr-event',
                     ],
                     [
                         'route'   => 'organizer.job/management',
                         'icon'    => 'briefcase',
                         'label'   => 'Job Management',
                         'pattern' => 'coordinator/job/management*',
-                        'color'   => 'clr-job',
                     ],
                     [
                         'route'   => 'organizer.alumni/employment',
                         'icon'    => 'chart-line',
                         'label'   => 'Alumni Tracking',
                         'pattern' => 'coordinator/alumni/employment*',
-                        'color'   => 'clr-employment',
                     ],
                     [
                         'route'   => 'organizer.chat/alumni',
                         'icon'    => 'comments',
                         'label'   => 'Message Hub',
                         'pattern' => 'coordinator/message/hub*',
-                        'color'   => 'clr-chat',
                     ],
                     [
                         'route'   => 'organizer.yearbook',
                         'icon'    => 'book-open',
                         'label'   => 'Alumni Yearbook',
                         'pattern' => 'coordinator/yearbook*',
-                        'color'   => 'clr-yearbook',
                     ],
                 ];
             @endphp
@@ -2170,33 +2034,24 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; }
-                           navClickedRoute = '{{ $link['route'] }}';
-                           var __r = navClickedRoute;
-                           setTimeout(() => { if (navClickedRoute === __r) navClickedRoute = null; }, 8000);"
+                   @click="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="coord-nav-link {{ $isActive ? 'is-active' : '' }}
                           flex items-center px-4 py-3 rounded-xl group">
 
-                    <div class="coord-nav-icon {{ $link['color'] }} w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
-                         style="box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
+                    <div class="coord-nav-icon w-10 h-10 flex items-center justify-center rounded-lg shrink-0 mr-3.5"
+                         style="background-color:{{ $isActive ? '#FFFFFF' : '#F9F7FC' }};color:#7A3F91;
+                                box-shadow:{{ $isActive ? '0 2px 6px rgba(122,63,145,0.18)' : 'none' }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
-                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
-                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                            <span class="coord-nav-spinner-icon-anchored">
-                                <i class="fas fa-spinner fa-spin coord-nav-spinner"></i>
-                            </span>
-                        </template>
+                           x-show="navClickedRoute !== '{{ $link['route'] }}'"></i>
+                        <i class="fas fa-spinner fa-spin coord-nav-spinner"
+                           x-show="navClickedRoute === '{{ $link['route'] }}'" x-cloak></i>
                     </div>
 
                     <span class="coord-nav-label coord-collapsible-text font-medium tracking-wide flex-1 text-[14px]
                                  {{ $isActive ? 'text-[#5A2D70] font-bold' : 'text-[#3A3A3A]' }}">
                         {{ $link['label'] }}
                     </span>
-
-                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                        <i class="fas fa-spinner fa-spin coord-nav-spinner"></i>
-                    </template>
 
                     @if($isActive)
                         <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
@@ -2244,10 +2099,10 @@
         <div class="p-2 lg:p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
             <form method="POST"
                   action="{{ route('logout') }}"
-                  @submit="loggingOut = true; window.dispatchEvent(new CustomEvent('stop-coord-polling'));">
+                  @submit.prevent="doLogout($el)">
                 @csrf
                 <button type="submit"
-                        :disabled="loggingOut"
+                        :disabled="loggingOut || navClickedRoute !== null"
                         title="Logout"
                         class="coord-logout-btn">
                     <template x-if="!loggingOut">
@@ -2267,6 +2122,17 @@
         </div>
     </aside>
 
+    <script>
+        // Block copy / right-click / drag on the sidebar itself (same as alumni).
+        (function () {
+            var sidebar = document.getElementById('coord-sidebar-aside');
+            if (!sidebar) return;
+            ['contextmenu', 'copy', 'cut', 'dragstart', 'selectstart'].forEach(function (evt) {
+                sidebar.addEventListener(evt, function (e) { e.preventDefault(); });
+            });
+        })();
+    </script>
+
     {{-- ══ MAIN CONTENT ══ --}}
     <main class="flex-1 flex flex-col h-full overflow-hidden min-w-0 min-h-0">
 
@@ -2281,7 +2147,9 @@
              style="background:transparent;pointer-events:all;"
              @click.prevent @contextmenu.prevent></div>
 
-        <header class="flex items-center justify-between px-4 lg:px-8 h-24 bg-white border-b border-[#E8E0F0]
+        {{-- Top bar — transparent (no box), same as alumni. Hamburger only on
+             mobile; bell always on the right, icon-only. --}}
+        <header class="flex items-center justify-between px-4 lg:px-8 h-12 lg:h-14 bg-transparent
                        shrink-0 z-30">
             <button @click="open = !open"
                     class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
@@ -2303,14 +2171,16 @@
                 title="Notifications"
                 aria-label="Open notifications"
                 class="coord-topbar-bell">
-                <span class="coord-bell-wave"
-                      :class="$store.coordNotifs && $store.coordNotifs.unread > 0 ? 'is-active' : ''"></span>
                 <i class="bell-icon fas fa-bell"
-                   :class="$store.coordNotifs && $store.coordNotifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:20px; color:#7A3F91;
-                          --fa-animation-duration:4s;
-                          --fa-animation-iteration-count:infinite;
-                          pointer-events:none;"></i>
+                   style="font-size:20px; color:#7A3F91; pointer-events:none;"></i>
+                <span
+                    x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
+                    x-cloak
+                    class="bell-bubbles">
+                    <span class="bell-bubble"></span>
+                    <span class="bell-bubble"></span>
+                    <span class="bell-bubble"></span>
+                </span>
                 <span
                     x-show="$store.coordNotifs && $store.coordNotifs.unread > 0"
                     x-cloak
@@ -2329,7 +2199,7 @@
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8"
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] px-4 pt-0 pb-4 lg:px-8 lg:pt-0 lg:pb-6"
              style="min-height: 0; -webkit-overflow-scrolling: touch;">
             <div class="container mx-auto">
                 @yield('content')
@@ -2350,10 +2220,12 @@
     x-transition:enter="transition ease-out duration-200"
     x-transition:enter-start="opacity-0 scale-95 -translate-y-2"
     x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-    x-transition:leave="transition ease-in duration-150"
+    x-transition:leave="transition ease-out duration-75"
     x-transition:leave-start="opacity-100 scale-100 translate-y-0"
     x-transition:leave-end="opacity-0 scale-95 -translate-y-2"
     @click.stop
+    @contextmenu.prevent
+    @copy.prevent
     class="notif-no-select bg-white rounded-2xl border border-[#E8E0F0] flex flex-col overflow-hidden"
     style="
         position: fixed;
@@ -2649,27 +2521,126 @@
     </div>
 
     {{-- Panel Footer --}}
-    <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FFFFFF;">
-        <p style="font-size:13px;color:#555555;font-weight:500;letter-spacing:0.01em;">
+    <div class="px-5 py-3 border-t border-[#F0ECF8] text-center shrink-0" style="background:#FAFAFA;">
+        <p style="font-size:11px;color:#333333;font-weight:600;">
             Click a notification to view and mark as read
         </p>
     </div>
 </div>
 
-{{-- ══ SESSION-EXPIRED SOFT MODAL — replaces raw "Page Expired" screen ══ --}}
-<div id="coord-session-expired-modal">
-    <div class="coord-sem-card">
-        <div class="coord-sem-icon"><i class="fas fa-clock-rotate-left"></i></div>
-        <p class="coord-sem-title">Your session has expired</p>
-        <p class="coord-sem-sub">
-            This tab was open for a while and your session timed out.
-            Refresh the page to continue where you left off.
-        </p>
-        <button type="button" class="coord-sem-btn" onclick="window.location.reload()">
-            <i class="fas fa-rotate-right mr-1.5"></i> Refresh Page
-        </button>
-    </div>
-</div>
+{{-- ══ SESSION GUARD (same as alumni) ═══════════════════════════════════
+     No "page expired" popup. On logout: stop timers, drop new requests, let
+     in-flight ones finish, THEN POST /logout via fetch and go to login.
+     Any Livewire 419/401 is handled quietly (reload once → login if still
+     rejected). A page restored from bfcache is reloaded so it never submits
+     a stale token. Runs once per full page load (data-navigate-once). --}}
+<script data-navigate-once>
+(function () {
+    if (window.__sessionGuardBooted) return;
+    window.__sessionGuardBooted = true;
+
+    var LOGIN_URL = '{{ route('login') }}';
+    window.__loggingOut   = false;
+    window.__logoutFetch  = false;
+
+    // Track in-flight requests; drop NEW ones once logout has started.
+    var origFetch = window.fetch.bind(window);
+    var pending   = new Set();
+    window.fetch = function (input, init) {
+        if (window.__loggingOut && !window.__logoutFetch) {
+            return new Promise(function () {}); // page is leaving — stay silent
+        }
+        var p = origFetch(input, init);
+        pending.add(p);
+        var done = function () { pending.delete(p); };
+        p.then(done, done);
+        return p;
+    };
+
+    window.__doLogout = async function (form, ctx) {
+        window.__loggingOut = true;
+        window.__coordLoggingOut = true;
+        window.__notifPollSuspended = true;
+
+        // Stop the notification polling timers.
+        try {
+            ['notifs', 'alumniNotifs', 'coordNotifs'].forEach(function (name) {
+                var s = window.Alpine && Alpine.store(name);
+                if (s && s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
+            });
+        } catch (e) { /* ignore */ }
+
+        // Let anything already in flight finish (max 2.5s) so nothing is
+        // still touching the session when it gets invalidated.
+        try {
+            await Promise.race([
+                Promise.allSettled(Array.from(pending)),
+                new Promise(function (r) { setTimeout(r, 2500); })
+            ]);
+        } catch (e) { /* ignore */ }
+
+        var ok = false;
+        try {
+            var tokenInput = form.querySelector('input[name="_token"]');
+            var metaTag    = document.querySelector('meta[name="csrf-token"]');
+            var token      = (tokenInput && tokenInput.value) || (metaTag && metaTag.content) || '';
+            window.__logoutFetch = true;
+            var req = window.fetch(form.action, {
+                method: 'POST',
+                credentials: 'same-origin',
+                redirect: 'manual',
+                cache: 'no-store',
+                headers: {
+                    'X-CSRF-TOKEN': token,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({ _token: token }).toString()
+            });
+            window.__logoutFetch = false;
+            await req;   // 200 / 302 (opaque redirect) / 419 — all fine: we go to login either way
+            ok = true;
+        } catch (e) {
+            window.__logoutFetch = false;
+        }
+
+        if (ok) {
+            window.location.replace(LOGIN_URL);
+        } else {
+            // Network hiccup: fall back to a normal form POST.
+            window.__loggingOut = false;
+            window.__coordLoggingOut = false;
+            try { form.submit(); } catch (e) { if (ctx) ctx.loggingOut = false; }
+        }
+    };
+
+    // Livewire 419 / 401 → quiet recovery, no confirm() popup.
+    document.addEventListener('livewire:init', function () {
+        try {
+            Livewire.hook('request', function (hookCtx) {
+                hookCtx.fail(function (info) {
+                    if (info.status !== 419 && info.status !== 401) return;
+                    info.preventDefault();
+                    if (window.__loggingOut) return;       // logging out anyway
+                    var last = 0;
+                    try { last = parseInt(sessionStorage.getItem('__lw419') || '0', 10); } catch (e) {}
+                    try { sessionStorage.setItem('__lw419', String(Date.now())); } catch (e) {}
+                    if (Date.now() - last < 5000) {
+                        window.location.href = LOGIN_URL;  // reload already tried → session really gone
+                    } else {
+                        window.location.reload();          // fresh token if the session is still valid
+                    }
+                });
+            });
+        } catch (e) { /* hook API differs — nothing else breaks */ }
+    });
+
+    // Back/forward cache restored a stale page (stale CSRF token) → refresh it.
+    window.addEventListener('pageshow', function (e) {
+        if (e.persisted) window.location.reload();
+    });
+})();
+</script>
 
 @livewireScripts
 

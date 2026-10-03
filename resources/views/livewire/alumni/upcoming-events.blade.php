@@ -52,7 +52,7 @@ new class extends Component {
     public array  $sentRoomIds      = []; // rooms already sent to in this modal session — keeps their Send button disabled to prevent spam
 
     public int $page    = 1;
-    public int $perPage = 20;
+    public int $perPage = 10;
 
     public function mount(): void
     {
@@ -274,14 +274,12 @@ new class extends Component {
     public function pagedEvents()
     {
         $all = $this->events;
-        if ($this->filterStatus === 'upcoming') return $all;
         return $all->slice(($this->page - 1) * $this->perPage, $this->perPage)->values();
     }
 
     #[Computed]
     public function totalPages(): int
     {
-        if ($this->filterStatus === 'upcoming') return 1;
         return max(1, (int) ceil($this->events->count() / $this->perPage));
     }
 
@@ -628,14 +626,13 @@ new class extends Component {
         border-radius: 0 !important; box-shadow: none !important;
     }
     #ev-content-block input.filter-input,
-    #ev-content-block /* Event cards grid — plain CSS breakpoints (1 / 2 / 3 / 4 columns) */
-.ev-card-grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: .75rem; }
-@media (min-width: 768px)  { .ev-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (min-width: 1280px) { .ev-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (min-width: 1536px) { .ev-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-
-select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
+    #ev-content-block select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
 }
+
+/* Event cards grid — 1 column on phones, 2 on small tablets, 3 per row from lg up */
+.ev-card-grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: .75rem; }
+@media (min-width: 640px)  { .ev-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .ev-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; } }
 
 /* Toolbar: Search → "FILTERS" label → status dropdown → Reset (far right).
    Written as plain CSS (not Tailwind md:/lg: classes) so the layout does not
@@ -664,9 +661,6 @@ select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
 }
 @media (min-width: 1024px) {
     .ev-search { width: 20rem; }
-}
-
-select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
 }
 
 /* Toolbar: search → "Filters" label → dropdown → Reset inline from md up.
@@ -1237,7 +1231,7 @@ select.filter-input:hover { cursor: default !important; }
                     <div class="ev-card-spinner"><span></span><span></span><span></span></div>
 
                     @if($hasPhoto)
-                    <div class="relative w-full flex-shrink-0 bg-white" style="height:200px;">
+                    <div class="relative w-full flex-shrink-0 bg-white" style="height:150px;">
                         <img src="{{ $evPhotoUrl }}" alt="{{ $event->title }}"
                              loading="lazy"
                              class="w-full h-full object-contain"
@@ -1252,8 +1246,8 @@ select.filter-input:hover { cursor: default !important; }
                     </div>
                     @else
                     <div class="relative w-full flex items-center justify-center flex-shrink-0"
-                         style="height:130px; background:linear-gradient(135deg,#7a3f91 0%,#4a1f6a 100%);">
-                        <i class="fas fa-calendar-days text-white/20 text-4xl"></i>
+                         style="height:100px; background:linear-gradient(135deg,#7a3f91 0%,#4a1f6a 100%);">
+                        <i class="fas fa-calendar-days text-white/20 text-3xl"></i>
                         <div class="absolute top-2.5 right-2.5">
                             @if($isCompleted)
                                 <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Completed</span>
@@ -1264,7 +1258,7 @@ select.filter-input:hover { cursor: default !important; }
                     </div>
                     @endif
 
-                    <div class="flex flex-col flex-1 p-4 gap-2.5">
+                    <div class="flex flex-col flex-1 p-3.5 gap-2">
 
                         <div class="flex items-start justify-between gap-2">
                             <div class="flex-1 min-w-0">
@@ -1289,7 +1283,7 @@ select.filter-input:hover { cursor: default !important; }
                         <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
                         @endif
 
-                        <div class="flex items-center justify-between pt-2.5 border-t border-gray-100 mt-auto gap-2">
+                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto gap-2">
                             <div class="flex flex-col gap-0.5 min-w-0">
                                 <span class="text-[12px]" style="color:#333333;">{{ $postedAgo }}</span>
                                 <span class="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-600">
@@ -1342,7 +1336,6 @@ select.filter-input:hover { cursor: default !important; }
             @endif
         </div>
 
-        @if($filterStatus !== 'upcoming')
         @php
             $total   = $this->events->count();
             $from    = $total > 0 ? (($page - 1) * $perPage) + 1 : 0;
@@ -1407,7 +1400,6 @@ select.filter-input:hover { cursor: default !important; }
                 </span>
             </div>
         </div>
-        @endif
 
     </div>
 </div>
