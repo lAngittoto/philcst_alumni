@@ -222,7 +222,30 @@ new class extends Component {
         $this->motto                = $alumni->motto                ?? '';
         $this->mottoLocked          = !empty($alumni->motto);
 
-        $this->profileComplete = (bool)($alumni->profile_completed ?? false);
+        // Completeness is derived from the required fields, using the same
+        // rule the registrar uses (alumni_blade.php: isProfileComplete() and
+        // applyProfileCompletionFilter()). The stored profile_completed flag
+        // can go stale, so it is only trusted when it agrees with the fields;
+        // otherwise it is re-synced here. This stops a fully filled profile
+        // from still showing Edit Mode, the Locked banner, or "incomplete" text.
+        $requiredForComplete = [
+            'email', 'gender', 'date_of_birth', 'contact_number',
+            'father_last_name', 'father_given_name',
+            'mother_last_name', 'mother_given_name',
+            'address_street', 'address_barangay', 'address_municipality', 'address_province',
+        ];
+        $derivedComplete = true;
+        foreach ($requiredForComplete as $rf) {
+            if (trim((string)($alumni->$rf ?? '')) === '') {
+                $derivedComplete = false;
+                break;
+            }
+        }
+        if ((bool)($alumni->profile_completed ?? false) !== $derivedComplete) {
+            DB::table('alumni')->where('id', $alumni->id)->update(['profile_completed' => $derivedComplete]);
+        }
+
+        $this->profileComplete = $derivedComplete;
         $this->editingProfile  = !$this->profileComplete;
 
         $keys = $this->editableKeys();

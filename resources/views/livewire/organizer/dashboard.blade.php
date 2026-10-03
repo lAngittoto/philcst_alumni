@@ -489,18 +489,19 @@ new class extends Component {
 
 /* ── Main grid — align-items: stretch so the profile card grows to
      match the right column's full height instead of stopping short ── */
-.org-main-grid { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 1rem; align-items: stretch; margin-top: 1.25rem; }
+.org-main-grid { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 1rem; align-items: stretch; margin-top: clamp(1.5rem, 8vh, 3rem); }
+@media (min-width: 1024px) {
+    .org-main-grid { margin-top: clamp(3rem, 14vh, 6rem); }
+}
 @media (min-width: 1280px) {
-    .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); margin-top: 2.5rem; }
-}
-@media (min-width: 1024px) and (max-width: 1279px) {
-    .org-main-grid { margin-top: 2rem; }
-}
-@media (max-width: 1023px) {
-    .org-main-grid { grid-template-columns: minmax(0, 1fr); gap: 0.85rem; align-items: start; margin-top: 1rem; }
+    .org-main-grid { grid-template-columns: minmax(0, 300px) minmax(0, 1fr); margin-top: clamp(4rem, 17vh, 8rem); }
 }
 @media (min-width: 1536px) {
-    .org-main-grid { margin-top: 3rem; }
+    .org-main-grid { margin-top: clamp(5rem, 20vh, 9rem); }
+}
+@media (max-width: 1023px) {
+    .org-main-grid { grid-template-columns: minmax(0, 1fr); gap: 0.85rem; align-items: start; margin-top: clamp(1rem, 4vh, 2.5rem); }
+}
 }
 
 /* ── Profile column — stretches to full grid row height on desktop;
