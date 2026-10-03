@@ -578,18 +578,64 @@ new class extends Component {
 <style>
 [x-cloak] { display: none !important; }
 
-/* Full-screen page shell: fills the whole viewport area under the top bar.
-   Top bar = 3rem (mobile) / 3.5rem (lg) and bottom padding = 1rem / 1.5rem
-   from the alumni layout, so total offset = 4rem / 5rem. */
+/* Full-screen page shell: fills the whole area under the top bar.
+   Offsets come from the alumni layout: top bar 3rem (mobile) / 3.5rem (lg) and
+   bottom padding 1rem / 1.5rem. If the layout changes, edit ONLY these vars.
+   Plain CSS on purpose (works even if Tailwind wasn't rebuilt). */
 .ev-page-root {
+    --ev-topbar: 3rem;
+    --ev-page-pad: 1rem;
     display: flex; flex-direction: column;
-    height: calc(100vh - 4rem);
-    height: calc(100dvh - 4rem);
+    height: calc(100vh - var(--ev-topbar) - var(--ev-page-pad));
+    height: calc(100dvh - var(--ev-topbar) - var(--ev-page-pad));
     min-height: 420px;
     overflow: hidden;
+    margin: 0 -1rem -1rem;       /* phones: cancel layout side/bottom padding → true full screen */
+}
+@media (min-width: 640px) {
+    .ev-page-root { margin: 0; }
 }
 @media (min-width: 1024px) {
-    .ev-page-root { height: calc(100vh - 5rem); height: calc(100dvh - 5rem); }
+    .ev-page-root { --ev-topbar: 3.5rem; --ev-page-pad: 1.5rem; }
+}
+
+.ev-main {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    gap: .75rem; width: 100%; max-width: 96rem; margin: 0 auto;
+    padding: .75rem 1rem 0;
+}
+@media (min-width: 640px)  { .ev-main { padding: 1.25rem 1.75rem 1.25rem; gap: 1rem; } }
+@media (min-width: 1024px) { .ev-main { padding: 1.5rem 2.5rem 1.5rem; } }
+
+/* Header: icon + text on the left (same pattern as Alumni Dashboard) */
+.ev-header { display: flex; align-items: center; gap: .75rem 1rem; flex-shrink: 0; width: 100%; }
+.ev-header-icon {
+    width: 2.75rem; height: 2.75rem; border-radius: 1rem; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #7A3F91; color: #ffffff; font-size: 1.05rem;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1);
+}
+.ev-header-text { min-width: 0; text-align: left; }
+
+/* Phones: card goes edge to edge, inputs 16px (no iOS zoom-on-focus) */
+@media (max-width: 639px) {
+    .ev-header-icon { width: 2.5rem; height: 2.5rem; border-radius: .85rem; font-size: .95rem; }
+    .ev-header h1 { font-size: 1.05rem; line-height: 1.3; }
+    .ev-header p  { font-size: .8rem; }
+    .ev-block {
+        margin-left: -1rem; margin-right: -1rem;
+        border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important;
+        border-radius: 0 !important; box-shadow: none !important;
+    }
+    #ev-content-block input.filter-input,
+    #ev-content-block select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
+}
+
+/* Toolbar: search → "Filters" label → dropdown → Reset inline from md up.
+   The "Filters" toggle button exists below md only. */
+@media (min-width: 768px) {
+    .ev-filter-toggle { display: none !important; }
+    .ev-filter-panel  { display: flex !important; }
 }
 
 select.filter-input {
@@ -1010,26 +1056,25 @@ select.filter-input:hover { cursor: default !important; }
     </button>
 </div>
 
-<div class="flex flex-col flex-1 gap-3 sm:gap-4 pt-1 w-full min-h-0">
+<div class="ev-main">
 
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4 flex-shrink-0">
-        <div class="flex items-center gap-3 sm:gap-4">
-            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
-                <i class="fas fa-calendar-days text-white text-base sm:text-lg"></i>
-            </div>
-            <div>
-                <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Upcoming Events</h1>
-                <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
-                    Events available for
-                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
-                        {{ $alumniCollege ?: 'your college' }}
-                    </span>
-                </p>
-            </div>
+    {{-- PAGE HEADER — icon + text on the left, like Alumni Dashboard --}}
+    <div class="ev-header">
+        <div class="ev-header-icon">
+            <i class="fas fa-calendar-days"></i>
+        </div>
+        <div class="ev-header-text">
+            <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Upcoming Events</h1>
+            <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+                Events available for
+                <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
+                    {{ $alumniCollege ?: 'your college' }}
+                </span>
+            </p>
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
+    <div class="ev-block flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
          id="ev-content-block">
 
         @php $hasActiveFilters = $search !== '' || $filterStatus !== 'upcoming'; @endphp
@@ -1055,7 +1100,7 @@ select.filter-input:hover { cursor: default !important; }
                         @click="fOpen = !fOpen"
                         :aria-expanded="fOpen.toString()"
                         aria-controls="ev-filter-panel"
-                        class="md:hidden inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-[13px] font-semibold bg-white border transition active:scale-95 flex-shrink-0"
+                        class="ev-filter-toggle md:hidden inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-[13px] font-semibold bg-white border transition active:scale-95 flex-shrink-0"
                         :class="fOpen ? 'border-[#7a3f91] text-[#7a3f91]' : 'border-gray-200 text-gray-700'">
                     <i class="fas fa-sliders text-xs"></i>
                     <span>Filters</span>
@@ -1067,7 +1112,7 @@ select.filter-input:hover { cursor: default !important; }
 
                 {{-- 3) Filters panel: always inline on md+, tap-to-open/hide below md --}}
                 <div id="ev-filter-panel"
-                     class="w-full md:w-auto md:flex-1 items-center gap-2"
+                     class="ev-filter-panel w-full md:w-auto md:flex-1 items-center gap-2"
                      :class="fOpen ? 'flex' : 'hidden md:flex'">
 
                     <span class="hidden md:inline text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>

@@ -1515,12 +1515,34 @@ new class extends \Livewire\Volt\Component {
      request landing/cancelling at the same moment as the unsend() click.
      Purely a console-noise fix; nothing about the delete flow itself
      changes. --}}
+{{-- Single Livewire root: page frame (header + chat shell). Alpine state
+     (mobileChatOpen) lives here so the header can hide on phones while a
+     chat is open, giving the conversation the full screen. --}}
+<div class="msgr-page"
+     x-data="{ mobileChatOpen: false }"
+     :class="mobileChatOpen ? 'msgr-chat-open' : ''"
+     @chat-open-mobile.window="mobileChatOpen = true"
+     @chat-close-mobile.window="mobileChatOpen = false">
+<div class="msgr-main">
+
+    {{-- PAGE HEADER — icon + text on the left, like Alumni Dashboard --}}
+    <div class="msgr-header">
+        <div class="msgr-header-icon">
+            <i class="fas fa-comments"></i>
+        </div>
+        <div class="msgr-header-text">
+            <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Batch Chat</h1>
+            <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+                You can chat with alumni from your batch and
+                <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
+                    {{ $alumniCollege ?: 'your college' }}
+                </span>
+            </p>
+        </div>
+    </div>
+
 <div
-    x-data="{ mobileChatOpen: false }"
-    @chat-open-mobile.window="mobileChatOpen = true"
-    @chat-close-mobile.window="mobileChatOpen = false"
-    class="alm-msgr-noselect flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
-    style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;"
+    class="msgr-shell alm-msgr-noselect flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden"
     @if(! $confirmDeleteId) wire:poll.1500ms="unifiedPoll" @endif>
 
     <style>
@@ -1896,11 +1918,76 @@ new class extends \Livewire\Volt\Component {
             background: #FDECEC; color: #DC2626; flex-shrink: 0;
         }
 
-        @media (max-width: 768px) {
+        @media (max-width: 767px) {
             #msgr-sidebar { display: none; }
             #msgr-sidebar.msgr-mobile-show { display: flex; width: 100% !important; }
             #msgr-chatpane { display: none; }
             #msgr-chatpane.msgr-mobile-show { display: flex; width: 100% !important; }
+        }
+
+        /* ═══════════ PAGE FRAME / RESPONSIVE LAYOUT ═══════════
+           Offsets come from the alumni layout: top bar 3rem (mobile) / 3.5rem (lg)
+           + bottom padding 1rem / 1.5rem. If the layout changes, edit ONLY the two
+           vars on .msgr-page. Plain CSS on purpose (no Tailwind rebuild needed). */
+        .msgr-page {
+            --msgr-topbar: 3rem;
+            --msgr-page-pad: 1rem;
+            display: flex; flex-direction: column;
+            height: calc(100vh - var(--msgr-topbar) - var(--msgr-page-pad));
+            height: calc(100dvh - var(--msgr-topbar) - var(--msgr-page-pad));
+            min-height: 420px;
+            overflow: hidden;
+            margin: 0 -1rem -1rem;   /* phones: cancel layout side/bottom padding → true full screen */
+        }
+        @media (min-width: 640px)  { .msgr-page { margin: 0; } }
+        @media (min-width: 1024px) { .msgr-page { --msgr-topbar: 3.5rem; --msgr-page-pad: 1.5rem; } }
+
+        .msgr-main {
+            display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+            gap: .75rem; width: 100%; max-width: 96rem; margin: 0 auto;
+            padding: .75rem 1rem 0;
+        }
+        @media (min-width: 640px)  { .msgr-main { padding: 1.25rem 1.75rem 1.25rem; gap: 1rem; } }
+        @media (min-width: 1024px) { .msgr-main { padding: 1.5rem 2.5rem 1.5rem; } }
+
+        .msgr-shell { flex: 1 1 auto; min-height: 0; }
+
+        .msgr-header { display: flex; align-items: center; gap: .75rem 1rem; flex-shrink: 0; width: 100%; }
+        .msgr-header-icon {
+            width: 2.75rem; height: 2.75rem; border-radius: 1rem; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: #7A3F91; color: #ffffff; font-size: 1.05rem;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1);
+        }
+        .msgr-header-text { min-width: 0; text-align: left; }
+
+        /* Phones: shell goes edge to edge; header hides while a chat is open so the
+           conversation gets the whole screen. */
+        @media (max-width: 639px) {
+            .msgr-header-icon { width: 2.5rem; height: 2.5rem; border-radius: .85rem; font-size: .95rem; }
+            .msgr-header h1 { font-size: 1.05rem; line-height: 1.3; }
+            .msgr-header p  { font-size: .8rem; }
+            .msgr-shell {
+                border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important;
+                border-radius: 0 !important; box-shadow: none !important;
+                margin-left: -1rem; margin-right: -1rem;
+            }
+        }
+        @media (max-width: 767px) {
+            .msgr-chat-open .msgr-header { display: none; }
+            .msgr-chat-open .msgr-main   { padding-top: 0; gap: 0; }
+            .msgr-chat-open .msgr-shell  { border-top: 0 !important; border-radius: 0 !important; }
+        }
+
+        /* Members / Pins panel: sits beside the chat only on wide screens (xl+).
+           Between 768px and 1279px there isn't room for list + chat + panel, so it
+           slides over the chat from the right instead of squeezing it. */
+        @media (min-width: 768px) and (max-width: 1279px) {
+            .msgr-panel {
+                position: absolute !important; top: 0; right: 0; bottom: 0; left: auto;
+                width: min(20rem, 100%) !important; z-index: 150 !important;
+                box-shadow: -10px 0 28px rgba(26,15,34,.14);
+            }
         }
     </style>
 
@@ -3128,4 +3215,6 @@ new class extends \Livewire\Volt\Component {
     </div>
     @endif
 
+</div>
+</div>
 </div>

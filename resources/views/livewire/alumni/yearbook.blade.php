@@ -246,14 +246,14 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col gap-2 sm:gap-3 px-2 sm:px-5 lg:px-10 pt-2 sm:pt-4 pb-1 sm:pb-4 max-w-screen-2xl mx-auto w-full yb-root-height yb-no-select"
+<div class="yb-root yb-no-select"
      oncontextmenu="return false;"
      x-data="{
         activeFilter: null,
         courseBusy: false,
         setAvailHeight() {
             const rect = this.$el.getBoundingClientRect();
-            const bottomSafe = 8;
+            const bottomSafe = 0;
             const avail = window.innerHeight - rect.top - bottomSafe;
             this.$el.style.setProperty('--yb-avail-h', avail + 'px');
         },
@@ -672,16 +672,41 @@ new class extends Component {
     box-shadow: 0 3px 12px rgba(90,26,138,.18);
 }
 
-/* ── Root height ─────────────────────────────────────────── */
-.yb-root-height {
-    height: calc(100vh - 160px);
-    max-height: calc(100vh - 160px);
+/* ── Page frame ──────────────────────────────────────────
+   Offsets come from the alumni layout: top bar 3rem (mobile) / 3.5rem (lg) and
+   bottom padding 1rem / 1.5rem. If the layout changes, edit ONLY the two vars.
+   Phones (<640px) use the measured height from setAvailHeight() (falls back to
+   the calc) so the page runs edge to edge to the bottom of the screen.
+   Plain CSS on purpose (no Tailwind rebuild needed). */
+.yb-root {
+    --yb-topbar: 3.5rem;
+    --yb-page-pad: 1.5rem;
+    display: flex; flex-direction: column; gap: .5rem;
+    box-sizing: border-box;
+    width: 100%; max-width: 96rem; margin: 0 auto;
+    padding: .75rem 1rem 0;
+    height: calc(100vh - var(--yb-topbar) - var(--yb-page-pad));
+    height: calc(100dvh - var(--yb-topbar) - var(--yb-page-pad));
+    max-height: calc(100dvh - var(--yb-topbar) - var(--yb-page-pad));
+    min-height: 420px;
     overflow: hidden;
 }
-@media (min-width: 641px) {
-    .yb-root-height {
-        height: calc(100vh - 180px);
-        max-height: calc(100vh - 180px);
+@media (min-width: 640px)  { .yb-root { padding: 1.25rem 1.75rem 1.25rem; gap: .75rem; } }
+@media (min-width: 1024px) { .yb-root { padding: 1.5rem 2.5rem 1.5rem; } }
+@media (max-width: 639px) {
+    .yb-root {
+        --yb-topbar: 3rem; --yb-page-pad: 1rem;
+        width: auto; max-width: none;
+        margin: 0 -1rem -1rem;          /* cancel layout padding → true full screen */
+        height: var(--yb-avail-h, calc(100dvh - 4rem));
+        max-height: var(--yb-avail-h, calc(100dvh - 4rem));
+        min-height: 0;
+    }
+    /* table card goes edge to edge */
+    .yb-table-block {
+        margin-left: -1rem; margin-right: -1rem;
+        border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important;
+        border-radius: 0 !important; box-shadow: none !important;
     }
 }
 
@@ -713,32 +738,21 @@ new class extends Component {
 @media (max-width: 767px) {
     html, body { overflow: hidden !important; }
 
-    .yb-root-height {
-        height: var(--yb-avail-h, 100dvh) !important;
-        max-height: var(--yb-avail-h, 100dvh) !important;
-        overflow: hidden !important;
-    }
-
-    .yb-mobile-subtitle { display: none; }
-    .yb-mobile-header-icon { width: 2rem !important; height: 2rem !important; }
-    .yb-mobile-title { font-size: 0.95rem !important; }
+    .yb-mobile-header-icon { width: 2.5rem !important; height: 2.5rem !important; }
+    .yb-mobile-title { font-size: 1.05rem !important; line-height: 1.3; }
+    .yb-mobile-subtitle { font-size: .8rem !important; }
 
     .yb-filter-bar { padding: 0.4rem 0.6rem; }
     .yb-dd-btn, .yb-search-input { padding-top: 0.38rem; padding-bottom: 0.38rem; font-size: 0.8rem; }
+    .yb-search-input { font-size: 16px !important; }   /* 16px = no iOS zoom-on-focus */
 
-    .yb-pagination-bar { min-height: 38px; padding: 4px 0.65rem; }
-    .yb-pagination-bar p { font-size: 10px; }
-
+    /* Pagination now sits at the bottom of the card (the card itself ends at the
+       screen edge), with room for the iOS home indicator. */
     .yb-pagination-bar {
-        position: fixed !important;
-        bottom: 0; left: 0; right: 0;
+        min-height: 38px; padding: 4px 0.65rem;
         padding-bottom: calc(0.35rem + env(safe-area-inset-bottom, 0px));
-        z-index: 200;
-        border-radius: 0;
     }
-    #yb-scroll {
-        padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px)) !important;
-    }
+    .yb-pagination-bar p { font-size: 10px; }
 }
 
 /* ── Scroll area background ─────────────────────────────── */
