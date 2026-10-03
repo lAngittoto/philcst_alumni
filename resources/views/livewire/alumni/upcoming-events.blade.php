@@ -628,7 +628,45 @@ new class extends Component {
         border-radius: 0 !important; box-shadow: none !important;
     }
     #ev-content-block input.filter-input,
-    #ev-content-block select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
+    #ev-content-block /* Event cards grid — plain CSS breakpoints (1 / 2 / 3 / 4 columns) */
+.ev-card-grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: .75rem; }
+@media (min-width: 768px)  { .ev-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .ev-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1536px) { .ev-card-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+
+select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
+}
+
+/* Toolbar: Search → "FILTERS" label → status dropdown → Reset (far right).
+   Written as plain CSS (not Tailwind md:/lg: classes) so the layout does not
+   depend on which responsive utilities exist in the compiled Tailwind build.
+   Below 768px: search + a "Filters" toggle button; the panel opens as its own row. */
+.ev-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.ev-search  { position: relative; flex: 1 1 0%; min-width: 0; }
+.ev-filter-label { display: none; }
+.ev-filter-panel { display: none; width: 100%; align-items: center; gap: .5rem; }
+.ev-filter-panel.is-open { display: flex; }
+.ev-select-wrap { flex: 1 1 0%; min-width: 0; }
+.ev-select { width: 100%; }
+.ev-reset { margin-left: auto; }
+
+@media (min-width: 768px) {
+    .ev-filter-toggle { display: none !important; }
+    .ev-search { flex: 0 0 auto; width: 18rem; }
+    .ev-filter-label {
+        display: inline-block; flex-shrink: 0; padding: 0 .25rem;
+        font-size: .75rem; font-weight: 700; letter-spacing: .1em;
+        text-transform: uppercase; color: #7a3f91; user-select: none;
+    }
+    .ev-filter-panel { display: flex; width: auto; flex: 1 1 0%; min-width: 0; }
+    .ev-select-wrap { flex: 0 0 auto; }
+    .ev-select { width: 11rem; }
+}
+@media (min-width: 1024px) {
+    .ev-search { width: 20rem; }
+}
+
+select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
 }
 
 /* Toolbar: search → "Filters" label → dropdown → Reset inline from md up.
@@ -1081,10 +1119,10 @@ select.filter-input:hover { cursor: default !important; }
         <div class="bg-gray-50 border-b border-[#E8E0F0] px-3 sm:px-3.5 py-2.5 flex-shrink-0"
              x-data="{ fOpen: false }">
 
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="ev-toolbar">
 
                 {{-- 1) Search bar --}}
-                <div class="relative flex-1 min-w-0 md:flex-none md:w-72 lg:w-80"
+                <div class="ev-search"
                      wire:ignore
                      x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
@@ -1100,7 +1138,7 @@ select.filter-input:hover { cursor: default !important; }
                         @click="fOpen = !fOpen"
                         :aria-expanded="fOpen.toString()"
                         aria-controls="ev-filter-panel"
-                        class="ev-filter-toggle md:hidden inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-[13px] font-semibold bg-white border transition active:scale-95 flex-shrink-0"
+                        class="ev-filter-toggle inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-[13px] font-semibold bg-white border transition active:scale-95 flex-shrink-0"
                         :class="fOpen ? 'border-[#7a3f91] text-[#7a3f91]' : 'border-gray-200 text-gray-700'">
                     <i class="fas fa-sliders text-xs"></i>
                     <span>Filters</span>
@@ -1112,12 +1150,12 @@ select.filter-input:hover { cursor: default !important; }
 
                 {{-- 3) Filters panel: always inline on md+, tap-to-open/hide below md --}}
                 <div id="ev-filter-panel"
-                     class="ev-filter-panel w-full md:w-auto md:flex-1 items-center gap-2"
-                     :class="fOpen ? 'flex' : 'hidden md:flex'">
+                     class="ev-filter-panel"
+                     :class="fOpen ? 'is-open' : ''">
 
-                    <span class="hidden md:inline text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
+                    <span class="ev-filter-label">Filters</span>
 
-                    <div class="flex-1 md:flex-none min-w-0"
+                    <div class="ev-select-wrap"
                          wire:ignore
                          x-data="{
                              fs: 'upcoming',
@@ -1132,7 +1170,7 @@ select.filter-input:hover { cursor: default !important; }
                          }">
                         <select x-model="fs" @change="onChange($event.target.value)"
                                 aria-label="Filter events by status"
-                                class="filter-input w-full md:w-auto py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                class="filter-input ev-select py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                                        hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
                             <option value="">All Events</option>
                             <option value="upcoming">Upcoming</option>
@@ -1146,7 +1184,7 @@ select.filter-input:hover { cursor: default !important; }
                             wire:target="resetFilters"
                             data-ev-reset
                             @disabled(!$hasActiveFilters)
-                            class="md:ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold flex-shrink-0
+                            class="ev-reset inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold flex-shrink-0
                                    border transition active:scale-95
                                    {{ $hasActiveFilters
                                         ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
@@ -1177,7 +1215,7 @@ select.filter-input:hover { cursor: default !important; }
              wire:loading.class="opacity-40 pointer-events-none" wire:target="search,filterStatus,previousPage,nextPage,page,resetFilters">
 
             @if($this->pagedEvents->count() > 0)
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-3">
+            <div class="ev-card-grid">
                 @foreach($this->pagedEvents as $event)
                 @php
                     $isCompleted  = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||

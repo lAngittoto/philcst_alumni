@@ -1595,6 +1595,11 @@
           sidebarCollapsed: localStorage.getItem('reg_sidebar_collapsed') === '1',
           sidebarSettled: false,
           loggingOut: false,
+          doLogout(form) {
+              if (this.navClickedRoute !== null || this.loggingOut) return;
+              this.loggingOut = true;
+              window.__doLogout(form, this);
+          },
           navClickedRoute: null
       }"
       x-init="
@@ -1712,7 +1717,7 @@
         <div class="p-2 lg:p-4 mt-auto border-t border-[#E5E5E5] shrink-0">
             <form method="POST"
                   action="{{ route('logout') }}"
-                  @submit="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } loggingOut = true">
+                  @submit.prevent="doLogout($el)">
                 @csrf
                 <button type="submit"
                         :disabled="loggingOut || navClickedRoute !== null"
@@ -2042,6 +2047,131 @@
         </p>
     </div>
 </div>
+
+    {{-- ══ SESSION GUARD ═══════════════════════════════════════════════════
+         Fixes the "This page has expired. Would you like to refresh the page?"
+         popup on login / logout. That popup is Livewire's built-in answer to an
+         HTTP 419 (CSRF / session mismatch) on ANY Livewire request. It happened
+         because requests were still firing while the session was being torn down:
+           • wire:poll components (e.g. the 1.5s messenger poll) and the notification
+             poll kept hitting the server mid-logout, racing the session invalidation
+             (the in-flight request could even re-save the old session/token, which
+             then made the NEXT login fail with 419);
+           • the back button could restore a cached page with a stale token.
+         What this does:
+           1) Logout: stop timers, drop new requests, wait for in-flight ones to
+              finish, THEN POST /logout (fetch, so a 419 can never show an error
+              page) and go to the login page.
+           2) Any Livewire 419/401 is handled quietly (reload once → login if still
+              rejected) instead of the confirm() dialog.
+           3) pageshow: a page restored from the back/forward cache is reloaded so it
+              never submits a stale token.
+         Runs once per full page load (data-navigate-once) — safe with wire:navigate. --}}
+    <script data-navigate-once>
+    (function () {
+        if (window.__sessionGuardBooted) return;
+        window.__sessionGuardBooted = true;
+
+        var LOGIN_URL = '{{ route('login') }}';
+        window.__loggingOut   = false;
+        window.__logoutFetch  = false;
+
+        // Track in-flight requests; drop NEW ones once logout has started.
+        var origFetch = window.fetch.bind(window);
+        var pending   = new Set();
+        window.fetch = function (input, init) {
+            if (window.__loggingOut && !window.__logoutFetch) {
+                return new Promise(function () {}); // page is leaving — stay silent
+            }
+            var p = origFetch(input, init);
+            pending.add(p);
+            var done = function () { pending.delete(p); };
+            p.then(done, done);
+            return p;
+        };
+
+        window.__doLogout = async function (form, ctx) {
+            window.__loggingOut = true;
+            window.__notifPollSuspended = true;
+
+            // Stop the notification polling timers (both layouts' stores).
+            try {
+                ['notifs', 'alumniNotifs'].forEach(function (name) {
+                    var s = window.Alpine && Alpine.store(name);
+                    if (s && s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
+                });
+            } catch (e) { /* ignore */ }
+
+            // Let anything already in flight finish (max 2.5s) so nothing is
+            // still touching the session when it gets invalidated.
+            try {
+                await Promise.race([
+                    Promise.allSettled(Array.from(pending)),
+                    new Promise(function (r) { setTimeout(r, 2500); })
+                ]);
+            } catch (e) { /* ignore */ }
+
+            var ok = false;
+            try {
+                var tokenInput = form.querySelector('input[name="_token"]');
+                var metaTag    = document.querySelector('meta[name="csrf-token"]');
+                var token      = (tokenInput && tokenInput.value) || (metaTag && metaTag.content) || '';
+                window.__logoutFetch = true;
+                var req = window.fetch(form.action, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    redirect: 'manual',
+                    cache: 'no-store',
+                    headers: {
+                        'X-CSRF-TOKEN': token,
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams({ _token: token }).toString()
+                });
+                window.__logoutFetch = false;
+                await req;   // 200 / 302 (opaque redirect) / 419 — all fine: we go to login either way
+                ok = true;
+            } catch (e) {
+                window.__logoutFetch = false;
+            }
+
+            if (ok) {
+                window.location.replace(LOGIN_URL);
+            } else {
+                // Network hiccup: fall back to a normal form POST.
+                window.__loggingOut = false;
+                try { form.submit(); } catch (e) { if (ctx) ctx.loggingOut = false; }
+            }
+        };
+
+        // Livewire 419 / 401 → no confirm() popup.
+        document.addEventListener('livewire:init', function () {
+            try {
+                Livewire.hook('request', function (hookCtx) {
+                    hookCtx.fail(function (info) {
+                        if (info.status !== 419 && info.status !== 401) return;
+                        info.preventDefault();
+                        if (window.__loggingOut) return;       // logging out anyway
+                        var last = 0;
+                        try { last = parseInt(sessionStorage.getItem('__lw419') || '0', 10); } catch (e) {}
+                        try { sessionStorage.setItem('__lw419', String(Date.now())); } catch (e) {}
+                        if (Date.now() - last < 5000) {
+                            window.location.href = LOGIN_URL;  // reload already tried → session really gone
+                        } else {
+                            window.location.reload();          // fresh token if the session is still valid
+                        }
+                    });
+                });
+            } catch (e) { /* hook API differs — nothing else breaks */ }
+        });
+
+        // Back/forward cache restored a stale page (stale CSRF token) → refresh it.
+        window.addEventListener('pageshow', function (e) {
+            if (e.persisted) window.location.reload();
+        });
+    })();
+    </script>
 
 @livewireScripts
 
