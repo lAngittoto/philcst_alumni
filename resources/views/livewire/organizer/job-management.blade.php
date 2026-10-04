@@ -779,7 +779,7 @@ new class extends Component {
     public function jobPostings()
     {
         $org = auth()->user()?->organizer;
-        if (!$org) return JobPosting::whereRaw('0=1')->paginate(8);
+        if (!$org) return JobPosting::whereRaw('0=1')->paginate(20);
 
         $orgCollege = $this->organizerCollege;
         $today      = now('Asia/Manila')->startOfDay()->toDateString();
@@ -870,7 +870,7 @@ new class extends Component {
 
         $q->orderBy('updated_at', 'desc');
 
-        $paginated = $q->paginate(8);
+        $paginated = $q->paginate(20);
 
         $nowDate = now('Asia/Manila')->startOfDay();
         $paginated->getCollection()->transform(function ($job) use ($nowDate) {
@@ -2071,10 +2071,10 @@ body:has(.jm-page-root)::-webkit-scrollbar { display: none; }
 .m-in  { animation: modalIn .2s cubic-bezier(.25,.8,.25,1) both; }
 .fs-in { animation: slideInFull .22s cubic-bezier(.4,0,.2,1) both; }
 
-/* ── Job table: no visible scrollbar (rows are paged so everything fits;
-   scrolling by wheel / touch still works as a safety net on very short screens) ── */
-#jm-table-scroll { scrollbar-width: none; -ms-overflow-style: none; }
-#jm-table-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+/* ── Job table: 20 rows per page, so the list scrolls inside the card
+   (header + pagination bar stay fixed). Thin scrollbar, same look as
+   Event Management. ── */
+#jm-table-scroll { scrollbar-width: thin; scrollbar-color: #d1d5db transparent; overflow-y: auto !important; overscroll-behavior: contain; }
 
 .scroll-c::-webkit-scrollbar { width: 5px; }
 .scroll-c::-webkit-scrollbar-track { background: transparent; border-radius: 99px; }

@@ -42,26 +42,11 @@ new class extends Component {
     public string $contact_phone  = '';
     public string $notes          = '';
 
-    // ── Batch Year — now a FROM/TO range picker (like Alumni Records'
-    //    Batch filter) instead of a free-typed single year. A single
-    //    batch is just a range where From === To. batchYear (single
-    //    string) is gone — everything downstream reads
-    //    batchYearFrom/batchYearTo instead. ──
-    public string $batchYearFrom  = '';
-    public string $batchYearTo    = '';
-
-    /** True only after the user explicitly taps "All Alumni" in the batch
-     *  picker. Lets the trigger button show "All Alumni" instead of the
-     *  ambiguous "Select Batch Year" placeholder — both batchYearFrom and
-     *  batchYearTo are '' in BOTH states, so without this flag the button
-     *  looked identical whether "All Alumni" was chosen or nothing was
-     *  picked yet, making the selection look like it "didn't work". */
-    public bool $allAlumniChosen = false;
-
-    /** Set while setSingleBatchYear()/setBatchRange() are writing to
-     *  batchYearFrom/batchYearTo directly, so the updated*() hooks below
-     *  don't immediately re-trigger and double-fire normalization. */
-    private bool $skipBatchYearHooks = false;
+    // ── Batch Year — checkbox list. The organizer ticks any combination of
+    //    batch years (e.g. 2000 and 2008, not just a consecutive range).
+    //    "Select All" ticks every year. At least ONE year must be ticked.
+    //    Values are 4-digit year strings, e.g. ['2000', '2008']. ──
+    public array $selectedBatches = [];
 
     public array  $selectedCourses = [];
 
@@ -468,10 +453,9 @@ new class extends Component {
         if (trim($this->venue) === '')          return false;
         if (trim($this->venue_address) === '')  return false;
 
-        // Batch Year is marked required (*) in the UI — must have a
-        // complete range, OR the organizer explicitly chose "All Alumni".
-        if (! $this->allAlumniChosen
-            && ($this->batchYearFrom === '' || $this->batchYearTo === '')) {
+        // Batch Year is marked required (*) in the UI — at least one
+        // batch year checkbox must be ticked.
+        if (empty($this->selectedBatches)) {
             return false;
         }
 
@@ -492,71 +476,65 @@ new class extends Component {
         return true;
     }
 
-    /** True only once BOTH ends of the batch range are set — a half-picked
-     *  range (only From, or only To) is not applied yet. */
-    private function batchRangeIsComplete(): bool
+    /** Ticked batch years as unique 4-digit strings, sorted oldest → newest. */
+    private function sortedSelectedBatches(): array
     {
-        return $this->batchYearFrom !== '' && $this->batchYearTo !== '';
+        $years = array_values(array_unique(array_map('strval', $this->selectedBatches)));
+        sort($years, SORT_NUMERIC);
+        return $years;
     }
 
-    private function normalizeBatchYearRange(): void
+    /** Turns ['2000','2001','2002','2008'] into "2000–2002, 2008".
+     *  Runs of 3+ consecutive years are shortened to a range; anything
+     *  else is listed individually, comma-separated. */
+    private function formatBatchYears(array $years): string
     {
-        if ($this->batchYearFrom !== '' && $this->batchYearTo !== ''
-            && (int) $this->batchYearFrom > (int) $this->batchYearTo) {
-            [$this->batchYearFrom, $this->batchYearTo] = [$this->batchYearTo, $this->batchYearFrom];
+        $nums = array_values(array_unique(array_map('intval', $years)));
+        sort($nums);
+        $out = [];
+        $n = count($nums);
+        $i = 0;
+        while ($i < $n) {
+            $j = $i;
+            while ($j + 1 < $n && $nums[$j + 1] === $nums[$j] + 1) { $j++; }
+            if ($j - $i >= 2) {
+                $out[] = $nums[$i] . '–' . $nums[$j];
+            } else {
+                for ($k = $i; $k <= $j; $k++) { $out[] = (string) $nums[$k]; }
+            }
+            $i = $j + 1;
         }
+        return implode(', ', $out);
     }
 
-    /** Single-year quick pick from the plain year list — sets both ends
-     *  of the range to the same year in one round-trip. */
-    public function setSingleBatchYear(string $year): void
+    /** Reverse of formatBatchYears(). Understands a single year ("2026"),
+     *  a range ("2021–2026"), a comma list ("2000, 2008") and any mix
+     *  ("2000–2002, 2008"). */
+    private function parseBatchYears(string $batchPart): array
     {
-        $this->skipBatchYearHooks = true;
-        $this->batchYearFrom = $year;
-        $this->batchYearTo   = $year;
-        $this->allAlumniChosen = false;
-        $this->skipBatchYearHooks = false;
+        $years = [];
+        foreach (explode(',', $batchPart) as $chunk) {
+            $chunk = trim($chunk);
+            if ($chunk === '') continue;
+            if (str_contains($chunk, '–')) {
+                [$a, $b] = array_map('intval', array_map('trim', explode('–', $chunk, 2)));
+                if ($a > $b) { [$a, $b] = [$b, $a]; }
+                if ($a > 0 && ($b - $a) <= 100) {
+                    for ($y = $a; $y <= $b; $y++) { $years[] = (string) $y; }
+                }
+            } elseif (preg_match('/^\d{4}$/', $chunk)) {
+                $years[] = $chunk;
+            }
+        }
+        $years = array_values(array_unique($years));
+        sort($years, SORT_NUMERIC);
+        return $years;
     }
 
-    /** Explicit From/To range pick, applied together in one round-trip
-     *  once both sides are chosen (see the "Apply" button in the picker). */
-    public function setBatchRange(string $from, string $to): void
-    {
-        $this->skipBatchYearHooks = true;
-        $this->batchYearFrom = $from;
-        $this->batchYearTo   = $to;
-        $this->allAlumniChosen = false;
-        $this->skipBatchYearHooks = false;
-        $this->normalizeBatchYearRange();
-    }
-
-    /** "All Alumni" — clears both ends of the range in one round-trip,
-     *  same reasoning as setSingleBatchYear()/setBatchRange() above.
-     *  Also flips allAlumniChosen so the trigger button can tell this
-     *  apart from the never-picked-anything state. */
-    public function chooseAllAlumniBatch(): void
-    {
-        $this->skipBatchYearHooks = true;
-        $this->batchYearFrom = '';
-        $this->batchYearTo   = '';
-        $this->allAlumniChosen = true;
-        $this->skipBatchYearHooks = false;
-    }
-
-    /** The "Clear" link next to the Batch Year label — a true reset back
-     *  to the untouched/nothing-picked state. This is deliberately
-     *  separate from chooseAllAlumniBatch(): both leave batchYearFrom/To
-     *  empty, but only allAlumniChosen tells them apart, so Clear must
-     *  turn that flag back off or clicking Clear while "All Alumni" was
-     *  selected would look like it did nothing (still empty, still
-     *  flagged as All Alumni). */
+    /** The "Clear" link next to Select All — unticks every batch year. */
     public function clearBatchYear(): void
     {
-        $this->skipBatchYearHooks = true;
-        $this->batchYearFrom = '';
-        $this->batchYearTo   = '';
-        $this->allAlumniChosen = false;
-        $this->skipBatchYearHooks = false;
+        $this->selectedBatches = [];
     }
 
     #[Computed]
@@ -604,7 +582,7 @@ new class extends Component {
         // whatever just got approved/rejected/completed) always floats to
         // the top of the table instead of staying pinned by creation date.
         $q->orderBy('updated_at', 'desc');
-        return $q->paginate(8);
+        return $q->paginate(20);
     }
 
     #[Computed]
@@ -687,18 +665,12 @@ public function openCreateModal(): void
         $coursesPart  = trim($parts[0] ?? '');
         $batchPart    = trim($parts[1] ?? '');
 
-        // Batch part is either a single year ("2026") or a range
-        // ("2021–2026") — split on the en-dash to tell them apart.
-        if ($batchPart !== '' && str_contains($batchPart, '–')) {
-            [$from, $to] = array_map('trim', explode('–', $batchPart, 2));
-            $this->batchYearFrom = $from;
-            $this->batchYearTo   = $to;
-            $this->allAlumniChosen = false;
-        } else {
-            $this->batchYearFrom = $batchPart;
-            $this->batchYearTo   = $batchPart;
-            $this->allAlumniChosen = ($batchPart === '');
-        }
+        // Batch part can be a single year ("2026"), a range ("2021–2026"),
+        // a comma list ("2000, 2008") or a mix. No batch part at all means
+        // the event targets every batch → tick all years.
+        $this->selectedBatches = $batchPart === ''
+            ? array_values($this->batches)
+            : $this->parseBatchYears($batchPart);
 
         $this->selectedCourses = !empty($coursesPart) && $coursesPart !== 'All Courses'
             ? array_map('trim', explode(',', $coursesPart))
@@ -726,9 +698,7 @@ public function openCreateModal(): void
             'venue_address'  => $this->venue_address,
             'contact_phone'  => $this->contact_phone,
             'notes'          => $this->notes,
-            'batchYearFrom'  => $this->batchYearFrom,
-            'batchYearTo'    => $this->batchYearTo,
-            'allAlumniChosen'=> $this->allAlumniChosen,
+            'selectedBatches'=> $this->sortedSelectedBatches(),
             'selectedCourses'=> $this->selectedCourses,
             'removePhoto'    => $this->removePhoto,
             'hasNewPhoto'    => $this->photo !== null,
@@ -1102,54 +1072,25 @@ public function closeFormModal(): void
             }
         }
 
-        // Batch year range validation. A half-picked range (only From or
-        // only To) is treated the same as picking a single year on that
-        // side — the picker itself never sends a half-picked range to the
-        // server (see setSingleBatchYear()/setBatchRange() below), but we
-        // still guard here in case both ends aren't in sync for any reason.
-        $batchFrom = trim($this->batchYearFrom);
-        $batchTo   = trim($this->batchYearTo);
+        // Batch year validation. At least one checkbox must be ticked and
+        // every ticked year must have verified alumni in this college.
+        $batchYears = $this->sortedSelectedBatches();
 
-        // -- REQUIRED: Batch Year must be explicitly chosen. The Submit
-        //    button is already disabled via isFormValid() while this is
-        //    empty, but we still need a visible error message here so
-        //    the organizer knows exactly what is missing.
-        if (!$this->allAlumniChosen && $batchFrom === '' && $batchTo === '') {
-            $errors['batch_year'] = 'Batch year is required. Please select a batch, a range, or choose "All Alumni".';
-        }
-
-        if ($batchFrom !== '' && !preg_match('/^\d{4}$/', $batchFrom)) {
+        if (empty($batchYears)) {
+            $errors['batch_year'] = 'Batch year is required. Please tick at least one batch year.';
+        } elseif (collect($batchYears)->contains(fn($y) => !preg_match('/^\d{4}$/', $y))) {
             $errors['batch_year'] = 'Batch year must be a valid 4-digit year (numbers only, e.g. ' . now()->year . ').';
-        }
-        if ($batchTo !== '' && !preg_match('/^\d{4}$/', $batchTo)) {
-            $errors['batch_year'] = 'Batch year must be a valid 4-digit year (numbers only, e.g. ' . now()->year . ').';
-        }
-
-        if (($batchFrom !== '' || $batchTo !== '') && !isset($errors['target']) && !isset($errors['batch_year'])) {
-            $fromYear = (int) ($batchFrom !== '' ? $batchFrom : $batchTo);
-            $toYear   = (int) ($batchTo   !== '' ? $batchTo   : $batchFrom);
-            if ($fromYear > $toYear) { [$fromYear, $toYear] = [$toYear, $fromYear]; }
-
+        } elseif (!isset($errors['target'])) {
             $dept = $this->organizerDepartment;
             $q = Alumni::where('status', 'VERIFIED')
-                ->where('batch', '>=', $fromYear)
-                ->where('batch', '<=', $toYear);
+                ->whereIn('batch', array_map('intval', $batchYears));
             if ($dept) { $q->whereHas('course', fn($c) => $c->where('college', $dept)); }
-            if (!$q->exists()) {
-                $suggQ = Alumni::where('status', 'VERIFIED');
-                if ($dept) { $suggQ->whereHas('course', fn($c) => $c->where('college', $dept)); }
-                $available = $suggQ->distinct()->orderBy('batch', 'desc')
-                    ->pluck('batch')->map(fn($b) => (int)$b)->toArray();
-                $rangeLabel = $fromYear === $toYear ? (string) $fromYear : "{$fromYear}–{$toYear}";
-                if (empty($available)) {
-                    $errors['batch_year'] = "No verified alumni found for your college. Leave batch blank to target all alumni.";
-                } else {
-                    $nearest   = collect($available)->sortBy(fn($y) => abs($y - $fromYear))->first();
-                    $batchList = implode(', ', array_slice($available, 0, 8));
-                    if (count($available) > 8) $batchList .= '…';
-                    $errors['batch_year'] = "No verified alumni for batch {$rangeLabel}."
-                        . ($nearest ? " Nearest: {$nearest}." : '') . " Available: {$batchList}.";
-                }
+
+            $foundBatches = $q->distinct()->pluck('batch')->map(fn($b) => (string) $b)->toArray();
+            $missing      = array_values(array_diff($batchYears, $foundBatches));
+
+            if (!empty($missing)) {
+                $errors['batch_year'] = 'No verified alumni for batch ' . implode(', ', $missing) . '. Please untick it.';
             }
         }
 
@@ -1173,14 +1114,14 @@ public function closeFormModal(): void
 
         $courseStr = !empty($this->selectedCourses) ? implode(', ', $this->selectedCourses) : 'All Courses';
 
-        $batchFrom = trim($this->batchYearFrom);
-        $batchTo   = trim($this->batchYearTo);
-        $yearSuffix = '';
-        if ($batchFrom !== '' || $batchTo !== '') {
-            $yearSuffix = $batchFrom === $batchTo
-                ? ' · Batch ' . ($batchFrom !== '' ? $batchFrom : $batchTo)
-                : ' · Batch ' . $batchFrom . '–' . $batchTo;
-        }
+        // Batch suffix: every year ticked (and more than one batch exists)
+        // = the whole alumni base → store NO suffix, same as the old
+        // "All Alumni" option. Otherwise store the ticked years.
+        $batchYears  = $this->sortedSelectedBatches();
+        $allTicked   = count($batchYears) > 1 && empty(array_diff($this->batches, $batchYears));
+        $yearSuffix  = (!empty($batchYears) && !$allTicked)
+            ? ' · Batch ' . $this->formatBatchYears($batchYears)
+            : '';
         $targetStr = $courseStr . $yearSuffix;
 
         $startDt = \Carbon\Carbon::createFromFormat('Y-m-d H:i', $this->event_date . ' ' . $this->start_time, 'Asia/Manila');
@@ -1514,21 +1455,10 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
             ? array_map('trim', explode(',', $coursesPart))
             : [];
 
-        // Batch part is either a single year ("2026") or a range
-        // ("2021–2026") — expand a range into the full list of years it
-        // covers so every matching batch GC within the range gets
-        // auto-ticked, not just the endpoints.
-        $batchYears = [];
-        if ($batchPart !== '') {
-            if (str_contains($batchPart, '–')) {
-                [$rFrom, $rTo] = array_map('trim', explode('–', $batchPart, 2));
-                $rFrom = (int) $rFrom; $rTo = (int) $rTo;
-                if ($rFrom > $rTo) { [$rFrom, $rTo] = [$rTo, $rFrom]; }
-                for ($y = $rFrom; $y <= $rTo; $y++) { $batchYears[] = (string) $y; }
-            } else {
-                $batchYears[] = $batchPart;
-            }
-        }
+        // Batch part can be a single year, a range, a comma list or a mix —
+        // expand it into the full list of years so every matching batch GC
+        // gets auto-ticked.
+        $batchYears = $batchPart !== '' ? $this->parseBatchYears($batchPart) : [];
 
         $this->shareTargetBatchYear   = $batchPart;
         $this->shareTargetCourseCodes = $courseCodes;
@@ -1800,9 +1730,7 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         $this->venue = $this->venue_address = $this->contact_phone = $this->notes = '';
         $this->contact_person = '';
         $this->contact_email  = '';
-        $this->batchYearFrom  = '';
-        $this->batchYearTo    = '';
-        $this->allAlumniChosen = false;
+        $this->selectedBatches = [];
         $this->selectedCourses = [];
         $this->photo                 = null;
         $this->photoPublicId         = null;
@@ -3243,214 +3171,77 @@ select.tw-select-arrow {
                             </div>
                         @endif
 
-                        {{-- ── Batch Year — dropdown picker. Opens to a 3-choice
-                             landing screen first: "Specific Batch/Year" (plain
-                             year list, pick one, done), "Multiple Batches"
-                             (From/To range picker for consecutive batches like
-                             2021–2026), or "All Alumni" (clears the filter
-                             entirely, no batch scoping). Each sub-screen has a
-                             "Back" row to return to the landing screen.
-                             RANGE IS ALL-OR-NOTHING: picking only From (or
-                             only To) does not apply anything until both
-                             sides are chosen and "Apply" is tapped. ── --}}
+                        {{-- ── Batch Year — checkbox list (same look as Programs).
+                             Tick any combination of years (e.g. 2000 + 2008) or hit
+                             "Select All". At least one must be ticked. The list has a
+                             fixed height and scrolls, so it never stretches the sidebar. ── --}}
                         <div class="pt-2 border-t border-gray-100"
                              x-data="{
-                                 rangeMode: {{ ($batchYearFrom !== '' && $batchYearTo !== '' && $batchYearFrom !== $batchYearTo) ? 'true' : 'false' }},
-                                 rangeFrom: '{{ $batchYearFrom }}',
-                                 rangeTo: '{{ $batchYearTo }}',
-                                 open: false,
-                                 // ── view: which screen the dropdown shows.
-                                 // 'menu'   = the 3-choice landing (Specific Batch/Year,
-                                 //            Multiple Batches, All Alumni) — always the
-                                 //            first thing shown when the dropdown opens.
-                                 // 'single' = the plain year list.
-                                 // 'range'  = the From/To range picker.
-                                 view: 'menu',
-                                 menuStyle: '',
-                                 // ── Positions the teleported dropdown menu using fixed
-                                 // coordinates read from the trigger button's own
-                                 // bounding box, recomputed every time it opens (and on
-                                 // scroll/resize while open) — this is what lets the menu
-                                 // float above the sidebar's own overflow-y-auto scroll
-                                 // area instead of being clipped by it, since a teleported
-                                 // node sits in <body> and is no longer a descendant of
-                                 // that scrolling ancestor at all. ──
-                                 positionMenu(){
-                                     const btn = this.$refs.trigger;
-                                     if(!btn) return;
-                                     const r = btn.getBoundingClientRect();
-                                     this.menuStyle = 'position:fixed; top:'+(r.bottom+4)+'px; left:'+r.left+'px; min-width:'+r.width+'px;';
+                                 years: {{ json_encode(array_values($this->batches)) }},
+                                 get allChecked() {
+                                     return this.years.length > 0 && this.years.every(y => $wire.selectedBatches.includes(y));
                                  },
-                                 toggle(){
-                                     this.open = !this.open;
-                                     if(this.open){
-                                         this.view = 'menu';
-                                         this.$nextTick(() => this.positionMenu());
-                                     }
-                                 },
-                                 close(){ this.open = false; },
-                                 backToMenu(){ this.view = 'menu'; },
-                                 chooseSpecific(){ this.view = 'single'; },
-                                 chooseMultiple(){
-                                     this.rangeFrom = $wire.batchYearFrom || '';
-                                     this.rangeTo   = $wire.batchYearTo   || '';
-                                     this.rangeMode = true;
-                                     this.view = 'range';
-                                 },
-                                 chooseAllAlumni(){ $wire.chooseAllAlumniBatch(); this.rangeMode=false; this.rangeFrom=''; this.rangeTo=''; this.close(); },
-                                 selectYear(val){ $wire.setSingleBatchYear(val); this.rangeMode=false; this.close(); },
-                                 pickFrom(val){ this.rangeFrom=val; },
-                                 pickTo(val){ this.rangeTo=val; },
-                                 applyRange(){ if(this.rangeFrom!=='' && this.rangeTo!==''){ $wire.setBatchRange(this.rangeFrom, this.rangeTo); this.rangeMode=true; this.close(); } }
-                             }"
-                             @scroll.window="if(open) positionMenu()"
-                             @resize.window="if(open) positionMenu()">
-                            <div class="flex items-center justify-between mb-1">
+                                 toggleAll(e) {
+                                     $wire.set('selectedBatches', e.target.checked ? [...this.years] : []);
+                                 }
+                             }">
+                            <div class="flex items-center justify-between mb-1.5">
                                 <label class="block text-sm font-semibold uppercase tracking-[.06em] text-[#333333]">
                                     Batch Year <span class="text-red-500">*</span>
                                 </label>
-                                @if($batchYearFrom !== '' || $batchYearTo !== '' || $allAlumniChosen)
-                                <button type="button" wire:click="clearBatchYear" wire:loading.attr="disabled" wire:target="clearBatchYear"
-                                        class="text-xs font-semibold text-[#7a3f91] hover:text-[#5f3272] transition-colors flex items-center gap-1 disabled:opacity-60 disabled:cursor-wait">
-                                    <span wire:loading wire:target="clearBatchYear">
-                                        <i class="fas fa-spinner fa-spin" style="font-size:10px;"></i>
+                                @if(count($selectedBatches) > 0)
+                                    <span class="inline-flex items-center justify-center min-w-[1.5rem] h-6 px-1 rounded-full bg-purple-200 text-purple-800 text-xs font-bold">
+                                        {{ count($selectedBatches) }}
                                     </span>
-                                    <i class="fas fa-rotate-left" style="font-size:10px;" wire:loading.remove wire:target="clearBatchYear"></i>
-                                    Clear
-                                </button>
+                                @else
+                                    <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-xs font-semibold">None</span>
                                 @endif
                             </div>
 
-                            <div class="relative eo-batch-dropdown">
-                                <button type="button" x-ref="trigger" @click.stop="toggle()"
-                                        :class="{ 'has-value': ($wire.batchYearFrom!=='' && $wire.batchYearTo!=='') || $wire.allAlumniChosen, 'open': open }"
-                                        class="eo-batch-trigger {{ isset($formErrors['batch_year']) ? 'border-red-400 bg-red-50' : '' }}">
-                                    <i class="fas fa-calendar-days" style="font-size:11px;opacity:.7;"></i>
-                                    <span class="flex-1 text-left">
-                                        @if($batchYearFrom !== '' && $batchYearTo !== '' && $batchYearFrom !== $batchYearTo)
-                                            Batch {{ $batchYearFrom }}–{{ $batchYearTo }}
-                                        @elseif($batchYearFrom !== '' && $batchYearTo !== '')
-                                            Batch {{ $batchYearFrom }}
-                                        @elseif($batchYearFrom !== '')
-                                            Batch {{ $batchYearFrom }} → pick end year
-                                        @elseif($batchYearTo !== '')
-                                            pick start year → Batch {{ $batchYearTo }}
-                                        @elseif($allAlumniChosen)
-                                            All Alumni
-                                        @else
-                                            Select Batch Year
+                            @if(count($this->batches) > 0)
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <span class="text-sm font-semibold uppercase tracking-wider text-[#555555]">Select batches</span>
+                                    <div class="flex items-center gap-3">
+                                        <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                                            <input type="checkbox"
+                                                   :checked="allChecked"
+                                                   @change="toggleAll($event)"
+                                                   class="accent-purple-600 w-3.5 h-3.5 flex-shrink-0">
+                                            <span class="text-sm font-semibold text-[#7a3f91] leading-none">Select All</span>
+                                        </label>
+                                        @if(count($selectedBatches) > 0)
+                                            <button type="button" wire:click="clearBatchYear"
+                                                    class="text-sm font-semibold hover:text-red-500 text-[#555555]">Clear</button>
                                         @endif
-                                    </span>
-                                    <i class="fas fa-chevron-down eo-batch-chevron"></i>
-                                </button>
-
-                                {{-- Teleported to <body> so this menu is no longer a
-                                     descendant of the sidebar's own overflow-y-auto
-                                     scroll container — that ancestor was clipping the
-                                     dropdown instead of letting it float above the
-                                     content underneath it. Positioned via fixed
-                                     coordinates computed in positionMenu() above. --}}
-                                <template x-teleport="body">
-                                    <div x-show="open"
-                                         x-transition:enter="transition ease-out duration-100" x-transition:enter-start="opacity-0 scale-95 -translate-y-1" x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-                                         x-transition:leave="transition ease-in duration-75" x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
-                                         @click.outside="close()"
-                                         :style="menuStyle"
-                                         class="eo-batch-menu" style="display:none;" @click.stop>
-
-                                    {{-- Landing screen: the 3 top-level choices. Always
-                                         the first thing shown on open — no years visible
-                                         here at all, so the person picks a MODE first. --}}
-                                    <template x-if="view === 'menu'">
-                                        <div style="min-width:240px;">
-                                            <button type="button" @click.stop="chooseSpecific()" class="eo-batch-item" style="white-space:normal;display:flex;align-items:center;gap:10px;">
-                                                <i class="fas fa-calendar-day" style="font-size:13px;color:#7a3f91;width:14px;flex-shrink:0;"></i>
-                                                <span>
-                                                    <span class="block">Specific Batch/Year</span>
-                                                    <span class="block text-xs font-normal text-[#777777]">Pick one batch year</span>
-                                                </span>
-                                            </button>
-                                            <button type="button" @click.stop="chooseMultiple()" class="eo-batch-item" style="white-space:normal;display:flex;align-items:center;gap:10px;">
-                                                <i class="fas fa-layer-group" style="font-size:13px;color:#7a3f91;width:14px;flex-shrink:0;"></i>
-                                                <span>
-                                                    <span class="block">Multiple Batches</span>
-                                                    <span class="block text-xs font-normal text-[#777777]">Pick a range of consecutive batches</span>
-                                                </span>
-                                            </button>
-                                            <button type="button" @click.stop="chooseAllAlumni()" :class="{'active': $wire.allAlumniChosen}" class="eo-batch-item" style="white-space:normal;display:flex;align-items:center;gap:10px;">
-                                                <i class="fas fa-users" style="font-size:13px;color:#7a3f91;width:14px;flex-shrink:0;"></i>
-                                                <span>
-                                                    <span class="block">All Alumni</span>
-                                                    <span class="block text-xs font-normal text-[#777777]">Every batch, no filter</span>
-                                                </span>
-                                            </button>
-                                        </div>
-                                    </template>
-
-                                    {{-- Specific Batch/Year: plain year list, with a Back
-                                         row pinned to the bottom to return to the 3-choice
-                                         landing screen. --}}
-                                    <template x-if="view === 'single'">
-                                        <div>
-                                            @forelse($this->batches as $b)
-                                            <button type="button" @click.stop="selectYear('{{ $b }}')" :class="{'active': $wire.batchYearFrom==='{{ $b }}' && $wire.batchYearTo==='{{ $b }}'}" class="eo-batch-item">{{ $b }}</button>
-                                            @empty
-                                            <div class="px-3 py-2 text-xs text-[#777777]">No batch years available yet.</div>
-                                            @endforelse
-                                            <div class="eo-batch-footer">
-                                                <button type="button" @click.stop="backToMenu()"
-                                                        class="eo-batch-item flex items-center gap-1.5 font-semibold" style="color:#7a3f91;">
-                                                    <i class="fas fa-arrow-left" style="font-size:10px;"></i> Back
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </template>
-
-                                    {{-- Multiple Batches: two side-by-side From/To lists,
-                                         applied together via "Apply". --}}
-                                    <template x-if="view === 'range'">
-                                        <div class="p-2" style="width:220px;">
-                                            <div class="flex items-start gap-2">
-                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#e5e7eb;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                                    @foreach($this->batches as $b)
-                                                    <button type="button" @click.stop="if(rangeTo!=='{{ $b }}') pickFrom('{{ $b }}')"
-                                                            :disabled="rangeTo==='{{ $b }}'"
-                                                            :class="{'active':rangeFrom==='{{ $b }}', 'disabled':rangeTo==='{{ $b }}'}"
-                                                            class="eo-batch-item eo-batch-range-item" style="border-radius:0;">{{ $b }}</button>
-                                                    @endforeach
-                                                </div>
-                                                <div class="flex-1 min-w-0 border rounded-lg overflow-y-auto" style="border-color:#e5e7eb;max-height:110px;scrollbar-width:thin;scrollbar-color:#d4b8e8 transparent;">
-                                                    @foreach($this->batches as $b)
-                                                    <button type="button" @click.stop="if(rangeFrom!=='{{ $b }}') pickTo('{{ $b }}')"
-                                                            :disabled="rangeFrom==='{{ $b }}'"
-                                                            :class="{'active':rangeTo==='{{ $b }}', 'disabled':rangeFrom==='{{ $b }}'}"
-                                                            class="eo-batch-item eo-batch-range-item" style="border-radius:0;">{{ $b }}</button>
-                                                    @endforeach
-                                                </div>
-                                            </div>
-                                            <div class="flex items-center gap-2 mt-3 eo-batch-footer">
-                                                <button type="button" @click.stop="backToMenu()"
-                                                        class="flex-1 text-xs font-semibold text-[#333333] hover:bg-[#F5F5F5] rounded-lg py-1.5 transition-colors border border-gray-200">
-                                                    Back
-                                                </button>
-                                                <button type="button" @click.stop="applyRange()"
-                                                        :disabled="rangeFrom==='' || rangeTo===''"
-                                                        class="flex-1 text-xs font-semibold rounded-lg py-1.5 transition-colors border"
-                                                        :class="(rangeFrom==='' || rangeTo==='') ? 'text-[#B9A8CB] border-gray-200 bg-[#F5F5F5] cursor-not-allowed' : 'border-gray-200 hover:bg-[#F5F0FA]'"
-                                                        :style="(rangeFrom==='' || rangeTo==='') ? '' : 'color:#7a3f91;'">
-                                                    Apply
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </template>
+                                    </div>
                                 </div>
-                                </template>
-                            </div>
+
+                                {{-- Fixed height + internal scroll (≈4 rows visible, rest scrolls) --}}
+                                <div class="grid grid-cols-3 gap-1 overflow-y-auto pr-1 {{ isset($formErrors['batch_year']) ? 'p-1.5 rounded-lg border border-red-200 bg-red-50/30' : '' }}"
+                                     style="max-height:152px; scrollbar-width:thin; scrollbar-color:#d4b8e8 transparent;">
+                                    @foreach($this->batches as $b)
+                                        <label wire:key="eo-batch-cb-{{ $b }}"
+                                               class="flex items-center gap-1 px-2 py-1 border rounded-lg cursor-pointer transition text-sm font-semibold
+                                                      {{ in_array($b, $selectedBatches)
+                                                          ? 'border-gray-200 bg-purple-50 text-purple-700'
+                                                          : 'border-gray-200 hover:border-purple-300 hover:bg-purple-50/40 bg-white text-[#333333]' }}">
+                                            <input type="checkbox" wire:model.live="selectedBatches" value="{{ $b }}"
+                                                   class="accent-purple-600 w-3 h-3 flex-shrink-0">
+                                            <span class="truncate text-sm">{{ $b }}</span>
+                                        </label>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div class="text-center py-2">
+                                    <i class="fas fa-inbox text-xl block mb-1 text-gray-200"></i>
+                                    <p class="text-sm text-[#555555]">No batch years available yet.</p>
+                                </div>
+                            @endif
 
                             @if(isset($formErrors['batch_year']))
                                 <p class="text-red-600 text-sm mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $formErrors['batch_year'] }}</p>
                             @else
-                                <p class="text-xs mt-1 text-[#777777]">Choose a specific batch, multiple batches, or all alumni.</p>
+                                <p class="text-xs mt-1 text-[#777777]">Tick one or more batch years, or use Select All.</p>
                             @endif
                         </div>
                     </div>

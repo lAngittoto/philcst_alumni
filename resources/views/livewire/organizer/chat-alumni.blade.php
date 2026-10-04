@@ -1190,11 +1190,11 @@ new class extends Component {
             }
 
             // Staff room: count directors + active coordinators
-            $staffOnline = DB::table('director')->whereNull('deleted_at')
+            $staffOnline = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
                 ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
                     ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
-            $staffTotal  = DB::table('director')->whereNull('deleted_at')->count()
+            $staffTotal  = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             $isCurrentRoom = ($staffRoomRow->id === $this->roomId);
@@ -1796,11 +1796,11 @@ new class extends Component {
         if (! $this->room) return;
         try {
             if ($this->isStaffRoom) {
-                $this->onlineCount = DB::table('director')->whereNull('deleted_at')
+                $this->onlineCount = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
                     ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
                         ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
-                $this->totalCount  = DB::table('director')->whereNull('deleted_at')->count()
+                $this->totalCount  = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             } elseif ($this->isCollegeRoom) {
@@ -2092,7 +2092,7 @@ new class extends Component {
                     ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")->value('id');
                 if ($foundCoord) DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'organizer','mentioned_id'=>$foundCoord,'created_at'=>now(),'updated_at'=>now()]);
 
-                $foundDir = DB::table('director')->whereNull('deleted_at')
+                $foundDir = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
                     ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")->value('id');
                 if ($foundDir) DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'director','mentioned_id'=>$foundDir,'created_at'=>now(),'updated_at'=>now()]);
             }
@@ -2468,7 +2468,7 @@ new class extends Component {
         $q = trim($this->memberSearch);
         $self = $this;
 
-        $dirQuery = DB::table('director')->whereNull('deleted_at');
+        $dirQuery = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at');
         if ($q !== '') $dirQuery->where(function ($sub) use ($q) { $sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%")->orWhereRaw("CONCAT(first_name,' ',last_name) LIKE ?", ["%{$q}%"]); });
         $this->staffDirectors = $dirQuery->orderBy('first_name')->get(['id','first_name','last_name','profile_photo','last_seen_at'])
             ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'photo'=>$self->resolvePhotoUrl($d->profile_photo??null),'is_online'=>isset($d->last_seen_at)&&Carbon::parse($d->last_seen_at)->gte(now()->subMinutes($self->onlineMinutes))])->toArray();
@@ -2556,7 +2556,7 @@ new class extends Component {
             if ($this->isStaffRoom) {
                 // ── Staff room: only suggest members of this specific staff room ──
                 // Directors and coordinators who are part of this internal room
-                $dirs = DB::table('director')->whereNull('deleted_at')
+                $dirs = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
                     ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
                     ->limit(3)->get(['id','first_name','last_name'])
                     ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'type'=>'director'])->toArray();

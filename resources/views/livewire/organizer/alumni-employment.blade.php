@@ -1000,7 +1000,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                 <i class="fas fa-chart-line text-white text-lg"></i>
             </div>
             <div>
-                <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
+                <h1 class="text-2xl font-semibold text-[#333333] leading-tight">Alumni Tracking</h1>
                 <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
                     Track employment status of your assigned alumni
                     @if($organizerDepartment)
@@ -2247,10 +2247,9 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 
                 {{-- RIGHT: Employment Information --}}
                 <div class="border border-[#E8E0F0] rounded-xl p-4 lg:p-6 bg-white">
-                    <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest mb-3.5">Employment Information</p>
-
-                    {{-- Status + updated --}}
+                    {{-- Heading + Status badge (beside the title) + updated --}}
                     <div class="flex items-center gap-2.5 mb-3.5 flex-wrap">
+                        <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest">Employment Information</p>
                         <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-base font-bold {{ $statusCls }}">
                             {{ $statusLbl }}
                         </span>
