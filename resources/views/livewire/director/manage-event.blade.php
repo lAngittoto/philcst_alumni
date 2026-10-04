@@ -1496,6 +1496,33 @@ select.tw-select-arrow[disabled] {
 /* ══ Table container height — mirrors event-organizer's flex-fill card ══ */
 .dir-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
+/* ══ Event Overview page — table pushed down a bit so it sits centered ══ */
+@media (min-width: 1024px) { .evt-page-body { padding-top: 56px !important; } }
+@media (min-width: 640px) and (max-width: 1023px) { .evt-page-body { padding-top: 32px !important; } }
+@media (max-width: 640px) {
+    .evt-page-body { padding: 0 !important; gap: 0 !important; }
+    .evt-page-header { padding: 14px 16px 12px; background: #fff; border-bottom: 1px solid #E8E0F0; }
+}
+
+/* ══ View Event — fills the whole screen, no side gaps.
+   Desktop (lg+): everything fits in one screen, no page scroll; long text
+   (about / notes) scrolls inside its own card. Phone/tablet: normal scroll. ══ */
+.evt-view-wrap { width: 100%; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.evt-view-scroll { overflow-y: auto; }
+.evt-view-photo { width: 100%; background: #f9fafb; }
+.evt-view-photo img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 320px; min-height: 200px; }
+.evt-view-card-body { overflow-y: auto; }
+@media (min-width: 640px) { .evt-view-wrap { padding: 16px; gap: 14px; } }
+@media (min-width: 1024px) {
+    .evt-view-scroll { overflow: hidden; }
+    .evt-view-wrap { height: 100%; padding: 16px 20px; gap: 14px; }
+    .evt-view-top { flex: 1 1 0; min-height: 0; }
+    .evt-view-photo { height: 100%; }
+    .evt-view-photo img { max-height: none; min-height: 0; }
+    .evt-view-bottom { flex: 1 1 0; min-height: 0; }
+    .evt-view-card-body { min-height: 0; }
+}
+
 @media (max-width: 640px) {
     .dir-table-card {
         border-radius: 0 !important;
@@ -1546,10 +1573,10 @@ select.tw-select-arrow[disabled] {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div class="evt-page-body flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left, mirrors organizer style) ══ --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+    <div class="evt-page-header flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
         <div class="flex items-center gap-3">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -2693,30 +2720,29 @@ select.tw-select-arrow[disabled] {
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 overflow-y-auto scroll-c" style="background:#f0ecf5;">
-        <div class="max-w-7xl mx-auto p-5 sm:p-8 flex flex-col gap-5">
+    <div class="flex-1 min-h-0 evt-view-scroll scroll-c" style="background:#f0ecf5;">
+        <div class="evt-view-wrap">
 
             {{-- ── TOP CARD: photo left + title/chips right ── --}}
-            <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex flex-col sm:flex-row gap-6">
+            <div class="evt-view-top bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-5 flex flex-col sm:flex-row gap-4 sm:gap-6">
 
                 {{-- Photo --}}
                 @if($hasPhoto)
-                <div class="w-full sm:w-[46%] flex-shrink-0 rounded-xl overflow-hidden border border-gray-100 bg-gray-50">
-                    <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}"
-                         class="w-full h-full object-cover block" style="max-height:340px; min-height:220px;">
+                <div class="evt-view-photo sm:w-[46%] flex-shrink-0 rounded-xl overflow-hidden border border-gray-100">
+                    <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}">
                 </div>
                 @else
-                <div class="w-full sm:w-[46%] flex-shrink-0 rounded-xl flex items-center justify-center" style="min-height:220px; background:#7a3f91;">
+                <div class="sm:w-[46%] flex-shrink-0 rounded-xl flex items-center justify-center w-full" style="min-height:200px; background:#7a3f91;">
                     <i class="fas fa-calendar-days text-white/20 text-6xl"></i>
                 </div>
                 @endif
 
                 {{-- Title + badges --}}
-                <div class="flex-1 min-w-0 flex flex-col gap-4 pt-1">
+                <div class="flex-1 min-w-0 flex flex-col gap-3 sm:gap-4 pt-1">
                     <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider w-fit text-white" style="background:#7a3f91;">
                         <i class="fas fa-calendar-days text-[11px]"></i> Event Title
                     </span>
-                    <h2 class="text-2xl sm:text-3xl font-bold text-[#1a1026] leading-tight">{{ $ev->title }}</h2>
+                    <h2 class="text-xl sm:text-2xl xl:text-3xl font-bold text-[#1a1026] leading-tight break-words">{{ $ev->title }}</h2>
                     @if($ev->target_participants)
                     <div class="flex flex-wrap gap-2 mt-1">
                         @foreach(array_filter(array_map('trim', preg_split('/[,·\·]+/u', $ev->target_participants))) as $chip)
@@ -2800,15 +2826,15 @@ select.tw-select-arrow[disabled] {
 
 
             {{-- ── BOTTOM 3-COL: About | Notes | Contact (equal height) ── --}}
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-stretch">
+            <div class="evt-view-bottom grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 items-stretch">
 
                 {{-- About This Event --}}
-                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col">
-                    <div class="px-5 py-3.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
+                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0">
+                    <div class="px-5 py-3 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
                         <i class="fas fa-align-left text-white/80 text-sm"></i>
                         <p class="text-xs font-bold uppercase tracking-widest text-white">About This Event</p>
                     </div>
-                    <div class="bg-white flex-1 px-5 py-5">
+                    <div class="evt-view-card-body bg-white flex-1 px-5 py-4">
                         @if($ev->description)
                             <p class="text-sm text-[#333333] leading-relaxed whitespace-pre-wrap" style="line-height:1.9;">{{ trim($ev->description) }}</p>
                         @else
@@ -2818,12 +2844,12 @@ select.tw-select-arrow[disabled] {
                 </div>
 
                 {{-- Additional Notes --}}
-                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col">
-                    <div class="px-5 py-3.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
+                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0">
+                    <div class="px-5 py-3 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
                         <i class="fas fa-note-sticky text-white/80 text-sm"></i>
                         <p class="text-xs font-bold uppercase tracking-widest text-white">Additional Notes</p>
                     </div>
-                    <div class="bg-white flex-1 px-5 py-5">
+                    <div class="evt-view-card-body bg-white flex-1 px-5 py-4">
                         @if($ev->notes)
                             <p class="text-sm text-[#333333] leading-relaxed whitespace-pre-wrap" style="line-height:1.9;">{{ trim($ev->notes) }}</p>
                         @else
@@ -2833,12 +2859,12 @@ select.tw-select-arrow[disabled] {
                 </div>
 
                 {{-- Contact Information --}}
-                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col">
-                    <div class="px-5 py-3.5 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
+                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0">
+                    <div class="px-5 py-3 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
                         <i class="fas fa-address-card text-white/80 text-sm"></i>
                         <p class="text-xs font-bold uppercase tracking-widest text-white">Contact Information</p>
                     </div>
-                    <div class="bg-white flex-1 px-5 py-5 flex flex-col gap-3">
+                    <div class="evt-view-card-body bg-white flex-1 px-5 py-4 flex flex-col gap-3">
                         @php
                             $hasContact = $ev->contact_person || $ev->contact_email || $ev->contact_phone || $ev->organizer;
                         @endphp

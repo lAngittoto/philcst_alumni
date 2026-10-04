@@ -984,8 +984,30 @@ new class extends Component {
     /* Manage Colleges: list column width. Plain CSS (not Tailwind col-span-8/9 utilities,
        which weren't being generated and collapsed the list into a 1-column sliver). */
     @media (min-width: 1024px) {
+        .mc-left-span-3 { grid-column: span 3 / span 3; min-width: 0; }
+        .mc-left-span-4 { grid-column: span 4 / span 4; min-width: 0; }
         .mc-list-span-9 { grid-column: span 9 / span 9; min-width: 0; }
         .mc-list-span-8 { grid-column: span 8 / span 8; min-width: 0; }
+    }
+    /* On phones/tablets the Manage Colleges panels stack full width */
+    @media (max-width: 1023px) {
+        .mc-left-span-3, .mc-left-span-4, .mc-list-span-9, .mc-list-span-8 {
+            grid-column: 1 / -1; min-width: 0; width: 100%;
+        }
+    }
+
+    /* ══ Coordinator page — vertically centered, fluid on every screen ══ */
+    .coord-page-body { justify-content: flex-start; }
+    @media (min-width: 1024px) {
+        .coord-page-body { padding-top: 56px !important; }
+    }
+    @media (min-width: 640px) and (max-width: 1023px) {
+        .coord-page-body { padding-top: 32px !important; }
+    }
+    @media (max-width: 640px) {
+        .coord-page-body { padding-left: 0 !important; padding-right: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; gap: 0 !important; }
+        .coord-page-header { padding: 14px 16px 12px; background: #fff; border-bottom: 1px solid #E8E0F0; }
+        .coord-table-card { max-height: none !important; flex: 1 1 auto; }
     }
     .cfs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #f8f7fb; }
 
@@ -1158,10 +1180,10 @@ new class extends Component {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div class="coord-page-body flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- PAGE HEADER — fixed, never scrolls --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
+    <div class="coord-page-header flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0">
         <div class="flex items-center gap-4">
             <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md" style="background:#7a3f91;">
                 <i class="fas fa-users-gear text-white text-lg"></i>
@@ -2438,7 +2460,7 @@ new class extends Component {
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:flex-1 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)]">
 
                 @if(!$orgAddingToCollege)
-                <div id="mc-section-add" class="lg:col-span-3 scroll-mt-4 lg:min-h-0">
+                <div id="mc-section-add" class="mc-left-span-3 scroll-mt-4 lg:min-h-0">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden lg:sticky lg:top-5">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
                             <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Add New College</h3>
@@ -2461,7 +2483,7 @@ new class extends Component {
                     </div>
                 </div>
                 @else
-                <div id="mc-section-assign" class="lg:col-span-4 scroll-mt-4 lg:min-h-0">
+                <div id="mc-section-assign" class="mc-left-span-4 scroll-mt-4 lg:min-h-0">
                     <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden flex flex-col max-h-[80vh] lg:max-h-full lg:h-full">
                         <div class="px-5 py-3.5 border-b border-[#e2d3ef] bg-[#f5eef9] flex-shrink-0">
                             <h3 class="text-xs font-semibold text-[#7a3f91] uppercase tracking-wider flex items-center gap-2">
@@ -2587,7 +2609,6 @@ new class extends Component {
                                                             <span class="inline-block px-2 py-1 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-md text-xs font-mono font-semibold">{{ $dept['code'] }}</span>
                                                         @endforeach
                                                     </div>
-                                                    <p class="text-xs text-gray-500 mt-1">{{ count($departments) }} department{{ count($departments) !== 1 ? 's' : '' }}</p>
                                                 @else
                                                     <span class="text-xs text-gray-500 mt-1 block">No departments</span>
                                                 @endif

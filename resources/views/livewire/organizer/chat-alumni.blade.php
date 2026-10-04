@@ -3352,8 +3352,6 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
 
                             <div class="flex items-center gap-1 flex-wrap mt-0.5 mb-0.5">
                                 @if($r['type'] === 'staff')
-                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-shield-halved text-[9px] mr-0.5"></i>Internal</span>
-                                    <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} staff</span>
                                 @elseif($r['type'] === 'college')
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#6b2490]"><i class="fa-solid fa-users-between-lines text-[9px] mr-0.5"></i>All Courses</span>
                                     <span class="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-[#f2e8f9] text-[#8b35b8]">{{ $r['total_count'] }} members</span>
