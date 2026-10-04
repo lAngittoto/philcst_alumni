@@ -169,6 +169,16 @@ new class extends Component {
             : (Course::where('code', $code)->value('college') ?? $code);
     }
 
+    /**
+     * A college is LOCKED while it has an ACTIVE coordinator: its departments
+     * (BSIT, BCS, ...) cannot be edited, added or removed until that coordinator
+     * is deactivated. Returns the active coordinator's name, or null if unlocked.
+     */
+    private function activeCoordinatorOf(string $college): ?string
+    {
+        return $this->occupiedColleges()[$college] ?? null;
+    }
+
     public function getPhotoUrl(?string $path): string
     {
         if (!$path || str_contains($path, 'default.png')) return asset('storage/alumni-photos/default.png');
@@ -487,6 +497,12 @@ new class extends Component {
 
     public function startEditingCollege(string $college): void
     {
+        if ($coordName = $this->activeCoordinatorOf($college)) {
+            $this->orgCourseAlert     = "Cannot edit departments: \"{$college}\" has an active coordinator ({$coordName}). Deactivate the coordinator first.";
+            $this->orgCourseAlertType = 'error';
+            return;
+        }
+
         $this->orgAddingToCollege = $college;
         $this->orgSelectedCourseCodes = Course::where('college', $college)->pluck('code')->toArray();
         $this->orgCourseAlert = '';
@@ -540,6 +556,30 @@ new class extends Component {
         $this->savingOrgCourse = true;
         $college = trim($this->orgAddingToCollege ?? '');
         if (!$college) { $this->orgCourseAlert = 'College name missing.'; $this->orgCourseAlertType = 'error'; $this->savingOrgCourse = false; return; }
+
+        // LOCK: no adding / editing / removing departments while this college has an ACTIVE coordinator.
+        if ($coordName = $this->activeCoordinatorOf($college)) {
+            $this->orgCourseAlert     = "Cannot change departments: \"{$college}\" has an active coordinator ({$coordName}). Deactivate the coordinator first.";
+            $this->orgCourseAlertType = 'error';
+            $this->savingOrgCourse    = false;
+            return;
+        }
+
+        // LOCK (other side): never let a save pull departments out of a DIFFERENT college that is locked.
+        $occupiedNow  = $this->occupiedColleges();
+        $lockedSource = Course::whereIn('code', $this->orgSelectedCourseCodes)
+            ->whereNotNull('college')
+            ->where('college', '!=', $college)
+            ->pluck('college')->unique()
+            ->filter(fn ($c) => isset($occupiedNow[$c]))
+            ->values();
+        if ($lockedSource->isNotEmpty()) {
+            $this->orgCourseAlert     = 'Cannot move departments out of a college with an active coordinator: ' . $lockedSource->implode(', ') . '.';
+            $this->orgCourseAlertType = 'error';
+            $this->savingOrgCourse    = false;
+            return;
+        }
+
         if (empty($this->orgSelectedCourseCodes)) { $this->orgCourseAlert = 'Select at least one course.'; $this->orgCourseAlertType = 'error'; $this->savingOrgCourse = false; return; }
         try {
             Course::where('college', $college)->whereNotIn('code', $this->orgSelectedCourseCodes)->update(['college' => null]);
@@ -896,7 +936,9 @@ new class extends Component {
 <div class="flex flex-col" style="height: calc(100vh - 120px); max-height: calc(100vh - 120px); overflow: hidden;">
 
 <style>
-    /* ── Search highlight — same light blue mark used on Alumni Records ── */
+    [x-cloak] { display: none !important; }
+
+    /* ── Search highlight — same light blue mark used on Alumni Records / Manage Job ── */
     mark.cp-hl {
         background: #BFDBFE;
         color: inherit;
@@ -905,59 +947,24 @@ new class extends Component {
         font-weight: 700;
     }
 
-    /* ══ Coordinator table — same interaction language as Alumni Records ══ */
-    .coord-row,
-    .coord-row * {
-        cursor: pointer;
-        user-select: none !important;
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-        transition: background .08s ease;
+    /* ── Disable text selection across the page header + table (same treatment
+       as Manage Job). Inputs stay typeable; modals render outside this root. ── */
+    #dir-coord-root,
+    #dir-coord-root * {
+        -webkit-user-select: none;
+        -moz-user-select: none;
+        -ms-user-select: none;
+        user-select: none;
     }
-    .coord-row:hover { background: #F7F4FA !important; }
+    #dir-coord-root input {
+        -webkit-user-select: text;
+        -moz-user-select: text;
+        -ms-user-select: text;
+        user-select: text;
+    }
 
-    .coord-mrow,
-    .coord-mrow * {
-        cursor: pointer;
-        user-select: none !important;
-        -webkit-user-select: none !important;
-        -moz-user-select: none !important;
-        -ms-user-select: none !important;
-    }
-    .coord-mrow {
-        background: #fff;
-        border-bottom: 1px solid #F0ECF5;
-        transition: background .08s ease;
-        padding: 12px 14px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .coord-mrow:active { background: #F0ECF5; }
-
-    /* ══ FIX #2: whole page layout is now locked/fixed — header, filter bar,
-       and pagination bar never move. Only the table body area (.coord-scroll-area)
-       scrolls internally. The outer wrapper div uses a hard height with
-       overflow:hidden (see root div above) so nothing outside this card can
-       cause page-level scrolling; this content block fills the remaining
-       vertical space with flex-1 + min-h-0, and the inner scroll div is the
-       only element with overflow-y:auto. ══ */
-    .coord-table-card { display: flex; flex-direction: column; min-height: 0; background: #fff; }
-    .coord-scroll-area { overflow-y: auto; overflow-x: hidden; min-height: 0; }
-    .coord-scroll-area::-webkit-scrollbar { width: 5px; }
-    .coord-scroll-area::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
-    .coord-scroll-area::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-    .coord-scroll-area::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
-
-    /* ══ Long, fill-the-screen table card (same look as Jobs / Event Overview) ══ */
-    @media (min-width: 768px) {
-        .coord-table-card { flex: none; height: calc(100vh - 190px); height: calc(100dvh - 190px); min-height: 480px; }
-    }
-    .coord-filter-wrap { padding: 12px; background: #fff; border-bottom: 1px solid #E8E0F0; flex-shrink: 0; }
-    .coord-filter-bar  { background: #FAF8FD; border: 1px solid #E8E0F0; border-radius: 14px; }
-    .coord-row td { border-bottom: 1px solid #F3EEF8; }
-    .coord-row:last-child td { border-bottom: none; }
+    /* ══ Fixed-height flex-fill card — identical to Manage Job's .job-table-card ══ */
+    .coord-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
     @media (max-width: 640px) {
         .coord-table-card {
@@ -969,31 +976,64 @@ new class extends Component {
         }
     }
 
-    /* ══ Filter bar inputs — thin, consistent 1px border everywhere, no fat focus ring ══ */
-    .coord-filter-input,
-    .coord-filter-input:focus,
-    .coord-filter-input:hover,
-    .coord-filter-input:active {
-        border-width: 1px !important;
-        border-color: #E8E0F0 !important;
-        box-shadow: none !important;
-        outline: none !important;
+    /* ══ Mobile stacked card rows (same as Manage Job's .job-mrow) ══ */
+    .coord-mrow {
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+        background: #fff;
+        border-bottom: 1px solid #F0ECF5;
+        padding: 12px 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        transition: background .08s ease;
     }
-    .coord-filter-input:hover { border-color: #c4b5d4 !important; }
-    .coord-filter-input:focus {
-        border-color: #7a3f91 !important;
+    .coord-mrow:active { background: #F0ECF5; }
+
+    .scroll-c {
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-y: contain;
+        touch-action: pan-y;
     }
-    input.coord-filter-input, select.coord-filter-select { height: 38px; }
-    .coord-filter-select {
-        -webkit-appearance: none !important;
-        -moz-appearance: none !important;
-        appearance: none !important;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E") !important;
-        background-repeat: no-repeat !important;
-        background-position: right 0.6rem center !important;
-        background-size: 1.1em !important;
+    .scroll-c::-webkit-scrollbar { width: 5px; }
+    .scroll-c::-webkit-scrollbar-track { background: transparent; border-radius: 99px; }
+    .scroll-c::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+    .scroll-c::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+    /* ══ Table rows white, hover tint, no tap-highlight flash — same as Manage Job ══ */
+    #coord-table-scroll table,
+    #coord-table-scroll tr,
+    #coord-table-scroll td {
+        -webkit-tap-highlight-color: transparent;
     }
-    .coord-filter-select::-ms-expand { display: none; }
+    #coord-table-scroll,
+    #coord-table-scroll table,
+    #coord-table-scroll tbody,
+    #coord-table-scroll tr {
+        background: #ffffff !important;
+    }
+    #coord-table-scroll tr[data-coord-row]:hover {
+        background: #F0F0F0 !important;
+    }
+
+    select.tw-select-arrow {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+        background-position: right 0.6rem center;
+        background-repeat: no-repeat;
+        background-size: 1.25em 1.25em;
+        padding-right: 2.25rem;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        appearance: none;
+        cursor: pointer;
+    }
+
+    /* Fixed-position cursor tooltips (row "View Profile" + any [data-tip]) — desktop only */
+    #coord-hover-tip, #coord-data-tip { display: none !important; }
+    @media (min-width: 1024px) {
+        #coord-hover-tip, #coord-data-tip { display: block !important; }
+    }
 
     /* ══ Manage Colleges modal — simple header, no sidebar ══ */
     /* Manage Colleges: list column width. Plain CSS (not Tailwind col-span-8/9 utilities,
@@ -1036,13 +1076,6 @@ new class extends Component {
         .mc-right .mc-scroll { overflow: visible; }
     }
 
-    /* ══ Coordinator page — vertically centered, fluid on every screen ══ */
-    .coord-page-body { justify-content: flex-start; }
-    @media (max-width: 640px) {
-        .coord-page-body { padding-left: 0 !important; padding-right: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; gap: 0 !important; }
-        .coord-page-header { padding: 14px 16px 12px; background: #fff; border-bottom: 1px solid #E8E0F0; }
-        .coord-table-card { max-height: none !important; height: auto !important; flex: 1 1 auto; }
-    }
     .cfs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #f8f7fb; }
 
     /* ══ View Profile — hover-to-upload photo (mirrors alumni-records) ══ */
@@ -1151,21 +1184,6 @@ new class extends Component {
     }
     .suffix-compact-clear:hover { color: #dc2626; background: #fef2f2; }
 
-    /* ── Filter-bar interaction blocker ─────────────────────────────────
-       Absolutely-positioned transparent overlay rendered inside the filter
-       bar while any filter / pagination Livewire request is in flight.
-       Sits above every control (z-index: 20) so the user cannot fire a
-       second filter request mid-flight (race / double-update).
-       cursor: default so the pointer gives no "clickable" cue.
-       Same pattern as the nav-blocker on the Director Dashboard. ── */
-    .coord-filter-blocker {
-        position: absolute;
-        inset: 0;
-        z-index: 20;
-        pointer-events: all;
-        cursor: default;
-        background: rgba(245, 245, 245, 0.55);
-    }
     .coord-reg-input:focus {
         border-color: #7a3f91 !important;
         box-shadow: 0 0 0 3px rgba(122,63,145,.18) !important;
@@ -1173,15 +1191,21 @@ new class extends Component {
     }
 </style>
 
-{{-- ══ MOUSE-FOLLOWING CURSOR LABEL ══ --}}
-<div id="coord-cursor-label"
-     class="fixed z-[99999] pointer-events-none flex items-center gap-1.5 bg-gray-900 text-white text-[11px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-lg shadow-xl whitespace-nowrap select-none opacity-0 invisible transition-[opacity,visibility] duration-75"
-     style="left:-999px;top:-999px;transform:translateY(-100%);">
-    <svg class="w-2.5 h-2.5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 16 16">
-        <path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/>
-    </svg>
-    View Profile
-    <span class="absolute top-full left-1/2 -translate-x-1/2 border-[6px] border-transparent border-t-gray-900"></span>
+{{-- Hover tooltip (row "View Profile") — same fixed/overlay approach as Manage Job --}}
+<div id="coord-hover-tip"
+     class="fixed bg-[#1a1a1a] text-white text-[11px] font-semibold tracking-[.05em] px-3 py-1.5 rounded-[7px] whitespace-nowrap pointer-events-none opacity-0 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)] transition-opacity duration-150"
+     style="transform:translate(12px,18px);">
+    <i class="fas fa-eye mr-1.5"></i>View Profile
+    <span class="absolute bottom-full left-3.5 border-[5px] border-transparent border-b-[#1a1a1a]"></span>
+</div>
+
+{{-- Generic fixed/overlay tooltip for any [data-tip] element (action buttons, locked
+     Edit button in Manage Colleges, department chips). position:fixed + z-[99999] so it
+     is never clipped by the table's overflow or the full-screen modals. --}}
+<div id="coord-data-tip"
+     class="fixed bg-[#1a1a1a] text-white text-[11px] font-semibold tracking-[.05em] px-3 py-1.5 rounded-[7px] whitespace-nowrap pointer-events-none opacity-0 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)] transition-opacity duration-150"
+     style="transform:translate(-50%,-130%);">
+    <span id="coord-data-tip-text"></span>
 </div>
 
 {{-- ══ FLASH TOAST ══ --}}
@@ -1214,97 +1238,136 @@ new class extends Component {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="coord-page-body flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+<div id="dir-coord-root" class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
-    {{-- PAGE HEADER — fixed, never scrolls --}}
-    <div class="coord-page-header flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0">
+    {{-- ══ PAGE HEADER ══ --}}
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
         <div class="flex items-center gap-4">
-            <div class="w-11 h-11 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-md" style="background:#7a3f91;">
-                <i class="fas fa-users-gear text-white text-lg"></i>
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-users-gear text-white text-base"></i>
             </div>
-            <div style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                <h1 class="text-2xl font-semibold tracking-tight text-[#111111]">Manage Coordinator</h1>
-                <p class="text-sm leading-relaxed mt-0.5 text-[#7A3F91] font-normal">
-                    Manage coordinator records and
-                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">college assignments</span>
+            <div>
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Manage Coordinator</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                    <i class="fas fa-circle text-[5px] text-emerald-500 align-middle"></i>
+                    <span>Manage coordinator records and college assignments.</span>
                 </p>
             </div>
         </div>
+        <div class="flex items-center gap-2.5 flex-wrap">
+            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide">
+                <i class="fas fa-users-gear text-purple-600 text-[10px]"></i>
+                {{ $this->coordinatorRecords->total() }} {{ $this->coordinatorRecords->total() !== 1 ? 'Coordinators' : 'Coordinator' }}
+            </span>
 
-        <div class="flex items-center gap-2 shrink-0">
-            <div class="relative group">
+            {{-- Register Coordinator --}}
+            <div class="relative inline-flex group">
                 <button wire:click="openModal('registerCoordinator')"
                         wire:loading.attr="disabled" wire:target="openModal('registerCoordinator')"
-                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#7a3f91] hover:bg-[#5e2f72] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
+                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72] disabled:opacity-70 disabled:cursor-wait"
                         aria-label="Register Coordinator">
-                    <i class="fas fa-user-plus text-white text-sm" wire:loading.remove wire:target="openModal('registerCoordinator')"></i>
-                    <i class="fas fa-spinner animate-spin text-white text-sm" wire:loading wire:target="openModal('registerCoordinator')"></i>
+                    <span wire:loading.remove wire:target="openModal('registerCoordinator')">
+                        <i class="fas fa-user-plus text-sm"></i>
+                    </span>
+                    <span wire:loading wire:target="openModal('registerCoordinator')">
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
+                    </span>
                 </button>
-                <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-                    <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
-                        Register Coordinator
-                    </div>
+                <div class="hidden lg:block absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50 shadow-lg">
+                    <i class="fas fa-user-plus text-[9px] mr-1"></i>Register Coordinator
+                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-[4px] border-transparent border-b-[#1a1a1a]"></span>
                 </div>
             </div>
 
-            <div class="relative group">
+            {{-- Manage Colleges --}}
+            <div class="relative inline-flex group">
                 <button wire:click="openModal('manageOrgCourses')"
                         wire:loading.attr="disabled" wire:target="openModal('manageOrgCourses')"
-                        class="inline-flex items-center justify-center w-[38px] h-[38px] rounded-xl bg-[#1d4ed8] hover:bg-[#1e40af] shadow-md hover:shadow-lg transition-all duration-150 active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
+                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl font-semibold text-white shadow-md transition cursor-pointer bg-[#1d4ed8] hover:bg-[#1e40af] disabled:opacity-70 disabled:cursor-wait"
                         aria-label="Manage Colleges">
-                    <i class="fas fa-building-columns text-white text-sm" wire:loading.remove wire:target="openModal('manageOrgCourses')"></i>
-                    <i class="fas fa-spinner animate-spin text-white text-sm" wire:loading wire:target="openModal('manageOrgCourses')"></i>
+                    <span wire:loading.remove wire:target="openModal('manageOrgCourses')">
+                        <i class="fas fa-building-columns text-sm"></i>
+                    </span>
+                    <span wire:loading wire:target="openModal('manageOrgCourses')">
+                        <i class="fas fa-spinner fa-spin text-sm"></i>
+                    </span>
                 </button>
-                <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-50">
-                    <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md whitespace-nowrap relative">
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
-                        Manage Colleges
-                    </div>
+                <div class="hidden lg:block absolute top-[calc(100%+8px)] left-1/2 -translate-x-1/2 bg-[#1a1a1a] text-white px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-50 shadow-lg">
+                    <i class="fas fa-building-columns text-[9px] mr-1"></i>Manage Colleges
+                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-[4px] border-transparent border-b-[#1a1a1a]"></span>
                 </div>
             </div>
         </div>
     </div>
 
-    {{-- ══ CONTENT BLOCK — fills remaining height, only inner table scrolls ══ --}}
+    {{-- ══ UNIFIED TABLE BLOCK — same fixed-height / inner-scroll pattern as Manage Job:
+         only the table body area scrolls, never the whole page or the table sideways. ══ --}}
     <div class="coord-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
-        {{-- FILTER BAR — fixed, never scrolls --}}
-        <div class="coord-filter-wrap">
-        <div class="coord-filter-bar px-3 py-2.5 flex flex-wrap gap-2 items-center relative">
-
-            {{-- Filter-bar blocker: hides all controls during Livewire loading --}}
-            <div class="coord-filter-blocker"
-                 wire:loading
-                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1),viewProfile">
-            </div>
+        {{-- ── FILTER BAR ── --}}
+        <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="coordSearch,coordCollege,coordStatus">
 
             <div class="relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
-                 x-data="{ q: '', init() { this.q = $wire.coordSearch ?? ''; $wire.$watch('coordSearch', val => { if (val !== this.q) this.q = val; }); } }">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-500 pointer-events-none"></i>
-                <input type="text" x-model="q" @input.debounce.200ms="$wire.set('coordSearch', q)"
+                 x-data="{q:'',init(){this.q=$wire.coordSearch??'';$wire.$watch('coordSearch',v=>{if(v!==this.q)this.q=v;});}}">
+                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
+                <input type="text" x-model="q" @input.debounce.400ms="$wire.set('coordSearch',q)"
                        placeholder="Search..."
-                       class="coord-filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition"
-                       autocomplete="off" spellcheck="false">
+                       class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 pl-9 rounded-lg w-full transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] placeholder-[#a78bbd]"
+                       autocomplete="off" maxlength="100" spellcheck="false">
             </div>
 
-            <span class="text-xs font-bold uppercase tracking-widest text-[#7a3f91] select-none px-1">Filters</span>
+            <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+                Filters
+            </div>
 
             <select wire:model.live="coordCollege"
-                    class="coord-filter-input coord-filter-select py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition cursor-pointer">
-                <option value="">All Colleges</option>
+                    wire:loading.attr="disabled"
+                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
+                <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
                 @foreach($this->orgColleges as $col)
                     <option value="{{ $col }}">{{ $col }}</option>
                 @endforeach
             </select>
 
             <select wire:model.live="coordStatus"
-                    class="coord-filter-input coord-filter-select py-[7px] px-3 pr-8 text-[13px] font-medium text-gray-900 bg-white border border-gray-300 rounded-lg transition cursor-pointer">
-                <option value="">All Status</option>
+                    wire:loading.attr="disabled"
+                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4]">
+                <option value="" {{ $coordStatus ? 'disabled' : '' }}>All Statuses</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
             </select>
+
+            @if($coordStatus)
+            @php
+                $coordStatusPillMap = [
+                    'ACTIVE'   => ['label' => 'Active',   'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
+                    'INACTIVE' => ['label' => 'Inactive', 'cls' => 'bg-amber-50 border-amber-300 text-amber-800'],
+                ];
+                $cSPill = $coordStatusPillMap[$coordStatus] ?? null;
+            @endphp
+            @if($cSPill)
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $cSPill['cls'] }}">
+                <i class="fas fa-filter text-[9px]"></i>{{ $cSPill['label'] }}
+                <button wire:click="$set('coordStatus', '')" type="button"
+                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                    <i class="fas fa-xmark text-[10px]"></i>
+                </button>
+            </span>
+            @endif
+            @endif
+
+            @if($coordCollege)
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
+                <i class="fas fa-building-columns text-[9px]"></i>{{ $coordCollege }}
+                <button wire:click="$set('coordCollege', '')" type="button"
+                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                    <i class="fas fa-xmark text-[10px]"></i>
+                </button>
+            </span>
+            @endif
 
             @php $coordHasActiveFilters = $coordSearch || $coordCollege || $coordStatus; @endphp
             <button wire:click="resetCoordFilters"
@@ -1313,154 +1376,151 @@ new class extends Component {
                     wire:target="resetCoordFilters"
                     {{ !$coordHasActiveFilters ? 'disabled' : '' }}
                     title="{{ $coordHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 h-[38px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-                <i class="fas fa-rotate-left text-xs" wire:loading.remove wire:target="resetCoordFilters"></i>
-                <span wire:loading wire:target="resetCoordFilters">
-                    <i class="fas fa-spinner animate-spin text-xs"></i>
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                <span wire:loading.remove wire:target="resetCoordFilters">
+                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
                 </span>
-                <span class="hidden sm:inline">Reset</span>
+                <span wire:loading wire:target="resetCoordFilters">
+                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                </span>
+                <span class="hidden sm:inline text-[#333333]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
             </button>
-        </div>
+
+            {{-- Mobile-only college select --}}
+            <select wire:model.live="coordCollege"
+                    wire:loading.attr="disabled"
+                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
+                <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
+                @foreach($this->orgColleges as $col)
+                    <option value="{{ $col }}">{{ $col }}</option>
+                @endforeach
+            </select>
         </div>
 
-        {{-- TABLE BODY — THIS is the only scrollable region in the whole page --}}
-        <div class="bg-white flex-1 flex flex-col relative min-h-0" x-data="{ showTop: false }">
+        {{-- ── TABLE WRAPPER — only this region scrolls; loading dim applies here only
+             so the filter bar and pagination stay fixed. ── --}}
+        <div class="relative flex-1 min-h-0 bg-white">
 
-            {{-- Center overlay spinner — mirrors Alumni Records: icon only,
-                 no background box, absolutely positioned over the table
-                 (not sticky/in-flow) so it never pushes the sticky <thead>
-                 down inside the scroll container. Pure overlay: floats on
-                 top, table layout stays completely undisturbed while
-                 filtering. Replaces the old thin shimmer progress bar,
-                 which read as visually "stuck" mid-filter. Also covers
-                 pagination (previousPage/nextPage/gotoPage/$set('page'))
-                 so flipping pages gets the same clear loading feedback
-                 as filtering. --}}
-            <div class="absolute top-0 left-0 w-full z-20 flex items-center justify-center pointer-events-none"
-                 wire:loading wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1),viewProfile">
-                <div class="flex items-center justify-center" style="margin-top:16px;">
-                    <i class="fas fa-spinner fa-spin" style="font-size:34px; color:#7A3F91;"></i>
-                </div>
+            {{-- Centered loading spinner over the table itself (same as Manage Job) --}}
+            <div class="absolute inset-0 z-20 items-center justify-center hidden"
+                 wire:loading.flex wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,viewProfile">
+                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
-            <div id="coord-scroll"
-                 @scroll.passive="showTop = $event.target.scrollTop > 200"
-                 class="coord-scroll-area flex-1 transition-opacity duration-200"
-                 wire:loading.class="opacity-40 pointer-events-none"
-                 wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,$set('page', 1),viewProfile">
+            <div id="coord-table-scroll"
+                 class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
+                 wire:loading.class="opacity-50" wire:target="coordSearch,coordCollege,coordStatus,resetCoordFilters,previousPage,nextPage,gotoPage,viewProfile">
 
-                @if($this->coordinatorRecords->count() > 0)
+            @if($this->coordinatorRecords->count() > 0)
+
+            {{-- Build the course lookups ONCE per render instead of running 2-3 queries per row. --}}
+            @php
+                $allCoursesLookup = $this->allCoursesForAssign;
+                $collegeNameSet   = $allCoursesLookup->pluck('college')->filter()->unique()->flip();
+                $codeToCollege    = $allCoursesLookup->pluck('college', 'code');
+                $coursesByCollege = $allCoursesLookup->filter(fn ($c) => $c->college)->groupBy('college');
+            @endphp
+
+            <div class="bg-white">
                 {{-- ── DESKTOP / TABLET: table view ── --}}
-                <table class="w-full border-collapse bg-white hidden md:table table-fixed">
+                <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
                         <col style="width:24%;"><col style="width:12%;"><col style="width:22%;"><col style="width:22%;"><col style="width:10%;"><col style="width:10%;">
                     </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0; user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                         <tr>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Name</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Teacher ID</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Email</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">College</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-right text-xs font-semibold text-[#555555] uppercase tracking-widest">Action</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Teacher ID</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Email</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">College</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
+                            <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-widest text-[#555555]">Action</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody class="divide-y divide-[#F5F5F5]">
                         @foreach($this->coordinatorRecords as $item)
                         @php
-                            $dept        = $item->department;
-                            $directMatch = \App\Models\Course::where('college', $dept)->exists();
-                            $collegeName = $directMatch ? $dept : (\App\Models\Course::where('code', $dept)->value('college') ?? $dept);
-                            // code => full course name, so each chip can show its full
-                            // name as a hover tooltip instead of just the short code.
-                            $deptCodeNames = \App\Models\Course::where('college', $collegeName)->orderBy('code')->pluck('name', 'code');
+                            $dept          = $item->department;
+                            $collegeName   = isset($collegeNameSet[$dept]) ? $dept : ($codeToCollege[$dept] ?? $dept);
+                            $deptCodeNames = ($coursesByCollege[$collegeName] ?? collect())->pluck('name', 'code');
+                            $isActive      = $item->status === 'ACTIVE';
+                            $toggleAction  = $isActive ? 'deactivate' : 'activate';
                         @endphp
-                        <tr class="coord-row bg-white"
+                        <tr class="coord-row transition-colors duration-100 cursor-pointer select-none bg-white hover:bg-[#f5f0fa] active:bg-[#f5f0fa]"
+                            wire:loading.class.remove="hover:bg-[#f5f0fa]" wire:loading.class="!bg-purple-50 opacity-60 cursor-wait" wire:target="viewProfile({{ $item->id }})"
+                            wire:click="viewProfile({{ $item->id }})"
                             wire:key="coord-row-{{ $item->id }}"
                             data-coord-row
                             data-coord-id="{{ $item->id }}"
-                            wire:click="viewProfile({{ $item->id }})"
                             role="button"
                             tabindex="0"
                             onkeypress="if(event.key==='Enter')this.click()">
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
+
+                            <td class="px-4 py-3.5 overflow-hidden">
                                 <div class="flex items-center gap-3">
                                     <img src="{{ $this->getPhotoUrl($item->profile_photo) }}"
                                          alt="{{ $item->first_name }}"
                                          class="w-10 h-10 rounded-xl object-cover shrink-0 shadow-sm ring-1 ring-gray-200">
-                                    <span class="font-semibold text-gray-900 text-sm leading-tight truncate block">
-                                        {!! $this->highlight($this->formatDisplayName($item->first_name ?? '', $item->middle_initial ?? '', $item->last_name ?? '', $item->suffix ?? ''), $coordSearch) !!}
-                                    </span>
+                                    <div class="min-w-0">
+                                        <p class="font-semibold text-sm leading-snug truncate text-[#333333]">
+                                            {!! $this->highlight($this->formatDisplayName($item->first_name ?? '', $item->middle_initial ?? '', $item->last_name ?? '', $item->suffix ?? ''), $coordSearch) !!}
+                                        </p>
+                                        @if($item->updated_at)
+                                        <p class="text-xs mt-0.5 text-[#777777] truncate">{{ $item->updated_at->diffForHumans() }}</p>
+                                        @endif
+                                    </div>
                                 </div>
                             </td>
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <span class="font-mono text-gray-700 text-sm truncate block">{!! $this->highlight($item->id_number ?? '', $coordSearch) !!}</span>
+
+                            <td class="px-4 py-3.5 overflow-hidden">
+                                <span class="font-mono text-[#333333] text-sm truncate block">{!! $this->highlight($item->id_number ?? '', $coordSearch) !!}</span>
                             </td>
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <span class="text-gray-600 text-sm truncate block">{!! $this->highlight($item->email ?? '', $coordSearch) !!}</span>
+
+                            <td class="px-4 py-3.5 overflow-hidden">
+                                <span class="text-[#333333] text-sm truncate block">{!! $this->highlight($item->email ?? '', $coordSearch) !!}</span>
                             </td>
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <span class="block font-semibold text-gray-800 text-sm leading-snug truncate">{{ $collegeName }}</span>
+
+                            <td class="px-4 py-3.5 overflow-hidden">
+                                <p class="text-sm font-semibold text-[#333333] leading-snug truncate">{{ $collegeName }}</p>
                                 @if($deptCodeNames->isNotEmpty())
                                 <div class="flex flex-wrap gap-1 mt-1">
                                     @foreach($deptCodeNames as $dc => $dcName)
-                                        <span class="text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded-md bg-[#f5eef9] text-[#7a3f91] border border-[#e2d3ef] cursor-default" title="{{ $dcName ?: $dc }}">{{ $dc }}</span>
+                                        <span class="text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded-md bg-[#f5eef9] text-[#7a3f91] border border-[#e2d3ef] cursor-default"
+                                              data-coord-action data-tip="{{ $dcName ?: $dc }}">{{ $dc }}</span>
                                     @endforeach
                                 </div>
                                 @endif
                             </td>
-                            <td class="px-4 sm:px-5 py-4 text-center whitespace-nowrap">
-                                @php
-                                    [$sc, $sd] = match($item->status) {
-                                        'ACTIVE'    => ['border-emerald-200 bg-emerald-50 text-emerald-700', 'bg-emerald-500'],
-                                        'INACTIVE'  => ['border-amber-200 bg-amber-50 text-amber-700',       'bg-amber-500'],
-                                        'SUSPENDED' => ['border-red-200 bg-red-50 text-red-700',             'bg-red-500'],
-                                        default     => ['border-gray-200 bg-gray-50 text-gray-600',          'bg-gray-400'],
-                                    };
-                                @endphp
-                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border whitespace-nowrap {{ $sc }}">
-                                    <span class="w-1.5 h-1.5 rounded-full {{ $sd }}"></span>{{ ucfirst(strtolower($item->status)) }}
-                                </span>
+
+                            <td class="px-4 py-3.5 text-center">
+                                @if($isActive)
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
+                                        <i class="fas fa-circle-check text-[9px] mr-1"></i>Active
+                                    </span>
+                                @elseif($item->status === 'SUSPENDED')
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-700 whitespace-nowrap">
+                                        <i class="fas fa-ban text-[9px] mr-1"></i>Suspended
+                                    </span>
+                                @else
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
+                                        <i class="fas fa-circle-pause text-[9px] mr-1"></i>{{ ucfirst(strtolower($item->status ?? 'Inactive')) }}
+                                    </span>
+                                @endif
                             </td>
-                            <td class="px-4 sm:px-5 py-4 text-right">
-                                <div class="flex items-center justify-end" data-coord-actions>
-                                    @if($item->status === 'ACTIVE')
-                                        <div class="relative group/btn">
-                                            <button type="button"
-                                                    data-coord-action
-                                                    wire:click.stop="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"
-                                                    wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"
-                                                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-50 border border-amber-300 text-amber-600 hover:bg-amber-100 hover:border-amber-400 transition-all duration-150 active:scale-95 disabled:opacity-50"
-                                                    aria-label="Deactivate">
-                                                <i class="fas fa-ban text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"></i>
-                                                <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'deactivate')"></i>
-                                            </button>
-                                            <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
-                                                <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
-                                                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
-                                                    Deactivate
-                                                </div>
-                                            </div>
-                                        </div>
-                                    @else
-                                        <div class="relative group/btn">
-                                            <button type="button"
-                                                    data-coord-action
-                                                    wire:click.stop="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"
-                                                    wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"
-                                                    class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-600 hover:bg-emerald-100 hover:border-emerald-400 transition-all duration-150 active:scale-95 disabled:opacity-50"
-                                                    aria-label="Activate">
-                                                <i class="fas fa-circle-check text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"></i>
-                                                <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, 'activate')"></i>
-                                            </button>
-                                            <div class="hidden md:block absolute top-full left-1/2 -translate-x-1/2 mt-1.5 pointer-events-none opacity-0 group-hover/btn:opacity-100 transition-opacity duration-150 z-50">
-                                                <div class="bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded whitespace-nowrap relative">
-                                                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-gray-900"></span>
-                                                    Activate
-                                                </div>
-                                            </div>
-                                        </div>
-                                    @endif
+
+                            <td class="px-4 py-3.5">
+                                <div class="flex items-center justify-end gap-1.5" @click.stop>
+                                    {{-- Activate / Deactivate — single button, icon/color/tooltip swap on $isActive --}}
+                                    <div class="relative inline-flex" data-coord-action data-tip="{{ $isActive ? 'Deactivate Coordinator' : 'Activate Coordinator' }}">
+                                        <button type="button"
+                                                wire:click.stop="confirmToggleCoordinatorStatus({{ $item->id }}, '{{ $toggleAction }}')"
+                                                wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, '{{ $toggleAction }}')"
+                                                class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer disabled:opacity-60 disabled:cursor-wait {{ $isActive ? 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-white hover:border-amber-400' : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-white hover:border-emerald-400' }}"
+                                                aria-label="{{ $isActive ? 'Deactivate' : 'Activate' }}">
+                                            <i class="fas {{ $isActive ? 'fa-ban' : 'fa-circle-check' }}" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, '{{ $toggleAction }}')"></i>
+                                            <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $item->id }}, '{{ $toggleAction }}')"></i>
+                                        </button>
+                                    </div>
                                 </div>
                             </td>
                         </tr>
@@ -1473,64 +1533,61 @@ new class extends Component {
                     @foreach($this->coordinatorRecords as $item)
                     @php
                         $dept        = $item->department;
-                        $directMatch = \App\Models\Course::where('college', $dept)->exists();
-                        $collegeName = $directMatch ? $dept : (\App\Models\Course::where('code', $dept)->value('college') ?? $dept);
+                        $collegeName = isset($collegeNameSet[$dept]) ? $dept : ($codeToCollege[$dept] ?? $dept);
+                        $isActive    = $item->status === 'ACTIVE';
                     @endphp
-                    <div class="coord-mrow" wire:key="coord-mrow-{{ $item->id }}" data-coord-row data-coord-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
+                    <div class="coord-mrow"
+                         wire:loading.class="opacity-60 cursor-wait" wire:target="viewProfile({{ $item->id }})"
+                         wire:key="coord-mrow-{{ $item->id }}" data-coord-row data-coord-id="{{ $item->id }}" wire:click="viewProfile({{ $item->id }})">
                         <img src="{{ $this->getPhotoUrl($item->profile_photo) }}" alt="{{ $item->first_name }}"
                              class="w-11 h-11 rounded-xl object-cover shrink-0 ring-1 ring-gray-200">
                         <div class="flex-1 min-w-0">
-                            <p class="font-semibold text-gray-900 text-sm truncate">
+                            <p class="font-semibold text-sm truncate text-gray-900">
                                 {!! $this->highlight($this->formatDisplayName($item->first_name ?? '', $item->middle_initial ?? '', $item->last_name ?? '', $item->suffix ?? ''), $coordSearch) !!}
                             </p>
                             <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                                <span class="font-mono text-gray-600 text-xs">{!! $this->highlight($item->id_number ?? '', $coordSearch) !!}</span>
+                                <span class="font-mono text-xs text-gray-600">{!! $this->highlight($item->id_number ?? '', $coordSearch) !!}</span>
                                 <span class="text-gray-300 text-xs">&bull;</span>
-                                <span class="text-gray-600 text-xs truncate">{{ $collegeName }}</span>
+                                <span class="text-xs text-gray-600 truncate">{{ $collegeName }}</span>
                             </div>
-                            @php
-                                [$sc, $sd] = match($item->status) {
-                                    'ACTIVE'    => ['border-emerald-200 bg-emerald-50 text-emerald-700', 'bg-emerald-500'],
-                                    'INACTIVE'  => ['border-amber-200 bg-amber-50 text-amber-700',       'bg-amber-500'],
-                                    'SUSPENDED' => ['border-red-200 bg-red-50 text-red-700',             'bg-red-500'],
-                                    default     => ['border-gray-200 bg-gray-50 text-gray-600',          'bg-gray-400'],
-                                };
-                            @endphp
-                            <span class="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-semibold {{ $sc }}">
-                                <span class="w-1.5 h-1.5 rounded-full {{ $sd }}"></span>{{ ucfirst(strtolower($item->status)) }}
-                            </span>
+                            @if($isActive)
+                                <span class="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700">Active</span>
+                            @elseif($item->status === 'SUSPENDED')
+                                <span class="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 text-red-700">Suspended</span>
+                            @else
+                                <span class="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700">{{ ucfirst(strtolower($item->status ?? 'Inactive')) }}</span>
+                            @endif
                         </div>
                         <i class="fas fa-chevron-right text-gray-300 text-xs shrink-0"></i>
                     </div>
                     @endforeach
                 </div>
-
-                @else
-                <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-20 bg-white">
-                    <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-[#f5eef9]">
-                        <i class="fas fa-users-gear text-xl text-[#c49dd8]"></i>
-                    </div>
-                    <div>
-                        <p class="font-semibold text-base text-gray-700">No coordinators found</p>
-                        <p class="text-sm mt-1 text-gray-500">
-                            @if($coordCollege || $coordSearch || $coordStatus) Try adjusting your filters or clearing them.
-                            @else Register a new coordinator to get started. @endif
-                        </p>
-                    </div>
-
-                </div>
-                @endif
-
             </div>
 
-            <button x-show="showTop" @click="document.getElementById('coord-scroll').scrollTo({top:0,behavior:'smooth'})"
-                    class="absolute bottom-4 right-4 z-20 w-8 h-8 rounded-full flex items-center justify-center shadow-lg text-white transition hover:opacity-90 bg-[#7a3f91]"
-                    style="display:none;">
-                <i class="fas fa-arrow-up text-sm"></i>
-            </button>
+            @else
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
+                    <i class="fas fa-users-gear text-xl text-gray-400"></i>
+                </div>
+                <div>
+                    <p class="font-semibold text-base text-[#333333]">
+                        @if($coordCollege || $coordSearch || $coordStatus) No coordinators match your filters
+                        @else No coordinators yet
+                        @endif
+                    </p>
+                    <p class="text-sm mt-1 text-[#555555]">
+                        @if($coordCollege || $coordSearch || $coordStatus) Try clearing your filters to see all coordinators.
+                        @else Click the <strong>register</strong> button above to add the first coordinator.
+                        @endif
+                    </p>
+                </div>
+            </div>
+            @endif
+
+            </div>
         </div>
 
-        {{-- PAGINATION BAR — fixed, never scrolls --}}
+        {{-- ── PAGINATION ── --}}
         @php
             $total   = $this->coordinatorRecords->total();
             $pp      = $this->coordinatorRecords->perPage();
@@ -1541,45 +1598,53 @@ new class extends Component {
             $pgStart = max(1, $cp - 2);
             $pgEnd   = min($lp, $cp + 2);
         @endphp
-        <div class="flex items-center justify-between gap-2 flex-wrap px-5 min-h-[48px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] border-t border-[#7a3f91]/30 flex-shrink-0">
+        <div class="flex-shrink-0 border-t border-[#7a3f91]/30 px-4 min-h-[48px] flex items-center justify-between gap-2 flex-wrap py-1"
+             style="background: linear-gradient(to right, #7a3f91, #9b59b6);">
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
-                Showing <strong class="text-white font-bold">{{ $from }}–{{ $to }}</strong>
+                Showing <strong class="text-white font-bold">{{ $from }}&ndash;{{ $to }}</strong>
                 of <strong class="text-white font-bold">{{ $total }}</strong>
                 coordinator{{ $total !== 1 ? 's' : '' }}
-                @if($coordCollege || $coordSearch || $coordStatus)<span class="text-white/50 text-xs ml-1">(filtered)</span>@endif
+                @if($coordCollege || $coordSearch || $coordStatus)
+                    <span class="text-white/50 text-xs ml-1">(filtered)</span>
+                @endif
             </p>
-            <div class="flex items-center gap-1 flex-wrap">
+            <div class="flex items-center gap-1 flex-wrap py-2">
                 <button wire:click="previousPage('coordPage')"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if($this->coordinatorRecords->onFirstPage()) disabled @endif aria-label="Previous">
                     <i class="fas fa-chevron-left text-[9px]"></i>
                 </button>
                 @if($pgStart > 1)
-                    <button wire:click="$set('page', 1)" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
+                    <button wire:click="gotoPage(1, 'coordPage')"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                 @endif
                 @for($p = $pgStart; $p <= $pgEnd; $p++)
                     @if($p === $cp)
                         <span class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
-                        <button wire:click="gotoPage({{ $p }}, 'coordPage')" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
+                        <button wire:click="gotoPage({{ $p }}, 'coordPage')"
+                                class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
                 @endfor
                 @if($pgEnd < $lp)
                     @if($pgEnd < $lp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
-                    <button wire:click="gotoPage({{ $lp }}, 'coordPage')" class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
+                    <button wire:click="gotoPage({{ $lp }}, 'coordPage')"
+                            class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $lp }}</button>
                 @endif
                 <button wire:click="nextPage('coordPage')"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold bg-white/15 border border-white/25 text-white hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
                         @if(!$this->coordinatorRecords->hasMorePages()) disabled @endif aria-label="Next">
                     <i class="fas fa-chevron-right text-[9px]"></i>
                 </button>
-                <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">Page {{ $cp }}/{{ $lp }}</span>
+                <span class="hidden sm:inline text-white/60 text-xs font-normal whitespace-nowrap ml-1">
+                    Page {{ $cp }}/{{ $lp }}
+                </span>
             </div>
         </div>
 
-    </div>{{-- end content-block --}}
-</div>
+    </div>{{-- /table-block --}}
+</div>{{-- /main layout --}}
 
 
 {{-- ═══════════════════════════════════════════════════════════════ --}}
@@ -1933,7 +1998,6 @@ new class extends Component {
 
                 </form>
             </div>
-        </main>
     </div>
 </div>
 @endif
@@ -2593,9 +2657,21 @@ new class extends Component {
                                 <p class="text-xs text-gray-400 mt-1">Add one using the panel on the left.</p>
                             </div>
                             @else
+                            @php $occupiedMap = $this->occupiedColleges(); @endphp
+
+                            @if(count($occupiedMap) > 0)
+                            <div class="flex items-start gap-2 mb-3 px-3.5 py-2.5 rounded-xl bg-amber-50 border border-amber-200">
+                                <i class="fas fa-lock text-amber-600 text-xs mt-0.5 shrink-0"></i>
+                                <p class="text-xs text-amber-800 leading-snug">
+                                    Colleges with an <strong>active coordinator</strong> are locked — their departments can't be edited or removed.
+                                    Deactivate the coordinator first to unlock.
+                                </p>
+                            </div>
+                            @endif
+
                             <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-3 items-start">
                                 @foreach($orgCoursesList as $college => $departments)
-                                @php $occupied = $this->occupiedColleges(); $coordName = $occupied[$college] ?? null; @endphp
+                                @php $coordName = $occupiedMap[$college] ?? null; $isLocked = $coordName !== null; @endphp
                                 <div class="bg-white hover:border-[#d4aaeb] hover:shadow-md transition rounded-xl border border-gray-200 shadow-sm px-4 py-3" wire:key="college-row-{{ Str::slug($college) }}">
 
                                     {{-- NOTE ON RENAME UX FIX:
@@ -2653,9 +2729,12 @@ new class extends Component {
                                                     <span class="text-xs text-gray-500 mt-1 block">No departments</span>
                                                 @endif
                                                 @if($coordName)
-                                                    <div class="flex items-center gap-1.5 mt-1.5">
+                                                    <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
                                                         <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
                                                         <span class="text-xs text-[#333333]">{{ $coordName }}</span>
+                                                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                                            <i class="fas fa-lock text-[8px]"></i>Locked
+                                                        </span>
                                                     </div>
                                                 @else
                                                     <span class="text-xs text-gray-500 italic mt-1.5 block">Unassigned</span>
@@ -2679,7 +2758,16 @@ new class extends Component {
                                                     </div>
                                                 </div>
                                             </div>
-                                            {{-- FIX #4: tooltip label simplified to just "Edit" (was "Departments") --}}
+                                            {{-- Edit departments — LOCKED (disabled + lock icon) while this college has an ACTIVE coordinator --}}
+                                            @if($isLocked)
+                                            <div class="relative inline-flex" data-tip="Locked — deactivate {{ $coordName }} to edit departments">
+                                                <button type="button" disabled
+                                                        class="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 border border-gray-200 text-gray-400 opacity-70 cursor-not-allowed pointer-events-none"
+                                                        aria-label="Locked">
+                                                    <i class="fas fa-lock text-xs"></i>
+                                                </button>
+                                            </div>
+                                            @else
                                             <div class="relative group/b">
                                                 <button wire:click="startEditingCollege('{{ addslashes($college) }}')"
                                                         wire:loading.attr="disabled" wire:target="startEditingCollege('{{ addslashes($college) }}')"
@@ -2695,6 +2783,7 @@ new class extends Component {
                                                     </div>
                                                 </div>
                                             </div>
+                                            @endif
                                         </div>
                                         @endif
                                     </div>
@@ -2770,92 +2859,85 @@ new class extends Component {
 </div>
 @endif
 
-{{-- ── Mouse-following cursor label logic ── --}}
+{{-- ══ ROW HOVER TOOLTIP ("View Profile") + [data-tip] TOOLTIP SCRIPT ══
+     Delegated document-level listeners (same approach as Manage Job). Rows get fresh DOM
+     nodes on every page/filter change, so per-row binding silently stops working after the
+     first morph; delegated listeners never need re-binding. The element lookups happen on
+     every event, and the bound-flag stops duplicate listeners piling up on SPA navigation. ── --}}
 <script>
 (function () {
-    function init() {
-        const label = document.getElementById('coord-cursor-label');
-        if (!label) return;
+    if (window.__coordTipsBound) return;
+    window.__coordTipsBound = true;
 
-        let activeRow = null, rafId = null, pendingX = 0, pendingY = 0;
+    function hoverTip()    { return document.getElementById('coord-hover-tip'); }
+    function dataTip()     { return document.getElementById('coord-data-tip'); }
+    function dataTipText() { return document.getElementById('coord-data-tip-text'); }
+    function findRow(el)    { return el && el.closest ? el.closest('[data-coord-row]')    : null; }
+    function findAction(el) { return el && el.closest ? el.closest('[data-coord-action]') : null; }
+    function findTip(el)    { return el && el.closest ? el.closest('[data-tip]')          : null; }
 
-        function show() { label.style.opacity = '1'; label.style.visibility = 'visible'; }
-        function hide() { label.style.opacity = '0'; label.style.visibility = 'hidden'; }
+    // Row tooltip: follows the cursor over a row, hides over action buttons / chips.
+    document.addEventListener('mousemove', function (e) {
+        var tip = hoverTip();
+        if (!tip) return;
+        var row = findRow(e.target);
+        if (!row) { tip.style.opacity = '0'; return; }
+        if (findAction(e.target)) { tip.style.opacity = '0'; return; }
+        tip.style.left = e.clientX + 'px';
+        tip.style.top  = e.clientY + 'px';
+        tip.style.opacity = '1';
+    });
 
-        function isHoverCapable() {
-            return window.matchMedia('(hover: hover) and (pointer: fine)').matches && window.innerWidth > 768;
-        }
+    document.addEventListener('mouseout', function (e) {
+        var tip = hoverTip();
+        if (!tip) return;
+        var row = findRow(e.target);
+        if (row && !row.contains(e.relatedTarget)) tip.style.opacity = '0';
+    });
 
-        function positionLabel() {
-            label.style.left = (pendingX - label.offsetWidth / 2) + 'px';
-            label.style.top  = (pendingY - 14) + 'px';
-            rafId = null;
-        }
+    document.addEventListener('click', function (e) {
+        var tip = hoverTip();
+        if (tip && findRow(e.target)) tip.style.opacity = '0';
+    });
 
-        function onMouseMove(e) {
-            if (!isHoverCapable()) return;
-            pendingX = e.clientX; pendingY = e.clientY;
-            if (!rafId) rafId = requestAnimationFrame(positionLabel);
-        }
+    // Generic tooltip for any [data-tip] element.
+    document.addEventListener('mouseover', function (e) {
+        var dTip = dataTip(), dTipText = dataTipText();
+        if (!dTip || !dTipText) return;
+        var el = findTip(e.target);
+        if (!el) return;
+        dTipText.textContent = el.getAttribute('data-tip') || '';
+        dTip.style.opacity = '1';
+    });
 
-        function onRowEnter(e) {
-            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-            activeRow = e.currentTarget;
-            document.addEventListener('mousemove', onMouseMove);
-            if (isHoverCapable()) show();
-        }
+    document.addEventListener('mousemove', function (e) {
+        var dTip = dataTip();
+        if (!dTip) return;
+        var el = findTip(e.target);
+        if (!el) return;
+        dTip.style.left = e.clientX + 'px';
+        dTip.style.top  = e.clientY + 'px';
+    });
 
-        function onRowLeave(e) {
-            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
-            activeRow = null;
-            hide();
-            document.removeEventListener('mousemove', onMouseMove);
-        }
+    document.addEventListener('mouseout', function (e) {
+        var dTip = dataTip();
+        if (!dTip) return;
+        var el = findTip(e.target);
+        if (el && !el.contains(e.relatedTarget)) dTip.style.opacity = '0';
+    });
 
-        function attachListeners() {
-            document.querySelectorAll('[data-coord-row]').forEach(row => {
-                if (row._coordBound) return;
-                row._coordBound = true;
-                row.addEventListener('mouseenter', onRowEnter);
-                row.addEventListener('mouseleave', onRowLeave);
-                row.querySelectorAll('[data-coord-action]').forEach(btn => {
-                    btn.addEventListener('mouseenter', () => hide());
-                    btn.addEventListener('mouseleave', () => { if (activeRow) show(); });
-                });
+    // A Livewire re-render can remove the hovered element before mouseout fires — never leave
+    // a tooltip stuck on screen.
+    document.addEventListener('livewire:init', function () {
+        if (!window.Livewire || !Livewire.hook) return;
+        Livewire.hook('commit', function (ctx) {
+            ctx.succeed(function () {
+                var t1 = hoverTip(), t2 = dataTip();
+                if (t1) t1.style.opacity = '0';
+                if (t2) t2.style.opacity = '0';
             });
-        }
-
-        attachListeners();
-
-        document.addEventListener('livewire:navigated', () => {
-            document.querySelectorAll('[data-coord-row]').forEach(r => { r._coordBound = false; });
-            attachListeners();
         });
-
-        if (window.Livewire) {
-            window.Livewire.hook('morph.updated', () => {
-                requestAnimationFrame(() => {
-                    document.querySelectorAll('[data-coord-row]').forEach(r => { r._coordBound = false; });
-                    attachListeners();
-                });
-            });
-            try {
-                window.Livewire.hook('commit', ({ succeed }) => {
-                    succeed(() => {
-                        requestAnimationFrame(() => {
-                            document.querySelectorAll('[data-coord-row]').forEach(r => { r._coordBound = false; });
-                            attachListeners();
-                        });
-                    });
-                });
-            } catch(e) {}
-        }
-
-        document.addEventListener('livewire:update', () => { hide(); activeRow = null; });
-    }
-
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-    else init();
+    });
 })();
 </script>
 

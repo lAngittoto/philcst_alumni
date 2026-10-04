@@ -502,21 +502,25 @@ new class extends Component {
     public function refreshOnlineCount(): void
     {
         try {
-            $onlineDirs = DB::table('director')->whereNull('deleted_at')
-                ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+            // SCOPE = exactly what the Staff Members panel lists:
+            //   YOU (the director viewing this chat — always online) + every ACTIVE coordinator.
+            // Previously this also counted EVERY director row in the table, which is why the
+            // header showed 1/11 instead of 1/8 (7 coordinators + you).
+            $activeCoords = fn () => DB::table('organizer')
+                ->where('status', 'ACTIVE')
+                ->whereNull('deleted_at');
 
-            $onlineCoords = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
-                ->where('last_seen_at', '>=', now()->subMinutes(5))->count();
+            $totalCoords  = $activeCoords()->count();
+            $onlineCoords = $activeCoords()
+                ->where('last_seen_at', '>=', now()->subMinutes(5))
+                ->count();
 
-            $totalDirs = DB::table('director')->whereNull('deleted_at')->count();
-
-            $totalCoords = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
-
-            $this->onlineCount = $onlineDirs + $onlineCoords;
-            $this->totalCount  = $totalDirs  + $totalCoords;
+            $this->onlineCount = 1 + $onlineCoords;
+            $this->totalCount  = 1 + $totalCoords;
         } catch (\Throwable) {
-            $this->onlineCount = 0;
-            $this->totalCount  = 0;
+            // DB hiccup — fall back to "just you" instead of showing a wrong 0/0.
+            $this->onlineCount = 1;
+            $this->totalCount  = 1;
         }
     }
 
@@ -1231,6 +1235,11 @@ new class extends Component {
                                                 : 'Not yet active'),
                 ];
             })->toArray();
+
+        // Keep the header's "x/y online" in lock-step with this list:
+        // total = you + active coordinators, online = you + coordinators seen in the last 5 min.
+        $this->totalCount  = 1 + count($this->coordinators);
+        $this->onlineCount = 1 + collect($this->coordinators)->where('is_online', true)->count();
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1340,6 +1349,11 @@ new class extends Component {
 
 {{-- ════════════════════════════════════════════════════════════════════════
      DIRECTOR MESSENGER UI  —  "Command Circle" (Directors + Coordinators)
+     - NEW: page header (icon + "Chat Room" title + purple subtitle) on top,
+       same pattern as Manage Coordinator / Manage Job.
+     - FIX: "x/y online" counter. Total is now YOU + ACTIVE coordinators
+       (e.g. 1 + 7 = 8) — it used to also count every director row (1/11).
+       The Staff Members panel title uses the same numbers.
      - FIX: header icon was oversized (a big circular bubble icon dominating
        the header). It's now a compact rounded-square badge sized to match
        the organizer chat header (w-10 h-10), so the title/status line reads
@@ -1358,8 +1372,29 @@ new class extends Component {
      ════════════════════════════════════════════════════════════════════════ --}}
 
 
+{{-- Single Livewire root: page header (same pattern as Manage Coordinator / Manage Job)
+     + the chat card below it. --}}
+<div class="flex flex-col gap-4 mx-auto w-full" style="max-width: 1400px;">
+
+    {{-- ══ PAGE HEADER ══ --}}
+    <div class="flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0">
+        <div class="flex items-center gap-4">
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fa-solid fa-comments text-white text-base"></i>
+            </div>
+            <div style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Chat Room</h1>
+                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
+                    <i class="fa-solid fa-circle text-[5px] text-emerald-500 align-middle"></i>
+                    <span>Message and coordinate with your coordinators in real time.</span>
+                </p>
+            </div>
+        </div>
+    </div>
+
 <div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
-     style="height: calc(100vh - 250px); max-width: 1400px;"
+     style="height: calc(100vh - 300px); min-height: 440px; max-width: 1400px;"
      x-data="{ postNavigating: false }"
      @if(! $confirmDeleteId) wire:poll.5000ms.visible="unifiedPoll" @endif>
 <style>
@@ -2237,11 +2272,10 @@ new class extends Component {
                         <p class="text-sm font-semibold text-white flex-1 uppercase tracking-wide">
                             Staff Members
                             <span class="text-xs font-semibold text-white/70 ml-1">
-                                ({{ count($coordinators) }})
+                                ({{ count($coordinators) + 1 }})
                             </span>
-                            @if($onlineCount > 0)
-                            <span class="ml-1 text-xs font-semibold text-emerald-300">· {{ $onlineCount }} online</span>
-                            @endif
+                            @php $panelOnline = 1 + collect($coordinators)->where('is_online', true)->count(); @endphp
+                            <span class="ml-1 text-xs font-semibold text-emerald-300">· {{ $panelOnline }} online</span>
                         </p>
                     @endif
                     <button wire:click="{{ $showPins ? 'togglePins' : 'toggleMembers' }}"
@@ -2617,3 +2651,5 @@ new class extends Component {
     @endif
 
 </div>
+
+</div>{{-- /root --}}
