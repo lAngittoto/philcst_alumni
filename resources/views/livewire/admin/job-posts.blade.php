@@ -510,9 +510,22 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col h-full min-h-0" style="overflow: hidden;">
+<div id="jp-root" class="jp-root flex flex-col h-full min-h-0" style="overflow: hidden;">
 
 <style>
+/* ── Full-screen page: the page fits the viewport exactly (desktop) and ONLY
+   the job list scrolls. --jp-h is set by the script at the bottom
+   (viewport height minus the space above this page); the calc() is just
+   a fallback until that runs. ── */
+@media (min-width: 1024px) {
+    .jp-root {
+        height: var(--jp-h, calc(100dvh - 4.5rem)) !important;
+        max-height: var(--jp-h, calc(100dvh - 4.5rem)) !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+    }
+    .jp-root #jb-content-block { min-height: 360px; }
+}
 /* ── Search highlight ── */
 mark.jp-hl {
     background: #BFDBFE;
@@ -2737,6 +2750,45 @@ select.filter-input option {
         document.addEventListener('DOMContentLoaded', init);
     } else {
         init();
+    }
+})();
+</script>
+
+<script>
+(function () {
+    // Sizes the Job Postings page to exactly the visible screen so the whole
+    // page never scrolls — only the job list (left panel) and the detail
+    // panel (right) scroll internally.
+    function fit() {
+        var el = document.getElementById('jp-root');
+        if (!el) return;
+        if (window.innerWidth < 1024) {
+            document.documentElement.style.removeProperty('--jp-h');
+            return;
+        }
+        // Top of the page at scroll position 0 (add back every ancestor's scrollTop)
+        var top = el.getBoundingClientRect().top + (window.scrollY || 0);
+        var node = el.parentElement;
+        while (node && node !== document.body && node !== document.documentElement) {
+            top += node.scrollTop || 0;
+            node = node.parentElement;
+        }
+        var h = Math.max(480, Math.floor(window.innerHeight - top));
+        document.documentElement.style.setProperty('--jp-h', h + 'px');
+    }
+
+    function run() {
+        fit();
+        setTimeout(fit, 80);
+        setTimeout(fit, 350);
+    }
+
+    window.addEventListener('resize', fit);
+    document.addEventListener('livewire:navigated', run);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run);
+    } else {
+        run();
     }
 })();
 </script>

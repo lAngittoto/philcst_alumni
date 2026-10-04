@@ -47,6 +47,9 @@ new class extends Component {
 
     public $vPhoto       = null;
     public bool $vPhotoSave = false;
+    // "Default photo" is now staged (preview + Save / Cancel) instead of
+    // being applied the instant the button is clicked.
+    public bool $vPhotoReset = false;
 
     public ?int   $ueId      = null;
     public string $ueName    = '';
@@ -441,6 +444,27 @@ new class extends Component {
      * these are two cheap EXISTS queries, and a stale value here would
      * leave the button clickable (or locked) for up to the stats TTL.
      */
+    /**
+     * Registrars live in the `users` table. To store their name the same way
+     * Directors do (first / middle / last / suffix as separate fields) the
+     * users table needs those columns — see the migration shipped with this
+     * file. Until the migration runs this returns false and the page keeps
+     * working exactly as before (View Details just shows "—").
+     */
+    private function registrarNameColsExist(): bool
+    {
+        static $exists = null;
+        if ($exists === null) {
+            try {
+                $exists = \Illuminate\Support\Facades\Schema::hasColumn('users', 'first_name')
+                       && \Illuminate\Support\Facades\Schema::hasColumn('users', 'middle_name')
+                       && \Illuminate\Support\Facades\Schema::hasColumn('users', 'last_name')
+                       && \Illuminate\Support\Facades\Schema::hasColumn('users', 'suffix');
+            } catch (\Throwable) { $exists = false; }
+        }
+        return $exists;
+    }
+
     private function activeDirectorExists(?int $exceptUserId = null): bool
     {
         return DB::table('director')
@@ -477,7 +501,7 @@ new class extends Component {
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
         $this->dErrs=[]; $this->dOk='';
         $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
-        $this->vPhoto = null;
+        $this->vPhoto = null; $this->vPhotoReset = false;
     }
 
     public function closeModal(): void {
@@ -485,7 +509,7 @@ new class extends Component {
         $this->tId=null;
         $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[];
         $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
-        $this->vPhoto=null; $this->vPhotoSave=false; $this->vEmployment=null;
+        $this->vPhoto=null; $this->vPhotoSave=false; $this->vPhotoReset=false; $this->vEmployment=null;
         $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
     }
 
@@ -504,7 +528,6 @@ new class extends Component {
             $fieldErrors = [];
             if (!trim($this->rFn))       $fieldErrors['first_name']  = 'First name is required.';
             if (!trim($this->rLn))       $fieldErrors['last_name']   = 'Last name is required.';
-            if (!trim($this->rMn))       $fieldErrors['middle_name'] = 'Middle name is required.';
             if (!trim($this->rUsername)) {
                 $fieldErrors['username'] = 'Username is required.';
             } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', trim($this->rUsername))) {
@@ -535,7 +558,7 @@ new class extends Component {
             $full  = implode(' ', array_filter(array_map('trim', [$this->rFn, $this->rMn, $this->rLn, $this->rSfx])));
             $email = trim($this->rEmail);
 
-            $uid = DB::table('users')->insertGetId([
+            $regRow = [
                 'name'        => $full,
                 'email'       => $loginEmail,
                 'role'        => 'registrar',
@@ -543,7 +566,15 @@ new class extends Component {
                 'user_status' => 'ACTIVE',
                 'created_at'  => now(),
                 'updated_at'  => now(),
-            ]);
+            ];
+            // Same as Create Director: keep each name part in its own field.
+            if ($this->registrarNameColsExist()) {
+                $regRow['first_name']  = trim($this->rFn);
+                $regRow['middle_name'] = trim($this->rMn);
+                $regRow['last_name']   = trim($this->rLn);
+                $regRow['suffix']      = trim($this->rSfx) ?: null;
+            }
+            $uid = DB::table('users')->insertGetId($regRow);
 
             // Send credential email synchronously (->send) so it fires immediately
             // without needing a queue worker — same as Create Director. Wrapped in
@@ -585,7 +616,6 @@ new class extends Component {
             $fieldErrors = [];
             if (!trim($this->dFn))       $fieldErrors['first_name']  = 'First name is required.';
             if (!trim($this->dLn))       $fieldErrors['last_name']   = 'Last name is required.';
-            if (!trim($this->dMn))       $fieldErrors['middle_name'] = 'Middle name is required.';
             if (!trim($this->dUsername)) {
                 $fieldErrors['username'] = 'Username is required.';
             } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', trim($this->dUsername))) {
@@ -625,7 +655,7 @@ new class extends Component {
             DB::table('director')->insert([
                 'user_id'     => $uid,
                 'first_name'  => trim($this->dFn),
-                'middle_name' => trim($this->dMn),
+                'middle_name' => trim($this->dMn),  // optional — empty string when none
                 'last_name'   => trim($this->dLn),
                 'suffix'      => trim($this->dSfx) ?: null,
                 'email'       => trim($this->dEmail),
@@ -692,8 +722,22 @@ new class extends Component {
     }
 
     public function showProfile(int $id): void {
+        $regSelect = $this->registrarNameColsExist()
+            ? [
+                DB::raw("COALESCE(users.first_name,'')  as reg_first_name"),
+                DB::raw("COALESCE(users.middle_name,'') as reg_middle_name"),
+                DB::raw("COALESCE(users.last_name,'')   as reg_last_name"),
+                DB::raw("COALESCE(users.suffix,'')      as reg_suffix"),
+              ]
+            : [
+                DB::raw("'' as reg_first_name"),
+                DB::raw("'' as reg_middle_name"),
+                DB::raw("'' as reg_last_name"),
+                DB::raw("'' as reg_suffix"),
+              ];
         $r = DB::table('users')
             ->select([
+                ...$regSelect,
                 'users.id','users.name','users.email','users.role','users.created_at',
                 DB::raw("(CASE
                     WHEN users.role='alumni'    THEN IF(
@@ -776,6 +820,7 @@ new class extends Component {
             $this->vEmployment = $emp ? (array) $emp : null;
         }
         $this->vPhoto = null;
+        $this->vPhotoReset = false;
         $this->ueEmail  = '';
         $this->ueErrors = [];
         $this->ueSuccess = '';
@@ -809,6 +854,11 @@ new class extends Component {
             $this->cpName = $r->name;
         }
         $this->activeModal = 'viewProfile';
+    }
+
+    public function updatedVPhoto(): void
+    {
+        $this->vPhotoReset = false;
     }
 
     public function savePhoto(): void {
@@ -1011,7 +1061,7 @@ new class extends Component {
             $this->flash('success', 'Profile photo reset to default.');
         } catch (\Exception $e) {
             $this->flash('error', 'Failed to reset photo: ' . $e->getMessage());
-        } finally { $this->vPhotoSave = false; }
+        } finally { $this->vPhotoSave = false; $this->vPhotoReset = false; }
     }
 
     public function saveUpdateEmail(): void {
@@ -2343,6 +2393,8 @@ select.mu-filter-input.mu-active {
         $headerName = implode(' ', array_filter([$vd['first_name']??'', $vd['middle_name']??'', $vd['last_name']??'', $vd['suffix']??''])) ?: $vd['name'];
     elseif ($isAlumni)
         $headerName = implode(' ', array_filter([$vd['alumni_first_name']??'', $vd['alumni_middle_name']??'', $vd['alumni_last_name']??'', $vd['alumni_suffix']??''])) ?: $vd['name'];
+    elseif ($isReg)
+        $headerName = implode(' ', array_filter([$vd['reg_first_name']??'', $vd['reg_middle_name']??'', $vd['reg_last_name']??'', $vd['reg_suffix']??''])) ?: $vd['name'];
     elseif ($isAdmin)
         $headerName = $this->adminUsername($vd['email'], $vd['name']);
     else
@@ -2360,13 +2412,13 @@ select.mu-filter-input.mu-active {
 @endphp
 <div class="fixed inset-0 mu-modal-selectable {{ $isAlumni ? '' : 'flex items-center justify-center p-3 sm:p-6' }}"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     @if(!$isAlumni) @click.self="if(!saving){ $wire.closeModal(); setTimeout(() => muClosing = true, 220) }" @endif
-     x-data="{ muClosing: false, saving: false }"
+     @if(!$isAlumni) @click.self="if(!saving && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" @endif
+     x-data="{ muClosing: false, saving: false, closing: false }"
      x-show="!muClosing"
-     x-init="muClosing = false; saving = false"
+     x-init="muClosing = false; saving = false; closing = false"
      @mu-save-done.window="saving = false"
      @mu-toggle-done.window="muClosing = true"
-     @keydown.escape.window="if(!saving){ $wire.closeModal(); setTimeout(() => muClosing = true, 220) }">
+     @keydown.escape.window="if(!saving && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }">
     <div class="w-full flex flex-col {{ $isAlumni ? 'h-full' : 'max-w-5xl rounded-2xl shadow-2xl border border-[#E8E0F0]' }}"
          style="background:#F2F2F2;overflow:hidden;{{ $isAlumni ? '' : 'max-height:90vh;' }}">
 
@@ -2396,10 +2448,10 @@ select.mu-filter-input.mu-active {
                 </div>
             </div>
             @endif
-            <button @click="$wire.closeModal(); setTimeout(() => muClosing = true, 220)" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="if(!saving && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="closing"
                     class="mu-close-tooltip w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition text-white shrink-0">
-                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-base"></i>
-                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-base"></i>
+                <i x-show="!closing" class="fa-solid fa-xmark text-base"></i>
+                <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-base"></i>
             </button>
         </div>
 
@@ -2435,6 +2487,9 @@ select.mu-filter-input.mu-active {
                         @if($vPhoto)
                             <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
                                  class="w-20 h-20 rounded-xl object-cover ring-2 ring-[#7A3F91]/30" :class="dragging ? 'ring-[#7A3F91]' : ''">
+                        @elseif($vPhotoReset)
+                            <img src="{{ asset('storage/alumni-photos/default.png') }}" alt="Default photo"
+                                 class="w-20 h-20 rounded-xl object-cover ring-2 ring-[#7A3F91]/30">
                         @else
                             <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
                                  class="w-14 h-14 rounded-xl object-cover ring-2 ring-[#E8E0F0]" :class="dragging ? 'ring-[#7A3F91]' : ''">
@@ -2460,11 +2515,22 @@ select.mu-filter-input.mu-active {
                         <button wire:click="$set('vPhoto', null)" wire:loading.attr="disabled" wire:target="savePhoto"
                                 class="w-full px-1.5 py-1 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition disabled:opacity-50" style="color:#000000;">Cancel</button>
                     </div>
+                    @elseif($vPhotoReset)
+                    <div class="flex flex-col items-center gap-1 w-14">
+                        <button wire:click="resetPhoto" wire:loading.attr="disabled" wire:target="resetPhoto"
+                                class="w-full px-1.5 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
+                                style="background:#7A3F91;">
+                            <span wire:loading wire:target="resetPhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                            <span wire:loading.remove wire:target="resetPhoto"><i class="fas fa-check text-xs"></i> Save</span>
+                        </button>
+                        <button wire:click="$set('vPhotoReset', false)" wire:loading.attr="disabled" wire:target="resetPhoto"
+                                class="w-full px-1.5 py-1 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition disabled:opacity-50" style="color:#000000;">Cancel</button>
+                    </div>
                     @elseif($canPhoto && !empty($vd['photo']) && !str_contains($vd['photo'], 'default.png'))
-                    <button wire:click="resetPhoto" wire:loading.attr="disabled" wire:target="resetPhoto"
+                    <button wire:click="$set('vPhotoReset', true)" wire:loading.attr="disabled" wire:target="vPhotoReset"
                             class="px-2 py-1 rounded-lg text-xs font-semibold border border-[#D8B4FE] hover:bg-[#F9F5FC] transition disabled:opacity-50 inline-flex items-center gap-1" style="color:#7A3F91;">
-                        <span wire:loading wire:target="resetPhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                        <span wire:loading.remove wire:target="resetPhoto"><i class="fas fa-user text-xs"></i></span>
+                        <span wire:loading wire:target="vPhotoReset"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                        <span wire:loading.remove wire:target="vPhotoReset"><i class="fas fa-user text-xs"></i></span>
                         Default
                     </button>
                     @endif
@@ -2908,6 +2974,29 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
+            {{-- REGISTRAR INFO — same card as Director Information; "—" when a part was never saved --}}
+            @if($isReg)
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Registrar Information</p>
+                </div>
+                <div class="p-3 grid grid-cols-2 gap-2">
+                    @foreach([
+                        ['First Name',  $vd['reg_first_name']  ?? ''],
+                        ['Middle Name', $vd['reg_middle_name'] ?? ''],
+                        ['Last Name',   $vd['reg_last_name']   ?? ''],
+                        ['Suffix',      $vd['reg_suffix']      ?? ''],
+                        ['Username',    $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
+                    ] as [$lbl,$val])
+                    <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0] {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
+                        <p class="text-base font-semibold truncate" style="color:#333333;">{{ $val ?: '—' }}</p>
+                    </div>
+                    @endforeach
+                </div>
+            </div>
+            @endif
+
             {{-- COORDINATOR INFO — compact single-screen layout (left: photo card, right: details + email + status) --}}
             @if($isOrg)
             @php
@@ -2939,6 +3028,9 @@ select.mu-filter-input.mu-active {
                             @if($vPhoto)
                                 <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
                                      class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#7A3F91]/40">
+                            @elseif($vPhotoReset)
+                                <img src="{{ asset('storage/alumni-photos/default.png') }}" alt="Default photo"
+                                     class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#7A3F91]/40">
                             @else
                                 <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $orgName }}"
                                      class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#E8E0F0]" :class="dragging ? 'ring-[#7A3F91]' : ''">
@@ -2951,8 +3043,10 @@ select.mu-filter-input.mu-active {
                                          {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
                             <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
                         </label>
-                        @if(!$vPhoto)
+                        @if(!$vPhoto && !$vPhotoReset)
                         <p class="text-xs font-semibold uppercase tracking-wide text-center" style="color:#7A3F91;">Click to change photo</p>
+                        @elseif($vPhotoReset)
+                        <p class="text-xs font-semibold uppercase tracking-wide text-center" style="color:#7A3F91;">Use default photo?</p>
                         @endif
                         @if($vPhoto)
                         <div class="flex items-center gap-1.5 w-full">
@@ -2965,11 +3059,22 @@ select.mu-filter-input.mu-active {
                             <button wire:click="$set('vPhoto', null)" wire:loading.attr="disabled" wire:target="savePhoto"
                                     class="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition disabled:opacity-50" style="color:#000000;">Cancel</button>
                         </div>
+                        @elseif($vPhotoReset)
+                        <div class="flex items-center gap-1.5 w-full">
+                            <button wire:click="resetPhoto" wire:loading.attr="disabled" wire:target="resetPhoto"
+                                    class="flex-1 px-2 py-1.5 rounded-lg text-xs font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1"
+                                    style="background:#7A3F91;">
+                                <span wire:loading wire:target="resetPhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                                <span wire:loading.remove wire:target="resetPhoto"><i class="fas fa-check text-xs"></i> Save</span>
+                            </button>
+                            <button wire:click="$set('vPhotoReset', false)" wire:loading.attr="disabled" wire:target="resetPhoto"
+                                    class="flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold border border-[#E8E0F0] hover:bg-gray-50 transition disabled:opacity-50" style="color:#000000;">Cancel</button>
+                        </div>
                         @elseif(!empty($vd['photo']) && !str_contains($vd['photo'], 'default.png'))
-                        <button wire:click="resetPhoto" wire:loading.attr="disabled" wire:target="resetPhoto"
+                        <button wire:click="$set('vPhotoReset', true)" wire:loading.attr="disabled" wire:target="vPhotoReset"
                                 class="px-2.5 py-1 rounded-lg text-xs font-semibold border border-[#D8B4FE] hover:bg-[#F9F5FC] transition disabled:opacity-50 inline-flex items-center gap-1" style="color:#7A3F91;">
-                            <span wire:loading wire:target="resetPhoto"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                            <span wire:loading.remove wire:target="resetPhoto"><i class="fas fa-user text-xs"></i></span>
+                            <span wire:loading wire:target="vPhotoReset"><i class="fas fa-spinner animate-spin text-xs"></i></span>
+                            <span wire:loading.remove wire:target="vPhotoReset"><i class="fas fa-user text-xs"></i></span>
                             Default photo
                         </button>
                         @endif
@@ -3233,7 +3338,7 @@ select.mu-filter-input.mu-active {
                 $ueNote = $isOrg
                     ? 'A new temporary password will be generated and emailed to the new address. The coordinator must change it on next login.'
                     : ($isDir
-                    ? 'This is the director\'s contact email. It is not used to log in.'
+                    ? 'Updating the email will reset this director\'s password. A new temporary password will be generated and emailed to the new address, and the director must change it on next login.'
                     : 'Updating the email will require the account to reset their password on next login.');
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
@@ -3378,10 +3483,10 @@ select.mu-filter-input.mu-active {
 @if($activeModal === 'createDirector')
 <div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     x-data="{ muClosing: false, dPhotoFull: false, submitting: false }"
+     x-data="{ muClosing: false, dPhotoFull: false, submitting: false, closing: false }"
      x-show="!muClosing"
-     x-init="muClosing = false; submitting = false"
-     @keydown.escape.window="dPhotoFull ? (dPhotoFull = false) : (!submitting && ($wire.closeModal(), muClosing = true))">
+     x-init="muClosing = false; submitting = false; closing = false"
+     @keydown.escape.window="dPhotoFull ? (dPhotoFull = false) : (!submitting && !closing && (closing = true, $wire.closeModal().then(() => muClosing = true).catch(() => closing = false)))">
     <div class="w-full h-full flex flex-col" style="background:#FFFFFF;overflow:hidden;">
 
         <div class="flex items-center justify-between px-6 sm:px-8 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -3394,11 +3499,11 @@ select.mu-filter-input.mu-active {
                     <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
                 </div>
             </div>
-            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="submitting || closing"
                     :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/30'"
                     class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center transition text-white shrink-0">
-                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-lg"></i>
-                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-base"></i>
+                <i x-show="!closing" class="fa-solid fa-xmark text-lg"></i>
+                <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-base"></i>
             </button>
         </div>
 
@@ -3443,9 +3548,9 @@ select.mu-filter-input.mu-active {
                     </div>
                 </div>
             </div>
-            <button @click="$wire.closeModal(); muClosing = true" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="if(!closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="closing"
                     class="w-full py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
-                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-sm"></i>
+                <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-sm"></i>
                 <span>Done</span>
             </button>
             @endif
@@ -3554,7 +3659,7 @@ select.mu-filter-input.mu-active {
                                 @endif
                             </div>
                             <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
                                 <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
@@ -3573,7 +3678,7 @@ select.mu-filter-input.mu-active {
                                     { v: 'V',     l: 'V — the Fifth' },
                                     { v: 'VI',    l: 'VI — the Sixth' },
                                 ] }" @click.away="open = false">
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="text-red-400 font-normal">*</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
                                 <div class="mu-sfx-field">
                                     <button type="button" @click="open = !open"
                                             class="mu-sfx-trigger w-full mu-smooth-input text-base flex items-center justify-between"
@@ -3659,12 +3764,12 @@ select.mu-filter-input.mu-active {
 
                 <div class="flex gap-3 pt-1">
                     <button type="button"
-                            @click="if(!submitting){ $wire.closeModal(); muClosing = true; }"
-                            :disabled="submitting"
+                            @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }"
+                            :disabled="submitting || closing"
                             :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
                             style="color:#000000;border-color:#E5E5E5;">
-                        <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
+                        <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-xs"></i>
 <span>Cancel</span>
                     </button>
                     {{-- Set submitting=true immediately on click so the overlay and
@@ -3700,10 +3805,10 @@ select.mu-filter-input.mu-active {
 @if($activeModal === 'createRegistrar')
 <div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     x-data="{ muClosing: false, submitting: false }"
+     x-data="{ muClosing: false, submitting: false, closing: false }"
      x-show="!muClosing"
-     x-init="muClosing = false; submitting = false"
-     @keydown.escape.window="!submitting && ($wire.closeModal(), muClosing = true)">
+     x-init="muClosing = false; submitting = false; closing = false"
+     @keydown.escape.window="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }">
     <div class="w-full h-full flex flex-col" style="background:#FFFFFF;overflow:hidden;">
 
         <div class="flex items-center justify-between px-6 sm:px-8 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -3716,11 +3821,11 @@ select.mu-filter-input.mu-active {
                     <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
                 </div>
             </div>
-            <button @click="if(!submitting){ $wire.closeModal(); muClosing = true; }" :disabled="submitting" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="submitting || closing"
                     :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/30'"
                     class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center transition text-white shrink-0">
-                <i wire:loading.remove wire:target="closeModal" class="fa-solid fa-xmark text-lg"></i>
-                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-base"></i>
+                <i x-show="!closing" class="fa-solid fa-xmark text-lg"></i>
+                <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-base"></i>
             </button>
         </div>
 
@@ -3748,9 +3853,9 @@ select.mu-filter-input.mu-active {
                     </div>
                 </div>
             </div>
-            <button @click="$wire.closeModal(); muClosing = true" wire:loading.attr="disabled" wire:target="closeModal"
+            <button @click="if(!closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="closing"
                     class="w-full py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#7A3F91;">
-                <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-sm"></i>
+                <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-sm"></i>
                 <span>Done</span>
             </button>
             @endif
@@ -3827,7 +3932,7 @@ select.mu-filter-input.mu-active {
                                 @endif
                             </div>
                             <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="text-red-400 font-normal">*</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
                                 <input wire:model.defer="rMn" type="text" placeholder="e.g. Santos"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
@@ -3846,7 +3951,7 @@ select.mu-filter-input.mu-active {
                                     { v: 'V',     l: 'V — the Fifth' },
                                     { v: 'VI',    l: 'VI — the Sixth' },
                                 ] }" @click.away="open = false">
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="text-red-400 font-normal">*</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
                                 <div class="mu-sfx-field">
                                     <button type="button" @click="open = !open"
                                             class="mu-sfx-trigger w-full mu-smooth-input text-base flex items-center justify-between"
@@ -3932,12 +4037,12 @@ select.mu-filter-input.mu-active {
 
                 <div class="flex gap-3 pt-1">
                     <button type="button"
-                            @click="if(!submitting){ $wire.closeModal(); muClosing = true; }"
-                            :disabled="submitting"
+                            @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }"
+                            :disabled="submitting || closing"
                             :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
                             style="color:#000000;border-color:#E5E5E5;">
-                        <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
+                        <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-xs"></i>
 <span>Cancel</span>
                     </button>
                     {{-- Set submitting=true immediately on click so the overlay and
@@ -3973,14 +4078,14 @@ select.mu-filter-input.mu-active {
 @if($activeModal === 'toggleConfirm' && $tId)
 <div class="fixed inset-0 flex items-center justify-center p-3 sm:p-4 bg-black/50 backdrop-blur-sm mu-modal-selectable"
      style="z-index:9996;"
-     x-data="{ muClosing: false }"
+     x-data="{ muClosing: false, closing: false }"
      x-show="!muClosing"
      x-transition:leave="transition ease-in duration-150"
      x-transition:leave-start="opacity-100"
      x-transition:leave-end="opacity-0"
-     x-init="muClosing = false"
+     x-init="muClosing = false; closing = false"
      @mu-toggle-done.window="muClosing = true"
-     @keydown.escape.window="$wire.closeModal(); muClosing = true">
+     @keydown.escape.window="if(!closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }">
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden border border-[#E8E0F0]"
          x-show="!muClosing"
          x-transition:enter="transition ease-out duration-150"
@@ -4010,10 +4115,10 @@ select.mu-filter-input.mu-active {
                 @endif
             </p>
             <div class="flex gap-2">
-                <button @click="$wire.closeModal(); muClosing = true"
+                <button @click="if(!closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="closing"
                         class="flex-1 px-4 py-2.5 rounded-xl text-sm font-bold border transition hover:bg-gray-50 flex items-center justify-center gap-2"
                         style="color:#000000;border-color:#E8E0F0;">
-                    <i wire:loading wire:target="closeModal" class="fas fa-spinner animate-spin text-xs"></i>
+                    <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-xs"></i>
 <span>Cancel</span>
                 </button>
                 {{-- Close modal animation IMMEDIATELY on click — don't wait for the

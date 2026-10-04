@@ -421,8 +421,17 @@ mark.ev-hl {
 }
 .adm-share-close-btn:hover .tip { opacity: 1; }
 
-/* ── Table container height — always 58vh, never shrinks or grows regardless of content or flex siblings ── */
-.adm-table-card { display: flex; flex-direction: column; flex: 0 0 58vh !important; min-height: 58vh !important; height: 58vh !important; max-height: 58vh !important; }
+/* ── Table container height — fills the rest of the screen below the header + stat cards.
+   --ev-table-h is measured by the script at the bottom of this file (viewport height
+   minus the space above the table); 74vh is only the fallback until that runs.
+   Fixed (not content-driven) so it never shrinks or grows with the number of cards. ── */
+.adm-table-card {
+    display: flex; flex-direction: column;
+    flex: 0 0 var(--ev-table-h, 74vh) !important;
+    height: var(--ev-table-h, 74vh) !important;
+    min-height: 420px !important;
+    max-height: var(--ev-table-h, 74vh) !important;
+}
 
 /* ── Share button tooltip (table rows) — pure CSS hover, no JS dependency ── */
 .adm-share-tip-wrap { position: relative; display: inline-flex; }
@@ -2292,5 +2301,44 @@ select.filter-input:hover { cursor: default !important; }
         }
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+
+<script>
+(function () {
+    // Stretches the Event Monitoring card table down to the bottom of the
+    // screen (instead of a fixed 58vh with empty space under it). Only the
+    // card grid inside scrolls; the pagination bar stays pinned at the bottom.
+    var BOTTOM_GAP = 24; // breathing room under the table (px)
+
+    function fit() {
+        var el = document.getElementById('ev-content-block');
+        if (!el) return;
+
+        // Top of the table at scroll position 0 (add back every ancestor's scrollTop)
+        var top = el.getBoundingClientRect().top + (window.scrollY || 0);
+        var node = el.parentElement;
+        while (node && node !== document.body && node !== document.documentElement) {
+            top += node.scrollTop || 0;
+            node = node.parentElement;
+        }
+
+        var h = Math.max(420, Math.floor(window.innerHeight - top - BOTTOM_GAP));
+        document.documentElement.style.setProperty('--ev-table-h', h + 'px');
+    }
+
+    function run() {
+        fit();
+        setTimeout(fit, 80);
+        setTimeout(fit, 350);
+    }
+
+    window.addEventListener('resize', fit);
+    document.addEventListener('livewire:navigated', run);
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run);
+    } else {
+        run();
+    }
 })();
 </script>
