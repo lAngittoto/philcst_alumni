@@ -1180,7 +1180,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow bg-[#7A3F91]">
                         <i class="fa-solid fa-users text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">All</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalAlumni }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Total Alumni</p>
@@ -1192,7 +1191,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-briefcase text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 uppercase">Work</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalEmployed }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Employed</p>
@@ -1209,7 +1207,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-store text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100 uppercase">Self</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalSelf }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Self-Employed</p>
@@ -1226,7 +1223,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
                         <i class="fa-solid fa-circle-pause text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Idle</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalUnemployed }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Unemployed</p>
@@ -1243,7 +1239,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-gray-400 flex items-center justify-center shadow">
                         <i class="fa-solid fa-circle-question text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-[#666666] border border-gray-200 uppercase">N/A</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalNotFilled }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Not Filled</p>
@@ -1260,7 +1255,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-teal-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-house text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-100 uppercase">PH</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalLocal }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Local</p>
@@ -1277,7 +1271,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-plane-departure text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-100 uppercase">OFW</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalOFW }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Abroad (OFW)</p>
@@ -1294,7 +1287,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-emerald-600 flex items-center justify-center shadow">
                         <i class="fa-solid fa-check-circle text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 uppercase">Fit</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalRelated }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Course Relevant</p>
@@ -1311,7 +1303,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-adjust text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Half</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalPartial }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Partially Relevant</p>
@@ -1328,7 +1319,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <div class="w-10 h-10 rounded-xl bg-red-500 flex items-center justify-center shadow">
                         <i class="fa-solid fa-times-circle text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-100 uppercase">Off</span>
                 </div>
                 <p class="text-3xl font-semibold text-[#333333] leading-none">{{ $totalNotRelated }}</p>
                 <p class="text-sm text-[#666666] mt-1 font-normal">Not Relevant</p>
@@ -2138,10 +2128,10 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     $isEmp     = in_array($md['employment_status'] ?? '', ['employed','self_employed']);
     $statusLbl = ['employed'=>'Employed','self_employed'=>'Self-Employed','unemployed'=>'Unemployed'][$md['employment_status'] ?? ''] ?? 'Not Filled';
     $statusCls = match($md['employment_status'] ?? '') {
-        'employed'      => 'bg-emerald-50 text-emerald-700 border border-emerald-200',
-        'self_employed' => 'bg-blue-50 text-blue-700 border border-blue-200',
-        'unemployed'    => 'bg-amber-50 text-amber-700 border border-amber-200',
-        default         => 'bg-[#F9F7FC] text-[#999999] border border-[#E8E0F0]',
+        'employed'      => 'text-emerald-700',
+        'self_employed' => 'text-blue-700',
+        'unemployed'    => 'text-amber-700',
+        default         => 'text-[#999999]',
     };
     $empTypeMap = [
         'full_time'     => 'Full-Time',
@@ -2248,11 +2238,9 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                 {{-- RIGHT: Employment Information --}}
                 <div class="border border-[#E8E0F0] rounded-xl p-4 lg:p-6 bg-white">
                     {{-- Heading + Status badge (beside the title) + updated --}}
-                    <div class="flex items-center gap-2.5 mb-3.5 flex-wrap">
+                    <div class="flex items-center gap-x-5 gap-y-1.5 mb-3.5 flex-wrap">
                         <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest">Employment Information</p>
-                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-base font-bold {{ $statusCls }}">
-                            {{ $statusLbl }}
-                        </span>
+                        <span class="text-base font-bold {{ $statusCls }}">{{ $statusLbl }}</span>
                         @if($md['emp_updated_at'] ?? null)
                             <span class="text-base text-[#999999]">
                                 <i class="fa-regular fa-clock mr-0.5"></i>

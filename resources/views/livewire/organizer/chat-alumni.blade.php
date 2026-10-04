@@ -1190,11 +1190,11 @@ new class extends Component {
             }
 
             // Staff room: count directors + active coordinators
-            $staffOnline = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
+            $staffOnline = DB::table('director')->whereNull('deleted_at')
                 ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
                     ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
-            $staffTotal  = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count()
+            $staffTotal  = DB::table('director')->whereNull('deleted_at')->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             $isCurrentRoom = ($staffRoomRow->id === $this->roomId);
@@ -1796,11 +1796,11 @@ new class extends Component {
         if (! $this->room) return;
         try {
             if ($this->isStaffRoom) {
-                $this->onlineCount = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
+                $this->onlineCount = DB::table('director')->whereNull('deleted_at')
                     ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
                         ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
-                $this->totalCount  = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count()
+                $this->totalCount  = DB::table('director')->whereNull('deleted_at')->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             } elseif ($this->isCollegeRoom) {
@@ -2092,7 +2092,7 @@ new class extends Component {
                     ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")->value('id');
                 if ($foundCoord) DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'organizer','mentioned_id'=>$foundCoord,'created_at'=>now(),'updated_at'=>now()]);
 
-                $foundDir = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
+                $foundDir = DB::table('director')->whereNull('deleted_at')
                     ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")->value('id');
                 if ($foundDir) DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'director','mentioned_id'=>$foundDir,'created_at'=>now(),'updated_at'=>now()]);
             }
@@ -2468,7 +2468,7 @@ new class extends Component {
         $q = trim($this->memberSearch);
         $self = $this;
 
-        $dirQuery = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at');
+        $dirQuery = DB::table('director')->whereNull('deleted_at');
         if ($q !== '') $dirQuery->where(function ($sub) use ($q) { $sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%")->orWhereRaw("CONCAT(first_name,' ',last_name) LIKE ?", ["%{$q}%"]); });
         $this->staffDirectors = $dirQuery->orderBy('first_name')->get(['id','first_name','last_name','profile_photo','last_seen_at'])
             ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'photo'=>$self->resolvePhotoUrl($d->profile_photo??null),'is_online'=>isset($d->last_seen_at)&&Carbon::parse($d->last_seen_at)->gte(now()->subMinutes($self->onlineMinutes))])->toArray();
@@ -2549,53 +2549,76 @@ new class extends Component {
     // debounced) via checkMentions() below instead.
     public function checkMentions(string $value): void
     {
-        if (preg_match('/@(\w*)$/', $value, $m)) {
-            $q = $m[1];
-            $suggestions = [['id'=>0,'name'=>'everyone','type'=>'everyone']];
+        // Name being typed after the last "@": one word, or first + last name
+        // (same shape sendMessage() uses to detect a mention).
+        if (preg_match('/@([\p{L}\p{N}_]*(?: [\p{L}\p{N}_]*)?)$/u', $value, $m)) {
+            $q    = $m[1];
+            $like = '%' . addcslashes($q, '%_\\') . '%';
+            $matchName = fn ($query) => $query->whereRaw("CONCAT(first_name,' ',last_name) LIKE ?", [$like]);
+
+            // "@everyone" — only while the person is still typing a single word
+            // that it could complete ("@", "@e", "@every"…).
+            $suggestions = [];
+            if ($q === '' || (! str_contains($q, ' ') && str_starts_with('everyone', strtolower($q)))) {
+                $suggestions[] = ['id'=>0,'name'=>'everyone','type'=>'everyone'];
+            }
+
+            $mapPerson = fn ($type) => fn ($p) => [
+                'id'   => $p->id,
+                'name' => trim($p->first_name . ' ' . $p->last_name),
+                'type' => $type,
+            ];
 
             if ($this->isStaffRoom) {
-                // ── Staff room: only suggest members of this specific staff room ──
-                // Directors and coordinators who are part of this internal room
-                $dirs = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
-                    ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
-                    ->limit(3)->get(['id','first_name','last_name'])
-                    ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'type'=>'director'])->toArray();
+                // ── Staff room (Coordinators/Director): EVERY member shown in the
+                //    Staff Members panel — all ACTIVE directors + all ACTIVE
+                //    coordinators (every college), no cap. The list scrolls. ──
+                $dirs = $matchName(DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at'))
+                    ->orderBy('first_name')
+                    ->get(['id','first_name','last_name'])
+                    ->map($mapPerson('director'))->toArray();
 
-                $coords = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at')
-                    ->where('department', $this->department)
-                    ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
-                    ->limit(3)->get(['id','first_name','last_name'])
-                    ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'type'=>'coordinator'])->toArray();
+                $coords = $matchName(DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at'))
+                    ->where('id', '!=', $this->coordinatorId)
+                    ->orderBy('first_name')
+                    ->get(['id','first_name','last_name'])
+                    ->map($mapPerson('coordinator'))->toArray();
 
                 $this->mentionSuggestions = array_merge($suggestions, $dirs, $coords);
+
             } elseif ($this->room) {
-                // ── Alumni room: only suggest members who actually belong to this room ──
+                // ── Alumni rooms: members of THIS room — its alumni (college GC =
+                //    every course in the college, course GC = that course, batch
+                //    GC = that course + batch) plus the ACTIVE coordinators of
+                //    this college. Switching rooms changes the list. ──
                 if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
                     $alumniQ = DB::table('alumni')
                         ->whereIn('course_code', $this->deptCourseCodes)
-                        ->whereNull('deleted_at')
-                        ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"));
+                        ->whereNull('deleted_at');
                 } else {
                     $alumniQ = DB::table('alumni')
                         ->where('course_code', $this->room['course_code'])
-                        ->whereNull('deleted_at')
-                        ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"));
+                        ->whereNull('deleted_at');
                     if (! $this->isCourseRoom) $alumniQ->where('batch', $this->room['batch']);
                 }
-                $alumni = $alumniQ->limit(5)->get(['id','first_name','last_name'])
-                    ->map(fn($a)=>['id'=>$a->id,'name'=>trim($a->first_name.' '.$a->last_name),'type'=>'alumni'])->toArray();
+                // Cap at 100 so a college-wide GC doesn't ship thousands of rows
+                // on every keystroke — typing narrows it down.
+                $alumni = $matchName($alumniQ)
+                    ->orderBy('first_name')->limit(100)
+                    ->get(['id','first_name','last_name'])
+                    ->map($mapPerson('alumni'))->toArray();
 
-                // Only coordinators in this same department can be mentioned in alumni rooms
-                $coords = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at')
+                $coords = $matchName(DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at'))
                     ->where('department', $this->department)
-                    ->where(fn($sub)=>$sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%"))
-                    ->limit(3)->get(['id','first_name','last_name'])
-                    ->map(fn($o)=>['id'=>$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'type'=>'coordinator'])->toArray();
+                    ->where('id', '!=', $this->coordinatorId)
+                    ->orderBy('first_name')
+                    ->get(['id','first_name','last_name'])
+                    ->map($mapPerson('coordinator'))->toArray();
 
-                $this->mentionSuggestions = array_merge($suggestions, $alumni, $coords);
+                $this->mentionSuggestions = array_merge($suggestions, $coords, $alumni);
             }
 
-            $this->showMentions = true;
+            $this->showMentions = ! empty($this->mentionSuggestions);
         } else {
             $this->showMentions = false; $this->mentionSuggestions = [];
         }
@@ -2609,7 +2632,11 @@ new class extends Component {
 
     public function selectMention(string $name): void
     {
-        $this->body = preg_replace('/@\w*$/', '@' . $name . ' ', $this->body);
+        $this->body = preg_replace_callback(
+            '/@[\p{L}\p{N}_]*(?: [\p{L}\p{N}_]*)?$/u',
+            fn () => '@' . $name . ' ',
+            $this->body
+        );
         $this->showMentions = false; $this->mentionSuggestions = [];
         $this->dispatch('focus-input');
     }
@@ -3894,9 +3921,9 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                 {{-- Compose bar --}}
                 <div class="px-3 sm:px-4 py-3 border-t border-[#ddd3e8] bg-white flex-shrink-0" x-data>
                     @if($showMentions && ! empty($mentionSuggestions))
-                    <div class="mb-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-md overflow-hidden animate-[orgPop_.14s_ease-out]">
+                    <div class="mb-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-md overflow-y-auto overflow-x-hidden animate-[orgPop_.14s_ease-out]" style="max-height:240px; scrollbar-width:thin; scrollbar-color:#d4b8e8 transparent;">
                         @foreach($mentionSuggestions as $sug)
-                        <button wire:click="selectMention('{{ addslashes($sug['name']) }}')"
+                        <button type="button" wire:key="mention-{{ $sug['type'] }}-{{ $sug['id'] }}" wire:click="selectMention('{{ addslashes($sug['name']) }}')"
                                 class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f2e8f9] transition-colors text-left cursor-pointer">
                             <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
                                 @if($sug['name']==='everyone')<i class="fa-solid fa-users text-xs"></i>
@@ -3910,6 +3937,8 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                     <p class="text-xs text-violet-700 font-medium"><i class="fa-solid fa-shield-halved text-[10px] mr-0.5"></i>Director</p>
                                 @elseif($sug['type']==='coordinator')
                                     <p class="text-xs text-[#6b2490] font-medium">Coordinator</p>
+                                @elseif($sug['type']==='alumni')
+                                    <p class="text-xs text-gray-500 font-medium">Alumni</p>
                                 @endif
                             </div>
                         </button>
@@ -3948,7 +3977,7 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                     checkMention(el){
                                         clearTimeout(this._mTimer);
                                         this._mTimer = setTimeout(() => {
-                                            if (/@(\w*)$/.test(el.value)) { $wire.checkMentions(el.value); }
+                                            if (/@([\p{L}\p{N}_]*(?: [\p{L}\p{N}_]*)?)$/u.test(el.value)) { $wire.checkMentions(el.value); }
                                             else if ($wire.showMentions) { $wire.closeMentions(); }
                                         }, 80);
                                     }
