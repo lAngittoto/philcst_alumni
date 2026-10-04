@@ -2435,9 +2435,9 @@ new class extends Component {
                                     </div>
                                 </div>
                                 @error('profileEmailInput')<p class="text-xs text-red-500 mt-1.5">{{ $message }}</p>@enderror
-                                <p class="mt-2.5 flex items-start gap-2 text-xs leading-snug text-[#6b2f84] bg-[#faf5ff] border border-[#e6d6f2] rounded-lg px-3 py-2">
-                                    <i class="fas fa-circle-info mt-0.5 text-[11px] shrink-0"></i>
-                                    <span>When you save a new email, a <strong>temporary password</strong> will be sent to the coordinator's new address. They can use it to log in and set a new password.</span>
+                                <p class="mt-2.5 flex items-start gap-2 text-xs leading-snug !text-amber-800 !bg-amber-50 !border !border-amber-300 rounded-lg px-3 py-2" style="color:#92400e; background:#fffbeb; border:1px solid #fcd34d;">
+                                    <i class="fas fa-triangle-exclamation mt-0.5 text-[11px] shrink-0" style="color:#d97706;"></i>
+                                    <span>When you save a new email, a <strong style="color:#78350f;">temporary password</strong> will be sent to the coordinator's new address. They can use it to log in and set a new password.</span>
                                 </p>
                             @else
                                 <p class="vp-field-value mt-1">{{ $viewingProfile['email'] ?? '—' }}</p>

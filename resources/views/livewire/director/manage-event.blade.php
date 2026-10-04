@@ -730,6 +730,24 @@ new class extends Component {
         return $event->photo_url;
     }
 
+    /** Short label for the table's "Open For" pill. When several batch years
+     *  are listed, only the first is shown in full and the next is cut off
+     *  (e.g. "CITE · Batch 2021, 202…") so the row never grows long. */
+    public function shortTarget(?string $tp): string
+    {
+        $tp = trim((string) $tp);
+        if ($tp === '') return '';
+        $parts = explode(' · Batch ', $tp, 2);
+        if (!isset($parts[1])) return $tp;
+        $years = array_values(array_filter(array_map('trim', preg_split('/[,\s]+/', $parts[1]))));
+        if (count($years) > 1) {
+            $batch = $years[0] . ', ' . substr($years[1], 0, 3) . '…';
+        } else {
+            $batch = $years[0] ?? '';
+        }
+        return $parts[0] . ' · Batch ' . $batch;
+    }
+
     /** Deletes an event's stored photo — Cloudinary asset or legacy local file. */
     private function deleteEventPhotoAsset($event): void
     {
@@ -1565,10 +1583,6 @@ select.tw-select-arrow[disabled] {
 .evt-v-btn:hover { background:rgba(255,255,255,.26); }
 .evt-v-btn:active { transform:scale(.94); }
 .evt-v-btn:disabled { opacity:.6; cursor:wait; }
-.evt-v-btn.ok  { background:linear-gradient(135deg,#10b981,#059669); border-color:#10b981; box-shadow:0 2px 8px rgba(16,185,129,.35); }
-.evt-v-btn.ok:hover  { background:linear-gradient(135deg,#059669,#047857); }
-.evt-v-btn.bad { background:linear-gradient(135deg,#ef4444,#dc2626); border-color:#ef4444; box-shadow:0 2px 8px rgba(239,68,68,.35); }
-.evt-v-btn.bad:hover { background:linear-gradient(135deg,#dc2626,#b91c1c); }
 .evt-v-btn.off { background:rgba(255,255,255,.08); color:rgba(255,255,255,.45); cursor:not-allowed; box-shadow:none; }
 .evt-v-btn.off:hover { background:rgba(255,255,255,.08); }
 .evt-v-btn .evt-v-tip {
@@ -1835,7 +1849,7 @@ select.tw-select-arrow[disabled] {
                             <td class="px-4 py-3.5 overflow-hidden">
                                 @if($event->target_participants)
                                     <span class="inline-flex items-center max-w-full text-xs font-semibold px-2.5 py-1 rounded-full border border-purple-200 bg-purple-50 text-purple-700" title="{{ $event->target_participants }}">
-                                        <span class="truncate">{{ $event->target_participants }}</span>
+                                        <span class="truncate">{{ $this->shortTarget($event->target_participants) }}</span>
                                     </span>
                                 @else
                                     <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full border border-gray-200 bg-gray-50 text-gray-600">All Alumni</span>
@@ -1855,7 +1869,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                                 data-dir-action data-tip="Share"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-sky-100 text-sky-700 border border-sky-200 hover:bg-white hover:border-sky-400 disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                         </button>
@@ -1872,7 +1886,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     data-dir-action data-tip="Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
@@ -1881,7 +1895,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="confirmReject({{ $event->id }})"
                                                 data-dir-action data-tip="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $event->id }})"></i>
                                         </button>
@@ -1898,7 +1912,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     data-dir-action data-tip="Re-Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
@@ -1953,7 +1967,7 @@ select.tw-select-arrow[disabled] {
 
                             @if($event->target_participants)
                                 <span class="inline-flex items-center max-w-full mt-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-purple-700">
-                                    <span class="truncate">{{ $event->target_participants }}</span>
+                                    <span class="truncate">{{ $this->shortTarget($event->target_participants) }}</span>
                                 </span>
                             @endif
 
@@ -1968,7 +1982,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                                 aria-label="Share"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-sky-100 text-sky-700 border border-sky-200 active:bg-white active:border-sky-400 disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                         </button>
@@ -1985,7 +1999,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     aria-label="Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
@@ -1994,7 +2008,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="confirmReject({{ $event->id }})"
                                                 aria-label="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-red-50 text-red-600 border border-red-200 active:bg-red-100 active:border-red-400 disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $event->id }})"></i>
                                         </button>
@@ -2011,7 +2025,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     aria-label="Re-Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
@@ -2678,7 +2692,7 @@ select.tw-select-arrow[disabled] {
             @if($isPending)
                 <button type="button" wire:click="confirmReject({{ $ev->id }})"
                         wire:loading.attr="disabled" wire:target="confirmReject({{ $ev->id }})"
-                        class="evt-v-btn bad" aria-label="Reject">
+                        class="evt-v-btn" aria-label="Reject">
                     <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $ev->id }})"></i>
                     <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $ev->id }})"></i>
                     <span class="evt-v-tip">Reject</span>
@@ -2690,7 +2704,7 @@ select.tw-select-arrow[disabled] {
                 @else
                     <button type="button" wire:click="confirmApprove({{ $ev->id }})"
                             wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
-                            class="evt-v-btn ok" aria-label="Approve">
+                            class="evt-v-btn" aria-label="Approve">
                         <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
                         <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
                         <span class="evt-v-tip">Approve</span>
@@ -2706,7 +2720,7 @@ select.tw-select-arrow[disabled] {
                 @else
                     <button type="button" wire:click="confirmApprove({{ $ev->id }})"
                             wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
-                            class="evt-v-btn ok" aria-label="Re-Approve">
+                            class="evt-v-btn" aria-label="Re-Approve">
                         <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
                         <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
                         <span class="evt-v-tip">Re-Approve</span>

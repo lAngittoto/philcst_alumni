@@ -30,7 +30,10 @@
             border: none !important;
             outline: none !important;
             box-shadow: none !important;
-            padding: 0;
+            padding: 6px;
+            margin: 0;
+            -webkit-tap-highlight-color: transparent;
+            line-height: 0;
             cursor: pointer;
             position: relative;
             display: inline-flex;
@@ -358,9 +361,6 @@
             #admin-sidebar-aside.is-collapsed nav a > div:first-child {
                 margin-right: 0 !important;
             }
-            #admin-sidebar-aside.is-collapsed .admin-nav-link.is-navigating .admin-nav-icon-wrap i.fa-solid {
-                display: none !important;
-            }
             #admin-sidebar-aside.is-collapsed .admin-nav-section-row {
                 justify-content: center;
                 padding: 0 0.25rem;
@@ -422,55 +422,15 @@
         }
         .admin-nav-link.is-navigating { cursor: wait !important; }
 
-        /* ── Nav link click spinner — mirrors the registrar sidebar's
-           approach. Shows a small spinner on the row while a page
-           navigation is in flight for immediate feedback.
-           Expanded sidebar: sits at the end of the row (active dot slot).
-           Collapsed sidebar / mobile: centered on top of the icon chip. ── */
+        /* ── Nav link click spinner — ONE spinner per link, rendered inside the
+           icon chip in place of the icon (same approach as the organizer sidebar).
+           Works the same on desktop, collapsed and mobile — nothing to toggle. ── */
         .admin-nav-link { position: relative; }
         .admin-nav-icon-wrap { position: relative; }
-        .admin-nav-link.is-navigating .admin-nav-icon-wrap {
-            background: #F0F0F0 !important;
-            color: #9CA3AF !important;
-        }
         .admin-nav-spinner {
-            flex-shrink: 0;
-            margin-left: auto;
-            font-size: 13px;
-            color: #7A3F91;
+            font-size: 16px;
             line-height: 1;
-        }
-        .admin-nav-spinner-icon-anchored { display: none; }
-
-        #admin-sidebar-aside.is-collapsed .admin-nav-link.is-navigating > .admin-nav-spinner,
-        .admin-nav-link.is-navigating > .admin-nav-spinner {
-            display: none !important;
-        }
-        #admin-sidebar-aside.is-collapsed .admin-nav-link.is-navigating .admin-nav-spinner-icon-anchored,
-        .admin-nav-link.is-navigating .admin-nav-spinner-icon-anchored {
-            display: flex !important;
-            align-items: center;
-            justify-content: center;
-            position: absolute !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate(-50%, -50%) !important;
-            font-size: 16px !important;
-        }
-        .admin-nav-spinner-icon-anchored .admin-nav-spinner {
-            margin-left: 0;
-        }
-
-        @media (min-width: 1024px) {
-            #admin-sidebar-aside:not(.is-collapsed) .admin-nav-link.is-navigating > .admin-nav-spinner {
-                display: inline-block !important;
-            }
-            #admin-sidebar-aside:not(.is-collapsed) .admin-nav-link.is-navigating .admin-nav-spinner-icon-anchored {
-                display: none !important;
-            }
-            #admin-sidebar-aside:not(.is-collapsed) .admin-nav-link.is-navigating .admin-nav-icon-wrap i.fa-solid {
-                display: inline-block !important;
-            }
+            color: #7A3F91;
         }
 
         /* Logout button */
@@ -495,14 +455,69 @@
         }
         .admin-logout-btn:hover   { opacity: 0.92; }
         .admin-logout-btn:active  { transform: scale(0.97); }
+        .admin-logout-btn:disabled { cursor: not-allowed; opacity: 0.85; }
 
-        @keyframes admLogoutDotBounce {
-            0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
-            40% { transform: translateY(-4px); opacity: 1; }
+        /* Single ring spinner for logout (same as the organizer sidebar) */
+        .admin-logout-spinner {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff;
+            animation: admin-spin 0.7s linear infinite;
+            display: inline-block;
+        }
+        @keyframes admin-spin { to { transform: rotate(360deg); } }
+        .admin-logout-text-swap { display: inline-flex; align-items: center; }
+        @media (min-width: 1024px) {
+            #admin-sidebar-aside.is-collapsed .admin-logout-spinner { margin-right: 0 !important; }
+        }
+
+        /* ── Mobile viewport height fix (address bar safe) ── */
+        .admin-app-shell {
+            height: 100vh;
+            height: 100dvh;
         }
     </style>
 
     <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    //  LOGOUT-IN-PROGRESS FLAG — set the instant Logout is clicked. Polling and
+    //  notification fetches check it and bail out silently so nothing races the
+    //  session being torn down (that race is what flashed "Page expired").
+    // ─────────────────────────────────────────────────────────────────────────
+    window.__adminLoggingOut = false;
+
+    // BFCACHE FIX — a page restored from back/forward cache has a stale CSRF token
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) { window.location.reload(); }
+    });
+
+    // Swallow Livewire's duplicate promise rejection ({status, body, json, errors})
+    // after a failed request has already been handled quietly by the session guard.
+    window.addEventListener('unhandledrejection', function (event) {
+        var reason = event.reason;
+        if (reason && typeof reason === 'object' &&
+            'status' in reason && 'body' in reason && 'json' in reason && 'errors' in reason) {
+            event.preventDefault();
+        }
+    });
+
+    // Sidebar nav lock safety net — if a navigation fails outright, livewire:navigated
+    // never fires and every OTHER link would stay disabled. Clear the lock here.
+    window.addEventListener('livewire:navigate:failed', function () {
+        try {
+            if (window.Alpine && document.body) { Alpine.$data(document.body).navClickedRoute = null; }
+        } catch (e) { /* ignore */ }
+    });
+
+    // Stop all background polling on logout (fired BEFORE the logout request).
+    window.addEventListener('stop-admin-polling', function () {
+        window.__adminLoggingOut = true;
+        var s = window.__safeAdminNotifsStore && window.__safeAdminNotifsStore();
+        if (s && s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
+        if (s) { s.open = false; }
+    });
+
     // ─────────────────────────────────────────────────────────────────────────
     //  ROUTE MAP
     // ─────────────────────────────────────────────────────────────────────────
@@ -564,6 +579,7 @@
             },
 
             async _fetch() {
+                if (window.__adminLoggingOut) return;
                 if (this._deleting)  return;
                 if (this.navigating) return;
                 try {
@@ -1257,6 +1273,13 @@
         sidebarCollapsed: localStorage.getItem('admin_sidebar_collapsed') === '1',
         sidebarSettled: false,
         navClickedRoute: null,
+        loggingOut: false,
+        doLogout(form) {
+            if (this.navClickedRoute !== null || this.loggingOut) return;
+            this.loggingOut = true;
+            window.dispatchEvent(new CustomEvent('stop-admin-polling'));
+            window.__doLogout(form, this);
+        },
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
         }
@@ -1272,7 +1295,7 @@
     $authAdmin = auth()->user();
 @endphp
 
-<div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
+<div class="admin-app-shell flex bg-[#F5F5F5] font-sans overflow-hidden">
 
     {{-- Mobile overlay --}}
     <div
@@ -1411,7 +1434,7 @@
                 <a href="{{ route($link['route']) }}"
                    wire:navigate
                    title="{{ $link['label'] }}"
-                   @click="if (navClickedRoute !== null) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024) open = false;"
+                   @click="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024) open = false; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="admin-nav-link flex items-center px-4 py-3 transition-all duration-200 rounded-xl group
                           {{ $isActive
@@ -1422,12 +1445,10 @@
                                 transition-transform duration-200 group-hover:scale-110 shrink-0 mr-4"
                          style="background-color:{{ $isActive ? $link['color'].'22' : $link['bg'] }};color:{{ $link['color'] }};">
                         <i class="fa-solid fa-{{ $link['icon'] }} opacity-90"
-                           x-show="!(navClickedRoute === '{{ $link['route'] }}' && (sidebarCollapsed || window.innerWidth < 1024))"></i>
-                        <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                            <span class="admin-nav-spinner-icon-anchored">
-                                <i class="fas fa-spinner fa-spin admin-nav-spinner"></i>
-                            </span>
-                        </template>
+                           x-show="navClickedRoute !== '{{ $link['route'] }}'"></i>
+                        <i class="fas fa-spinner fa-spin admin-nav-spinner"
+                           style="color:{{ $link['color'] }} !important;"
+                           x-show="navClickedRoute === '{{ $link['route'] }}'" x-cloak></i>
                     </div>
 
                     <span class="admin-collapsible-text font-medium tracking-wide flex-1
@@ -1435,10 +1456,6 @@
                           style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}{{ in_array($link['route'], ['employment.tracking','events']) ? 'font-size:13.5px;' : '' }}">
                         {{ $link['label'] }}
                     </span>
-
-                    <template x-if="navClickedRoute === '{{ $link['route'] }}'">
-                        <i class="fas fa-spinner fa-spin admin-nav-spinner"></i>
-                    </template>
 
                     @if($isActive)
                         <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
@@ -1450,51 +1467,39 @@
             @endforeach
         </nav>
 
-        {{-- Admin notification poller --}}
-        <div wire:ignore.self x-data="{ pollingActive: true }" x-on:stop-admin-polling.window="pollingActive = false">
-            <template x-if="pollingActive">
-                @livewire('admin.admin-notif-poller')
-            </template>
+        {{-- Admin notification poller — must stay mounted at all times (including
+             during logout). It used to be wrapped in <template x-if="pollingActive">
+             and torn out of the DOM on logout, which let an in-flight wire:poll
+             request resolve against a component that no longer existed. Logout is a
+             hard navigation, so any in-flight poll dies naturally with the page. --}}
+        <div wire:ignore.self style="display:none;">
+            @livewire('admin.admin-notif-poller')
         </div>
 
         {{-- Logout --}}
         <div class="p-4 mt-auto border-t border-[#E8E0F0] shrink-0">
-            <a href="{{ route('logout') }}"
-               wire:navigate
-               title="Logout"
-               x-data="{ loggingOut: false }"
-               @click="
-                   loggingOut = true;
-                   window.dispatchEvent(new CustomEvent('stop-admin-polling'));
-                   if (window.__safeAdminNotifsStore) {
-                       var s = window.__safeAdminNotifsStore();
-                       if (s) {
-                           if (s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
-                           s.open = false;
-                       }
-                   }
-               "
-               class="admin-logout-btn">
-                <template x-if="!loggingOut">
-                    <span class="flex items-center justify-center">
-                        <i class="fa-solid fa-right-from-bracket mr-2"></i>
-                        <span class="admin-collapsible-text">Logout</span>
-                    </span>
-                </template>
-                <template x-if="loggingOut">
-                    <span class="flex items-center justify-center">
-                        <span class="admin-collapsible-text mr-2">Logging out</span>
-                        <span class="inline-flex items-center gap-1">
-                            <span class="w-1.5 h-1.5 rounded-full bg-white inline-block"
-                                  style="animation: admLogoutDotBounce 0.9s infinite ease-in-out; animation-delay: 0s;"></span>
-                            <span class="w-1.5 h-1.5 rounded-full bg-white inline-block"
-                                  style="animation: admLogoutDotBounce 0.9s infinite ease-in-out; animation-delay: 0.15s;"></span>
-                            <span class="w-1.5 h-1.5 rounded-full bg-white inline-block"
-                                  style="animation: admLogoutDotBounce 0.9s infinite ease-in-out; animation-delay: 0.3s;"></span>
+            <form method="POST"
+                  action="{{ route('logout') }}"
+                  @submit.prevent="doLogout($el)">
+                @csrf
+                <button type="submit"
+                        :disabled="loggingOut || navClickedRoute !== null"
+                        title="Logout"
+                        class="admin-logout-btn">
+                    <template x-if="!loggingOut">
+                        <span class="admin-logout-text-swap">
+                            <i class="fa-solid fa-right-from-bracket mr-2"></i>
+                            <span class="admin-collapsible-text">Logout</span>
                         </span>
-                    </span>
-                </template>
-            </a>
+                    </template>
+                    <template x-if="loggingOut">
+                        <span class="admin-logout-text-swap">
+                            <span class="admin-logout-spinner mr-2"></span>
+                            <span class="admin-collapsible-text">Logging out…</span>
+                        </span>
+                    </template>
+                </button>
+            </form>
         </div>
     </aside>
 
@@ -1512,60 +1517,23 @@
              aria-hidden="true">
         </div>
 
-        {{-- Mobile top bar --}}
-        <header class="flex items-center justify-between px-6 py-4 bg-white border-b border-[#E8E0F0]
-                       lg:hidden shrink-0 z-30">
+        {{-- Top bar — transparent (no box), same as the organizer. Hamburger only
+             on mobile; bell always on the right, icon-only. --}}
+        <header class="flex items-center justify-between px-4 lg:px-8 h-12 lg:h-14 bg-transparent
+                       shrink-0 z-30">
             <button @click.stop="open = !open"
-                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors">
+                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
                 <div class="w-6 h-5 relative flex flex-col justify-between">
                     <span :class="open ? 'rotate-45 translate-y-2' : ''"
-                          class="w-full h-0.5 bg-[#7A3F91] transition-all duration-300 origin-center"></span>
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
                     <span :class="open ? 'opacity-0' : ''"
-                          class="w-full h-0.5 bg-[#7A3F91] transition-all duration-300"></span>
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300"></span>
                     <span :class="open ? '-rotate-45 -translate-y-2.5' : ''"
-                          class="w-full h-0.5 bg-[#7A3F91] transition-all duration-300 origin-center"></span>
+                          class="w-full h-0.5 bg-[#333333] transition-all duration-300 origin-center"></span>
                 </div>
             </button>
-            <h2 class="text-lg font-bold text-[#333333]">Admin Portal</h2>
+            <span class="hidden lg:block"></span>
 
-            {{-- Bell Button (mobile) --}}
-            <button
-                id="admin-bell-btn-mobile"
-                type="button"
-                class="admin-bell-btn"
-                @click.stop="$store.adminNotifs && $store.adminNotifs.toggle(); positionAdminPanel();"
-                title="Notifications"
-                aria-label="Open notifications">
-
-                <i class="fas fa-bell"
-                   :class="$store.adminNotifs && $store.adminNotifs.unread > 0 ? 'fa-shake' : ''"
-                   style="font-size:19px; color:#7A3F91;
-                          --fa-animation-duration:4s;
-                          --fa-animation-iteration-count:infinite;
-                          pointer-events:none;"></i>
-
-                <span
-                    x-show="$store.adminNotifs && $store.adminNotifs.unread > 0"
-                    x-cloak
-                    x-transition:enter="transition ease-out duration-200"
-                    x-transition:enter-start="opacity-0 scale-0"
-                    x-transition:enter-end="opacity-100 scale-100"
-                    class="notif-ripple bell-badge absolute -top-1 -right-1 min-w-[18px] h-[18px] rounded-full
-                           bg-red-500 text-white text-[9px] font-black
-                           flex items-center justify-center px-1 leading-none
-                           shadow-md ring-2 ring-white"
-                    x-text="$store.adminNotifs && $store.adminNotifs.unread > 99
-                                ? '99+'
-                                : ($store.adminNotifs ? $store.adminNotifs.unread : 0)">
-                </span>
-            </button>
-        </header>
-
-        {{-- Desktop top bar --}}
-        <header class="hidden lg:flex items-center justify-end h-24 px-8 bg-white border-b border-[#E8E0F0]
-                       shrink-0 z-30">
-
-            {{-- Bell Button (desktop) --}}
             <button
                 id="admin-bell-btn"
                 type="button"
@@ -1599,7 +1567,7 @@
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto min-h-0 bg-[#F5F5F5] p-4 lg:p-8 no-scrollbar">
+        <div class="flex-1 overflow-y-auto min-h-0 bg-[#F5F5F5] px-4 pt-0 pb-4 lg:px-8 lg:pt-0 lg:pb-6 no-scrollbar">
             <div class="container mx-auto">
                 @yield('content')
             </div>
@@ -1935,6 +1903,119 @@
         </p>
     </div>
 </div>
+
+{{-- ══ SESSION GUARD (same as organizer / alumni) ═══════════════════════
+     No "page expired" popup. On logout: stop timers, drop new requests, let
+     in-flight ones finish, THEN POST /logout via fetch and go to login.
+     Any Livewire 419/401 is handled quietly (reload once → login if still
+     rejected). Runs once per full page load (data-navigate-once). --}}
+<script data-navigate-once>
+(function () {
+    if (window.__sessionGuardBooted) return;
+    window.__sessionGuardBooted = true;
+
+    var LOGIN_URL = '{{ route('login') }}';
+    window.__loggingOut  = false;
+    window.__logoutFetch = false;
+
+    // Track in-flight requests; drop NEW ones once logout has started.
+    var origFetch = window.fetch.bind(window);
+    var pending   = new Set();
+    window.fetch = function (input, init) {
+        if (window.__loggingOut && !window.__logoutFetch) {
+            return new Promise(function () {}); // page is leaving — stay silent
+        }
+        var p = origFetch(input, init);
+        pending.add(p);
+        var done = function () { pending.delete(p); };
+        p.then(done, done);
+        return p;
+    };
+
+    window.__doLogout = async function (form, ctx) {
+        window.__loggingOut      = true;
+        window.__adminLoggingOut = true;
+        window.__notifPollSuspended = true;
+
+        // Stop the notification polling timers.
+        try {
+            ['notifs', 'alumniNotifs', 'coordNotifs', 'adminNotifs'].forEach(function (name) {
+                var s = window.Alpine && Alpine.store(name);
+                if (s && s._pollTimer) { clearInterval(s._pollTimer); s._pollTimer = null; }
+            });
+        } catch (e) { /* ignore */ }
+
+        // Let anything already in flight finish (max 2.5s) so nothing is
+        // still touching the session when it gets invalidated.
+        try {
+            await Promise.race([
+                Promise.allSettled(Array.from(pending)),
+                new Promise(function (r) { setTimeout(r, 2500); })
+            ]);
+        } catch (e) { /* ignore */ }
+
+        var ok = false;
+        try {
+            var tokenInput = form.querySelector('input[name="_token"]');
+            var metaTag    = document.querySelector('meta[name="csrf-token"]');
+            var token      = (tokenInput && tokenInput.value) || (metaTag && metaTag.content) || '';
+            window.__logoutFetch = true;
+            var req = window.fetch(form.action, {
+                method: 'POST',
+                credentials: 'same-origin',
+                redirect: 'manual',
+                cache: 'no-store',
+                headers: {
+                    'X-CSRF-TOKEN': token,
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({ _token: token }).toString()
+            });
+            window.__logoutFetch = false;
+            await req;   // 200 / 302 (opaque redirect) / 419 — all fine: we go to login either way
+            ok = true;
+        } catch (e) {
+            window.__logoutFetch = false;
+        }
+
+        if (ok) {
+            window.location.replace(LOGIN_URL);
+        } else {
+            // Network hiccup: fall back to a normal form POST.
+            window.__loggingOut      = false;
+            window.__adminLoggingOut = false;
+            try { form.submit(); } catch (e) { if (ctx) ctx.loggingOut = false; }
+        }
+    };
+
+    // Livewire 419 / 401 → quiet recovery, no confirm() popup.
+    document.addEventListener('livewire:init', function () {
+        try {
+            Livewire.hook('request', function (hookCtx) {
+                hookCtx.fail(function (info) {
+                    if (info.status !== 419 && info.status !== 401) return;
+                    info.preventDefault();
+                    if (window.__loggingOut) return;       // logging out anyway
+                    var last = 0;
+                    try { last = parseInt(sessionStorage.getItem('__lw419') || '0', 10); } catch (e) {}
+                    try { sessionStorage.setItem('__lw419', String(Date.now())); } catch (e) {}
+                    if (Date.now() - last < 5000) {
+                        window.location.href = LOGIN_URL;  // reload already tried → session really gone
+                    } else {
+                        window.location.reload();          // fresh token if the session is still valid
+                    }
+                });
+            });
+        } catch (e) { /* hook API differs — nothing else breaks */ }
+    });
+
+    // Back/forward cache restored a stale page (stale CSRF token) → refresh it.
+    window.addEventListener('pageshow', function (e) {
+        if (e.persisted) window.location.reload();
+    });
+})();
+</script>
 
 @livewireScripts
 
