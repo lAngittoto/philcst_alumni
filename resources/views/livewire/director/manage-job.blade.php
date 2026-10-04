@@ -2230,7 +2230,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
 .view-field-display {
     padding: 0.55rem 0.75rem;
-    background: #fafafa;
+    background: #ffffff;
     border: 1.5px solid #e8e0f0;
     border-radius: 0.6rem;
     font-size: 0.78rem;

@@ -755,7 +755,7 @@ new class extends Component {
             $this->editingProfileEmail     = false;
             $this->profileEmailInput       = '';
 
-            $this->flash('success', 'Email updated — new login credentials sent to ' . $newEmail . '.');
+            $this->flash('success', 'Email updated — a temporary password was sent to ' . $newEmail . '.');
 
             $this->dispatch('dir-coordinator-updated',
                 id: $coordinator->id,
@@ -2045,9 +2045,13 @@ new class extends Component {
         $viewingProfile['suffix'] ?? ''
     );
 @endphp
-<div class="fixed inset-0 z-[9000] flex flex-col font-sans"
-     style="background:#f8f7fb; animation: vpFadeIn .12s ease both;"
+<div class="fixed inset-0 z-[9000] flex items-center justify-center p-3 sm:p-6 font-sans"
+     style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
+     wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
+<div class="relative w-full max-w-5xl flex flex-col rounded-2xl overflow-hidden shadow-2xl"
+     style="background:#f8f7fb; max-height:92vh;"
+     wire:click.stop @click.stop>
 
 <style>
 @keyframes vpFadeIn { from { opacity:0; } to { opacity:1; } }
@@ -2134,8 +2138,8 @@ new class extends Component {
     </div>
 
     {{-- Main scrollable body --}}
-    <div class="flex-1 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 py-6 flex flex-col lg:flex-row gap-5">
+    <div class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row gap-5">
 
             {{-- ── LEFT SIDEBAR ── --}}
             <div class="w-full lg:w-72 xl:w-80 flex flex-col gap-4 flex-shrink-0">
@@ -2431,6 +2435,10 @@ new class extends Component {
                                     </div>
                                 </div>
                                 @error('profileEmailInput')<p class="text-xs text-red-500 mt-1.5">{{ $message }}</p>@enderror
+                                <p class="mt-2.5 flex items-start gap-2 text-xs leading-snug text-[#6b2f84] bg-[#faf5ff] border border-[#e6d6f2] rounded-lg px-3 py-2">
+                                    <i class="fas fa-circle-info mt-0.5 text-[11px] shrink-0"></i>
+                                    <span>When you save a new email, a <strong>temporary password</strong> will be sent to the coordinator's new address. They can use it to log in and set a new password.</span>
+                                </p>
                             @else
                                 <p class="vp-field-value mt-1">{{ $viewingProfile['email'] ?? '—' }}</p>
                             @endif
@@ -2532,7 +2540,8 @@ new class extends Component {
         </div>{{-- /flex row --}}
     </div>{{-- /scrollable body --}}
 
-</div>
+</div>{{-- /dialog --}}
+</div>{{-- /overlay --}}
 @endif
 
 

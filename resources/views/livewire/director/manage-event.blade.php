@@ -1520,6 +1520,46 @@ select.tw-select-arrow[disabled] {
 @media (min-width:640px)  { .evt-v-grid { padding:20px; gap:20px; } .evt-v-col { gap:20px; } }
 @media (min-width:1024px) { .evt-v-grid { padding:24px; grid-template-columns:minmax(0,2fr) minmax(0,1fr); } }
 
+/* ══ View Event — "detail page" design (hero + info tiles + 3 content cards) ══ */
+.evt-d-wrap { width:100%; max-width:1520px; margin:0 auto; padding:24px; display:flex; flex-direction:column; gap:18px; }
+.evt-d-hero { background:#fff; border-radius:22px; box-shadow:0 4px 22px rgba(122,63,145,.10); overflow:hidden; display:grid; grid-template-columns:minmax(0,1fr); }
+.evt-d-photo { position:relative; background:#fff; display:flex; align-items:center; justify-content:center; min-height:280px; padding:24px; }
+.evt-d-photo img { max-width:100%; max-height:520px; width:auto; height:auto; object-fit:contain; display:block; }
+.evt-d-photo.is-empty { background:linear-gradient(135deg,#7A3F91,#9b59b6); }
+.evt-d-photo.is-empty i { font-size:84px; color:rgba(255,255,255,.28); }
+.evt-d-main { padding:26px 28px; display:flex; flex-direction:column; gap:16px; min-width:0; }
+.evt-d-pill { display:inline-flex; align-items:center; gap:7px; align-self:flex-start; background:#7a3f91; color:#fff; font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; padding:6px 14px; border-radius:999px; }
+.evt-d-title { font-size:2rem; line-height:1.2; font-weight:600; color:#1a1026; word-break:break-word; margin:0; }
+.evt-d-chips { display:flex; flex-wrap:wrap; gap:8px; }
+.evt-d-chip { display:inline-flex; align-items:center; gap:6px; font-size:13.5px; font-weight:600; padding:6px 14px; border-radius:999px; border:1px solid #E6D6F2; background:#F5ECFB; color:#6b2f84; }
+.evt-d-chip.alt { border-color:#E5E5E5; background:#F4F4F4; color:#444; }
+.evt-d-chip i { font-size:10px; }
+.evt-d-sep { height:1px; background:#EFE8F5; border:0; margin:2px 0; }
+.evt-d-tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:16px; }
+.evt-d-tile { border:1.5px solid #E8E0F0; border-radius:14px; padding:14px 16px 16px; background:#fff; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.evt-d-tlbl { display:flex; align-items:center; gap:7px; font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:#7a3f91; margin-bottom:4px; }
+.evt-d-tlbl i { font-size:11px; }
+.evt-d-tval { font-size:1.05rem; font-weight:600; color:#1a1026; line-height:1.3; word-break:break-word; }
+.evt-d-tsub { font-size:13px; color:#666; line-height:1.4; word-break:break-word; }
+.evt-d-tsub.up { text-transform:uppercase; }
+.evt-d-tile .evt-d-tlbl.mt { margin-top:8px; }
+.evt-d-cols { display:grid; grid-template-columns:minmax(0,1fr); gap:18px; align-items:stretch; }
+.evt-d-card { background:#fff; border-radius:18px; box-shadow:0 2px 14px rgba(122,63,145,.08); overflow:hidden; display:flex; flex-direction:column; min-width:0; }
+.evt-d-chead { display:flex; align-items:center; gap:10px; padding:14px 22px; color:#fff; font-size:13px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; background:linear-gradient(135deg,#7A3F91,#6a3080); }
+.evt-d-cbody { padding:22px 24px 26px; flex:1; }
+.evt-d-text { font-size:15.5px; line-height:1.9; color:#444; white-space:pre-wrap; word-break:break-word; margin:0; }
+.evt-d-empty { font-size:14px; color:#aaa; font-style:italic; margin:0; }
+.evt-d-crow { display:flex; align-items:flex-start; gap:14px; padding:9px 0; font-size:15.5px; color:#2a2a2a; }
+.evt-d-crow i { color:#7a3f91; width:18px; text-align:center; margin-top:4px; flex-shrink:0; }
+.evt-d-crow span { min-width:0; word-break:break-word; }
+@media (min-width:640px)  { .evt-d-wrap { padding:28px; } .evt-d-main { padding:30px 32px; } }
+@media (min-width:1024px) {
+    .evt-d-hero { grid-template-columns:minmax(0,1fr) minmax(0,1.1fr); }
+    .evt-d-photo { min-height:570px; }
+    .evt-d-cols { grid-template-columns:repeat(3,minmax(0,1fr)); }
+}
+@media (max-width:639px) { .evt-d-title { font-size:1.5rem; } .evt-d-wrap { padding:14px; } }
+
 /* Header action buttons — icon-only, same square size as the X close, tooltip on hover */
 .evt-v-btn  { position:relative; display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; padding:0; border-radius:10px; font-size:14px; color:#fff; cursor:pointer; transition:all .15s; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.14); }
 .evt-v-btn:hover { background:rgba(255,255,255,.26); }
@@ -2688,241 +2728,138 @@ select.tw-select-arrow[disabled] {
 
     {{-- ── BODY ── --}}
     <div class="flex-1 min-h-0 overflow-y-auto scroll-c">
-        <div class="evt-v-grid">
+        @php
+            $updatedPH = $ev->updated_at ? \Carbon\Carbon::parse($ev->updated_at)->setTimezone('Asia/Manila') : null;
+            $apprColor = match(true) {
+                $isApproved || $isCompleted => '#059669',
+                $isPending                  => '#d97706',
+                default                     => '#ea580c',
+            };
+            $cName  = $ev->contact_person ?: $ev->organizer?->name;
+            $cEmail = $ev->contact_email  ?: $ev->organizer?->email;
+            $cPhone = $ev->contact_phone;
+            $cDept  = $ev->organizer?->department;
+        @endphp
+        <div class="evt-d-wrap">
 
-            {{-- ═════════ LEFT / MAIN ═════════ --}}
-            <div class="evt-v-col">
+            {{-- ═════════ HERO: photo + title + info tiles ═════════ --}}
+            <div class="evt-d-hero">
+                <div class="evt-d-photo {{ $hasPhoto ? '' : 'is-empty' }}">
+                    @if($hasPhoto)
+                        <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}">
+                    @else
+                        <i class="fas fa-calendar-days"></i>
+                    @endif
+                </div>
 
-                {{-- Hero: photo + title --}}
-                <div class="evt-v-card overflow-hidden">
-                    <div class="relative w-full h-[220px] sm:h-[300px] lg:h-[360px] overflow-hidden"
-                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                        @if($hasPhoto)
-                            <img src="{{ $evPhotoUrl }}" alt="" aria-hidden="true"
-                                 class="absolute inset-0 w-full h-full object-cover scale-125 opacity-60" style="filter:blur(28px);">
-                            <div class="absolute inset-0 bg-white/40"></div>
-                            <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}"
-                                 class="relative z-[1] w-full h-full object-contain p-3 sm:p-4 drop-shadow-lg">
-                        @else
-                            <div class="absolute inset-0 flex items-center justify-center">
-                                <i class="fas fa-calendar-days text-white/25 text-7xl"></i>
-                            </div>
-                        @endif
+                <div class="evt-d-main">
+                    <span class="evt-d-pill"><i class="fas fa-layer-group text-[10px]"></i>Event Title</span>
+                    <h2 class="evt-d-title">{{ $ev->title }}</h2>
+
+                    @if(count($chips))
+                    <div class="evt-d-chips">
+                        @foreach($chips as $ci => $chip)
+                            <span class="evt-d-chip {{ $ci > 0 ? 'alt' : '' }}"><i class="fas fa-layer-group"></i>{{ $chip }}</span>
+                        @endforeach
                     </div>
+                    @endif
 
-                    <div class="p-5 sm:p-6 flex flex-col gap-3">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border {{ $vStCls }}">
-                                <span class="w-1.5 h-1.5 rounded-full {{ $vStDot }}"></span>{{ $vStLabel }}
-                            </span>
-                            @foreach($chips as $chip)
-                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-purple-200 bg-purple-50 text-purple-700 text-xs font-semibold">
-                                    <i class="fas fa-tag text-[9px]"></i>{{ $chip }}
-                                </span>
-                            @endforeach
-                        </div>
+                    <hr class="evt-d-sep">
 
-                        <h2 class="text-2xl sm:text-3xl font-bold text-[#1a1026] leading-tight break-words">{{ $ev->title }}</h2>
-
-                        <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-[#555555] font-medium">
-                            <span class="inline-flex items-center gap-2"><i class="fas fa-calendar-days text-[#7a3f91]"></i>{{ $eventDatePH->format('D, M d, Y') }}</span>
-                            <span class="inline-flex items-center gap-2"><i class="fas fa-clock text-[#7a3f91]"></i>{{ $timeDisplay }}</span>
+                    <div class="evt-d-tiles">
+                        <div class="evt-d-tile">
+                            <p class="evt-d-tlbl"><i class="fas fa-location-dot"></i>Venue</p>
                             @if($ev->venue)
-                            <span class="inline-flex items-center gap-2 min-w-0"><i class="fas fa-location-dot text-[#7a3f91]"></i><span class="truncate">{{ $ev->venue }}</span></span>
+                                <p class="evt-d-tval">{{ $ev->venue }}</p>
+                                @if($ev->venue_address)<p class="evt-d-tsub up">{{ $ev->venue_address }}</p>@endif
+                            @else
+                                <p class="evt-d-empty">Not specified</p>
+                            @endif
+                        </div>
+                        <div class="evt-d-tile">
+                            <p class="evt-d-tlbl"><i class="fas fa-calendar-days"></i>Date &amp; Time</p>
+                            <p class="evt-d-tval">{{ $eventDatePH->format('M d, Y') }}</p>
+                            <p class="evt-d-tsub">{{ $timeDisplay }}</p>
+                        </div>
+                        <div class="evt-d-tile">
+                            <p class="evt-d-tlbl"><i class="fas fa-users"></i>Open For</p>
+                            @if($ev->target_participants)
+                                <p class="evt-d-tval">{{ $ev->target_participants }}</p>
+                            @else
+                                <p class="evt-d-tval">All alumni</p>
+                            @endif
+                        </div>
+                    </div>
+
+                    <hr class="evt-d-sep">
+
+                    <div class="evt-d-tiles">
+                        <div class="evt-d-tile">
+                            <p class="evt-d-tlbl"><i class="fas fa-clipboard-check"></i>Responses</p>
+                            <p class="evt-d-tval">{{ $ev->confirmed_count }} Attending</p>
+                            <p class="evt-d-tsub">{{ $ev->tentative_count }} Maybe &middot; {{ $ev->declined_count }} No</p>
+                        </div>
+                        <div class="evt-d-tile">
+                            <p class="evt-d-tlbl"><i class="fas fa-circle-check"></i>Approval</p>
+                            <p class="evt-d-tval" style="color:{{ $apprColor }};">{{ $isPending ? 'Pending Review' : $vStLabel }}</p>
+                            @if(($isApproved || $isRejected) && $ev->review_remarks)
+                                <p class="evt-d-tsub {{ $isApproved ? 'italic' : '' }}">{{ $isApproved ? '"' . $ev->review_remarks . '"' : $ev->review_remarks }}</p>
+                            @endif
+                            @if(($isPending || $isRejected) && $eventDateExpired)
+                                <p class="evt-d-tsub" style="color:#ef4444;font-weight:600;"><i class="fas fa-triangle-exclamation text-[11px] mr-1"></i>Date needs updating.</p>
+                            @endif
+                        </div>
+                        <div class="evt-d-tile">
+                            <p class="evt-d-tlbl"><i class="fas fa-calendar-plus"></i>Created</p>
+                            <p class="evt-d-tval">{{ $createdPH->format('M d, Y g:i A') }}</p>
+                            @if($updatedPH)
+                                <p class="evt-d-tlbl mt"><i class="fas fa-clock-rotate-left"></i>Last Updated</p>
+                                <p class="evt-d-tval">Updated {{ $updatedPH->format('m/d/Y g:i A') }}</p>
                             @endif
                         </div>
                     </div>
                 </div>
+            </div>
 
-                {{-- About --}}
-                <div class="evt-v-card">
-                    <div class="evt-v-head">
-                        <span class="evt-v-ico"><i class="fas fa-align-left"></i></span>
-                        <p class="evt-v-lbl">About This Event</p>
-                    </div>
-                    <div class="px-5 sm:px-6 py-5">
+            {{-- ═════════ ABOUT / NOTES / CONTACT ═════════ --}}
+            <div class="evt-d-cols">
+                <div class="evt-d-card">
+                    <div class="evt-d-chead"><i class="fas fa-align-left"></i>About This Event</div>
+                    <div class="evt-d-cbody">
                         @if($ev->description)
-                            <p class="text-[15px] text-[#333333] whitespace-pre-wrap break-words" style="line-height:1.85;">{{ trim($ev->description) }}</p>
+                            <p class="evt-d-text">{{ trim($ev->description) }}</p>
                         @else
-                            <p class="text-sm text-[#aaaaaa] italic">No description provided.</p>
+                            <p class="evt-d-empty">No description provided.</p>
                         @endif
                     </div>
                 </div>
 
-                {{-- Additional Notes --}}
-                <div class="evt-v-card">
-                    <div class="evt-v-head">
-                        <span class="evt-v-ico"><i class="fas fa-note-sticky"></i></span>
-                        <p class="evt-v-lbl">Additional Notes</p>
-                    </div>
-                    <div class="px-5 sm:px-6 py-5">
+                <div class="evt-d-card">
+                    <div class="evt-d-chead"><i class="fas fa-note-sticky"></i>Additional Notes</div>
+                    <div class="evt-d-cbody">
                         @if($ev->notes)
-                            <p class="text-[15px] text-[#333333] whitespace-pre-wrap break-words" style="line-height:1.85;">{{ trim($ev->notes) }}</p>
+                            <p class="evt-d-text">{{ trim($ev->notes) }}</p>
                         @else
-                            <p class="text-sm text-[#aaaaaa] italic">No additional notes.</p>
-                        @endif
-                    </div>
-                </div>
-            </div>
-
-            {{-- ═════════ RIGHT / SIDEBAR ═════════ --}}
-            <div class="evt-v-col">
-
-                {{-- Approval --}}
-                <div class="evt-v-card">
-                    <div class="evt-v-head">
-                        <span class="evt-v-ico"><i class="fas fa-circle-check"></i></span>
-                        <p class="evt-v-lbl">Approval</p>
-                    </div>
-                    <div class="px-5 py-4 flex flex-col gap-2">
-                        <span class="inline-flex items-center gap-2 w-fit text-sm font-bold px-3.5 py-1.5 rounded-full border {{ $vStCls }}">
-                            <span class="w-2 h-2 rounded-full {{ $vStDot }}"></span>
-                            {{ $isPending ? 'Pending Review' : $vStLabel }}
-                        </span>
-                        @if(($isApproved || $isRejected) && $ev->review_remarks)
-                            <p class="text-sm text-[#555555] leading-snug {{ $isApproved ? 'italic' : '' }}">{{ $isApproved ? '"' . $ev->review_remarks . '"' : $ev->review_remarks }}</p>
-                        @endif
-                        @if(($isPending || $isRejected) && $eventDateExpired)
-                            <p class="text-sm text-red-500 font-semibold flex items-center gap-1.5">
-                                <i class="fas fa-triangle-exclamation text-xs"></i>Date needs updating.
-                            </p>
+                            <p class="evt-d-empty">No additional notes.</p>
                         @endif
                     </div>
                 </div>
 
-                {{-- Event Info --}}
-                <div class="evt-v-card">
-                    <div class="evt-v-head">
-                        <span class="evt-v-ico"><i class="fas fa-circle-info"></i></span>
-                        <p class="evt-v-lbl">Event Info</p>
-                    </div>
-                    <div class="px-5 py-4">
-                        <div class="evt-v-row">
-                            <span class="evt-v-ico"><i class="fas fa-calendar-days"></i></span>
-                            <div class="min-w-0">
-                                <p class="text-[11px] font-semibold uppercase tracking-wider text-[#999999]">Date &amp; Time</p>
-                                <p class="text-sm font-bold text-[#1a1026] mt-0.5">{{ $eventDatePH->format('M d, Y') }}</p>
-                                <p class="text-sm text-[#555555] font-medium">{{ $timeDisplay }}</p>
-                            </div>
-                        </div>
-                        <div class="evt-v-row">
-                            <span class="evt-v-ico"><i class="fas fa-location-dot"></i></span>
-                            <div class="min-w-0">
-                                <p class="text-[11px] font-semibold uppercase tracking-wider text-[#999999]">Venue</p>
-                                @if($ev->venue)
-                                    <p class="text-sm font-bold text-[#1a1026] mt-0.5 break-words">{{ $ev->venue }}</p>
-                                    @if($ev->venue_address)<p class="text-xs text-[#666666] font-medium leading-snug mt-0.5 uppercase break-words">{{ $ev->venue_address }}</p>@endif
-                                @else
-                                    <p class="text-sm text-[#aaaaaa] italic mt-0.5">Not specified</p>
-                                @endif
-                            </div>
-                        </div>
-                        <div class="evt-v-row">
-                            <span class="evt-v-ico"><i class="fas fa-users"></i></span>
-                            <div class="min-w-0">
-                                <p class="text-[11px] font-semibold uppercase tracking-wider text-[#999999]">Open For</p>
-                                @if($ev->target_participants)
-                                    <p class="text-sm font-bold text-[#1a1026] mt-0.5 break-words">{{ $ev->target_participants }}</p>
-                                @else
-                                    <p class="text-sm text-[#aaaaaa] italic mt-0.5">All alumni</p>
-                                @endif
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Responses --}}
-                <div class="evt-v-card">
-                    <div class="evt-v-head">
-                        <span class="evt-v-ico"><i class="fas fa-chart-simple"></i></span>
-                        <p class="evt-v-lbl">Responses</p>
-                        <span class="ml-auto text-xs font-semibold text-[#777777]">{{ $totalRsvp }} total</span>
-                    </div>
-                    <div class="px-5 py-4 flex flex-col gap-3.5">
-                        <div class="grid grid-cols-3 gap-2.5">
-                            <div class="rounded-xl bg-emerald-50 border border-emerald-100 py-3 text-center">
-                                <p class="text-xl font-bold text-emerald-700 leading-none">{{ $ev->confirmed_count }}</p>
-                                <p class="text-[11px] font-semibold text-emerald-700/80 mt-1.5">Attending</p>
-                            </div>
-                            <div class="rounded-xl bg-amber-50 border border-amber-100 py-3 text-center">
-                                <p class="text-xl font-bold text-amber-700 leading-none">{{ $ev->tentative_count }}</p>
-                                <p class="text-[11px] font-semibold text-amber-700/80 mt-1.5">Maybe</p>
-                            </div>
-                            <div class="rounded-xl bg-red-50 border border-red-100 py-3 text-center">
-                                <p class="text-xl font-bold text-red-600 leading-none">{{ $ev->declined_count }}</p>
-                                <p class="text-[11px] font-semibold text-red-600/80 mt-1.5">Not going</p>
-                            </div>
-                        </div>
-                        <div class="flex h-2 w-full rounded-full overflow-hidden bg-gray-100">
-                            @if($totalRsvp > 0)
-                                <div class="bg-emerald-500" style="width:{{ round($ev->confirmed_count / $rsvpTotalSafe * 100) }}%"></div>
-                                <div class="bg-amber-400"   style="width:{{ round($ev->tentative_count / $rsvpTotalSafe * 100) }}%"></div>
-                                <div class="bg-red-400"     style="width:{{ round($ev->declined_count / $rsvpTotalSafe * 100) }}%"></div>
-                            @endif
-                        </div>
-                    </div>
-                </div>
-
-                {{-- Contact --}}
-                <div class="evt-v-card">
-                    <div class="evt-v-head">
-                        <span class="evt-v-ico"><i class="fas fa-address-card"></i></span>
-                        <p class="evt-v-lbl">Contact Information</p>
-                    </div>
-                    <div class="px-5 py-4">
-                        @php
-                            $cName  = $ev->contact_person ?: $ev->organizer?->name;
-                            $cEmail = $ev->contact_email  ?: $ev->organizer?->email;
-                            $cPhone = $ev->contact_phone;
-                            $cDept  = $ev->organizer?->department;
-                        @endphp
+                <div class="evt-d-card">
+                    <div class="evt-d-chead"><i class="fas fa-address-card"></i>Contact Information</div>
+                    <div class="evt-d-cbody">
                         @if($cName || $cEmail || $cPhone || $cDept)
-                            @if($cName)
-                            <div class="evt-v-row">
-                                <span class="evt-v-ico"><i class="fas fa-user"></i></span>
-                                <p class="text-sm text-[#222222] font-semibold self-center break-words min-w-0">{{ $cName }}</p>
-                            </div>
-                            @endif
-                            @if($cEmail)
-                            <div class="evt-v-row">
-                                <span class="evt-v-ico"><i class="fas fa-envelope"></i></span>
-                                <p class="text-sm text-[#222222] font-medium self-center break-all min-w-0">{{ $cEmail }}</p>
-                            </div>
-                            @endif
-                            @if($cPhone)
-                            <div class="evt-v-row">
-                                <span class="evt-v-ico"><i class="fas fa-phone"></i></span>
-                                <p class="text-sm text-[#222222] font-medium self-center">{{ $cPhone }}</p>
-                            </div>
-                            @endif
-                            @if($cDept)
-                            <div class="evt-v-row">
-                                <span class="evt-v-ico"><i class="fas fa-building"></i></span>
-                                <p class="text-sm text-[#555555] font-medium self-center break-words min-w-0">{{ $cDept }}</p>
-                            </div>
-                            @endif
+                            @if($cName)<div class="evt-d-crow"><i class="fas fa-user"></i><span>{{ $cName }}</span></div>@endif
+                            @if($cEmail)<div class="evt-d-crow"><i class="fas fa-envelope"></i><span>{{ $cEmail }}</span></div>@endif
+                            @if($cPhone)<div class="evt-d-crow"><i class="fas fa-phone"></i><span>{{ $cPhone }}</span></div>@endif
+                            @if($cDept)<div class="evt-d-crow"><i class="fas fa-building"></i><span>{{ $cDept }}</span></div>@endif
                         @else
-                            <p class="text-sm text-[#aaaaaa] italic">No contact information.</p>
+                            <p class="evt-d-empty">No contact information.</p>
                         @endif
                     </div>
                 </div>
-
-                {{-- Posted --}}
-                <div class="evt-v-card">
-                    <div class="evt-v-head">
-                        <span class="evt-v-ico"><i class="fas fa-clock-rotate-left"></i></span>
-                        <p class="evt-v-lbl">Posted</p>
-                    </div>
-                    <div class="px-5 py-4">
-                        <p class="text-sm font-bold text-[#1a1026]">{{ $createdPH->format('M d, Y') }}</p>
-                        <p class="text-sm text-[#555555] font-medium mt-0.5">{{ $createdPH->diffForHumans() }}</p>
-                        <p class="text-xs text-[#777777] mt-2 flex items-center gap-1.5 break-words">
-                            <i class="fas fa-user-tie text-[10px] text-[#7a3f91]"></i>{{ $postedByLabel }}
-                        </p>
-                    </div>
-                </div>
-
             </div>
+
         </div>
     </div>
 
