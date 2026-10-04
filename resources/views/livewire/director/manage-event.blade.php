@@ -1388,7 +1388,7 @@ new class extends Component {
 ?>
 
 <div class="flex flex-col" wire:poll.3000ms
-     style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow: hidden;">
+     style="height: calc(100vh - 120px); max-height: calc(100vh - 120px); overflow: hidden;">
 
 <style>
 /* ── Search highlight — same light blue mark used on Alumni Records / Coordinator Management ── */
@@ -1514,17 +1514,32 @@ select.tw-select-arrow[disabled] {
 .evt-v-row  { display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-bottom:1px solid #F5F0F9; }
 .evt-v-row:last-child { border-bottom:none; padding-bottom:0; }
 .evt-v-row:first-child { padding-top:0; }
-.evt-v-btn  { display:inline-flex; align-items:center; justify-content:center; gap:7px; height:36px; padding:0 12px; border-radius:10px; font-size:13px; font-weight:600; color:#fff; cursor:pointer; transition:all .15s; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.14); white-space:nowrap; }
+/* View Event body — responsive 2-column grid (main 2/3 + sidebar 1/3) */
+.evt-v-grid { width:100%; max-width:1400px; margin:0 auto; padding:16px; display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
+.evt-v-col  { display:flex; flex-direction:column; gap:16px; min-width:0; }
+@media (min-width:640px)  { .evt-v-grid { padding:20px; gap:20px; } .evt-v-col { gap:20px; } }
+@media (min-width:1024px) { .evt-v-grid { padding:24px; grid-template-columns:minmax(0,2fr) minmax(0,1fr); } }
+
+/* Header action buttons — icon-only, same square size as the X close, tooltip on hover */
+.evt-v-btn  { position:relative; display:inline-flex; align-items:center; justify-content:center; width:36px; height:36px; padding:0; border-radius:10px; font-size:14px; color:#fff; cursor:pointer; transition:all .15s; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.14); }
 .evt-v-btn:hover { background:rgba(255,255,255,.26); }
-.evt-v-btn:active { transform:scale(.96); }
+.evt-v-btn:active { transform:scale(.94); }
 .evt-v-btn:disabled { opacity:.6; cursor:wait; }
-.evt-v-btn.ok  { background:#10b981; border-color:#10b981; }
-.evt-v-btn.ok:hover  { background:#059669; }
-.evt-v-btn.bad { background:#ef4444; border-color:#ef4444; }
-.evt-v-btn.bad:hover { background:#dc2626; }
-.evt-v-btn.off { background:rgba(255,255,255,.08); color:rgba(255,255,255,.45); cursor:not-allowed; }
+.evt-v-btn.ok  { background:linear-gradient(135deg,#10b981,#059669); border-color:#10b981; box-shadow:0 2px 8px rgba(16,185,129,.35); }
+.evt-v-btn.ok:hover  { background:linear-gradient(135deg,#059669,#047857); }
+.evt-v-btn.bad { background:linear-gradient(135deg,#ef4444,#dc2626); border-color:#ef4444; box-shadow:0 2px 8px rgba(239,68,68,.35); }
+.evt-v-btn.bad:hover { background:linear-gradient(135deg,#dc2626,#b91c1c); }
+.evt-v-btn.off { background:rgba(255,255,255,.08); color:rgba(255,255,255,.45); cursor:not-allowed; box-shadow:none; }
 .evt-v-btn.off:hover { background:rgba(255,255,255,.08); }
-@media (max-width: 639px) { .evt-v-btn .t { display:none; } .evt-v-btn { width:36px; padding:0; } }
+.evt-v-btn .evt-v-tip {
+    position:absolute; top:calc(100% + 8px); left:50%; transform:translateX(-50%);
+    background:#111827; color:#fff; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;
+    padding:4px 10px; border-radius:6px; white-space:nowrap; pointer-events:none;
+    opacity:0; transition:opacity .15s; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,.25);
+}
+.evt-v-btn .evt-v-tip::before { content:''; position:absolute; bottom:100%; left:50%; transform:translateX(-50%); border:4px solid transparent; border-bottom-color:#111827; }
+.evt-v-btn:hover .evt-v-tip { opacity:1; }
+@media (hover:none) { .evt-v-btn .evt-v-tip { display:none; } }
 
 @media (max-width: 640px) {
     .dir-table-card {
@@ -2613,48 +2628,48 @@ select.tw-select-arrow[disabled] {
             @if($isApproved || $isCompleted)
                 <button type="button" wire:click="openShareModal({{ $ev->id }})"
                         wire:loading.attr="disabled" wire:target="openShareModal({{ $ev->id }})"
-                        class="evt-v-btn" aria-label="Share event" title="Share">
+                        class="evt-v-btn" aria-label="Share event">
                     <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $ev->id }})"></i>
                     <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $ev->id }})"></i>
-                    <span class="t">Share</span>
+                    <span class="evt-v-tip">Share</span>
                 </button>
             @endif
 
             @if($isPending)
                 <button type="button" wire:click="confirmReject({{ $ev->id }})"
                         wire:loading.attr="disabled" wire:target="confirmReject({{ $ev->id }})"
-                        class="evt-v-btn bad" aria-label="Reject" title="Reject">
+                        class="evt-v-btn bad" aria-label="Reject">
                     <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $ev->id }})"></i>
                     <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $ev->id }})"></i>
-                    <span class="t">Reject</span>
+                    <span class="evt-v-tip">Reject</span>
                 </button>
                 @if($eventDateExpired)
-                    <span class="evt-v-btn off" aria-label="Need to update date" title="Need to update date">
-                        <i class="fas fa-check"></i><span class="t">Approve</span>
+                    <span class="evt-v-btn off" aria-label="Need to update date">
+                        <i class="fas fa-check"></i><span class="evt-v-tip">Need to update date</span>
                     </span>
                 @else
                     <button type="button" wire:click="confirmApprove({{ $ev->id }})"
                             wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
-                            class="evt-v-btn ok" aria-label="Approve" title="Approve">
+                            class="evt-v-btn ok" aria-label="Approve">
                         <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
                         <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
-                        <span class="t">Approve</span>
+                        <span class="evt-v-tip">Approve</span>
                     </button>
                 @endif
             @endif
 
             @if($isRejected)
                 @if($eventDateExpired)
-                    <span class="evt-v-btn off" aria-label="Need to update date" title="Need to update date">
-                        <i class="fas fa-rotate-left"></i><span class="t">Re-Approve</span>
+                    <span class="evt-v-btn off" aria-label="Need to update date">
+                        <i class="fas fa-rotate-left"></i><span class="evt-v-tip">Need to update date</span>
                     </span>
                 @else
                     <button type="button" wire:click="confirmApprove({{ $ev->id }})"
                             wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
-                            class="evt-v-btn ok" aria-label="Re-Approve" title="Re-Approve">
+                            class="evt-v-btn ok" aria-label="Re-Approve">
                         <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
                         <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
-                        <span class="t">Re-Approve</span>
+                        <span class="evt-v-tip">Re-Approve</span>
                     </button>
                 @endif
             @endif
@@ -2663,19 +2678,20 @@ select.tw-select-arrow[disabled] {
 
             <button type="button" wire:click="closeViewModal"
                     wire:loading.attr="disabled" wire:target="closeViewModal"
-                    class="evt-v-btn !w-9 !px-0" aria-label="Close" title="Close">
+                    class="evt-v-btn" aria-label="Close">
                 <i class="fas fa-xmark" wire:loading.remove wire:target="closeViewModal"></i>
                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="closeViewModal"></i>
+                <span class="evt-v-tip">Close</span>
             </button>
         </div>
     </div>
 
     {{-- ── BODY ── --}}
     <div class="flex-1 min-h-0 overflow-y-auto scroll-c">
-        <div class="max-w-[1400px] mx-auto w-full p-3 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-start">
+        <div class="evt-v-grid">
 
             {{-- ═════════ LEFT / MAIN ═════════ --}}
-            <div class="lg:col-span-8 flex flex-col gap-4 lg:gap-5 min-w-0">
+            <div class="evt-v-col">
 
                 {{-- Hero: photo + title --}}
                 <div class="evt-v-card overflow-hidden">
@@ -2750,7 +2766,7 @@ select.tw-select-arrow[disabled] {
             </div>
 
             {{-- ═════════ RIGHT / SIDEBAR ═════════ --}}
-            <div class="lg:col-span-4 flex flex-col gap-4 lg:gap-5 min-w-0">
+            <div class="evt-v-col">
 
                 {{-- Approval --}}
                 <div class="evt-v-card">

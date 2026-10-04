@@ -2240,6 +2240,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     display: block;
     word-break: break-word;
 }
+.view-field-display.view-field-lg {
+    font-size: 0.95rem;
+    padding: 0.7rem 0.9rem;
+    line-height: 1.4;
+}
 .view-field-display.multiline { white-space: pre-wrap; min-height: 100px; }
 .view-field-display.empty     { color: #aaa; font-style: italic; }
 
@@ -4274,30 +4279,30 @@ window.eoCompressToBase64 = eoCompressToBase64;
                     <div class="px-3.5 py-2 bg-[#faf7fc] border-b border-[#e8e0f0] rounded-t-2xl flex items-center gap-1.5 text-[#333333] text-[0.8rem] font-semibold uppercase tracking-wide">
                         Job Information
                     </div>
-                    <div class="p-2.5 space-y-2">
+                    <div class="p-3.5 space-y-3">
                         <div>
-                            <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Job Title</label>
-                            <div class="view-field-display font-semibold">{{ $job->job_title ?: '—' }}</div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Job Title</label>
+                            <div class="view-field-display view-field-lg font-semibold">{{ $job->job_title ?: '—' }}</div>
                         </div>
                         <div>
-                            <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Experience Level</label>
-                            <div class="view-field-display">{{ $job->experience_level ?: '—' }}</div>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Experience Level</label>
+                            <div class="view-field-display view-field-lg">{{ $job->experience_level ?: '—' }}</div>
                         </div>
-                        <div class="grid grid-cols-2 gap-2">
+                        <div class="grid grid-cols-2 gap-3">
                             <div>
-                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Salary</label>
-                                <div class="view-field-display">{{ $job->salary ?: 'Not disclosed' }}</div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Salary</label>
+                                <div class="view-field-display view-field-lg">{{ $job->salary ?: 'Not disclosed' }}</div>
                             </div>
                             <div>
-                                <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Deadline</label>
-                                <div class="view-field-display {{ $isExp ? 'text-red-700' : ($isUrgentView ? 'text-amber-700' : '') }}">{{ $hasDeadline ? $dl->format('M d, Y') : 'No deadline' }}</div>
+                                <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Deadline</label>
+                                <div class="view-field-display view-field-lg {{ $isExp ? 'text-red-700' : ($isUrgentView ? 'text-amber-700' : '') }}">{{ $hasDeadline ? $dl->format('M d, Y') : 'No deadline' }}</div>
                             </div>
                         </div>
-                        <p class="text-[0.68rem] {{ $isExp ? 'text-red-600 font-semibold' : ($isUrgentView ? 'text-amber-600 font-semibold' : 'text-[#777777]') }}">
-                            @if(!$hasDeadline) <i class="fas fa-infinity text-[8px] mr-0.5"></i>No deadline — always active
-                            @elseif($isExp) <i class="fas fa-ban text-[8px] mr-0.5"></i>No longer accepting applications
-                            @elseif($daysLeft === 0) <i class="fas fa-fire text-[8px] mr-0.5"></i>Closing today!
-                            @elseif($daysLeft === 1) <i class="fas fa-fire text-[8px] mr-0.5"></i>Closes tomorrow
+                        <p class="text-[0.85rem] {{ $isExp ? 'text-red-600 font-semibold' : ($isUrgentView ? 'text-amber-600 font-semibold' : 'text-[#777777]') }}">
+                            @if(!$hasDeadline) <i class="fas fa-infinity text-[10px] mr-1"></i>No deadline — always active
+                            @elseif($isExp) <i class="fas fa-ban text-[10px] mr-1"></i>No longer accepting applications
+                            @elseif($daysLeft === 0) <i class="fas fa-fire text-[10px] mr-1"></i>Closing today!
+                            @elseif($daysLeft === 1) <i class="fas fa-fire text-[10px] mr-1"></i>Closes tomorrow
                             @else {{ $daysLeft }} days remaining
                             @endif
                         </p>

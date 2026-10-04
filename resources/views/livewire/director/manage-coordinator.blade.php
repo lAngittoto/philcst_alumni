@@ -278,7 +278,7 @@ new class extends Component {
             $this->validate([
                 'coordFirstName'     => ['required', 'string', 'max:100'],
                 'coordLastName'      => ['required', 'string', 'max:100'],
-                'coordMiddleInitial' => ['required', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
+                'coordMiddleInitial' => ['nullable', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
                 'coordSuffix'        => ['nullable', 'string', 'max:10'],
                 'coordTeacherId'     => ['required', 'string', 'regex:/^\d{8}$/', 'unique:organizer,id_number'],
                 'coordEmail'         => ['required', 'email', 'max:255', 'unique:organizer,email', 'unique:users,email'],
@@ -286,7 +286,6 @@ new class extends Component {
             ], [
                 'coordFirstName.required'     => 'First name is required.',
                 'coordLastName.required'      => 'Last name is required.',
-                'coordMiddleInitial.required' => 'Middle name is required.',
                 'coordMiddleInitial.regex'    => 'Middle name must contain letters only.',
                 'coordMiddleInitial.min'      => 'Middle name must be a full word (e.g. Santos, not S).',
                 'coordTeacherId.required'     => 'Teacher ID is required.',
@@ -1184,6 +1183,35 @@ new class extends Component {
     }
     .suffix-compact-clear:hover { color: #dc2626; background: #fef2f2; }
 
+    /* Register form — stronger, clearly visible borders (cards, inputs, selects, buttons) */
+    #reg-section-personal,
+    #reg-section-account,
+    #reg-section-college {
+        border: 1.5px solid #CBBFD8 !important;
+        box-shadow: 0 1px 3px rgba(122,63,145,.08) !important;
+    }
+    #reg-section-personal > div:first-child,
+    #reg-section-account  > div:first-child,
+    #reg-section-college  > div:first-child {
+        border-bottom: 1.5px solid #E3DAEC !important;
+    }
+    .coord-reg-input:not(.border-red-300) {
+        border-width: 1.5px !important;
+        border-color: #B9AACB !important;
+    }
+    #reg-section-personal .suffix-compact-trigger:not(.field-error) {
+        border-width: 1.5px !important;
+        border-color: #B9AACB !important;
+    }
+    #reg-section-college .rounded-xl.border-gray-300,
+    #reg-section-college .rounded-full.border-gray-300 {
+        border-width: 1.5px !important;
+        border-color: #B9AACB !important;
+    }
+    form[wire\:submit="registerCoordinator"] button[wire\:click="resetCoordFormPublic"] {
+        border-width: 1.5px !important;
+        border-color: #B9AACB !important;
+    }
     .coord-reg-input:focus {
         border-color: #7a3f91 !important;
         box-shadow: 0 0 0 3px rgba(122,63,145,.18) !important;
@@ -1725,7 +1753,7 @@ new class extends Component {
                           em: @entangle('coordEmail'),
                           col: @entangle('coordCollegeSelect'),
                           get canSubmit() {
-                              return this.fN.trim() !== '' && this.lN.trim() !== '' && this.mN.trim() !== ''
+                              return this.fN.trim() !== '' && this.lN.trim() !== ''
                                   && this.tId.trim() !== '' && this.em.trim() !== '' && this.col.trim() !== '';
                           }
                       }">
@@ -1822,7 +1850,7 @@ new class extends Component {
                                         @error('coordLastName')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
-                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Middle Name <span class="text-red-500">*</span></label>
+                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Middle Name</label>
                                         <input wire:model.defer="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
                                                class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordMiddleInitial') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
                                         @error('coordMiddleInitial')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
@@ -1894,7 +1922,7 @@ new class extends Component {
                                     @error('coordTeacherId')
                                         <p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>
                                     @else
-                                        <p class="text-xs text-[#333333] mt-1">Must be exactly 8 digits</p>
+                                        <p class="text-xs text-[#333333] mt-1">Must be exactly 8 digits &middot; This will be used as their username</p>
                                     @enderror
                                 </div>
                                 <div>
