@@ -924,11 +924,11 @@ new class extends Component {
         -webkit-user-select: none !important;
         -moz-user-select: none !important;
         -ms-user-select: none !important;
+    }
+    .coord-mrow {
         background: #fff;
         border-bottom: 1px solid #F0ECF5;
         transition: background .08s ease;
-    }
-    .coord-mrow {
         padding: 12px 14px;
         display: flex;
         align-items: center;
@@ -943,8 +943,21 @@ new class extends Component {
        cause page-level scrolling; this content block fills the remaining
        vertical space with flex-1 + min-h-0, and the inner scroll div is the
        only element with overflow-y:auto. ══ */
-    .coord-table-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 320px); }
-    .coord-scroll-area { overflow-y: auto; overflow-x: hidden; }
+    .coord-table-card { display: flex; flex-direction: column; min-height: 0; background: #fff; }
+    .coord-scroll-area { overflow-y: auto; overflow-x: hidden; min-height: 0; }
+    .coord-scroll-area::-webkit-scrollbar { width: 5px; }
+    .coord-scroll-area::-webkit-scrollbar-track { background: #f3f4f6; border-radius: 99px; }
+    .coord-scroll-area::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+    .coord-scroll-area::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+
+    /* ══ Long, fill-the-screen table card (same look as Jobs / Event Overview) ══ */
+    @media (min-width: 768px) {
+        .coord-table-card { flex: none; height: calc(100vh - 190px); height: calc(100dvh - 190px); min-height: 480px; }
+    }
+    .coord-filter-wrap { padding: 12px; background: #fff; border-bottom: 1px solid #E8E0F0; flex-shrink: 0; }
+    .coord-filter-bar  { background: #FAF8FD; border: 1px solid #E8E0F0; border-radius: 14px; }
+    .coord-row td { border-bottom: 1px solid #F3EEF8; }
+    .coord-row:last-child td { border-bottom: none; }
 
     @media (max-width: 640px) {
         .coord-table-card {
@@ -962,13 +975,15 @@ new class extends Component {
     .coord-filter-input:hover,
     .coord-filter-input:active {
         border-width: 1px !important;
-        border-color: #d1d5db !important;
+        border-color: #E8E0F0 !important;
         box-shadow: none !important;
         outline: none !important;
     }
+    .coord-filter-input:hover { border-color: #c4b5d4 !important; }
     .coord-filter-input:focus {
-        border-color: #9b8aab !important;
+        border-color: #7a3f91 !important;
     }
+    input.coord-filter-input, select.coord-filter-select { height: 38px; }
     .coord-filter-select {
         -webkit-appearance: none !important;
         -moz-appearance: none !important;
@@ -996,18 +1011,37 @@ new class extends Component {
         }
     }
 
+    /* ══ Manage Colleges — guaranteed internal scroll (plain CSS, no Tailwind-JIT dependency).
+       Desktop: modal is exactly one screen; each panel scrolls inside itself so adding more
+       courses / colleges never gets clipped or pushes the layout.
+       Mobile + tablet: panels stack, the whole modal scrolls, long lists are height-capped. ══ */
+    .mc-root { height: 100vh; height: 100dvh; }
+    .mc-scroll { scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+    .mc-scroll::-webkit-scrollbar { width: 6px; }
+    .mc-scroll::-webkit-scrollbar-track { background: transparent; }
+    .mc-scroll::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
+    .mc-scroll::-webkit-scrollbar-thumb:hover { background: #7a3f91; }
+    .mc-panel { display: flex; flex-direction: column; overflow: hidden; }
+    @media (min-width: 1024px) {
+        .mc-main   { overflow: hidden !important; }
+        .mc-wrap   { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+        .mc-grid   { flex: 1 1 0; min-height: 0; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: minmax(0, 1fr); gap: 20px; }
+        .mc-col    { min-height: 0; height: 100%; }
+        .mc-panel  { height: 100%; max-height: 100%; }
+        .mc-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+    }
+    @media (max-width: 1023px) {
+        .mc-main  { overflow-y: auto !important; overflow-x: hidden; }
+        .mc-left .mc-scroll  { max-height: 52vh; max-height: 52dvh; overflow-y: auto; }
+        .mc-right .mc-scroll { overflow: visible; }
+    }
+
     /* ══ Coordinator page — vertically centered, fluid on every screen ══ */
     .coord-page-body { justify-content: flex-start; }
-    @media (min-width: 1024px) {
-        .coord-page-body { padding-top: 56px !important; }
-    }
-    @media (min-width: 640px) and (max-width: 1023px) {
-        .coord-page-body { padding-top: 32px !important; }
-    }
     @media (max-width: 640px) {
         .coord-page-body { padding-left: 0 !important; padding-right: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; gap: 0 !important; }
         .coord-page-header { padding: 14px 16px 12px; background: #fff; border-bottom: 1px solid #E8E0F0; }
-        .coord-table-card { max-height: none !important; flex: 1 1 auto; }
+        .coord-table-card { max-height: none !important; height: auto !important; flex: 1 1 auto; }
     }
     .cfs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #f8f7fb; }
 
@@ -1233,10 +1267,11 @@ new class extends Component {
     </div>
 
     {{-- ══ CONTENT BLOCK — fills remaining height, only inner table scrolls ══ --}}
-    <div class="coord-table-card flex-1 min-h-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm">
+    <div class="coord-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- FILTER BAR — fixed, never scrolls --}}
-        <div class="bg-[#F5F5F5] border-b border-[#E8E0F0] px-3.5 py-2.5 flex flex-wrap gap-2 items-center flex-shrink-0 relative">
+        <div class="coord-filter-wrap">
+        <div class="coord-filter-bar px-3 py-2.5 flex flex-wrap gap-2 items-center relative">
 
             {{-- Filter-bar blocker: hides all controls during Livewire loading --}}
             <div class="coord-filter-blocker"
@@ -1278,13 +1313,14 @@ new class extends Component {
                     wire:target="resetCoordFilters"
                     {{ !$coordHasActiveFilters ? 'disabled' : '' }}
                     title="{{ $coordHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                    class="ml-auto inline-flex items-center gap-1.5 px-3 h-[38px] rounded-lg text-xs font-semibold bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                 <i class="fas fa-rotate-left text-xs" wire:loading.remove wire:target="resetCoordFilters"></i>
                 <span wire:loading wire:target="resetCoordFilters">
                     <i class="fas fa-spinner animate-spin text-xs"></i>
                 </span>
                 <span class="hidden sm:inline">Reset</span>
             </button>
+        </div>
         </div>
 
         {{-- TABLE BODY — THIS is the only scrollable region in the whole page --}}
@@ -1317,19 +1353,19 @@ new class extends Component {
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full border-collapse bg-white hidden md:table table-fixed">
                     <colgroup>
-                        <col style="width:26%;"><col style="width:14%;"><col style="width:22%;"><col style="width:22%;"><col style="width:8%;"><col style="width:8%;">
+                        <col style="width:24%;"><col style="width:12%;"><col style="width:22%;"><col style="width:22%;"><col style="width:10%;"><col style="width:10%;">
                     </colgroup>
-                    <thead style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                        <tr class="bg-[#f5f0fa] border-b-2 border-[#e2d3ef] sticky top-0 z-10">
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Teacher ID</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Email</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">College</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Action</th>
+                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0; user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+                        <tr>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Name</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Teacher ID</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">Email</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold text-[#555555] uppercase tracking-widest">College</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold text-[#555555] uppercase tracking-widest">Status</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-right text-xs font-semibold text-[#555555] uppercase tracking-widest">Action</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-100">
+                    <tbody>
                         @foreach($this->coordinatorRecords as $item)
                         @php
                             $dept        = $item->department;
@@ -1368,25 +1404,26 @@ new class extends Component {
                                 @if($deptCodeNames->isNotEmpty())
                                 <div class="flex flex-wrap gap-1 mt-1">
                                     @foreach($deptCodeNames as $dc => $dcName)
-                                        <span class="text-xs font-mono text-[#7a3f91] cursor-default" title="{{ $dcName ?: $dc }}">{{ $dc }}</span>
-                                        @if(!$loop->last)<span class="text-gray-300 text-xs">·</span>@endif
+                                        <span class="text-[11px] font-mono font-semibold px-1.5 py-0.5 rounded-md bg-[#f5eef9] text-[#7a3f91] border border-[#e2d3ef] cursor-default" title="{{ $dcName ?: $dc }}">{{ $dc }}</span>
                                     @endforeach
                                 </div>
                                 @endif
                             </td>
                             <td class="px-4 sm:px-5 py-4 text-center whitespace-nowrap">
                                 @php
-                                    $sc = match($item->status) {
-                                        'ACTIVE'    => 'bg-emerald-50 text-emerald-700',
-                                        'INACTIVE'  => 'bg-amber-50 text-amber-700',
-                                        'SUSPENDED' => 'bg-red-50 text-red-700',
-                                        default     => 'bg-gray-50 text-gray-600',
+                                    [$sc, $sd] = match($item->status) {
+                                        'ACTIVE'    => ['border-emerald-200 bg-emerald-50 text-emerald-700', 'bg-emerald-500'],
+                                        'INACTIVE'  => ['border-amber-200 bg-amber-50 text-amber-700',       'bg-amber-500'],
+                                        'SUSPENDED' => ['border-red-200 bg-red-50 text-red-700',             'bg-red-500'],
+                                        default     => ['border-gray-200 bg-gray-50 text-gray-600',          'bg-gray-400'],
                                     };
                                 @endphp
-                                <span class="inline-block px-2.5 py-1.5 rounded-full text-xs font-semibold {{ $sc }}">{{ $item->status }}</span>
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border whitespace-nowrap {{ $sc }}">
+                                    <span class="w-1.5 h-1.5 rounded-full {{ $sd }}"></span>{{ ucfirst(strtolower($item->status)) }}
+                                </span>
                             </td>
-                            <td class="px-4 sm:px-5 py-4 text-center">
-                                <div class="flex items-center justify-center" data-coord-actions>
+                            <td class="px-4 sm:px-5 py-4 text-right">
+                                <div class="flex items-center justify-end" data-coord-actions>
                                     @if($item->status === 'ACTIVE')
                                         <div class="relative group/btn">
                                             <button type="button"
@@ -1452,13 +1489,16 @@ new class extends Component {
                                 <span class="text-gray-600 text-xs truncate">{{ $collegeName }}</span>
                             </div>
                             @php
-                                $sc = match($item->status) {
-                                    'ACTIVE'    => 'bg-emerald-50 text-emerald-700',
-                                    'INACTIVE'  => 'bg-amber-50 text-amber-700',
-                                    default     => 'bg-gray-50 text-gray-600',
+                                [$sc, $sd] = match($item->status) {
+                                    'ACTIVE'    => ['border-emerald-200 bg-emerald-50 text-emerald-700', 'bg-emerald-500'],
+                                    'INACTIVE'  => ['border-amber-200 bg-amber-50 text-amber-700',       'bg-amber-500'],
+                                    'SUSPENDED' => ['border-red-200 bg-red-50 text-red-700',             'bg-red-500'],
+                                    default     => ['border-gray-200 bg-gray-50 text-gray-600',          'bg-gray-400'],
                                 };
                             @endphp
-                            <span class="inline-block mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold {{ $sc }}">{{ $item->status }}</span>
+                            <span class="inline-flex items-center gap-1.5 mt-1.5 px-2.5 py-0.5 rounded-full border text-[11px] font-semibold {{ $sc }}">
+                                <span class="w-1.5 h-1.5 rounded-full {{ $sd }}"></span>{{ ucfirst(strtolower($item->status)) }}
+                            </span>
                         </div>
                         <i class="fas fa-chevron-right text-gray-300 text-xs shrink-0"></i>
                     </div>
@@ -2406,7 +2446,7 @@ new class extends Component {
 
 {{-- ── MANAGE COLLEGES — FULL SCREEN, SIMPLE HEADER (NO SIDEBAR) ───────────── --}}
 @if($activeModal === 'manageOrgCourses')
-<div class="fixed inset-0 z-[9000] isolate flex flex-col bg-gray-50"
+<div class="mc-root fixed inset-0 z-[9000] isolate flex flex-col bg-gray-50"
      @keydown.escape.window="$wire.closeModal()">
 
     <div class="flex items-center justify-between px-4 sm:px-6 lg:px-8 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] shrink-0 shadow-lg gap-4">
@@ -2446,9 +2486,9 @@ new class extends Component {
          5/7) so the "Colleges & Departments" list panel gets more breathing
          room per FIX #1. --}}
     <main id="org-modal-scroll"
-          class="cfs-main min-h-0 overflow-y-auto overflow-x-hidden lg:overflow-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
+          class="cfs-main mc-main min-h-0 overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full"
           @org-modal-scroll-top.window="$nextTick(() => $el.scrollTo({ top: 0, behavior: 'smooth' }))">
-        <div class="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-5 flex flex-col gap-4 lg:flex-1 lg:min-h-0">
+        <div class="mc-wrap max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 flex flex-col gap-4">
 
             @if($orgCourseAlert)
             <div class="flex items-start gap-2.5 p-3 flex-shrink-0 rounded-2xl shadow-sm {{ $orgCourseAlertType === 'success' ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200' }}">
@@ -2457,10 +2497,10 @@ new class extends Component {
             </div>
             @endif
 
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:flex-1 lg:min-h-0 lg:grid-rows-[minmax(0,1fr)]">
+            <div class="mc-grid grid grid-cols-1 gap-5">
 
                 @if(!$orgAddingToCollege)
-                <div id="mc-section-add" class="mc-left-span-3 scroll-mt-4 lg:min-h-0">
+                <div id="mc-section-add" class="mc-left-span-3 mc-col scroll-mt-4">
                     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden lg:sticky lg:top-5">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50">
                             <h3 class="text-xs font-semibold text-black uppercase tracking-wider">Add New College</h3>
@@ -2483,8 +2523,8 @@ new class extends Component {
                     </div>
                 </div>
                 @else
-                <div id="mc-section-assign" class="mc-left-span-4 scroll-mt-4 lg:min-h-0">
-                    <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm overflow-hidden flex flex-col max-h-[80vh] lg:max-h-full lg:h-full">
+                <div id="mc-section-assign" class="mc-left-span-4 mc-col mc-left scroll-mt-4">
+                    <div class="bg-white rounded-2xl border-2 border-[#d4aaeb] shadow-sm mc-panel">
                         <div class="px-5 py-3.5 border-b border-[#e2d3ef] bg-[#f5eef9] flex-shrink-0">
                             <h3 class="text-xs font-semibold text-[#7a3f91] uppercase tracking-wider flex items-center gap-2">
                                 <i class="fas fa-{{ isset($orgCoursesList[$orgAddingToCollege]) ? 'pencil' : 'plus' }}"></i>
@@ -2493,7 +2533,7 @@ new class extends Component {
                             <p class="text-xs text-gray-600 mt-0.5 normal-case">{{ $orgAddingToCollege }}</p>
                             <span class="inline-block mt-2 px-3 py-1 bg-[#7a3f91] text-white rounded-full text-xs font-semibold">{{ count($orgSelectedCourseCodes) }} selected</span>
                         </div>
-                        <div class="p-5 flex-1 overflow-y-auto min-h-0">
+                        <div class="p-4 sm:p-5 mc-scroll">
                             @if($this->allCoursesForAssign->count() > 0)
                             <p class="text-sm text-gray-600 mb-3">Select all courses belonging to this college:</p>
                             <div class="border border-gray-200 rounded-xl divide-y divide-gray-100 overflow-hidden">
@@ -2508,8 +2548,8 @@ new class extends Component {
                                     <input type="checkbox" wire:model="orgSelectedCourseCodes" value="{{ $c->code }}"
                                            class="w-4 h-4 shrink-0 rounded" style="accent-color:#7a3f91;" {{ $isTaken ? 'disabled' : '' }}>
                                     <span class="font-semibold text-gray-900 text-sm font-mono shrink-0 w-20">{{ $c->code }}</span>
-                                    <span class="text-gray-500 text-xs truncate flex-1">{{ $c->name }}</span>
-                                    @if($isTaken)<span class="text-xs text-amber-700 shrink-0 whitespace-nowrap"><i class="fas fa-lock mr-1"></i>{{ $otherCollege }}</span>@endif
+                                    <span class="text-gray-500 text-xs truncate flex-1 min-w-0" title="{{ $c->name }}">{{ $c->name }}</span>
+                                    @if($isTaken)<span class="text-xs text-amber-700 shrink-0 truncate max-w-[48%]" title="{{ $otherCollege }}"><i class="fas fa-lock mr-1"></i>{{ $otherCollege }}</span>@endif
                                     @if($isSelected && !$isTaken)<i class="fas fa-circle-check shrink-0 text-[#7a3f91]"></i>@endif
                                 </label>
                                 @endforeach
@@ -2521,7 +2561,7 @@ new class extends Component {
                             </div>
                             @endif
                         </div>
-                        <div class="p-5 pt-3 border-t border-gray-100 flex gap-3 flex-shrink-0">
+                        <div class="p-4 sm:p-5 pt-3 border-t border-gray-100 bg-white flex gap-3 flex-shrink-0">
                             <button wire:click="cancelAddingCourses"
                                     wire:loading.attr="disabled" wire:target="cancelAddingCourses"
                                     class="flex-1 sm:flex-none sm:w-32 bg-white border border-gray-300 text-gray-700 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition disabled:opacity-60 disabled:pointer-events-none inline-flex items-center justify-center gap-1.5">
@@ -2538,14 +2578,14 @@ new class extends Component {
                 </div>
                 @endif
 
-                <div id="mc-section-list" class="{{ $orgAddingToCollege ? 'mc-list-span-8' : 'mc-list-span-9' }} scroll-mt-4 lg:min-h-0">
-                    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col max-h-[75vh] lg:max-h-full lg:h-full">
+                <div id="mc-section-list" class="{{ $orgAddingToCollege ? 'mc-list-span-8' : 'mc-list-span-9' }} mc-col mc-right scroll-mt-4">
+                    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mc-panel">
                         <div class="px-5 py-3.5 border-b border-gray-100 bg-gray-50 flex items-center gap-2 flex-shrink-0">
                             <h3 class="text-sm font-semibold text-[#333333] uppercase tracking-wider">Colleges and Programs</h3>
                             <span class="ml-auto text-xs font-semibold text-[#7a3f91] bg-[#f5eef9] px-2.5 py-1 rounded-full border border-[#d4aaeb]">{{ count($orgCoursesList) }}</span>
                         </div>
 
-                        <div class="flex-1 overflow-y-auto overflow-x-hidden min-h-0 p-3 sm:p-4 bg-[#faf9fc] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
+                        <div class="mc-scroll overflow-x-hidden p-3 sm:p-4 bg-[#faf9fc]">
                             @if(count($orgCoursesList) === 0)
                             <div class="flex flex-col items-center justify-center h-full text-center py-16">
                                 <i class="fas fa-building-columns text-4xl text-gray-200 block mb-3"></i>

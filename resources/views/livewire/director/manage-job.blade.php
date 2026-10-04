@@ -3109,7 +3109,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                                 <i class="fas {{ $ico }} text-base flex-shrink-0"></i>
                                 <div>
                                     <span class="block">{{ $label }}</span>
-                                    <span class="block font-normal opacity-70 text-xs">{{ $sub }}</span>
+                                    
                                 </div>
                             </button>
                             @endforeach
@@ -3224,7 +3224,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                             <input type="checkbox" :checked="all" class="w-4 h-4 flex-shrink-0 accent-[#7a3f91] pointer-events-none">
                             <span class="text-sm font-semibold" :class="all ? 'text-[#5e2f72]' : 'text-[#555555]'">All Colleges</span>
                         </label>
-                        <div class="grid grid-cols-1 gap-1.5">
+                        <div class="grid grid-cols-1 gap-1.5 max-h-64 overflow-y-auto scroll-c pr-1">
                             @foreach($this->collegesWithDepts as $college)
                                 <label @click.prevent="toggleOne(@js($college['name']))"
                                        class="flex items-center gap-2 px-3 py-2 border rounded-xl cursor-pointer transition-colors duration-150 font-semibold"
@@ -3657,7 +3657,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                                     <i class="fas {{ $ico }} text-base flex-shrink-0"></i>
                                     <div>
                                         <span class="block">{{ $label }}</span>
-                                        <span class="block font-normal opacity-70 text-xs">{{ $sub }}</span>
+                                        
                                     </div>
                                 </button>
                                 @endforeach
@@ -3746,7 +3746,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                         </div>
 
                         {{-- Edit mode: checkboxes --}}
-                        <div x-show="editMode" x-cloak class="space-y-1.5">
+                        <div x-show="editMode" x-cloak class="space-y-1.5 max-h-64 overflow-y-auto scroll-c pr-1">
                             <label class="flex items-center gap-2 px-3 py-2 border-2 border-[#7a3f91] bg-[#f5eef9] rounded-xl cursor-pointer">
                                 <input type="checkbox" wire:model.live="editAllColleges" class="w-4 h-4 flex-shrink-0 accent-[#7a3f91]">
                                 <span class="text-sm font-semibold text-[#5e2f72]">All Colleges</span>
@@ -4091,7 +4091,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                         @endif
                         <div>
                             <p class="text-[10px] font-semibold uppercase tracking-wider text-[#555555]">Deadline</p>
-                            <p class="text-sm text-[#333333]">{{ \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->format('M d, Y') }}</p>
+                            <p class="text-sm text-[#333333]">{{ $editingJob->deadline ? \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->format('M d, Y') : 'No deadline — always active' }}</p>
                         </div>
                     </div>
                 </div>
@@ -4157,10 +4157,11 @@ window.eoCompressToBase64 = eoCompressToBase64;
 @if($showViewModal && $this->viewingJob)
 @php
     $job              = $this->viewingJob;
-    $dl               = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-    $daysLeft         = (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false);
-    $isExp            = now('Asia/Manila')->startOfDay()->gt($dl->copy()->startOfDay());
-    $isUrgentView     = $daysLeft <= 7 && !$isExp;
+    $hasDeadline      = !empty($job->deadline);
+    $dl               = $hasDeadline ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila') : null;
+    $daysLeft         = $hasDeadline ? (int) now('Asia/Manila')->startOfDay()->diffInDays($dl->copy()->startOfDay(), false) : PHP_INT_MAX;
+    $isExp            = $hasDeadline && now('Asia/Manila')->startOfDay()->gt($dl->copy()->startOfDay());
+    $isUrgentView     = $hasDeadline && $daysLeft <= 7 && !$isExp;
     $createdPH        = \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila');
     $displayType      = ($job->company_type === $job->company_name) ? 'PHILCST' : $job->company_type;
     $isActiveView     = $job->status === 'ACTIVE';
@@ -4293,11 +4294,12 @@ window.eoCompressToBase64 = eoCompressToBase64;
                             </div>
                             <div>
                                 <label class="block text-[0.68rem] font-semibold uppercase tracking-[.04em] text-[#333333] mb-0.5">Deadline</label>
-                                <div class="view-field-display {{ $isExp ? 'text-red-700' : ($isUrgentView ? 'text-amber-700' : '') }}">{{ $dl->format('M d, Y') }}</div>
+                                <div class="view-field-display {{ $isExp ? 'text-red-700' : ($isUrgentView ? 'text-amber-700' : '') }}">{{ $hasDeadline ? $dl->format('M d, Y') : 'No deadline' }}</div>
                             </div>
                         </div>
                         <p class="text-[0.68rem] {{ $isExp ? 'text-red-600 font-semibold' : ($isUrgentView ? 'text-amber-600 font-semibold' : 'text-[#777777]') }}">
-                            @if($isExp) <i class="fas fa-ban text-[8px] mr-0.5"></i>No longer accepting applications
+                            @if(!$hasDeadline) <i class="fas fa-infinity text-[8px] mr-0.5"></i>No deadline — always active
+                            @elseif($isExp) <i class="fas fa-ban text-[8px] mr-0.5"></i>No longer accepting applications
                             @elseif($daysLeft === 0) <i class="fas fa-fire text-[8px] mr-0.5"></i>Closing today!
                             @elseif($daysLeft === 1) <i class="fas fa-fire text-[8px] mr-0.5"></i>Closes tomorrow
                             @else {{ $daysLeft }} days remaining

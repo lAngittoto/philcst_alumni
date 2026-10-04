@@ -1496,32 +1496,38 @@ select.tw-select-arrow[disabled] {
 /* ══ Table container height — mirrors event-organizer's flex-fill card ══ */
 .dir-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 
-/* ══ Event Overview page — table pushed down a bit so it sits centered ══ */
-@media (min-width: 1024px) { .evt-page-body { padding-top: 56px !important; } }
-@media (min-width: 640px) and (max-width: 1023px) { .evt-page-body { padding-top: 32px !important; } }
+/* ══ Event Overview — long, fill-the-screen table card (same look as Jobs Overview) ══ */
+@media (min-width: 768px) {
+    .evt-table-card { flex: none; height: calc(100vh - 190px); height: calc(100dvh - 190px); min-height: 480px; }
+}
 @media (max-width: 640px) {
     .evt-page-body { padding: 0 !important; gap: 0 !important; }
     .evt-page-header { padding: 14px 16px 12px; background: #fff; border-bottom: 1px solid #E8E0F0; }
 }
+.evt-filter-wrap { padding: 12px; background: #fff; border-bottom: 1px solid #E8E0F0; }
+.evt-filter-bar  { background: #FAF8FD; border: 1px solid #E8E0F0; border-radius: 14px; }
+.evt-row td { border-bottom: 1px solid #F3EEF8; }
+.evt-row:last-child td { border-bottom: none; }
 
-/* ══ View Event — fills the whole screen, no side gaps.
-   Desktop (lg+): everything fits in one screen, no page scroll; long text
-   (about / notes) scrolls inside its own card. Phone/tablet: normal scroll. ══ */
-.evt-view-wrap { width: 100%; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
-.evt-view-scroll { overflow-y: auto; }
-.evt-view-photo { width: 100%; background: #f9fafb; }
-.evt-view-photo img { width: 100%; height: 100%; object-fit: contain; display: block; max-height: 320px; min-height: 200px; }
-.evt-view-card-body { overflow-y: auto; }
-@media (min-width: 640px) { .evt-view-wrap { padding: 16px; gap: 14px; } }
-@media (min-width: 1024px) {
-    .evt-view-scroll { overflow: hidden; }
-    .evt-view-wrap { height: 100%; padding: 16px 20px; gap: 14px; }
-    .evt-view-top { flex: 1 1 0; min-height: 0; }
-    .evt-view-photo { height: 100%; }
-    .evt-view-photo img { max-height: none; min-height: 0; }
-    .evt-view-bottom { flex: 1 1 0; min-height: 0; }
-    .evt-view-card-body { min-height: 0; }
-}
+/* ══ View Event — two-column layout, normal scroll (no squashed columns) ══ */
+.evt-v-card { background:#fff; border:1px solid #E8E0F0; border-radius:16px; box-shadow:0 1px 2px rgba(122,63,145,.06); }
+.evt-v-head { display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid #F0E9F6; }
+.evt-v-ico  { width:34px; height:34px; border-radius:10px; background:#F3EAF9; color:#7a3f91; display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:13px; }
+.evt-v-lbl  { font-size:11px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:#7a3f91; }
+.evt-v-row  { display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-bottom:1px solid #F5F0F9; }
+.evt-v-row:last-child { border-bottom:none; padding-bottom:0; }
+.evt-v-row:first-child { padding-top:0; }
+.evt-v-btn  { display:inline-flex; align-items:center; justify-content:center; gap:7px; height:36px; padding:0 12px; border-radius:10px; font-size:13px; font-weight:600; color:#fff; cursor:pointer; transition:all .15s; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.14); white-space:nowrap; }
+.evt-v-btn:hover { background:rgba(255,255,255,.26); }
+.evt-v-btn:active { transform:scale(.96); }
+.evt-v-btn:disabled { opacity:.6; cursor:wait; }
+.evt-v-btn.ok  { background:#10b981; border-color:#10b981; }
+.evt-v-btn.ok:hover  { background:#059669; }
+.evt-v-btn.bad { background:#ef4444; border-color:#ef4444; }
+.evt-v-btn.bad:hover { background:#dc2626; }
+.evt-v-btn.off { background:rgba(255,255,255,.08); color:rgba(255,255,255,.45); cursor:not-allowed; }
+.evt-v-btn.off:hover { background:rgba(255,255,255,.08); }
+@media (max-width: 639px) { .evt-v-btn .t { display:none; } .evt-v-btn { width:36px; padding:0; } }
 
 @media (max-width: 640px) {
     .dir-table-card {
@@ -1573,164 +1579,164 @@ select.tw-select-arrow[disabled] {
 </div>
 
 {{-- ══ MAIN LAYOUT ══ --}}
-<div class="evt-page-body flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
+@php
+    // status → [label, pill classes, dot color]
+    $evtStatusMap = [
+        'COMPLETED' => ['Completed', 'border-green-200 bg-green-50 text-green-700',     'bg-green-500'],
+        'APPROVED'  => ['Approved',  'border-emerald-200 bg-emerald-50 text-emerald-700', 'bg-emerald-500'],
+        'PENDING'   => ['Pending',   'border-amber-200 bg-amber-50 text-amber-700',     'bg-amber-500'],
+        'REJECTED'  => ['Rejected',  'border-orange-200 bg-orange-50 text-orange-700',  'bg-orange-500'],
+    ];
+@endphp
+<div class="evt-page-body flex flex-col flex-1 gap-5 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
-    {{-- ══ PAGE HEADER (matches Dashboard placement — icon + title on the left, mirrors organizer style) ══ --}}
+    {{-- ══ PAGE HEADER ══ --}}
     <div class="evt-page-header flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-        <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+        <div class="flex items-center gap-3.5 min-w-0">
+            <div class="w-12 h-12 rounded-xl flex items-center justify-center shadow-lg shrink-0"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <i class="fas fa-calendar-days text-white text-base"></i>
+                <i class="fas fa-calendar-days text-white text-lg"></i>
             </div>
-            <div>
+            <div class="min-w-0">
                 <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Event Overview</h1>
-                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
-                    Review, moderate, and manage
-                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                        <i class="fas fa-building-columns text-[9px]"></i>
-                        all colleges
-                    </span>
+                <p class="text-sm text-[#7A3F91] font-normal flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+                    <span class="truncate">Review, moderate, and manage all event postings.</span>
                 </p>
             </div>
         </div>
-        <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide">
+        <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-xl border border-purple-200 bg-purple-50 text-purple-700 uppercase tracking-wide shrink-0">
             <i class="fas fa-calendar-days text-purple-600 text-[10px]"></i>
             {{ $this->events->total() }} Event{{ $this->events->total() !== 1 ? 's' : '' }}
         </span>
     </div>
 
-    {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="dir-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
+    {{-- ══ UNIFIED TABLE CARD ══ --}}
+    <div class="dir-table-card evt-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
-             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterCollege">
+        <div class="evt-filter-wrap flex-shrink-0 transition-opacity duration-200"
+             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterCollege,filterSort">
+            <div class="evt-filter-bar px-3 py-2.5 flex flex-wrap gap-2 items-center">
 
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
-                <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
-                       placeholder="Search..."
-                       class="w-full pl-9 pr-4 py-2 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] placeholder-[#a78bbd] font-normal
-                              hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
-                       autocomplete="off" maxlength="100" spellcheck="false">
+                <div class="relative flex-1 min-w-[160px] max-w-xs"
+                     wire:ignore
+                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
+                    <input type="text" x-model="q" @input.debounce.300ms="$wire.set('search',q)"
+                           placeholder="Search..."
+                           class="w-full h-[38px] pl-9 pr-4 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] placeholder-[#a78bbd] font-normal
+                                  hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                           autocomplete="off" maxlength="100" spellcheck="false">
+                </div>
+
+                <div class="hidden sm:flex items-center px-2 h-[38px] shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
+                    Filters
+                </div>
+
+                <select wire:model.live="filterStatus"
+                        wire:loading.attr="disabled"
+                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
+                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                    <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="REJECTED">Rejected</option>
+                    <option value="COMPLETED">Completed</option>
+                </select>
+
+                <select wire:model.live="filterCollege"
+                        wire:loading.attr="disabled"
+                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal flex-1 sm:flex-none sm:min-w-[200px] sm:max-w-[280px]
+                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                    <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
+                    @foreach($this->colleges as $col)
+                        <option value="{{ $col }}">{{ $col }}</option>
+                    @endforeach
+                </select>
+
+                <select wire:model.live="filterSort"
+                        wire:loading.attr="disabled"
+                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
+                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                    <option value="recent">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                </select>
+
+                @php $mgEventHasActiveFilters = $search || $filterStatus || $filterCollege || $filterSort !== 'recent'; @endphp
+                <button wire:click="resetFilters"
+                        wire:loading.attr="disabled"
+                        wire:loading.class="opacity-60 cursor-wait"
+                        wire:target="resetFilters"
+                        {{ !$mgEventHasActiveFilters ? 'disabled' : '' }}
+                        title="{{ $mgEventHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
+                        class="ml-auto inline-flex items-center gap-1.5 h-[38px] px-3 rounded-lg text-sm font-normal text-[#333333]
+                               bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                    <span wire:loading.remove wire:target="resetFilters">
+                        <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                    </span>
+                    <span wire:loading wire:target="resetFilters">
+                        <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                    </span>
+                    <span class="hidden sm:inline" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
+                </button>
             </div>
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                Filters
+            {{-- Active pills --}}
+            @if($filterStatus || $filterCollege)
+            <div class="flex flex-wrap gap-2 items-center mt-2.5 px-1">
+                @if($filterStatus && isset($evtStatusMap[$filterStatus]))
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $evtStatusMap[$filterStatus][1] }}">
+                    <i class="fas fa-filter text-[9px]"></i>
+                    {{ $evtStatusMap[$filterStatus][0] }}
+                    <button wire:click="$set('filterStatus', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
+                @if($filterCollege)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
+                    <i class="fas fa-building-columns text-[9px]"></i>
+                    {{ $filterCollege }}
+                    <button wire:click="$set('filterCollege', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
             </div>
-
-            <select wire:model.live="filterStatus"
-                    wire:loading.attr="disabled"
-                    class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
-                           hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
-                <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
-                <option value="PENDING">Pending</option>
-                <option value="APPROVED">Approved</option>
-                <option value="REJECTED">Rejected</option>
-                <option value="COMPLETED">Completed</option>
-            </select>
-
-            <select wire:model.live="filterCollege"
-                    wire:loading.attr="disabled"
-                    class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
-                           hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow hidden sm:block">
-                <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
-                @foreach($this->colleges as $col)
-                    <option value="{{ $col }}">{{ $col }}</option>
-                @endforeach
-            </select>
-
-            {{-- Active pill: Status --}}
-            @if($filterStatus)
-            @php
-                $pillMap = [
-                    'PENDING'   => ['label' => 'Pending',   'cls' => 'bg-yellow-50 border-yellow-300 text-yellow-800'],
-                    'APPROVED'  => ['label' => 'Approved',  'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
-                    'REJECTED'  => ['label' => 'Rejected',  'cls' => 'bg-orange-50 border-orange-300 text-orange-800'],
-                    'COMPLETED' => ['label' => 'Completed', 'cls' => 'bg-green-50 border-green-300 text-green-800'],
-                ];
-                $pill = $pillMap[$filterStatus] ?? null;
-            @endphp
-            @if($pill)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $pill['cls'] }}">
-                <i class="fas fa-filter text-[9px]"></i>
-                {{ $pill['label'] }}
-                <button wire:click="$set('filterStatus', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
             @endif
-            @endif
-
-            {{-- Active pill: College --}}
-            @if($filterCollege)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
-                <i class="fas fa-building-columns text-[9px]"></i>
-                {{ $filterCollege }}
-                <button wire:click="$set('filterCollege', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
-
-            @php $mgEventHasActiveFilters = $search || $filterStatus || $filterCollege; @endphp
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    {{ !$mgEventHasActiveFilters ? 'disabled' : '' }}
-                    title="{{ $mgEventHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333]
-                           bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
-            </button>
-
-            {{-- Mobile college select --}}
-            <select wire:model.live="filterCollege"
-                    wire:loading.attr="disabled"
-                    class="py-2 px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] flex-1 sm:hidden tw-select-arrow">
-                <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
-                @foreach($this->colleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
-            </select>
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
         <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
 
-            {{-- Centered loading spinner — mirrors event-organizer's table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
+                 wire:loading.flex wire:target="search,filterStatus,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
                 <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
             </div>
 
             @if($this->events->count() > 0)
             <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
+                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
+
                 {{-- ── DESKTOP / TABLET: table view ── --}}
                 <table class="w-full bg-white border-collapse hidden md:table table-fixed">
                     <colgroup>
-                        <col style="width:32%;"><col style="width:20%;"><col style="width:22%;"><col style="width:12%;"><col style="width:14%;">
+                        <col style="width:29%;"><col style="width:18%;"><col style="width:16%;"><col style="width:15%;"><col style="width:11%;"><col style="width:11%;">
                     </colgroup>
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #E8E0F0; user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
                         <tr>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Date &amp; Time</th>
                             <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Coordinator</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Date &amp; Time</th>
+                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Open For</th>
                             <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]"></th>
+                            <th class="px-4 sm:px-5 py-3.5 text-right text-xs font-semibold uppercase tracking-widest text-[#555555]">Action</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-[#F5F5F5]">
+                    <tbody>
                         @foreach($this->events as $index => $event)
                         @php
                             $isCompleted = $event->status === 'COMPLETED';
@@ -1740,25 +1746,31 @@ select.tw-select-arrow[disabled] {
                             $eventDate   = $event->event_date->setTimezone('Asia/Manila');
                             $rowCheckDate  = $event->event_date;
                             $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC'));
+                            [$stLabel, $stCls, $stDot] = $evtStatusMap[$event->status] ?? $evtStatusMap['REJECTED'];
                         @endphp
-                        <tr class="bg-white transition-colors duration-100 cursor-pointer hover:bg-[#f5f0fa]"
+                        <tr class="evt-row bg-white transition-colors duration-100 cursor-pointer hover:bg-[#f5f0fa]"
                             wire:loading.class.remove="hover:bg-[#f5f0fa]" wire:loading.class="!bg-purple-50 opacity-60 cursor-wait" wire:target="viewEvent({{ $event->id }})"
                             wire:click="viewEvent({{ $event->id }})"
                             wire:key="dir-event-row-{{ $event->id }}"
                             data-dir-row>
 
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <div class="flex items-start gap-2">
-                                    <div class="flex-1 min-w-0 overflow-hidden">
-                                        <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{!! $this->highlight($event->title, $search) !!}</p>
-                                        <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $eventDate->diffForHumans() }}</p>
-                                    </div>
-                                </div>
+                            <td class="px-4 sm:px-5 py-3.5 overflow-hidden">
+                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#222222]">{!! $this->highlight($event->title, $search) !!}</p>
+                                <p class="text-xs mt-0.5 text-[#777777] truncate">{{ $eventDate->diffForHumans() }}</p>
                             </td>
 
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <p class="text-sm font-semibold text-[#333333] truncate">{{ $eventDate->format('M d, Y') }}</p>
-                                <p class="text-xs mt-0.5 text-[#555555] truncate">
+                            <td class="px-4 sm:px-5 py-3.5 overflow-hidden">
+                                @if($event->organizer)
+                                    <p class="text-sm font-semibold text-[#222222] truncate">{{ $event->organizer->name }}</p>
+                                    <p class="text-xs mt-0.5 text-[#777777] truncate">{{ $event->organizer->department }}</p>
+                                @else
+                                    <span class="inline-flex items-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-purple-700">Alumni Director</span>
+                                @endif
+                            </td>
+
+                            <td class="px-4 sm:px-5 py-3.5 overflow-hidden">
+                                <p class="text-sm font-semibold text-[#222222] truncate">{{ $eventDate->format('M d, Y') }}</p>
+                                <p class="text-xs mt-0.5 text-[#777777] truncate">
                                     {{ $eventDate->format('g:i A') }}
                                     @if($event->event_end_date)
                                         &ndash; {{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}
@@ -1766,38 +1778,24 @@ select.tw-select-arrow[disabled] {
                                 </p>
                             </td>
 
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                @if($event->organizer)
-                                    <p class="text-sm font-semibold text-[#333333] truncate">{{ $event->organizer->name }}</p>
-                                    <p class="text-xs mt-0.5 text-[#777777] truncate">{{ $event->organizer->department }}</p>
+                            <td class="px-4 sm:px-5 py-3.5 overflow-hidden">
+                                @if($event->target_participants)
+                                    <span class="inline-flex items-center max-w-full text-xs font-semibold px-2.5 py-1 rounded-full border border-purple-200 bg-purple-50 text-purple-700" title="{{ $event->target_participants }}">
+                                        <span class="truncate">{{ $event->target_participants }}</span>
+                                    </span>
                                 @else
-                                    <span class="text-xs text-[#bbbbbb]">—</span>
+                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-full border border-gray-200 bg-gray-50 text-gray-600">All Alumni</span>
                                 @endif
                             </td>
 
-                            <td class="px-4 sm:px-5 py-4 text-center whitespace-nowrap">
-                                @if($isCompleted)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
-                                        <i class="fas fa-circle-check text-[9px] mr-1"></i>Completed
-                                    </span>
-                                @elseif($isApproved)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
-                                        <i class="fas fa-badge-check text-[9px] mr-1"></i>Approved
-                                    </span>
-                                @elseif($isPending)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-yellow-200 bg-yellow-50 text-yellow-700 whitespace-nowrap">
-                                        <i class="fas fa-hourglass-half text-[9px] mr-1"></i>Pending
-                                    </span>
-                                @else
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap">
-                                        <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
-                                    </span>
-                                @endif
+                            <td class="px-4 sm:px-5 py-3.5 text-center whitespace-nowrap">
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border whitespace-nowrap {{ $stCls }}">
+    <span class="w-1.5 h-1.5 rounded-full {{ $stDot }}"></span>{{ $stLabel }}
+</span>
                             </td>
 
-                            <td class="px-4 sm:px-5 py-4 text-center">
-                                <div class="flex items-center justify-center gap-1.5" @click.stop>
-
+                            <td class="px-4 sm:px-5 py-3.5 text-right">
+                                <div class="flex items-center justify-end gap-1.5" @click.stop>
                                     @if($isCompleted || $isApproved)
                                         <button wire:click.stop="openShareModal({{ $event->id }})"
                                                 wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
@@ -1812,8 +1810,7 @@ select.tw-select-arrow[disabled] {
                                     @if($isPending)
                                         @if($rowDateExpired)
                                             <span data-dir-action data-tip="Need to update date"
-                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
-                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
                                                 <i class="fas fa-check"></i>
                                             </span>
                                         @else
@@ -1839,8 +1836,7 @@ select.tw-select-arrow[disabled] {
                                     @if($isRejected)
                                         @if($rowDateExpired)
                                             <span data-dir-action data-tip="Need to update date"
-                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
-                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
                                                 <i class="fas fa-rotate-left"></i>
                                             </span>
                                         @else
@@ -1854,7 +1850,6 @@ select.tw-select-arrow[disabled] {
                                             </button>
                                         @endif
                                     @endif
-
                                 </div>
                             </td>
                         </tr>
@@ -1873,6 +1868,7 @@ select.tw-select-arrow[disabled] {
                         $eventDate   = $event->event_date->setTimezone('Asia/Manila');
                         $rowCheckDate  = $event->event_date;
                         $rowDateExpired = $rowCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC'));
+                        [$stLabel, $stCls, $stDot] = $evtStatusMap[$event->status] ?? $evtStatusMap['REJECTED'];
                     @endphp
                     <div class="dir-mrow"
                          wire:loading.class="opacity-60 cursor-wait" wire:target="viewEvent({{ $event->id }})"
@@ -1881,12 +1877,8 @@ select.tw-select-arrow[disabled] {
                          data-dir-row>
 
                         <div class="flex-1 min-w-0">
-                            <div class="flex items-start gap-2">
-                                <div class="flex-1 min-w-0 overflow-hidden">
-                                    <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#333333]">{!! $this->highlight($event->title, $search) !!}</p>
-                                    <p class="text-xs mt-0.5 text-[#666666]">{{ $eventDate->diffForHumans() }}</p>
-                                </div>
-                            </div>
+                            <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#222222]">{!! $this->highlight($event->title, $search) !!}</p>
+                            <p class="text-xs mt-0.5 text-[#777777]">{{ $eventDate->diffForHumans() }}</p>
 
                             <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
                                 <span class="text-xs font-semibold text-[#333333]">{{ $eventDate->format('M d, Y') }}</span>
@@ -1905,24 +1897,16 @@ select.tw-select-arrow[disabled] {
                                 </p>
                             @endif
 
+                            @if($event->target_participants)
+                                <span class="inline-flex items-center max-w-full mt-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full border border-purple-200 bg-purple-50 text-purple-700">
+                                    <span class="truncate">{{ $event->target_participants }}</span>
+                                </span>
+                            @endif
+
                             <div class="flex items-center justify-between gap-2 mt-2">
-                                @if($isCompleted)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
-                                        <i class="fas fa-circle-check text-[9px] mr-1"></i>Completed
-                                    </span>
-                                @elseif($isApproved)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
-                                        <i class="fas fa-badge-check text-[9px] mr-1"></i>Approved
-                                    </span>
-                                @elseif($isPending)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-yellow-200 bg-yellow-50 text-yellow-700 whitespace-nowrap">
-                                        <i class="fas fa-hourglass-half text-[9px] mr-1"></i>Pending
-                                    </span>
-                                @else
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 whitespace-nowrap">
-                                        <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
-                                    </span>
-                                @endif
+                                <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border whitespace-nowrap {{ $stCls }}">
+    <span class="w-1.5 h-1.5 rounded-full {{ $stDot }}"></span>{{ $stLabel }}
+</span>
 
                                 <div class="flex items-center gap-1.5" @click.stop>
                                     @if($isCompleted || $isApproved)
@@ -1939,8 +1923,7 @@ select.tw-select-arrow[disabled] {
                                     @if($isPending)
                                         @if($rowDateExpired)
                                             <span aria-label="Need to update date"
-                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
-                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
                                                 <i class="fas fa-check"></i>
                                             </span>
                                         @else
@@ -1966,8 +1949,7 @@ select.tw-select-arrow[disabled] {
                                     @if($isRejected)
                                         @if($rowDateExpired)
                                             <span aria-label="Need to update date"
-                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold
-                                                         bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
+                                                  class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed">
                                                 <i class="fas fa-rotate-left"></i>
                                             </span>
                                         @else
@@ -2006,7 +1988,6 @@ select.tw-select-arrow[disabled] {
                         @endif
                     </p>
                 </div>
-
             </div>
             @endif
 
@@ -2604,239 +2585,149 @@ select.tw-select-arrow[disabled] {
     $approveCheckDate = $ev->event_date;
     $eventDateExpired = $approveCheckDate->lessThanOrEqualTo(\Carbon\Carbon::now('UTC'));
 @endphp
+@php
+    [$vStLabel, $vStCls, $vStDot] = ($evtStatusMap ?? [])[$ev->status] ?? ['Rejected', 'border-orange-200 bg-orange-50 text-orange-700', 'bg-orange-500'];
+    $rsvpTotalSafe = max(1, $totalRsvp);
+    $chips = $ev->target_participants
+        ? array_values(array_filter(array_map('trim', preg_split('/[,·]+/u', $ev->target_participants))))
+        : [];
+@endphp
 
-<div class="fixed inset-0 z-[100] flex flex-col bg-gray-50 overflow-hidden fs-in"
+<div class="fixed inset-0 z-[100] flex flex-col fs-in"
+     style="background:#f4f0f8;"
      @keydown.escape.window="$wire.closeViewModal()">
 
-    <div class="flex items-center justify-between px-4 sm:px-6 py-3 flex-shrink-0 shadow-md"
+    {{-- ── HEADER ── --}}
+    <div class="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 flex-shrink-0 shadow-md"
          style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
         <div class="flex items-center gap-3 min-w-0 flex-1">
+            <div class="w-10 h-10 rounded-xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
+                <i class="fas fa-calendar-days text-white"></i>
+            </div>
             <div class="min-w-0 flex-1">
                 <p class="text-white/60 text-[10px] sm:text-xs font-semibold uppercase tracking-widest">Event Details</p>
-                <h2 class="text-white font-semibold text-sm sm:text-base leading-tight line-clamp-2 sm:truncate">{{ $ev->title }}</h2>
+                <h2 class="text-white font-semibold text-sm sm:text-base leading-tight line-clamp-1">{{ $ev->title }}</h2>
             </div>
         </div>
-        <div class="flex items-center gap-1.5 flex-shrink-0 ml-3">
+
+        <div class="flex items-center gap-2 flex-shrink-0">
             @if($isApproved || $isCompleted)
-                <div class="relative inline-flex group">
-                    <button type="button" wire:click="openShareModal({{ $ev->id }})"
-                            wire:loading.attr="disabled" wire:target="openShareModal({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
-                            aria-label="Share event">
-                        <i class="fas fa-share-nodes text-white text-sm" wire:loading.remove wire:target="openShareModal({{ $ev->id }})"></i>
-                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="openShareModal({{ $ev->id }})"></i>
-                    </button>
-                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                        Share
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                    </div>
-                </div>
+                <button type="button" wire:click="openShareModal({{ $ev->id }})"
+                        wire:loading.attr="disabled" wire:target="openShareModal({{ $ev->id }})"
+                        class="evt-v-btn" aria-label="Share event" title="Share">
+                    <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $ev->id }})"></i>
+                    <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $ev->id }})"></i>
+                    <span class="t">Share</span>
+                </button>
             @endif
 
             @if($isPending)
-                <div class="relative inline-flex group">
-                    <button wire:click="confirmReject({{ $ev->id }})"
-                            wire:loading.attr="disabled" wire:target="confirmReject({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
-                            aria-label="Reject">
-                        <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="confirmReject({{ $ev->id }})"></i>
-                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmReject({{ $ev->id }})"></i>
-                    </button>
-                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                        Reject
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                    </div>
-                </div>
+                <button type="button" wire:click="confirmReject({{ $ev->id }})"
+                        wire:loading.attr="disabled" wire:target="confirmReject({{ $ev->id }})"
+                        class="evt-v-btn bad" aria-label="Reject" title="Reject">
+                    <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $ev->id }})"></i>
+                    <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $ev->id }})"></i>
+                    <span class="t">Reject</span>
+                </button>
                 @if($eventDateExpired)
-                <div class="relative inline-flex group">
-                    <span class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/15 cursor-not-allowed"
-                          aria-label="Need to update date">
-                        <i class="fas fa-check text-white/50 text-sm"></i>
+                    <span class="evt-v-btn off" aria-label="Need to update date" title="Need to update date">
+                        <i class="fas fa-check"></i><span class="t">Approve</span>
                     </span>
-                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                        Need to update date
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                    </div>
-                </div>
                 @else
-                <div class="relative inline-flex group">
-                    <button wire:click="confirmApprove({{ $ev->id }})"
+                    <button type="button" wire:click="confirmApprove({{ $ev->id }})"
                             wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
-                            aria-label="Approve">
-                        <i class="fas fa-check text-white text-sm" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
-                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
+                            class="evt-v-btn ok" aria-label="Approve" title="Approve">
+                        <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
+                        <span class="t">Approve</span>
                     </button>
-                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                        Approve
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                    </div>
-                </div>
                 @endif
             @endif
 
             @if($isRejected)
                 @if($eventDateExpired)
-                <div class="relative inline-flex group">
-                    <span class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/10 border border-white/15 cursor-not-allowed"
-                          aria-label="Need to update date">
-                        <i class="fas fa-rotate-left text-white/50 text-sm"></i>
+                    <span class="evt-v-btn off" aria-label="Need to update date" title="Need to update date">
+                        <i class="fas fa-rotate-left"></i><span class="t">Re-Approve</span>
                     </span>
-                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                        Need to update date
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                    </div>
-                </div>
                 @else
-                <div class="relative inline-flex group">
-                    <button wire:click="confirmApprove({{ $ev->id }})"
+                    <button type="button" wire:click="confirmApprove({{ $ev->id }})"
                             wire:loading.attr="disabled" wire:target="confirmApprove({{ $ev->id }})"
-                            class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/14 border border-white/20 hover:bg-white/24 disabled:opacity-60 disabled:cursor-wait"
-                            aria-label="Re-Approve">
-                        <i class="fas fa-rotate-left text-white text-sm" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
-                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
+                            class="evt-v-btn ok" aria-label="Re-Approve" title="Re-Approve">
+                        <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $ev->id }})"></i>
+                        <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $ev->id }})"></i>
+                        <span class="t">Re-Approve</span>
                     </button>
-                    <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                        Re-Approve
-                        <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                    </div>
-                </div>
                 @endif
             @endif
 
-            <div class="relative inline-flex group">
-                <button wire:click="closeViewModal" type="button"
-                        wire:loading.attr="disabled" wire:target="closeViewModal"
-                        class="relative inline-flex items-center justify-center w-8 h-8 rounded-lg cursor-pointer transition active:scale-95 bg-white/10 border border-white/15 hover:bg-white/22"
-                        aria-label="Close">
-                    <i class="fas fa-xmark text-white text-sm" wire:loading.remove wire:target="closeViewModal"></i>
-                    <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="closeViewModal"></i>
-                </button>
-                <div class="absolute top-[calc(100%+6px)] left-1/2 -translate-x-1/2 bg-[#111827] text-white text-[10px] font-bold uppercase tracking-[.05em] px-2.5 py-1 rounded-md whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-[9999]">
-                    Close
-                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-[#111827]"></span>
-                </div>
-            </div>
+            <span class="w-px h-6 bg-white/25 mx-0.5"></span>
+
+            <button type="button" wire:click="closeViewModal"
+                    wire:loading.attr="disabled" wire:target="closeViewModal"
+                    class="evt-v-btn !w-9 !px-0" aria-label="Close" title="Close">
+                <i class="fas fa-xmark" wire:loading.remove wire:target="closeViewModal"></i>
+                <i class="fas fa-spinner fa-spin" wire:loading wire:target="closeViewModal"></i>
+            </button>
         </div>
     </div>
 
-    <div class="flex-1 min-h-0 evt-view-scroll scroll-c" style="background:#f0ecf5;">
-        <div class="evt-view-wrap">
+    {{-- ── BODY ── --}}
+    <div class="flex-1 min-h-0 overflow-y-auto scroll-c">
+        <div class="max-w-[1400px] mx-auto w-full p-3 sm:p-5 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-start">
 
-            {{-- ── TOP CARD: photo left + title/chips right ── --}}
-            <div class="evt-view-top bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-5 flex flex-col sm:flex-row gap-4 sm:gap-6">
+            {{-- ═════════ LEFT / MAIN ═════════ --}}
+            <div class="lg:col-span-8 flex flex-col gap-4 lg:gap-5 min-w-0">
 
-                {{-- Photo --}}
-                @if($hasPhoto)
-                <div class="evt-view-photo sm:w-[46%] flex-shrink-0 rounded-xl overflow-hidden border border-gray-100">
-                    <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}">
-                </div>
-                @else
-                <div class="sm:w-[46%] flex-shrink-0 rounded-xl flex items-center justify-center w-full" style="min-height:200px; background:#7a3f91;">
-                    <i class="fas fa-calendar-days text-white/20 text-6xl"></i>
-                </div>
-                @endif
-
-                {{-- Title + badges --}}
-                <div class="flex-1 min-w-0 flex flex-col gap-3 sm:gap-4 pt-1">
-                    <span class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider w-fit text-white" style="background:#7a3f91;">
-                        <i class="fas fa-calendar-days text-[11px]"></i> Event Title
-                    </span>
-                    <h2 class="text-xl sm:text-2xl xl:text-3xl font-bold text-[#1a1026] leading-tight break-words">{{ $ev->title }}</h2>
-                    @if($ev->target_participants)
-                    <div class="flex flex-wrap gap-2 mt-1">
-                        @foreach(array_filter(array_map('trim', preg_split('/[,·\·]+/u', $ev->target_participants))) as $chip)
-                        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-gray-300 bg-gray-50 text-[#333333] text-sm font-semibold">
-                            <i class="fas fa-tag text-[10px]" style="color:#7a3f91;"></i>{{ $chip }}
-                        </span>
-                        @endforeach
+                {{-- Hero: photo + title --}}
+                <div class="evt-v-card overflow-hidden">
+                    <div class="relative w-full h-[220px] sm:h-[300px] lg:h-[360px] overflow-hidden"
+                         style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                        @if($hasPhoto)
+                            <img src="{{ $evPhotoUrl }}" alt="" aria-hidden="true"
+                                 class="absolute inset-0 w-full h-full object-cover scale-125 opacity-60" style="filter:blur(28px);">
+                            <div class="absolute inset-0 bg-white/40"></div>
+                            <img src="{{ $evPhotoUrl }}" alt="{{ $ev->title }}"
+                                 class="relative z-[1] w-full h-full object-contain p-3 sm:p-4 drop-shadow-lg">
+                        @else
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <i class="fas fa-calendar-days text-white/25 text-7xl"></i>
+                            </div>
+                        @endif
                     </div>
-                    @endif
-                </div>
-            </div>
 
-            {{-- ── INFO ROW 1: Venue | Date & Time | Open For ── --}}
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
-                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
-                        <i class="fas fa-location-dot"></i> Venue
-                    </p>
-                    @if($ev->venue)
-                        <p class="text-base font-bold text-[#1a1026]">{{ $ev->venue }}</p>
-                        @if($ev->venue_address)<p class="text-sm text-[#555555] font-medium leading-snug mt-1 uppercase">{{ $ev->venue_address }}</p>@endif
-                    @else
-                        <p class="text-sm text-[#aaaaaa] italic">Not specified</p>
-                    @endif
-                </div>
-                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
-                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
-                        <i class="fas fa-calendar-days"></i> Date &amp; Time
-                    </p>
-                    <p class="text-base font-bold text-[#1a1026]">{{ $eventDatePH->format('M d, Y') }}</p>
-                    <p class="text-sm font-semibold text-[#555555] mt-1">{{ $timeDisplay }}</p>
-                </div>
-                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
-                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
-                        <i class="fas fa-users"></i> Open For
-                    </p>
-                    @if($ev->target_participants)
-                        <p class="text-base font-bold text-[#1a1026]">{{ $ev->target_participants }}</p>
-                    @else
-                        <p class="text-sm text-[#aaaaaa] italic">All alumni</p>
-                    @endif
-                </div>
-            </div>
+                    <div class="p-5 sm:p-6 flex flex-col gap-3">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1 rounded-full border {{ $vStCls }}">
+                                <span class="w-1.5 h-1.5 rounded-full {{ $vStDot }}"></span>{{ $vStLabel }}
+                            </span>
+                            @foreach($chips as $chip)
+                                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-purple-200 bg-purple-50 text-purple-700 text-xs font-semibold">
+                                    <i class="fas fa-tag text-[9px]"></i>{{ $chip }}
+                                </span>
+                            @endforeach
+                        </div>
 
-            {{-- ── INFO ROW 2: Responses | Approval | Posted ── --}}
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
-                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
-                        <i class="fas fa-chart-simple"></i> Responses
-                    </p>
-                    <p class="text-base font-bold text-[#1a1026]">{{ $ev->confirmed_count }} Attending</p>
-                    <p class="text-sm text-[#555555] font-medium mt-1">{{ $ev->tentative_count }} Maybe &middot; {{ $ev->declined_count }} No</p>
-                </div>
-                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
-                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
-                        <i class="fas fa-circle-check"></i> Approval
-                    </p>
-                    @if($isCompleted)
-                        <p class="text-base font-bold text-green-600">Completed</p>
-                    @elseif($isApproved)
-                        <p class="text-base font-bold text-emerald-600">Approved</p>
-                        @if($ev->review_remarks)<p class="text-sm text-[#555555] italic mt-1">"{{ $ev->review_remarks }}"</p>@endif
-                    @elseif($isPending)
-                        <p class="text-base font-bold text-amber-600">Pending Review</p>
-                        @if($eventDateExpired)<p class="text-sm text-red-500 font-semibold mt-1">Date needs updating.</p>@endif
-                    @else
-                        <p class="text-base font-bold text-red-600">Rejected</p>
-                        @if($ev->review_remarks)<p class="text-sm text-[#555555] font-medium mt-1">{{ $ev->review_remarks }}</p>@endif
-                        @if($eventDateExpired)<p class="text-sm text-red-500 font-semibold mt-1">Date needs updating.</p>@endif
-                    @endif
-                </div>
-                <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5 flex flex-col gap-1">
-                    <p class="text-xs font-bold uppercase tracking-widest flex items-center gap-2 mb-1.5" style="color:#7a3f91;">
-                        <i class="fas fa-clock-rotate-left"></i> Posted
-                    </p>
-                    <p class="text-base font-bold text-[#1a1026]">{{ $createdPH->format('M d, Y') }}</p>
-                    <p class="text-sm text-[#555555] font-medium mt-1">{{ $createdPH->diffForHumans() }}</p>
-                </div>
-            </div>
+                        <h2 class="text-2xl sm:text-3xl font-bold text-[#1a1026] leading-tight break-words">{{ $ev->title }}</h2>
 
-
-
-            {{-- ── BOTTOM 3-COL: About | Notes | Contact (equal height) ── --}}
-            <div class="evt-view-bottom grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 items-stretch">
-
-                {{-- About This Event --}}
-                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0">
-                    <div class="px-5 py-3 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
-                        <i class="fas fa-align-left text-white/80 text-sm"></i>
-                        <p class="text-xs font-bold uppercase tracking-widest text-white">About This Event</p>
+                        <div class="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-[#555555] font-medium">
+                            <span class="inline-flex items-center gap-2"><i class="fas fa-calendar-days text-[#7a3f91]"></i>{{ $eventDatePH->format('D, M d, Y') }}</span>
+                            <span class="inline-flex items-center gap-2"><i class="fas fa-clock text-[#7a3f91]"></i>{{ $timeDisplay }}</span>
+                            @if($ev->venue)
+                            <span class="inline-flex items-center gap-2 min-w-0"><i class="fas fa-location-dot text-[#7a3f91]"></i><span class="truncate">{{ $ev->venue }}</span></span>
+                            @endif
+                        </div>
                     </div>
-                    <div class="evt-view-card-body bg-white flex-1 px-5 py-4">
+                </div>
+
+                {{-- About --}}
+                <div class="evt-v-card">
+                    <div class="evt-v-head">
+                        <span class="evt-v-ico"><i class="fas fa-align-left"></i></span>
+                        <p class="evt-v-lbl">About This Event</p>
+                    </div>
+                    <div class="px-5 sm:px-6 py-5">
                         @if($ev->description)
-                            <p class="text-sm text-[#333333] leading-relaxed whitespace-pre-wrap" style="line-height:1.9;">{{ trim($ev->description) }}</p>
+                            <p class="text-[15px] text-[#333333] whitespace-pre-wrap break-words" style="line-height:1.85;">{{ trim($ev->description) }}</p>
                         @else
                             <p class="text-sm text-[#aaaaaa] italic">No description provided.</p>
                         @endif
@@ -2844,67 +2735,155 @@ select.tw-select-arrow[disabled] {
                 </div>
 
                 {{-- Additional Notes --}}
-                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0">
-                    <div class="px-5 py-3 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
-                        <i class="fas fa-note-sticky text-white/80 text-sm"></i>
-                        <p class="text-xs font-bold uppercase tracking-widest text-white">Additional Notes</p>
+                <div class="evt-v-card">
+                    <div class="evt-v-head">
+                        <span class="evt-v-ico"><i class="fas fa-note-sticky"></i></span>
+                        <p class="evt-v-lbl">Additional Notes</p>
                     </div>
-                    <div class="evt-view-card-body bg-white flex-1 px-5 py-4">
+                    <div class="px-5 sm:px-6 py-5">
                         @if($ev->notes)
-                            <p class="text-sm text-[#333333] leading-relaxed whitespace-pre-wrap" style="line-height:1.9;">{{ trim($ev->notes) }}</p>
+                            <p class="text-[15px] text-[#333333] whitespace-pre-wrap break-words" style="line-height:1.85;">{{ trim($ev->notes) }}</p>
                         @else
                             <p class="text-sm text-[#aaaaaa] italic">No additional notes.</p>
                         @endif
                     </div>
                 </div>
+            </div>
 
-                {{-- Contact Information --}}
-                <div class="rounded-xl overflow-hidden border border-gray-100 shadow-sm flex flex-col min-h-0">
-                    <div class="px-5 py-3 flex items-center gap-2.5 flex-shrink-0" style="background:#7a3f91;">
-                        <i class="fas fa-address-card text-white/80 text-sm"></i>
-                        <p class="text-xs font-bold uppercase tracking-widest text-white">Contact Information</p>
+            {{-- ═════════ RIGHT / SIDEBAR ═════════ --}}
+            <div class="lg:col-span-4 flex flex-col gap-4 lg:gap-5 min-w-0">
+
+                {{-- Approval --}}
+                <div class="evt-v-card">
+                    <div class="evt-v-head">
+                        <span class="evt-v-ico"><i class="fas fa-circle-check"></i></span>
+                        <p class="evt-v-lbl">Approval</p>
                     </div>
-                    <div class="evt-view-card-body bg-white flex-1 px-5 py-4 flex flex-col gap-3">
+                    <div class="px-5 py-4 flex flex-col gap-2">
+                        <span class="inline-flex items-center gap-2 w-fit text-sm font-bold px-3.5 py-1.5 rounded-full border {{ $vStCls }}">
+                            <span class="w-2 h-2 rounded-full {{ $vStDot }}"></span>
+                            {{ $isPending ? 'Pending Review' : $vStLabel }}
+                        </span>
+                        @if(($isApproved || $isRejected) && $ev->review_remarks)
+                            <p class="text-sm text-[#555555] leading-snug {{ $isApproved ? 'italic' : '' }}">{{ $isApproved ? '"' . $ev->review_remarks . '"' : $ev->review_remarks }}</p>
+                        @endif
+                        @if(($isPending || $isRejected) && $eventDateExpired)
+                            <p class="text-sm text-red-500 font-semibold flex items-center gap-1.5">
+                                <i class="fas fa-triangle-exclamation text-xs"></i>Date needs updating.
+                            </p>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Event Info --}}
+                <div class="evt-v-card">
+                    <div class="evt-v-head">
+                        <span class="evt-v-ico"><i class="fas fa-circle-info"></i></span>
+                        <p class="evt-v-lbl">Event Info</p>
+                    </div>
+                    <div class="px-5 py-4">
+                        <div class="evt-v-row">
+                            <span class="evt-v-ico"><i class="fas fa-calendar-days"></i></span>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase tracking-wider text-[#999999]">Date &amp; Time</p>
+                                <p class="text-sm font-bold text-[#1a1026] mt-0.5">{{ $eventDatePH->format('M d, Y') }}</p>
+                                <p class="text-sm text-[#555555] font-medium">{{ $timeDisplay }}</p>
+                            </div>
+                        </div>
+                        <div class="evt-v-row">
+                            <span class="evt-v-ico"><i class="fas fa-location-dot"></i></span>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase tracking-wider text-[#999999]">Venue</p>
+                                @if($ev->venue)
+                                    <p class="text-sm font-bold text-[#1a1026] mt-0.5 break-words">{{ $ev->venue }}</p>
+                                    @if($ev->venue_address)<p class="text-xs text-[#666666] font-medium leading-snug mt-0.5 uppercase break-words">{{ $ev->venue_address }}</p>@endif
+                                @else
+                                    <p class="text-sm text-[#aaaaaa] italic mt-0.5">Not specified</p>
+                                @endif
+                            </div>
+                        </div>
+                        <div class="evt-v-row">
+                            <span class="evt-v-ico"><i class="fas fa-users"></i></span>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase tracking-wider text-[#999999]">Open For</p>
+                                @if($ev->target_participants)
+                                    <p class="text-sm font-bold text-[#1a1026] mt-0.5 break-words">{{ $ev->target_participants }}</p>
+                                @else
+                                    <p class="text-sm text-[#aaaaaa] italic mt-0.5">All alumni</p>
+                                @endif
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Responses --}}
+                <div class="evt-v-card">
+                    <div class="evt-v-head">
+                        <span class="evt-v-ico"><i class="fas fa-chart-simple"></i></span>
+                        <p class="evt-v-lbl">Responses</p>
+                        <span class="ml-auto text-xs font-semibold text-[#777777]">{{ $totalRsvp }} total</span>
+                    </div>
+                    <div class="px-5 py-4 flex flex-col gap-3.5">
+                        <div class="grid grid-cols-3 gap-2.5">
+                            <div class="rounded-xl bg-emerald-50 border border-emerald-100 py-3 text-center">
+                                <p class="text-xl font-bold text-emerald-700 leading-none">{{ $ev->confirmed_count }}</p>
+                                <p class="text-[11px] font-semibold text-emerald-700/80 mt-1.5">Attending</p>
+                            </div>
+                            <div class="rounded-xl bg-amber-50 border border-amber-100 py-3 text-center">
+                                <p class="text-xl font-bold text-amber-700 leading-none">{{ $ev->tentative_count }}</p>
+                                <p class="text-[11px] font-semibold text-amber-700/80 mt-1.5">Maybe</p>
+                            </div>
+                            <div class="rounded-xl bg-red-50 border border-red-100 py-3 text-center">
+                                <p class="text-xl font-bold text-red-600 leading-none">{{ $ev->declined_count }}</p>
+                                <p class="text-[11px] font-semibold text-red-600/80 mt-1.5">Not going</p>
+                            </div>
+                        </div>
+                        <div class="flex h-2 w-full rounded-full overflow-hidden bg-gray-100">
+                            @if($totalRsvp > 0)
+                                <div class="bg-emerald-500" style="width:{{ round($ev->confirmed_count / $rsvpTotalSafe * 100) }}%"></div>
+                                <div class="bg-amber-400"   style="width:{{ round($ev->tentative_count / $rsvpTotalSafe * 100) }}%"></div>
+                                <div class="bg-red-400"     style="width:{{ round($ev->declined_count / $rsvpTotalSafe * 100) }}%"></div>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Contact --}}
+                <div class="evt-v-card">
+                    <div class="evt-v-head">
+                        <span class="evt-v-ico"><i class="fas fa-address-card"></i></span>
+                        <p class="evt-v-lbl">Contact Information</p>
+                    </div>
+                    <div class="px-5 py-4">
                         @php
-                            $hasContact = $ev->contact_person || $ev->contact_email || $ev->contact_phone || $ev->organizer;
+                            $cName  = $ev->contact_person ?: $ev->organizer?->name;
+                            $cEmail = $ev->contact_email  ?: $ev->organizer?->email;
+                            $cPhone = $ev->contact_phone;
+                            $cDept  = $ev->organizer?->department;
                         @endphp
-                        @if($hasContact)
-                            {{-- Contact person: explicit field first, fallback to organizer name --}}
-                            @if($ev->contact_person)
-                            <div class="flex items-center gap-3">
-                                <i class="fas fa-user text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                <span class="text-sm text-[#333333] font-medium">{{ $ev->contact_person }}</span>
-                            </div>
-                            @elseif($ev->organizer)
-                            <div class="flex items-center gap-3">
-                                <i class="fas fa-user text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                <span class="text-sm text-[#333333] font-medium">{{ $ev->organizer->name }}</span>
+                        @if($cName || $cEmail || $cPhone || $cDept)
+                            @if($cName)
+                            <div class="evt-v-row">
+                                <span class="evt-v-ico"><i class="fas fa-user"></i></span>
+                                <p class="text-sm text-[#222222] font-semibold self-center break-words min-w-0">{{ $cName }}</p>
                             </div>
                             @endif
-                            {{-- Email --}}
-                            @if($ev->contact_email)
-                            <div class="flex items-center gap-3">
-                                <i class="fas fa-envelope text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                <span class="text-sm text-[#333333] font-medium break-all">{{ $ev->contact_email }}</span>
-                            </div>
-                            @elseif($ev->organizer?->email)
-                            <div class="flex items-center gap-3">
-                                <i class="fas fa-envelope text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                <span class="text-sm text-[#333333] font-medium break-all">{{ $ev->organizer->email }}</span>
+                            @if($cEmail)
+                            <div class="evt-v-row">
+                                <span class="evt-v-ico"><i class="fas fa-envelope"></i></span>
+                                <p class="text-sm text-[#222222] font-medium self-center break-all min-w-0">{{ $cEmail }}</p>
                             </div>
                             @endif
-                            {{-- Phone --}}
-                            @if($ev->contact_phone)
-                            <div class="flex items-center gap-3">
-                                <i class="fas fa-phone text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                <span class="text-sm text-[#333333] font-medium">{{ $ev->contact_phone }}</span>
+                            @if($cPhone)
+                            <div class="evt-v-row">
+                                <span class="evt-v-ico"><i class="fas fa-phone"></i></span>
+                                <p class="text-sm text-[#222222] font-medium self-center">{{ $cPhone }}</p>
                             </div>
                             @endif
-                            {{-- Department --}}
-                            @if($ev->organizer?->department)
-                            <div class="flex items-center gap-3 pt-3 border-t border-gray-100 mt-auto">
-                                <i class="fas fa-building text-sm w-4 flex-shrink-0" style="color:#7a3f91;"></i>
-                                <span class="text-sm text-[#555555] font-medium">{{ $ev->organizer->department }}</span>
+                            @if($cDept)
+                            <div class="evt-v-row">
+                                <span class="evt-v-ico"><i class="fas fa-building"></i></span>
+                                <p class="text-sm text-[#555555] font-medium self-center break-words min-w-0">{{ $cDept }}</p>
                             </div>
                             @endif
                         @else
@@ -2913,10 +2892,24 @@ select.tw-select-arrow[disabled] {
                     </div>
                 </div>
 
-            </div>{{-- end bottom 3-col --}}
+                {{-- Posted --}}
+                <div class="evt-v-card">
+                    <div class="evt-v-head">
+                        <span class="evt-v-ico"><i class="fas fa-clock-rotate-left"></i></span>
+                        <p class="evt-v-lbl">Posted</p>
+                    </div>
+                    <div class="px-5 py-4">
+                        <p class="text-sm font-bold text-[#1a1026]">{{ $createdPH->format('M d, Y') }}</p>
+                        <p class="text-sm text-[#555555] font-medium mt-0.5">{{ $createdPH->diffForHumans() }}</p>
+                        <p class="text-xs text-[#777777] mt-2 flex items-center gap-1.5 break-words">
+                            <i class="fas fa-user-tie text-[10px] text-[#7a3f91]"></i>{{ $postedByLabel }}
+                        </p>
+                    </div>
+                </div>
 
-        </div>{{-- end max-w --}}
-    </div>{{-- end scrollable --}}
+            </div>
+        </div>
+    </div>
 
 </div>
 @endif
