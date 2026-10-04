@@ -1869,7 +1869,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                                 data-dir-action data-tip="Share"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-sky-100 text-sky-700 border border-sky-200 hover:bg-white hover:border-sky-400 disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                         </button>
@@ -1886,7 +1886,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     data-dir-action data-tip="Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
@@ -1895,7 +1895,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="confirmReject({{ $event->id }})"
                                                 data-dir-action data-tip="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 hover:border-red-400 disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $event->id }})"></i>
                                         </button>
@@ -1912,7 +1912,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     data-dir-action data-tip="Re-Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-white text-[#555555] border border-[#E8E0F0] hover:bg-[#f5f0fa] hover:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
@@ -1982,7 +1982,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }})"
                                                 aria-label="Share"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-sky-100 text-sky-700 border border-sky-200 active:bg-white active:border-sky-400 disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
                                         </button>
@@ -1999,7 +1999,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     aria-label="Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-check" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>
@@ -2008,7 +2008,7 @@ select.tw-select-arrow[disabled] {
                                                 wire:loading.attr="disabled" wire:target="confirmReject({{ $event->id }})"
                                                 aria-label="Reject"
                                                 class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                       bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                       bg-red-50 text-red-600 border border-red-200 active:bg-red-100 active:border-red-400 disabled:opacity-60 disabled:cursor-wait">
                                             <i class="fas fa-xmark" wire:loading.remove wire:target="confirmReject({{ $event->id }})"></i>
                                             <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmReject({{ $event->id }})"></i>
                                         </button>
@@ -2025,7 +2025,7 @@ select.tw-select-arrow[disabled] {
                                                     wire:loading.attr="disabled" wire:target="confirmApprove({{ $event->id }})"
                                                     aria-label="Re-Approve"
                                                     class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-white text-[#555555] border border-[#E8E0F0] active:bg-[#f5f0fa] active:border-[#c4b5d4] disabled:opacity-60 disabled:cursor-wait">
+                                                           bg-emerald-50 text-emerald-700 border border-emerald-200 active:bg-emerald-100 active:border-emerald-400 disabled:opacity-60 disabled:cursor-wait">
                                                 <i class="fas fa-rotate-left" wire:loading.remove wire:target="confirmApprove({{ $event->id }})"></i>
                                                 <i class="fas fa-spinner fa-spin" wire:loading wire:target="confirmApprove({{ $event->id }})"></i>
                                             </button>

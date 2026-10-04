@@ -119,9 +119,11 @@ new class extends Component {
         $this->showProfile($id);
     }
 
+    // Rows per page — small enough that the whole table is visible at once
+    // (no inner scrollbar). Raise it if you ever want longer pages.
     private function perPage(): int
     {
-        return 100;
+        return 8;
     }
 
     public function updatingSearch(): void { $this->currentPage = 1; }
@@ -188,8 +190,11 @@ new class extends Component {
             // Management's 1,679 mismatch.
             $alumniTotal    = \App\Models\Alumni::count();
 
-            // FIX: same as computed_status/statusFilter above — Complete
-            // means every required profile field is filled in, not
+            // COMPLETE = every required profile field is filled in (same rule as
+            // Alumni Records): email, gender, birthday, contact number, both
+            // parents' last + given names, and full home address. Parents'
+            // MIDDLE names are optional and do NOT count. PENDING = anything
+            // missing. Not
             // "has ever logged in" (password_changed_at). Kept in sync
             // with alumni_blade.php's PROFILE_REQUIRED_FIELDS.
             // Also added whereNull('deleted_at') so soft-deleted alumni
@@ -203,10 +208,8 @@ new class extends Component {
                 ->whereNotNull('contact_number')->where('contact_number', '!=', '')
                 ->whereNotNull('father_last_name')->where('father_last_name', '!=', '')
                 ->whereNotNull('father_given_name')->where('father_given_name', '!=', '')
-                ->whereNotNull('father_middle_name')->where('father_middle_name', '!=', '')
                 ->whereNotNull('mother_last_name')->where('mother_last_name', '!=', '')
                 ->whereNotNull('mother_given_name')->where('mother_given_name', '!=', '')
-                ->whereNotNull('mother_middle_name')->where('mother_middle_name', '!=', '')
                 ->whereNotNull('address_street')->where('address_street', '!=', '')
                 ->whereNotNull('address_barangay')->where('address_barangay', '!=', '')
                 ->whereNotNull('address_municipality')->where('address_municipality', '!=', '')
@@ -301,7 +304,7 @@ new class extends Component {
             // parents' full names, and full home address — regardless
             // of whether the account has ever been logged into. This
             // now checks the exact same field list so "Complete" reads
-            // the same on both pages.
+            // the same on both pages (parents' middle names are optional).
             $st = "(CASE
                 WHEN users.role='alumni'    THEN IF(
                     al.email IS NOT NULL AND al.email != '' AND
@@ -310,10 +313,8 @@ new class extends Component {
                     al.contact_number IS NOT NULL AND al.contact_number != '' AND
                     al.father_last_name IS NOT NULL AND al.father_last_name != '' AND
                     al.father_given_name IS NOT NULL AND al.father_given_name != '' AND
-                    al.father_middle_name IS NOT NULL AND al.father_middle_name != '' AND
                     al.mother_last_name IS NOT NULL AND al.mother_last_name != '' AND
                     al.mother_given_name IS NOT NULL AND al.mother_given_name != '' AND
-                    al.mother_middle_name IS NOT NULL AND al.mother_middle_name != '' AND
                     al.address_street IS NOT NULL AND al.address_street != '' AND
                     al.address_barangay IS NOT NULL AND al.address_barangay != '' AND
                     al.address_municipality IS NOT NULL AND al.address_municipality != '' AND
@@ -368,8 +369,8 @@ new class extends Component {
                 // count so "Complete" shows the same 1,007 records the stat card does.
                 $profileStringFields = [
                     'al.email', 'al.gender', 'al.contact_number',
-                    'al.father_last_name', 'al.father_given_name', 'al.father_middle_name',
-                    'al.mother_last_name', 'al.mother_given_name', 'al.mother_middle_name',
+                    'al.father_last_name', 'al.father_given_name',
+                    'al.mother_last_name', 'al.mother_given_name',
                     'al.address_street', 'al.address_barangay', 'al.address_municipality', 'al.address_province',
                 ];
                 $profileDateFields = ['al.date_of_birth'];
@@ -701,10 +702,8 @@ new class extends Component {
                         al.contact_number IS NOT NULL AND al.contact_number != '' AND
                         al.father_last_name IS NOT NULL AND al.father_last_name != '' AND
                         al.father_given_name IS NOT NULL AND al.father_given_name != '' AND
-                        al.father_middle_name IS NOT NULL AND al.father_middle_name != '' AND
                         al.mother_last_name IS NOT NULL AND al.mother_last_name != '' AND
                         al.mother_given_name IS NOT NULL AND al.mother_given_name != '' AND
-                        al.mother_middle_name IS NOT NULL AND al.mother_middle_name != '' AND
                         al.address_street IS NOT NULL AND al.address_street != '' AND
                         al.address_barangay IS NOT NULL AND al.address_barangay != '' AND
                         al.address_municipality IS NOT NULL AND al.address_municipality != '' AND
@@ -809,21 +808,6 @@ new class extends Component {
             $this->cpName = $r->name;
         }
         $this->activeModal = 'viewProfile';
-    }
-
-    public function ueCooldownDaysLeft(): int {
-        $last = $this->vData['email_updated_at'] ?? null;
-        if (!$last) return 0;
-        // Was off by one: diffInDays() on the exact same moment returns 0,
-        // so "30 - 0" made the cooldown effectively last a full 30 days
-        // PLUS however much of "day 0" was left — 31 days end to end
-        // before a change was allowed again. Anchoring both sides to
-        // start-of-day before diffing removes that partial-day carry, so
-        // the window is exactly 30 calendar days from the update.
-        $elapsedDays = \Carbon\Carbon::parse($last)->startOfDay()
-            ->diffInDays(now()->startOfDay());
-        $remaining   = 30 - $elapsedDays;
-        return $remaining > 0 ? (int) $remaining : 0;
     }
 
     public function savePhoto(): void {
@@ -1033,13 +1017,6 @@ new class extends Component {
         $this->ueErrors = []; $this->ueSuccess = ''; $this->ueSave = true;
         try {
             $role = $this->vData['role'] ?? '';
-
-            $cooldownDays = $this->ueCooldownDaysLeft();
-            if ($cooldownDays > 0) {
-                $label = $role === 'registrar' ? 'username' : 'email';
-                $this->ueErrors = ['general' => ["This account's {$label} was updated recently. Please wait {$cooldownDays} more day" . ($cooldownDays === 1 ? '' : 's') . " before changing it again."]];
-                return;
-            }
 
             if ($role === 'registrar') {
                 $uname = trim($this->ueEmail);
@@ -1412,7 +1389,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col mu-page-root" style="height:90vh; overflow:hidden;">
+<div class="flex flex-col mu-page-root">
 
 <div id="mu-hover-tip" class="mu-row-tip">
     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Details
@@ -1575,12 +1552,6 @@ select.mu-filter-input.mu-active {
    mobile, staying at 2 columns keeps the block to 3 short rows
    instead of 5 tall ones, freeing up real space for the table. */
 
-/* ── Mobile: let the whole layout use more of the real viewport height ── */
-@media (max-width: 640px) {
-    .mu-page-root { height: 96vh !important; max-height: 96vh !important; }
-    .mu-main-layout { height: calc(96vh - 90px) !important; max-height: calc(96vh - 90px) !important; }
-}
-
 .mu-stat-card {
     background: #ffffff;
     border: 1px solid #E8E0F0;
@@ -1630,7 +1601,7 @@ select.mu-filter-input.mu-active {
     border-radius: 1rem; overflow: hidden;
     border: 1px solid #E8E0F0;
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
-    flex: 1; min-height: 0;
+    flex: 0 0 auto;
 }
 
 /* ── Mobile: the table block already gets all remaining space via
@@ -1823,6 +1794,14 @@ select.mu-filter-input.mu-active {
     .mu-org-bottom { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
 }
 
+/* ── Director / Registrar View Details: 2-column layout so the whole profile
+   fits on one screen on desktop (stacks + scrolls only on small screens) ── */
+@media (min-width: 1024px) {
+    .mu-pro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; align-items: stretch; }
+    .mu-pro-grid > * { margin-top: 0 !important; }
+    .mu-pro-grid > .mu-pro-span { grid-column: 1 / -1; }
+}
+
 /* ── Role badge — status style ── */
 .mu-role-badge {
     display: inline-flex;
@@ -1881,7 +1860,7 @@ select.mu-filter-input.mu-active {
 </div>
 
 {{-- MAIN LAYOUT --}}
-<div class="flex flex-col gap-3 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full mu-main-layout" style="height: calc(100vh - 180px); max-height: calc(100vh - 180px); overflow:hidden;">
+<div class="flex flex-col gap-3 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full mu-main-layout">
 
     {{-- PAGE HEADER --}}
     @php $s = $this->stats; @endphp
@@ -1998,7 +1977,7 @@ select.mu-filter-input.mu-active {
     </div>
 
     {{-- UNIFIED TABLE BLOCK --}}
-    <div class="mu-table-block min-h-0">
+    <div class="mu-table-block">
 
         {{-- FILTER BAR --}}
         <div class="mu-table-block-filter flex flex-wrap gap-2 items-center transition-opacity duration-200"
@@ -2023,55 +2002,74 @@ select.mu-filter-input.mu-active {
                     ['registrar','Registrar','fa-user-clock'],
                 ] as [$tab,$lbl,$ico])
                 @if($loop->first)
-                {{-- Alumni tab merged with its All/Complete/Pending status filter:
-                     one pill, not a pill plus a separate dropdown beside it. The
-                     native <select> sits transparently over the whole pill so
-                     clicking anywhere on it opens the picker. A small colored
-                     badge shows the active state (purple=All, green=Complete,
-                     amber=Pending). --}}
-                <div class="relative">
-                    @php
-                        $aBadge = match($statusFilter) {
-                            'complete'       => ['Complete', '#059669', '#ECFDF5'],
-                            'pending'        => ['Pending',  '#d97706', '#FFF7ED'],
-                            'new_this_month' => ['New',      '#2563eb', '#EFF6FF'],
-                            default          => ['All Alumni', '#7a3f91', '#F3E8FF'],
-                        };
-                    @endphp
-                    <div class="mu-tab-pill {{ $activeRole==='alumni' ? 'mu-tab-active' : 'mu-tab-inactive' }} pr-6">
-                        <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-xs font-bold border"
-                              style="background:{{ $aBadge[2] }};color:{{ $aBadge[1] }};border-color:{{ $aBadge[1] }};">
-                            <i class="fas fa-graduation-cap"></i>{{ $aBadge[0] }}
-                        </span>
-                        <i class="fas fa-chevron-down text-xs" style="opacity:.7;"></i>
+                {{-- Alumni tab merged with its All / Complete / Pending / Newly Registered
+                     filter into ONE styled dropdown (custom menu instead of a native
+                     <select> hidden under the pill). The menu is position:fixed so the
+                     table block's overflow:hidden can never clip it, and every option
+                     shows what it means + how many alumni it covers. --}}
+                @php
+                    $aOpts = [
+                        'all'            => ['All Alumni',       'Every alumni account',                           '#7a3f91', '#F3E8FF', $s['alumni']],
+                        'complete'       => ['Complete',         'All required profile details are filled in',     '#059669', '#ECFDF5', $s['alumniVerified']],
+                        'pending'        => ['Pending',          'Missing at least one required profile detail',   '#d97706', '#FFF7ED', $s['alumniPending']],
+                        'new_this_month' => ['Newly Registered', 'Registered this month',                          '#2563eb', '#EFF6FF', $s['alumniNewThisMonth']],
+                    ];
+                    $aOnAlumni = $activeRole === 'alumni';
+                    $aCurKey   = $aOnAlumni ? (isset($aOpts[$statusFilter]) ? $statusFilter : 'all') : null;
+                    $aCur      = $aCurKey ? $aOpts[$aCurKey] : null;
+                @endphp
+                <div class="relative" wire:key="alumni-status-dd"
+                     x-data="{
+                        open: false, top: 0, left: 0,
+                        toggle() {
+                            if (this.open) { this.open = false; return; }
+                            const r = this.$refs.btn.getBoundingClientRect();
+                            this.top  = r.bottom + 6;
+                            this.left = Math.max(8, Math.min(r.left, window.innerWidth - 304));
+                            this.open = true;
+                        },
+                        pick(v) { this.open = false; $wire.setStatusFilter(v); }
+                     }"
+                     @keydown.escape.window="open = false"
+                     @resize.window="open = false">
+                    <button type="button" x-ref="btn" @click="toggle()"
+                            :aria-expanded="open"
+                            class="mu-tab-pill {{ $aOnAlumni ? 'mu-tab-active' : 'mu-tab-inactive' }}">
+                        <i class="fas fa-graduation-cap text-xs"></i>
+                        <span>{{ $aCur ? $aCur[0] : 'Alumni' }}</span>
+                        @if($aCurKey && $aCurKey !== 'all')
+                            <span class="w-2 h-2 rounded-full shrink-0" style="background:{{ $aCur[2] }};"></span>
+                        @endif
+                        <i class="fas fa-chevron-down text-[10px] transition-transform duration-150"
+                           :class="open ? 'rotate-180' : ''" style="opacity:.7;"></i>
+                    </button>
+
+                    <div x-show="open" x-cloak
+                         @click.outside="open = false"
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="opacity-0 -translate-y-1"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         :style="`top:${top}px; left:${left}px;`"
+                         class="fixed z-[9999] w-[296px] max-w-[calc(100vw-16px)] bg-white rounded-xl overflow-hidden"
+                         style="border:1px solid #E8E0F0; box-shadow:0 12px 32px rgba(122,63,145,.22);">
+                        <div class="px-3.5 py-2 border-b border-[#F0ECF5]" style="background:#FAF7FC;">
+                            <p class="text-[11px] font-bold uppercase tracking-widest" style="color:#7a3f91;">Alumni profile status</p>
+                        </div>
+                        @foreach($aOpts as $aKey => [$aLbl, $aDesc, $aClr, $aBg, $aCnt])
+                        <button type="button" @click="pick('{{ $aKey }}')"
+                                class="w-full flex items-start gap-3 px-3.5 py-2.5 text-left transition hover:bg-[#F5F0FA] {{ $aCurKey === $aKey ? 'bg-[#F9F5FC]' : '' }}">
+                            <span class="mt-1.5 w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $aClr }};"></span>
+                            <span class="flex-1 min-w-0">
+                                <span class="flex items-center justify-between gap-2">
+                                    <span class="text-sm font-bold" style="color:#000000;">{{ $aLbl }}</span>
+                                    <span class="text-xs font-bold px-2 py-0.5 rounded-full" style="background:{{ $aBg }};color:{{ $aClr }};">{{ number_format($aCnt) }}</span>
+                                </span>
+                                <span class="block text-xs font-medium mt-0.5 leading-snug" style="color:#555555;">{{ $aDesc }}</span>
+                            </span>
+                            <i class="fas fa-check text-xs mt-1 shrink-0 {{ $aCurKey === $aKey ? '' : 'invisible' }}" style="color:#7a3f91;"></i>
+                        </button>
+                        @endforeach
                     </div>
-                    <select wire:key="alumni-status-select-{{ $activeRole }}-{{ $statusFilter }}"
-                            wire:change="setStatusFilter($event.target.value)"
-                            class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
-                        {{-- When we're on another role tab, the browser still
-                             needs SOME option to treat as "currently shown"
-                             even with none marked selected — and it silently
-                             falls back to the first <option> in the list,
-                             which was "All Alumni" (value="all"). So picking
-                             "All Alumni" again from Director/Coordinator/
-                             Registrar looked like no change to the browser
-                             (still "all" before and after) and wire:change
-                             never fired — the tab never switched back.
-                             This hidden, disabled placeholder is what the
-                             browser falls back to instead whenever we're off
-                             the Alumni tab, so it's never the same option as
-                             "All Alumni" — picking "All Alumni" is always a
-                             real change and always fires. It's disabled so
-                             it can never be picked on purpose, and it isn't
-                             rendered at all while already on Alumni. --}}
-                        @unless($activeRole === 'alumni')
-                        <option value="" selected disabled hidden></option>
-                        @endunless
-                        <option value="all"            {{ $activeRole==='alumni' && $statusFilter==='all'            ? 'selected' : '' }}>All Alumni</option>
-                        <option value="complete"       {{ $activeRole==='alumni' && $statusFilter==='complete'       ? 'selected' : '' }}>Complete</option>
-                        <option value="pending"        {{ $activeRole==='alumni' && $statusFilter==='pending'        ? 'selected' : '' }}>Pending</option>
-                        <option value="new_this_month" {{ $activeRole==='alumni' && $statusFilter==='new_this_month' ? 'selected' : '' }}>Newly Registered</option>
-                    </select>
                 </div>
                 @endif
                 <button wire:click="switchTab('{{ $tab }}')"
@@ -2105,7 +2103,7 @@ select.mu-filter-input.mu-active {
 
         {{-- TABLE --}}
         @php $pu = $this->users; @endphp
-        <div class="relative flex-1 min-h-0 flex flex-col">
+        <div class="relative flex flex-col">
 
             {{-- Centered loading spinner overlay — mirrors Manage Events' table overlay --}}
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
@@ -2114,7 +2112,7 @@ select.mu-filter-input.mu-active {
             </div>
 
             @if($pu->items->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto scroll-c transition-opacity duration-200" style="background:#fff;"
+            <div class="overflow-x-hidden transition-opacity duration-200" style="background:#fff;"
                  wire:loading.class="opacity-50 pointer-events-none"
                  wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage,showProfile">
                 <table class="w-full bg-white border-collapse mu-users-table">
@@ -2393,7 +2391,7 @@ select.mu-filter-input.mu-active {
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto {{ $isOrg ? 'p-3 sm:p-4 space-y-2.5 max-w-6xl' : ($isAlumni ? 'p-3 sm:p-4' : 'p-4 sm:p-5 space-y-3 max-w-4xl') }} mu-vp-scroll mx-auto w-full relative">
+        <div class="flex-1 min-h-0 overflow-y-auto {{ $isOrg ? 'p-3 sm:p-4 space-y-2.5 max-w-6xl' : ($isAlumni ? 'p-3 sm:p-4' : 'p-3 sm:p-4 space-y-3 max-w-6xl mu-pro-grid') }} mu-vp-scroll mx-auto w-full relative">
 
             {{-- Saving overlay: appears instantly when any modal action fires,
                  before the Livewire round-trip completes. Prevents double-clicks
@@ -2412,7 +2410,7 @@ select.mu-filter-input.mu-active {
             {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] p-5 flex items-start gap-5">
+            <div class="bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
                 @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0"
                      x-data="{ dragging: false }"
@@ -2466,7 +2464,7 @@ select.mu-filter-input.mu-active {
                 @endunless
 
                 <div class="min-w-0 flex-1">
-                    <p class="text-2xl font-bold uppercase leading-tight" style="color:#333333;">{{ $headerName }}</p>
+                    <p class="text-xl font-bold uppercase leading-tight" style="color:#333333;">{{ $headerName }}</p>
 
                     @if($isAlumni)
                         <p class="text-lg font-semibold mt-0.5" style="color:#333333;">{{ $vd['student_id'] ?: '—' }}</p>
@@ -2527,7 +2525,6 @@ select.mu-filter-input.mu-active {
                 $aluPhoto = $this->photoUrl($vd['photo'] ?? '');
                 $aluEmail = (!empty($vd['record_email']) && !str_contains($vd['record_email'], '@pending.local')) ? $vd['record_email'] : null;
                 $aluComplete = $vStatus === 'VERIFIED';
-                $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
 
             <div class="mua-body-grid">
@@ -2782,12 +2779,6 @@ select.mu-filter-input.mu-active {
                     <div class="mua-card">
                         <div class="mua-card-header"><i class="fas fa-envelope"></i><p>Change Email</p></div>
                         <div class="p-2">
-                            @if($ueCooldown > 0)
-                            <div class="mb-2 p-2 rounded-lg flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
-                                <i class="fas fa-lock text-sm mt-0.5 shrink-0" style="color:#555555;"></i>
-                                <p class="text-sm font-semibold leading-snug" style="color:#333333;">Email was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.</p>
-                            </div>
-                            @endif
                             @if($ueSuccess)
                             <div x-init="saving = false"></div>
                             <div class="mb-2 p-2 rounded-lg bg-emerald-50 border border-emerald-200 flex items-start gap-2">
@@ -2809,17 +2800,15 @@ select.mu-filter-input.mu-active {
                                 <div class="relative flex-1">
                                     <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                                     <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                                           @if($ueCooldown > 0) disabled @endif
-                                           class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
+                                           class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
                                 </div>
                                 <button wire:click="saveUpdateEmail"
                                         @click="saving = true"
                                         wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                        @if($ueCooldown > 0) disabled @endif
-                                        class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
+                                        class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
                                         style="background:#7A3F91;">
                                     <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
-                                    <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-sm"></i></span>
+                                    <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
                                     <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
                                     <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
                                 </button>
@@ -2887,10 +2876,10 @@ select.mu-filter-input.mu-active {
             {{-- DIRECTOR INFO --}}
             @if($isDir)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Director Information</p>
+                <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Director Information</p>
                 </div>
-                <div class="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="p-3 grid grid-cols-2 gap-2">
                     @foreach([
                         ['First Name',  $vd['first_name']  ?? '—'],
                         ['Middle Name', $vd['middle_name'] ?? '—'],
@@ -2898,9 +2887,9 @@ select.mu-filter-input.mu-active {
                         ['Suffix',      $vd['suffix']      ?? '—'],
                         ['Username',  $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
                     ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">{{ $lbl }}</p>
-                        <p class="text-lg font-semibold" style="color:#333333;">{{ $val ?: '—' }}</p>
+                    <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0] {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
+                        <p class="text-base font-semibold truncate" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
@@ -3170,7 +3159,6 @@ select.mu-filter-input.mu-active {
             @if($isReg)
             @php
                 $currentUsername = $vd['name'] ?? null;
-                $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
@@ -3183,14 +3171,6 @@ select.mu-filter-input.mu-active {
                             Only the login username changes — all registrar data stays intact. The registrar must use the new username to log in. No notification is sent, so inform them directly.
                         </p>
                     </div>
-                    @if($ueCooldown > 0)
-                    <div class="mb-2.5 p-2.5 rounded-xl flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
-                        <i class="fas fa-lock text-xs mt-0.5 shrink-0" style="color:#555555;"></i>
-                        <p class="text-sm font-semibold leading-snug" style="color:#333333;">
-                            Username was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.
-                        </p>
-                    </div>
-                    @endif
                     @if($ueSuccess)
                     <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
                         <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
@@ -3211,17 +3191,15 @@ select.mu-filter-input.mu-active {
                         <div class="relative flex-1">
                             <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="text" placeholder="New username…"
-                                   @if($ueCooldown > 0) disabled @endif
-                                   class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
+                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
                         </div>
                         <button wire:click="saveUpdateEmail"
                                 @click="saving = true"
                                 wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                @if($ueCooldown > 0) disabled @endif
-                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
+                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
                                 style="background:#7A3F91;">
                             <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
                             <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
                             <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
                         </button>
@@ -3245,7 +3223,6 @@ select.mu-filter-input.mu-active {
                     : ($isDir
                     ? 'This is the director\'s contact email. It is not used to log in.'
                     : 'Updating the email will require the account to reset their password on next login.');
-                $ueCooldown = $this->ueCooldownDaysLeft();
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
@@ -3262,14 +3239,6 @@ select.mu-filter-input.mu-active {
                             @endif
                         </p>
                     </div>
-                    @if($ueCooldown > 0)
-                    <div class="mb-3 p-3 rounded-xl flex items-start gap-2" style="background:#f3f0fa;border:1px solid #E8E0F0;">
-                        <i class="fas fa-lock text-sm mt-0.5 shrink-0" style="color:#555555;"></i>
-                        <p class="text-sm font-semibold leading-snug" style="color:#333333;">
-                            Email was updated recently. You can change it again in {{ $ueCooldown }} day{{ $ueCooldown === 1 ? '' : 's' }}.
-                        </p>
-                    </div>
-                    @endif
                     @if($ueSuccess)
                     <div x-init="saving = false"></div>
                     <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
@@ -3291,17 +3260,15 @@ select.mu-filter-input.mu-active {
                         <div class="relative flex-1">
                             <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                                   @if($ueCooldown > 0) disabled @endif
-                                   class="mu-filter-input w-full text-base {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}" style="padding-left:2.25rem;" autocomplete="off">
+                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
                         </div>
                         <button wire:click="saveUpdateEmail"
                                 @click="saving = true"
                                 wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                @if($ueCooldown > 0) disabled @endif
-                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0 {{ $ueCooldown > 0 ? 'opacity-50 cursor-not-allowed' : '' }}"
+                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
                                 style="background:#7A3F91;">
                             <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-{{ $ueCooldown > 0 ? 'lock' : 'check' }} text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
                             <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
                             <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
                         </button>
@@ -3316,7 +3283,7 @@ select.mu-filter-input.mu-active {
 
             {{-- CHANGE PASSWORD — Registrar / Admin --}}
             @if($isReg || $isAdmin)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Change Password</p>
                 </div>
