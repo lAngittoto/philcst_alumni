@@ -521,10 +521,9 @@ new class extends Component {
     .jp-root {
         height: var(--jp-h, calc(100dvh - 4.5rem)) !important;
         max-height: var(--jp-h, calc(100dvh - 4.5rem)) !important;
-        overflow-x: hidden !important;
-        overflow-y: auto !important;
+        overflow: hidden !important;
     }
-    .jp-root #jb-content-block { min-height: 360px; }
+    .jp-root #jb-content-block { min-height: 260px; }
 }
 /* ── Search highlight ── */
 mark.jp-hl {
@@ -2759,11 +2758,26 @@ select.filter-input option {
     // Sizes the Job Postings page to exactly the visible screen so the whole
     // page never scrolls — only the job list (left panel) and the detail
     // panel (right) scroll internally.
+    var BOTTOM_GAP = 16;  // breathing room under the page (px)
+    var MIN_H      = 420; // never smaller than this (px)
+
+    // Nearest ancestor that can scroll (or the page itself).
+    function scrollParent(el) {
+        var node = el.parentElement;
+        while (node && node !== document.body && node !== document.documentElement) {
+            var oy = window.getComputedStyle(node).overflowY;
+            if (oy === 'auto' || oy === 'scroll') return node;
+            node = node.parentElement;
+        }
+        return document.scrollingElement || document.documentElement;
+    }
+
     function fit() {
         var el = document.getElementById('jp-root');
         if (!el) return;
+        var root = document.documentElement;
         if (window.innerWidth < 1024) {
-            document.documentElement.style.removeProperty('--jp-h');
+            root.style.removeProperty('--jp-h');
             return;
         }
         // Top of the page at scroll position 0 (add back every ancestor's scrollTop)
@@ -2773,8 +2787,16 @@ select.filter-input option {
             top += node.scrollTop || 0;
             node = node.parentElement;
         }
-        var h = Math.max(480, Math.floor(window.innerHeight - top));
-        document.documentElement.style.setProperty('--jp-h', h + 'px');
+        var h = Math.max(MIN_H, Math.floor(window.innerHeight - top - BOTTOM_GAP));
+        root.style.setProperty('--jp-h', h + 'px');
+
+        // Safety net: shrink by whatever still overflows so no scrollbar appears.
+        var sp   = scrollParent(el);
+        var over = sp.scrollHeight - sp.clientHeight;
+        if (over > 0) {
+            h = Math.max(MIN_H, h - over - 2);
+            root.style.setProperty('--jp-h', h + 'px');
+        }
     }
 
     function run() {

@@ -429,7 +429,7 @@ mark.ev-hl {
     display: flex; flex-direction: column;
     flex: 0 0 var(--ev-table-h, 74vh) !important;
     height: var(--ev-table-h, 74vh) !important;
-    min-height: 420px !important;
+    min-height: 300px !important;
     max-height: var(--ev-table-h, 74vh) !important;
 }
 
@@ -2306,10 +2306,22 @@ select.filter-input:hover { cursor: default !important; }
 
 <script>
 (function () {
-    // Stretches the Event Monitoring card table down to the bottom of the
-    // screen (instead of a fixed 58vh with empty space under it). Only the
-    // card grid inside scrolls; the pagination bar stays pinned at the bottom.
-    var BOTTOM_GAP = 24; // breathing room under the table (px)
+    // Sizes the Event Monitoring card table to the space left on screen so the
+    // PAGE never gets a scrollbar. Only the card grid inside the table scrolls;
+    // the pagination bar stays pinned at the bottom.
+    var BOTTOM_GAP = 40;  // breathing room under the table (px)
+    var MIN_H      = 300; // never smaller than this (px)
+
+    // Nearest ancestor that can scroll (or the page itself).
+    function scrollParent(el) {
+        var node = el.parentElement;
+        while (node && node !== document.body && node !== document.documentElement) {
+            var oy = window.getComputedStyle(node).overflowY;
+            if (oy === 'auto' || oy === 'scroll') return node;
+            node = node.parentElement;
+        }
+        return document.scrollingElement || document.documentElement;
+    }
 
     function fit() {
         var el = document.getElementById('ev-content-block');
@@ -2323,8 +2335,19 @@ select.filter-input:hover { cursor: default !important; }
             node = node.parentElement;
         }
 
-        var h = Math.max(420, Math.floor(window.innerHeight - top - BOTTOM_GAP));
-        document.documentElement.style.setProperty('--ev-table-h', h + 'px');
+        var root = document.documentElement;
+        var h = Math.max(MIN_H, Math.floor(window.innerHeight - top - BOTTOM_GAP));
+        root.style.setProperty('--ev-table-h', h + 'px');
+
+        // Safety net: if the page (or its scroll container) STILL overflows
+        // because of padding/margins we can't see from here, shrink the table
+        // by exactly the overflow so no scrollbar appears.
+        var sp   = scrollParent(el);
+        var over = sp.scrollHeight - sp.clientHeight;
+        if (over > 0) {
+            h = Math.max(MIN_H, h - over - 2);
+            root.style.setProperty('--ev-table-h', h + 'px');
+        }
     }
 
     function run() {

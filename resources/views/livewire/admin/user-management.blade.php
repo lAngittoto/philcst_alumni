@@ -465,6 +465,23 @@ new class extends Component {
         return $exists;
     }
 
+    /**
+     * Registrars now have a contact email (same idea as Directors): it is where
+     * credentials / temporary passwords are sent. Stored in users.contact_email —
+     * see the second migration shipped with this file. Until it runs this returns
+     * false and the page keeps working (the email just shows as "Not set").
+     */
+    private function registrarContactColExists(): bool
+    {
+        static $exists = null;
+        if ($exists === null) {
+            try {
+                $exists = \Illuminate\Support\Facades\Schema::hasColumn('users', 'contact_email');
+            } catch (\Throwable) { $exists = false; }
+        }
+        return $exists;
+    }
+
     private function activeDirectorExists(?int $exceptUserId = null): bool
     {
         return DB::table('director')
@@ -573,6 +590,10 @@ new class extends Component {
                 $regRow['middle_name'] = trim($this->rMn);
                 $regRow['last_name']   = trim($this->rLn);
                 $regRow['suffix']      = trim($this->rSfx) ?: null;
+            }
+            // Keep the email the credentials were sent to, same as Director.
+            if ($this->registrarContactColExists()) {
+                $regRow['contact_email'] = $email;
             }
             $uid = DB::table('users')->insertGetId($regRow);
 
@@ -735,6 +756,9 @@ new class extends Component {
                 DB::raw("'' as reg_last_name"),
                 DB::raw("'' as reg_suffix"),
               ];
+        $regSelect[] = $this->registrarContactColExists()
+            ? DB::raw("COALESCE(users.contact_email,'') as reg_contact_email")
+            : DB::raw("'' as reg_contact_email");
         $r = DB::table('users')
             ->select([
                 ...$regSelect,
@@ -841,7 +865,9 @@ new class extends Component {
             // name now holds the registrar's full name; the login username is
             // the local part of the @registrar.internal email (older registrars
             // had name == username, so this resolves to the same value for them).
-            $this->ueEmail = $this->adminUsername($r->email ?? '', $r->name ?? '');
+            // Registrar now works like Director: the field holds the contact email
+            // (the login username is shown read-only in Registrar Information).
+            $this->ueEmail = $r->reg_contact_email ?? '';
             $this->ueId    = $id;
             $this->ueName  = $r->name;
         } elseif ($r->role === 'organizer') {
@@ -1069,43 +1095,6 @@ new class extends Component {
         try {
             $role = $this->vData['role'] ?? '';
 
-            if ($role === 'registrar') {
-                $uname = trim($this->ueEmail);
-                if ($uname === '') {
-                    $this->ueErrors = ['general' => ['Please enter a username.']]; return;
-                }
-                if (!preg_match('/^[a-zA-Z0-9._-]+$/', $uname)) {
-                    $this->ueErrors = ['general' => ['Username can only contain letters, numbers, dots, dashes, and underscores.']]; return;
-                }
-                $loginEmail = $uname . '@registrar.internal';
-                $duplicate = DB::table('users')->where('email', $loginEmail)->where('id', '!=', $this->ueId)->exists();
-                if ($duplicate) {
-                    $this->ueErrors = ['general' => ["The username \"{$uname}\" is already taken. Please choose a different one."]]; return;
-                }
-                DB::table('users')->where('id', $this->ueId)
-                    ->update(['email' => $loginEmail, 'password_changed_at' => null, 'email_updated_at' => now(), 'updated_at' => now()]);
-                if ($this->vData) { $this->vData['email'] = $loginEmail; $this->vData['email_updated_at'] = now(); }
-
-                $this->ueErrors = [];
-                // Keep the field showing the username that was actually
-                // saved (not just whatever was typed) — same as the
-                // alumni/director branch below — so the input itself
-                // visibly reflects the new state, not just the toast.
-                $this->ueEmail = $uname;
-
-                // ── DISPATCH: username updated notification ─────────────────────
-                $this->dispatch('__admin-user-username-rich', [
-                    'uid'      => $this->ueId,
-                    'name'     => $this->ueName,
-                    'username' => $uname,
-                ]);
-
-                $msg = "Username updated for {$this->ueName}. They will be required to reset their password on next login.";
-                $this->ueSuccess = $msg;
-                $this->flash('success', $msg);
-                return;
-            }
-
             $email = trim($this->ueEmail);
             if (!$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $this->ueErrors = ['general' => ['Please enter a valid email address.']]; return;
@@ -1176,6 +1165,57 @@ new class extends Component {
                 }
 
                 // Bust cache so the table row reflects the new email right away.
+                $this->bustUserListCache();
+            } elseif ($role === 'registrar') {
+                if (!$this->registrarContactColExists()) {
+                    $this->ueErrors = ['general' => ['Registrar email is not set up yet. Please run the latest database migration (php artisan migrate), then try again.']]; return;
+                }
+                $duplicate = DB::table('users')->where('contact_email', $email)->where('id', '!=', $this->ueId)->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another account."]]; return;
+                }
+
+                $regUser = DB::table('users')->where('id', $this->ueId)->first();
+                if (!$regUser) {
+                    $this->ueErrors = ['general' => ['Registrar record not found.']]; return;
+                }
+
+                // Same as Director: fresh temp password, forced change on next login.
+                $newTempPassword = Str::upper(Str::random(3)) . rand(100, 999) . Str::random(4) . '!';
+                DB::table('users')->where('id', $this->ueId)->update([
+                    'contact_email'       => $email,
+                    'email_updated_at'    => now(),
+                    'password'            => Hash::make($newTempPassword),
+                    'password_changed_at' => null,
+                    'updated_at'          => now(),
+                ]);
+
+                $regUsername = explode('@', $regUser->email)[0];
+
+                try {
+                    $args = [
+                        'fullName'     => $regUser->name,
+                        'username'     => $regUsername,
+                        'tempPassword' => $newTempPassword,
+                        'email'        => $email,
+                    ];
+                    // Use the 'email_updated' template variant if the Mailable has one
+                    // (same as DirectorRegistered); otherwise fall back to its default.
+                    try {
+                        $ctor = (new \ReflectionClass(\App\Mail\RegistrarRegistered::class))->getConstructor();
+                        foreach ($ctor ? $ctor->getParameters() : [] as $p) {
+                            if ($p->getName() === 'type') { $args['type'] = 'email_updated'; }
+                        }
+                    } catch (\Throwable) {}
+                    \Mail::to($email)->send(new \App\Mail\RegistrarRegistered(...$args));
+                } catch (\Throwable $mailEx) {
+                    \Illuminate\Support\Facades\Log::warning('RegistrarRegistered email-update mail failed: ' . $mailEx->getMessage());
+                }
+
+                if ($this->vData) {
+                    $this->vData['reg_contact_email'] = $email;
+                    $this->vData['email_updated_at']  = now();
+                }
                 $this->bustUserListCache();
             } elseif ($role === 'organizer') {
                 $duplicate = DB::table('organizer')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists()
@@ -1253,7 +1293,7 @@ new class extends Component {
                 'role'  => $role,
             ]);
 
-            $msg = in_array($role, ['director', 'organizer'], true)
+            $msg = in_array($role, ['director', 'organizer', 'registrar'], true)
                 ? "Email updated for {$this->ueName}. A new temporary password has been sent to {$email}. They must log in and change it immediately."
                 : "Email updated for {$this->ueName}. Their password has been reset to the temporary password (Student ID + first 2 letters of last name). They must log in using that and change it immediately.";
             $this->ueSuccess = $msg;
@@ -2387,7 +2427,7 @@ select.mu-filter-input.mu-active {
     $isReg    = $vRole === 'registrar';
     $isAdmin  = $vRole === 'admin';
     $canPhoto = in_array($vRole, ['director', 'organizer']);
-    $canToggle= in_array($vRole, ['director', 'organizer']);
+    $canToggle= in_array($vRole, ['director', 'organizer', 'registrar']);
 
     if ($isDir)
         $headerName = implode(' ', array_filter([$vd['first_name']??'', $vd['middle_name']??'', $vd['last_name']??'', $vd['suffix']??''])) ?: $vd['name'];
@@ -2406,7 +2446,7 @@ select.mu-filter-input.mu-active {
     elseif ($isDir && !empty($vd['director_email']))
         $headerSub = $vd['director_email'];
     elseif ($isReg)
-        $headerSub = !empty($vd['email']) ? explode('@', $vd['email'])[0] : '';
+        $headerSub = $vd['reg_contact_email'] ?? '';
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
@@ -2531,7 +2571,7 @@ select.mu-filter-input.mu-active {
                             class="px-2 py-1 rounded-lg text-xs font-semibold border border-[#D8B4FE] hover:bg-[#F9F5FC] transition disabled:opacity-50 inline-flex items-center gap-1" style="color:#7A3F91;">
                         <span wire:loading wire:target="vPhotoReset"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                         <span wire:loading.remove wire:target="vPhotoReset"><i class="fas fa-user text-xs"></i></span>
-                        Default
+                        <span class="text-center leading-tight">Change to<br>default photo</span>
                     </button>
                     @endif
                     <div wire:loading wire:target="vPhoto" class="flex items-center gap-1 text-xs font-medium" style="color:#7A3F91;">
@@ -2566,9 +2606,7 @@ select.mu-filter-input.mu-active {
                         </div>
                     @endif
 
-                    @unless($isReg)
                     <p class="text-lg mt-1 font-medium" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
-                    @endunless
 
                     <p class="text-base font-semibold mt-1" style="color:#333333;">
                         <i class="fa-regular fa-calendar mr-1"></i>
@@ -3075,7 +3113,7 @@ select.mu-filter-input.mu-active {
                                 class="px-2.5 py-1 rounded-lg text-xs font-semibold border border-[#D8B4FE] hover:bg-[#F9F5FC] transition disabled:opacity-50 inline-flex items-center gap-1" style="color:#7A3F91;">
                             <span wire:loading wire:target="vPhotoReset"><i class="fas fa-spinner animate-spin text-xs"></i></span>
                             <span wire:loading.remove wire:target="vPhotoReset"><i class="fas fa-user text-xs"></i></span>
-                            Default photo
+                            Change to default photo
                         </button>
                         @endif
                         <div wire:loading wire:target="vPhoto" class="flex items-center gap-1 text-xs font-medium" style="color:#7A3F91;">
@@ -3272,74 +3310,19 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- UPDATE USERNAME — Registrar --}}
-            @if($isReg)
-            @php
-                $currentUsername = $vd['name'] ?? null;
-            @endphp
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Username</p>
-                </div>
-                <div class="p-4">
-                    <div class="mb-3 p-3 rounded-xl flex items-start gap-2" style="background:#fef2f2;border:1px solid #fecaca;">
-                        <i class="fas fa-triangle-exclamation text-red-500 text-xs mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold leading-snug" style="color:#991b1b;">
-                            Only the login username changes — all registrar data stays intact. The registrar must use the new username to log in. No notification is sent, so inform them directly.
-                        </p>
-                    </div>
-                    @if($ueSuccess)
-                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
-                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
-                    </div>
-                    @endif
-                    @if(count($ueErrors))
-                    <div x-init="saving = false"></div>
-                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
-                        @foreach($ueErrors as $msgs)
-                            @foreach($msgs as $msg)
-                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
-                            @endforeach
-                        @endforeach
-                    </div>
-                    @endif
-                    <div class="flex gap-2">
-                        <div class="relative flex-1">
-                            <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
-                            <input wire:model.defer="ueEmail" type="text" placeholder="New username…"
-                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
-                        </div>
-                        <button wire:click="saveUpdateEmail"
-                                @click="saving = true"
-                                wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
-                                style="background:#7A3F91;">
-                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail">Update</span>
-                            <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
-                        </button>
-                    </div>
-                    <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-key text-amber-500 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold leading-snug" style="color:#92400e;">After updating, they log in using the new username with their current password. Use Change Password below if you also need to reset their password.</p>
-                    </div>
-                </div>
-            </div>
-            @endif
-
-            {{-- UPDATE EMAIL — Director (alumni + coordinator have their own cards above) --}}
-            @if($isDir)
+            {{-- UPDATE EMAIL — Director + Registrar (alumni + coordinator have their own cards above) --}}
+            @if($isDir || $isReg)
             @php
                 $ueCurrent = $isAlumni
                     ? ((!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local')) ? $vd['record_email'] : null)
-                    : ($isOrg ? ($vd['organizer_email'] ?: null) : ($vd['director_email'] ?: null));
+                    : ($isOrg ? ($vd['organizer_email'] ?: null) : ($isReg ? (($vd['reg_contact_email'] ?? '') ?: null) : ($vd['director_email'] ?: null)));
                 $ueNote = $isOrg
                     ? 'A new temporary password will be generated and emailed to the new address. The coordinator must change it on next login.'
+                    : ($isReg
+                    ? 'Updating the email will reset this registrar\'s password. A new temporary password will be generated and emailed to the new address, and the registrar must change it on next login.'
                     : ($isDir
                     ? 'Updating the email will reset this director\'s password. A new temporary password will be generated and emailed to the new address, and the director must change it on next login.'
-                    : 'Updating the email will require the account to reset their password on next login.');
+                    : 'Updating the email will require the account to reset their password on next login.'));
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
@@ -3398,8 +3381,8 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- CHANGE PASSWORD — Registrar / Admin --}}
-            @if($isReg || $isAdmin)
+            {{-- CHANGE PASSWORD — Admin only (registrar now resets via Update Email, like Director) --}}
+            @if($isAdmin)
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Change Password</p>
