@@ -3245,13 +3245,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                     <div class="p-3.5 space-y-2">
                         <div class="grid grid-cols-1 gap-1.5">
-                            @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Company','Known partner company','fa-handshake'],['custom','Other Company','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
+                            @foreach([['philcst','PHILCST Campus','fa-school'],['partner','Partner Company','fa-handshake'],['custom','Other Company','fa-pen-to-square']] as [$val,$label,$ico])
                             <button type="button" wire:click="$set('postOrgCategory','{{ $val }}')"
                                     class="px-2.5 py-2 border-2 rounded-xl bg-white cursor-pointer transition text-left font-semibold flex items-center gap-2.5 text-sm
                                            {{ $postOrgCategory===$val ? 'border-[#7a3f91] text-white shadow-md' : 'border-gray-200 text-[#333333] hover:border-[#7a3f91] hover:bg-purple-50' }}"
                                     style="{{ $postOrgCategory===$val ? 'background:linear-gradient(135deg,#7a3f91,#6a3580);' : '' }}">
                                 <i class="fas {{ $ico }} text-base flex-shrink-0"></i>
-                                <div><span class="block text-sm">{{ $label }}</span><span class="block font-normal opacity-70 text-sm">{{ $sub }}</span></div>
+                                <div><span class="block text-sm">{{ $label }}</span></div>
                             </button>
                             @endforeach
                         </div>
@@ -4000,13 +4000,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
                         {{-- Category picker — same three choices as the Post modal, editable in edit mode only --}}
                         <div x-show="editMode" x-cloak class="grid grid-cols-1 gap-1.5">
-                            @foreach([['philcst','PHILCST Campus','Internal department','fa-school'],['partner','Partner Company','Known partner company','fa-handshake'],['custom','Other Company','Enter manually','fa-pen-to-square']] as [$val,$label,$sub,$ico])
+                            @foreach([['philcst','PHILCST Campus','fa-school'],['partner','Partner Company','fa-handshake'],['custom','Other Company','fa-pen-to-square']] as [$val,$label,$ico])
                             <button type="button" wire:click="$set('editOrgCategory','{{ $val }}')"
                                     class="px-2.5 py-2 border-2 rounded-xl bg-white cursor-pointer transition text-left font-semibold flex items-center gap-2.5 text-sm
                                            {{ $editOrgCategory===$val ? 'border-[#7a3f91] text-white shadow-md' : 'border-gray-200 text-[#333333] hover:border-[#7a3f91] hover:bg-purple-50' }}"
                                     style="{{ $editOrgCategory===$val ? 'background:linear-gradient(135deg,#7a3f91,#6a3580);' : '' }}">
                                 <i class="fas {{ $ico }} text-base flex-shrink-0"></i>
-                                <div><span class="block text-sm">{{ $label }}</span><span class="block font-normal opacity-70 text-sm">{{ $sub }}</span></div>
+                                <div><span class="block text-sm">{{ $label }}</span></div>
                             </button>
                             @endforeach
                         </div>

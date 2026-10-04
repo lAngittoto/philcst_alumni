@@ -3,6 +3,7 @@
 <?php
 
 use Livewire\Component;
+use Livewire\Attributes\Renderless;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
@@ -54,8 +55,6 @@ new class extends Component {
     public int $totalCount  = 0;
 
     // ── @mention autocomplete ─────────────────────────────────────────────
-    public array $mentionSuggestions = [];
-    public bool  $showMentions       = false;
 
     // ── Typing indicator ──────────────────────────────────────────────────
     public array $typingUsers = [];
@@ -1190,11 +1189,11 @@ new class extends Component {
             }
 
             // Staff room: count directors + active coordinators
-            $staffOnline = DB::table('director')->whereNull('deleted_at')
+            $staffOnline = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
                 ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
                     ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
-            $staffTotal  = DB::table('director')->whereNull('deleted_at')->count()
+            $staffTotal  = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count()
                 + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             $isCurrentRoom = ($staffRoomRow->id === $this->roomId);
@@ -1796,11 +1795,11 @@ new class extends Component {
         if (! $this->room) return;
         try {
             if ($this->isStaffRoom) {
-                $this->onlineCount = DB::table('director')->whereNull('deleted_at')
+                $this->onlineCount = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')
                     ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')
                         ->where('last_seen_at', '>=', now()->subMinutes($this->onlineMinutes))->count();
-                $this->totalCount  = DB::table('director')->whereNull('deleted_at')->count()
+                $this->totalCount  = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at')->count()
                     + DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->count();
 
             } elseif ($this->isCollegeRoom) {
@@ -1962,9 +1961,29 @@ new class extends Component {
         $rplyMap = DB::table('chat_messages')->whereIn('id', $rplyIds)
             ->get(['id','sender_type','sender_id','body','deleted_at'])->keyBy(fn($m)=>(int)$m->id);
 
+        // Exact mentioned names per message (so the bubble highlights the FULL
+        // "@Juan Dela Cruz", not just the first two words).
+        $mentionNames = [];
+        $mRows = DB::table('chat_mentions')->whereIn('message_id', $msgIds)->whereIn('mention_type', ['alumni','organizer','director'])
+            ->get(['message_id','mention_type','mentioned_id']);
+        if ($mRows->isNotEmpty()) {
+            $nameOf = [];
+            foreach (['alumni'=>'alumni','organizer'=>'organizer','director'=>'director'] as $type => $tbl) {
+                $ids = $mRows->where('mention_type', $type)->pluck('mentioned_id')->unique()->filter()->values();
+                if ($ids->isEmpty()) continue;
+                foreach (DB::table($tbl)->whereIn('id', $ids)->get(['id','first_name','last_name']) as $r) {
+                    $nameOf[$type.':'.$r->id] = trim($r->first_name.' '.$r->last_name);
+                }
+            }
+            foreach ($mRows as $mr) {
+                $n = $nameOf[$mr->mention_type.':'.$mr->mentioned_id] ?? null;
+                if ($n) $mentionNames[(int)$mr->message_id][] = $n;
+            }
+        }
+
         $self = $this;
 
-        $this->messages = collect($rows)->map(function ($m) use ($aMap,$oMap,$dMap,$rxns,$pins,$rplyMap,$self) {
+        $this->messages = collect($rows)->map(function ($m) use ($aMap,$oMap,$dMap,$rxns,$pins,$rplyMap,$self,$mentionNames) {
             $isDir   = $m->sender_type === 'director';
             $isCoord = $m->sender_type === 'organizer';
             $sid     = (int) $m->sender_id;
@@ -2005,6 +2024,7 @@ new class extends Component {
                 'sender_course'  => (! $isDir && ! $isCoord && $s) ? ($s->course_code ?? '') : '',
                 'sender_batch'   => (! $isDir && ! $isCoord && $s) ? (string)($s->batch ?? '') : '',
                 'body'           => $m->body,
+                'mentions'       => array_values(array_unique($mentionNames[(int)$m->id] ?? [])),
                 'is_deleted'     => $isDeleted,
                 'post_preview'   => $isDeleted ? null : (function () use ($self, $m) {
                     // Defensive: resolvePostPreview() touches DB/model
@@ -2046,7 +2066,7 @@ new class extends Component {
     // preview for this room updates locally instead, and the next poll
     // tick (≤2.5s later) reconciles it with the DB for everyone else.
     // ─────────────────────────────────────────────────────────────────────
-    public function sendMessage(?string $typed = null): void
+    public function sendMessage(?string $typed = null, array $mentions = []): void
     {
         $body = trim($typed ?? $this->body);
         if ($body === '' || ! $this->roomId) return;
@@ -2063,47 +2083,14 @@ new class extends Component {
             'updated_at'  => now(),
         ]);
 
-        if (preg_match_all('/@(everyone|\w+(?:\s\w+)?)/iu', $body, $matches)) {
-            foreach (array_unique($matches[1]) as $mention) {
-                if (strtolower($mention) === 'everyone') {
-                    DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'everyone','mentioned_id'=>null,'created_at'=>now(),'updated_at'=>now()]);
-                    continue;
-                }
-
-                if (! $this->isStaffRoom && $this->room) {
-                    if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
-                        $foundAlumni = DB::table('alumni')
-                            ->whereIn('course_code', $this->deptCourseCodes)
-                            ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")
-                            ->value('id');
-                    } else {
-                        $alumniQ = DB::table('alumni')
-                            ->where('course_code', $this->room['course_code'])
-                            ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%");
-                        if (! $this->isCourseRoom) $alumniQ->where('batch', $this->room['batch']);
-                        $foundAlumni = $alumniQ->value('id');
-                    }
-                    if ($foundAlumni) {
-                        DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'alumni','mentioned_id'=>$foundAlumni,'created_at'=>now(),'updated_at'=>now()]);
-                    }
-                }
-
-                $foundCoord = DB::table('organizer')
-                    ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")->value('id');
-                if ($foundCoord) DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'organizer','mentioned_id'=>$foundCoord,'created_at'=>now(),'updated_at'=>now()]);
-
-                $foundDir = DB::table('director')->whereNull('deleted_at')
-                    ->where(DB::raw("CONCAT(first_name,' ',last_name)"), 'like', "%{$mention}%")->value('id');
-                if ($foundDir) DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>'director','mentioned_id'=>$foundDir,'created_at'=>now(),'updated_at'=>now()]);
-            }
-        }
+        $this->saveMentions((int) $msgId, $body, $mentions);
 
         $this->lastNotifiedMessageIds[$this->roomId] = (int) $msgId;
         Cache::put($this->lastNotifiedCacheKey($this->roomId), (int) $msgId, now()->addDays(30));
         $this->lastRenderedMessageId = (int) $msgId;
         $this->markRoomAsRead($this->roomId);
 
-        $this->body = ''; $this->replyTo = null; $this->showMentions = false;
+        $this->body = ''; $this->replyTo = null;
         $this->openToolbarMsgId = null;
         $this->stopTyping();
 
@@ -2468,7 +2455,7 @@ new class extends Component {
         $q = trim($this->memberSearch);
         $self = $this;
 
-        $dirQuery = DB::table('director')->whereNull('deleted_at');
+        $dirQuery = DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at');
         if ($q !== '') $dirQuery->where(function ($sub) use ($q) { $sub->where('first_name','like',"%{$q}%")->orWhere('last_name','like',"%{$q}%")->orWhereRaw("CONCAT(first_name,' ',last_name) LIKE ?", ["%{$q}%"]); });
         $this->staffDirectors = $dirQuery->orderBy('first_name')->get(['id','first_name','last_name','profile_photo','last_seen_at'])
             ->map(fn($d)=>['id'=>$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'photo'=>$self->resolvePhotoUrl($d->profile_photo??null),'is_online'=>isset($d->last_seen_at)&&Carbon::parse($d->last_seen_at)->gte(now()->subMinutes($self->onlineMinutes))])->toArray();
@@ -2538,107 +2525,145 @@ new class extends Component {
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // @mention autocomplete
+    // @mention — Messenger-style
     // ─────────────────────────────────────────────────────────────────────
-    // NOTE: body is now a DEFERRED wire:model (no network call per
-    // keystroke — huge perf win + fixes the Enter-to-send race where the
-    // server-side $body hadn't synced yet when sendMessage() fired).
-    // Because of that, Livewire's automatic updatedBody() hook no longer
-    // reliably runs per keystroke, so @mention detection is now triggered
-    // explicitly from the client (only when "@" is actually being typed,
-    // debounced) via checkMentions() below instead.
-    public function checkMentions(string $value): void
+    // The dropdown now lives 100% in Alpine (see compose bar). The server only
+    // answers "who matches this text?" and returns the list straight back to
+    // the browser (Renderless = no component re-render, no state, no lag).
+    // Returns EVERY matching member of the room (no more 3 / 5 cap) — the
+    // dropdown scrolls. Multi-word search works ("juan dela" / "dela juan").
+    #[Renderless]
+    public function searchMentions(string $q = ''): array
     {
-        // Name being typed after the last "@": one word, or first + last name
-        // (same shape sendMessage() uses to detect a mention).
-        if (preg_match('/@([\p{L}\p{N}_]*(?: [\p{L}\p{N}_]*)?)$/u', $value, $m)) {
-            $q    = $m[1];
-            $like = '%' . addcslashes($q, '%_\\') . '%';
-            $matchName = fn ($query) => $query->whereRaw("CONCAT(first_name,' ',last_name) LIKE ?", [$like]);
+        if (! $this->roomId) return [];
 
-            // "@everyone" — only while the person is still typing a single word
-            // that it could complete ("@", "@e", "@every"…).
-            $suggestions = [];
-            if ($q === '' || (! str_contains($q, ' ') && str_starts_with('everyone', strtolower($q)))) {
-                $suggestions[] = ['id'=>0,'name'=>'everyone','type'=>'everyone'];
+        $q     = trim(preg_replace('/\s+/u', ' ', $q));
+        $terms = $q === '' ? [] : array_slice(explode(' ', $q), 0, 5);
+        $like  = fn(string $t) => '%' . addcslashes($t, '%_\\') . '%';
+        $applyTerms = function ($query) use ($terms, $like) {
+            foreach ($terms as $t) {
+                $query->whereRaw("CONCAT(first_name,' ',last_name) LIKE ?", [$like($t)]);
             }
+            return $query;
+        };
 
-            $mapPerson = fn ($type) => fn ($p) => [
-                'id'   => $p->id,
-                'name' => trim($p->first_name . ' ' . $p->last_name),
-                'type' => $type,
-            ];
+        $items = [];
+        $hardCap = 500; // safety only — a GC will never realistically hit this
 
-            if ($this->isStaffRoom) {
-                // ── Staff room (Coordinators/Director): EVERY member shown in the
-                //    Staff Members panel — all ACTIVE directors + all ACTIVE
-                //    coordinators (every college), no cap. The list scrolls. ──
-                $dirs = $matchName(DB::table('director')->where('status', 'ACTIVE')->whereNull('deleted_at'))
-                    ->orderBy('first_name')
-                    ->get(['id','first_name','last_name'])
-                    ->map($mapPerson('director'))->toArray();
-
-                $coords = $matchName(DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at'))
-                    ->where('id', '!=', $this->coordinatorId)
-                    ->orderBy('first_name')
-                    ->get(['id','first_name','last_name'])
-                    ->map($mapPerson('coordinator'))->toArray();
-
-                $this->mentionSuggestions = array_merge($suggestions, $dirs, $coords);
-
-            } elseif ($this->room) {
-                // ── Alumni rooms: members of THIS room — its alumni (college GC =
-                //    every course in the college, course GC = that course, batch
-                //    GC = that course + batch) plus the ACTIVE coordinators of
-                //    this college. Switching rooms changes the list. ──
-                if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
-                    $alumniQ = DB::table('alumni')
-                        ->whereIn('course_code', $this->deptCourseCodes)
-                        ->whereNull('deleted_at');
-                } else {
-                    $alumniQ = DB::table('alumni')
-                        ->where('course_code', $this->room['course_code'])
-                        ->whereNull('deleted_at');
-                    if (! $this->isCourseRoom) $alumniQ->where('batch', $this->room['batch']);
-                }
-                // Cap at 100 so a college-wide GC doesn't ship thousands of rows
-                // on every keystroke — typing narrows it down.
-                $alumni = $matchName($alumniQ)
-                    ->orderBy('first_name')->limit(100)
-                    ->get(['id','first_name','last_name'])
-                    ->map($mapPerson('alumni'))->toArray();
-
-                $coords = $matchName(DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at'))
-                    ->where('department', $this->department)
-                    ->where('id', '!=', $this->coordinatorId)
-                    ->orderBy('first_name')
-                    ->get(['id','first_name','last_name'])
-                    ->map($mapPerson('coordinator'))->toArray();
-
-                $this->mentionSuggestions = array_merge($suggestions, $coords, $alumni);
-            }
-
-            $this->showMentions = ! empty($this->mentionSuggestions);
-        } else {
-            $this->showMentions = false; $this->mentionSuggestions = [];
+        // @everyone (only when it matches what's typed)
+        if ($q === '' || stripos('everyone', $q) === 0) {
+            $items[] = ['id'=>0,'name'=>'everyone','type'=>'everyone','sub'=>'Notify all members','photo'=>null];
         }
+
+        if ($this->isStaffRoom) {
+            $applyTerms($dQ = DB::table('director')->where('status','ACTIVE')->whereNull('deleted_at'));
+            foreach ($dQ->limit($hardCap)->get(['id','first_name','last_name','profile_photo']) as $d) {
+                $items[] = ['id'=>(int)$d->id,'name'=>trim($d->first_name.' '.$d->last_name),'type'=>'director','sub'=>'Director','photo'=>$this->resolvePhotoUrl($d->profile_photo ?? null)];
+            }
+        } elseif ($this->room) {
+            if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
+                $aQ = DB::table('alumni')->whereIn('course_code', $this->deptCourseCodes)->whereNull('deleted_at');
+            } else {
+                $aQ = DB::table('alumni')->where('course_code', $this->room['course_code'])->whereNull('deleted_at');
+                if (! $this->isCourseRoom) $aQ->where('batch', $this->room['batch']);
+            }
+            $applyTerms($aQ);
+            foreach ($aQ->limit($hardCap)->get(['id','first_name','last_name','profile_photo','course_code','batch']) as $a) {
+                $items[] = [
+                    'id'    => (int) $a->id,
+                    'name'  => trim($a->first_name.' '.$a->last_name),
+                    'type'  => 'alumni',
+                    'sub'   => trim($this->displayCourseLabel($a->course_code ?? '') . ($a->batch ? ' · Batch '.$a->batch : '')),
+                    'photo' => $this->resolvePhotoUrl($a->profile_photo ?? null),
+                ];
+            }
+        }
+
+        // Coordinators of this department (never yourself)
+        $cQ = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at')
+            ->where('department', $this->department)
+            ->where('id', '!=', $this->coordinatorId);
+        $applyTerms($cQ);
+        foreach ($cQ->limit($hardCap)->get(['id','first_name','last_name','profile_photo']) as $o) {
+            $items[] = ['id'=>(int)$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'type'=>'coordinator','sub'=>'Coordinator','photo'=>$this->resolvePhotoUrl($o->profile_photo ?? null)];
+        }
+
+        // Rank: everyone first → name starts with query → word starts with query → rest (A-Z)
+        $ql = mb_strtolower($q);
+        usort($items, function ($a, $b) use ($ql) {
+            $rank = function ($it) use ($ql) {
+                if ($it['type'] === 'everyone') return 0;
+                if ($ql === '') return 2;
+                $n = mb_strtolower($it['name']);
+                if (str_starts_with($n, $ql)) return 1;
+                foreach (explode(' ', $n) as $w) if (str_starts_with($w, $ql)) return 2;
+                return 3;
+            };
+            return [$rank($a), mb_strtolower($a['name'])] <=> [$rank($b), mb_strtolower($b['name'])];
+        });
+
+        return $items;
     }
 
-    public function closeMentions(): void
+    // Saves chat_mentions rows. Uses the exact members the sender picked from the
+    // dropdown (by id — so two people with the same first name can't get mixed
+    // up), then falls back to name matching for hand-typed @names.
+    private function saveMentions(int $msgId, string $body, array $picked): void
     {
-        $this->showMentions = false;
-        $this->mentionSuggestions = [];
-    }
+        $now  = now();
+        $seen = [];
+        $add  = function (string $type, ?int $id) use ($msgId, $now, &$seen) {
+            $key = $type . ':' . ($id ?? 0);
+            if (isset($seen[$key])) return;
+            $seen[$key] = true;
+            DB::table('chat_mentions')->insert(['message_id'=>$msgId,'mention_type'=>$type,'mentioned_id'=>$id,'created_at'=>$now,'updated_at'=>$now]);
+        };
 
-    public function selectMention(string $name): void
-    {
-        $this->body = preg_replace_callback(
-            '/@[\p{L}\p{N}_]*(?: [\p{L}\p{N}_]*)?$/u',
-            fn () => '@' . $name . ' ',
-            $this->body
-        );
-        $this->showMentions = false; $this->mentionSuggestions = [];
-        $this->dispatch('focus-input');
+        $bodyLc = mb_strtolower($body);
+        if (preg_match('/(^|\s)@everyone\b/iu', $body)) $add('everyone', null);
+
+        // 1) Picked from the dropdown — verify the @name is still in the text
+        $coveredNames = [];
+        foreach ($picked as $pk) {
+            $type = $pk['type'] ?? ''; $id = (int) ($pk['id'] ?? 0); $name = trim((string) ($pk['name'] ?? ''));
+            if ($id <= 0 || $name === '' || ! in_array($type, ['alumni','coordinator','director'], true)) continue;
+            if (! str_contains($bodyLc, '@' . mb_strtolower($name))) continue;
+
+            $ok = match ($type) {
+                'alumni'      => DB::table('alumni')->where('id', $id)->exists(),
+                'coordinator' => DB::table('organizer')->where('id', $id)->exists(),
+                'director'    => DB::table('director')->where('id', $id)->exists(),
+            };
+            if (! $ok) continue;
+            $add($type === 'coordinator' ? 'organizer' : $type, $id);
+            $coveredNames[] = mb_strtolower($name);
+        }
+
+        // 2) Hand-typed @names (no dropdown pick) — legacy behaviour, same scoping
+        if (preg_match_all('/@(\w+(?:\s\w+)?)/u', $body, $m)) {
+            foreach (array_unique($m[1]) as $mention) {
+                $ml = mb_strtolower($mention);
+                if ($ml === 'everyone') continue;
+                foreach ($coveredNames as $cn) { if (str_starts_with($cn, $ml) || str_starts_with($ml, $cn)) continue 2; }
+                $like = '%' . addcslashes($mention, '%_\\') . '%';
+                $nameSql = "CONCAT(first_name,' ',last_name) LIKE ?";
+
+                if (! $this->isStaffRoom && $this->room) {
+                    if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
+                        $fa = DB::table('alumni')->whereIn('course_code', $this->deptCourseCodes)->whereRaw($nameSql, [$like])->value('id');
+                    } else {
+                        $aq = DB::table('alumni')->where('course_code', $this->room['course_code'])->whereRaw($nameSql, [$like]);
+                        if (! $this->isCourseRoom) $aq->where('batch', $this->room['batch']);
+                        $fa = $aq->value('id');
+                    }
+                    if ($fa) $add('alumni', (int) $fa);
+                }
+                $fc = DB::table('organizer')->whereRaw($nameSql, [$like])->value('id');
+                if ($fc) $add('organizer', (int) $fc);
+                $fd = DB::table('director')->where('status','ACTIVE')->whereNull('deleted_at')->whereRaw($nameSql, [$like])->value('id');
+                if ($fd) $add('director', (int) $fd);
+            }
+        }
     }
 }; ?>
 
@@ -3736,7 +3761,15 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                             $mentionClass = $msg['is_mine']
                                                 ? 'font-semibold text-yellow-200 bg-yellow-400/20 px-0.5 rounded'
                                                 : 'font-semibold text-[#6b2490] bg-[#f2e8f9] px-0.5 rounded';
-                                            $formatted = preg_replace('/@(everyone|\w+(?:\s\w+)?)/u', '<span class="'.$mentionClass.'">@$1</span>', $safe);
+                                            $mNames = $msg['mentions'] ?? [];
+                                            if (! empty($mNames)) {
+                                                usort($mNames, fn($a, $b) => mb_strlen($b) <=> mb_strlen($a));
+                                                $alt = implode('|', array_map(fn($n) => preg_quote(htmlspecialchars($n, ENT_QUOTES, 'UTF-8'), '/'), $mNames));
+                                                $mPattern = '/@(everyone\b|' . $alt . '|\w+)/iu';
+                                            } else {
+                                                $mPattern = '/@(everyone|\w+(?:\s\w+)?)/u';
+                                            }
+                                            $formatted = preg_replace($mPattern, '<span class="'.$mentionClass.'">@$1</span>', $safe);
                                         @endphp
                                         <button wire:click.stop="toggleToolbar({{ $msg['id'] }})"
                                              class="org-bubble text-left px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed break-words w-full cursor-pointer shadow-sm {{ $bubbleCls }} {{ $toolbarOpen ? 'org-bubble-open' : '' }}"
@@ -3919,32 +3952,102 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                 @endif
 
                 {{-- Compose bar --}}
-                <div class="px-3 sm:px-4 py-3 border-t border-[#ddd3e8] bg-white flex-shrink-0" x-data>
-                    @if($showMentions && ! empty($mentionSuggestions))
-                    <div class="mb-2 bg-white border border-[#ddd3e8] rounded-2xl shadow-md overflow-y-auto overflow-x-hidden animate-[orgPop_.14s_ease-out]" style="max-height:240px; scrollbar-width:thin; scrollbar-color:#d4b8e8 transparent;">
-                        @foreach($mentionSuggestions as $sug)
-                        <button type="button" wire:key="mention-{{ $sug['type'] }}-{{ $sug['id'] }}" wire:click="selectMention('{{ addslashes($sug['name']) }}')"
-                                class="flex items-center gap-2.5 w-full px-3 py-2.5 hover:bg-[#f2e8f9] transition-colors text-left cursor-pointer">
-                            <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white" style="background:#6b2490;">
-                                @if($sug['name']==='everyone')<i class="fa-solid fa-users text-xs"></i>
-                                @else{{ strtoupper(substr($sug['name'],0,1)) }}@endif
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-semibold text-[#333333] truncate">&#64;{{ $sug['name'] }}</p>
-                                @if($sug['name']==='everyone')
-                                    <p class="text-xs text-[#6b2490] font-medium">Notify all members</p>
-                                @elseif($sug['type']==='director')
-                                    <p class="text-xs text-violet-700 font-medium"><i class="fa-solid fa-shield-halved text-[10px] mr-0.5"></i>Director</p>
-                                @elseif($sug['type']==='coordinator')
-                                    <p class="text-xs text-[#6b2490] font-medium">Coordinator</p>
-                                @elseif($sug['type']==='alumni')
-                                    <p class="text-xs text-gray-500 font-medium">Alumni</p>
-                                @endif
-                            </div>
-                        </button>
-                        @endforeach
+                <div class="px-3 sm:px-4 py-3 border-t border-[#ddd3e8] bg-white flex-shrink-0 relative"
+                     x-data="{
+                        mOpen:false, mItems:[], mIdx:0, mStart:-1, mPicked:[], mLoading:false,
+                        _mT:null, _mSeq:0, _mSkip:false, _mDead:'',
+                        mClose(){ this.mOpen=false; this.mItems=[]; this.mIdx=0; this.mStart=-1; },
+                        mInput(el){
+                            if (this._mSkip) { this._mSkip=false; return; }
+                            const pos = el.selectionStart ?? el.value.length;
+                            const before = el.value.slice(0, pos);
+                            const m = before.match(/(?:^|\s)\x40([^\s\x40]*(?:\s[^\s\x40]*){0,3})$/u);
+                            if (!m) { this._mDead=''; this.mClose(); return; }
+                            const raw = m[1];
+                            const q = raw.replace(/\s+/g,' ').trim();
+                            this.mStart = pos - raw.length - 1;
+                            if (this._mDead && q.toLowerCase().startsWith(this._mDead)) { this.mClose(); return; }
+                            this._mDead = '';
+                            clearTimeout(this._mT);
+                            this._mT = setTimeout(() => this.mSearch(q), q === '' ? 0 : 110);
+                        },
+                        async mSearch(q){
+                            const seq = ++this._mSeq;
+                            this.mLoading = true;
+                            let res = [];
+                            try { res = await $wire.searchMentions(q); } catch (e) { res = []; }
+                            if (seq !== this._mSeq) return;
+                            this.mLoading = false;
+                            this.mItems = Array.isArray(res) ? res : [];
+                            this.mIdx = 0;
+                            if (this.mItems.length === 0) { this._mDead = q.toLowerCase(); if (q !== '') this.mClose(); else this.mOpen=false; return; }
+                            this.mOpen = true;
+                            this.$nextTick(() => { const l=this.$refs.mList; if (l) l.scrollTop = 0; });
+                        },
+                        mMove(d){
+                            if (!this.mItems.length) return;
+                            this.mIdx = (this.mIdx + d + this.mItems.length) % this.mItems.length;
+                            this.$nextTick(() => { const el=this.$refs.mList?.querySelector('[data-active=true]'); if (el) el.scrollIntoView({block:'nearest'}); });
+                        },
+                        mPick(it){
+                            if (!it) return;
+                            const el = document.getElementById('chat-input');
+                            if (!el) return;
+                            const pos = el.selectionStart ?? el.value.length;
+                            const start = this.mStart >= 0 ? this.mStart : pos;
+                            const label = '\x40' + it.name + ' ';
+                            el.value = el.value.slice(0, start) + label + el.value.slice(pos);
+                            const np = start + label.length;
+                            el.focus(); el.setSelectionRange(np, np);
+                            if (it.type !== 'everyone' && !this.mPicked.some(p => p.type===it.type && p.id===it.id)) {
+                                this.mPicked.push({ type: it.type, id: it.id, name: it.name });
+                            }
+                            this._mSkip = true; this._mDead = '';
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            this._mSkip = false;
+                            this.mClose();
+                        },
+                        mKey(e){
+                            if (!this.mOpen) return;
+                            if (e.key === 'ArrowDown') { e.preventDefault(); this.mMove(1); }
+                            else if (e.key === 'ArrowUp') { e.preventDefault(); this.mMove(-1); }
+                            else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); this.mPick(this.mItems[this.mIdx]); }
+                            else if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.mClose(); }
+                        },
+                        mTake(text){
+                            const out = this.mPicked.filter(p => text.toLowerCase().includes('\x40' + p.name.toLowerCase()));
+                            this.mPicked = []; this._mDead=''; this.mClose();
+                            return out;
+                        }
+                     }">
+                    <div x-show="mOpen && mItems.length" x-cloak
+                         class="absolute left-3 right-3 sm:left-4 sm:right-4 bottom-full mb-1 z-30 bg-white border border-[#ddd3e8] rounded-2xl shadow-lg overflow-hidden animate-[orgPop_.14s_ease-out]">
+                        <div class="px-3 py-1.5 bg-[#faf7fc] border-b border-[#ddd3e8] flex items-center justify-between">
+                            <span class="text-xs font-semibold uppercase tracking-wider text-[#6b2490]">Mention a member</span>
+                            <span class="text-xs text-[#999999]" x-text="mItems.length + (mItems.length === 1 ? ' result' : ' results')"></span>
+                        </div>
+                        <div x-ref="mList" class="max-h-64 overflow-y-auto overscroll-contain">
+                            <template x-for="(it, i) in mItems" :key="it.type + ':' + it.id">
+                                <button type="button"
+                                        @mousedown.prevent="mPick(it)"
+                                        @mouseenter="mIdx = i"
+                                        :data-active="i === mIdx"
+                                        :class="i === mIdx ? 'bg-[#f2e8f9]' : 'bg-white'"
+                                        class="flex items-center gap-2.5 w-full px-3 py-2 transition-colors text-left cursor-pointer">
+                                    <div class="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold text-white overflow-hidden" style="background:#6b2490;">
+                                        <template x-if="it.type === 'everyone'"><i class="fa-solid fa-users text-xs"></i></template>
+                                        <template x-if="it.type !== 'everyone' && it.photo"><img :src="it.photo" alt="" class="w-full h-full object-cover"></template>
+                                        <template x-if="it.type !== 'everyone' && !it.photo"><span x-text="(it.name || '?').charAt(0).toUpperCase()"></span></template>
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <p class="text-sm font-semibold text-[#333333] truncate" x-text="(it.type === 'everyone' ? '\x40everyone' : it.name)"></p>
+                                        <p class="text-xs truncate" :class="it.type === 'director' ? 'text-violet-700 font-medium' : (it.type === 'coordinator' || it.type === 'everyone' ? 'text-[#6b2490] font-medium' : 'text-[#777777]')" x-text="it.sub"></p>
+                                    </div>
+                                    <template x-if="it.type === 'director'"><i class="fa-solid fa-shield-halved text-[10px] text-violet-700"></i></template>
+                                </button>
+                            </template>
+                        </div>
                     </div>
-                    @endif
 
                     {{-- ── Messenger-style optimistic send ─────────────────────
                          Mirrors Alumni Messenger's composer exactly: hitting
@@ -3972,19 +4075,13 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                 placeholder="{{ $editingId ? 'Edit your message…' : 'Message '.($isStaffRoom ? 'Coordinators/Director' : ($isCollegeRoom ? $department.' College GC' : ($isCourseRoom ? $this->displayCourseLabel($room['course_code'] ?? '').' All Batches GC' : ('Batch '.$room['batch'].' · '.$this->displayCourseLabel($room['course_code'] ?? ''))))).'… (@ to mention)' }}"
                                 rows="1"
                                 :disabled="sending"
-                                x-data="{
-                                    _mTimer: null,
-                                    checkMention(el){
-                                        clearTimeout(this._mTimer);
-                                        this._mTimer = setTimeout(() => {
-                                            if (/@([\p{L}\p{N}_]*(?: [\p{L}\p{N}_]*)?)$/u.test(el.value)) { $wire.checkMentions(el.value); }
-                                            else if ($wire.showMentions) { $wire.closeMentions(); }
-                                        }, 80);
-                                    }
-                                }"
-                                @input="checkMention($el)"
+                                @input="mInput($el)"
+                                @click="mInput($el)"
+                                @keyup="if (['ArrowLeft','ArrowRight','Home','End'].includes($event.key)) mInput($el)"
+                                @blur="setTimeout(() => mClose(), 150)"
+                                @keydown="mKey($event)"
                                 @keydown.escape="if({{ $editingId ? 'true' : 'false' }}) { $wire.cancelEdit(); }"
-                                @keydown.enter="if (!$event.shiftKey && !sending){ $event.preventDefault(); if ({{ $editingId ? 'true' : 'false' }}) { sending = true; $wire.saveEdit().then(() => { sending = false; }); } else { if (!hasText) return; sending = true; const val=$el.value; $el.style.height='auto'; hasText = false; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); } }"
+                                @keydown.enter="if (!$event.shiftKey && !sending){ $event.preventDefault(); if ({{ $editingId ? 'true' : 'false' }}) { sending = true; $wire.saveEdit().then(() => { sending = false; }); } else { if (!hasText) return; sending = true; const val=$el.value; $el.style.height='auto'; hasText = false; const ments = mTake(val); $wire.set('body', '', false); $wire.sendMessage(val, ments).then(() => { sending = false; }); } }"
                                 @focus-input.window="$el.focus()"
                                 @editing-started.window="$nextTick(() => { $el.style.height='auto'; $el.style.height=Math.min($el.scrollHeight,120)+'px'; $el.focus(); $el.select(); })"
                                 x-init="$el.addEventListener('input',function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px';hasText=this.value.trim()!=='';});"
@@ -4003,7 +4100,7 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                         @else
                         <button type="button"
                                 :disabled="sending || ! hasText"
-                                @click="if (!sending && hasText) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.style.height='auto'; hasText = false; $wire.set('body', '', false); $wire.sendMessage(val).then(() => { sending = false; }); }"
+                                @click="if (!sending && hasText) { sending = true; const el=document.getElementById('chat-input'); const val=el.value; el.style.height='auto'; hasText = false; const ments = mTake(val); $wire.set('body', '', false); $wire.sendMessage(val, ments).then(() => { sending = false; }); }"
                                 wire:loading.attr="disabled" wire:target="sendMessage"
                                 class="w-10 h-10 rounded-full flex items-center justify-center text-white flex-shrink-0 transition hover:opacity-90 active:scale-95 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                                 style="background:#6b2490;">
