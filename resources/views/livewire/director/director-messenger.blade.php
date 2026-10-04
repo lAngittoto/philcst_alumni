@@ -1374,7 +1374,7 @@ new class extends Component {
 
 {{-- Single Livewire root: page header (same pattern as Manage Coordinator / Manage Job)
      + the chat card below it. --}}
-<div class="flex flex-col gap-4 mx-auto w-full pt-6 sm:pt-8 px-3 sm:px-6 lg:px-10" style="max-width: 1400px;">
+<div class="flex flex-col gap-4 mx-auto w-full pt-6 sm:pt-8 px-3 sm:px-5 lg:px-6" style="max-width: 1800px;">
 
     {{-- ══ PAGE HEADER ══ --}}
     <div class="flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0">
@@ -1394,7 +1394,7 @@ new class extends Component {
     </div>
 
 <div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
-     style="height: calc(100vh - 330px); min-height: 440px; max-width: 1400px;"
+     style="height: calc(100vh - 190px); min-height: 440px; max-width: 1800px;"
      x-data="{ postNavigating: false }"
      @if(! $confirmDeleteId) wire:poll.5000ms.visible="unifiedPoll" @endif>
 <style>

@@ -219,7 +219,14 @@ new class extends Component {
             DB::table('director')->where('user_id', auth()->id())
                 ->update(['email' => $this->directorEmail]);
 
-            auth()->user()->update(['email' => $this->directorEmail]);
+            // EMAIL ONLY — raw query-builder update on the single `email`
+            // column. Deliberately NOT auth()->user()->update([...]): going
+            // through the Eloquent model fires model events / observers /
+            // mutators (saving, updating, password cast, notifications…)
+            // that can touch the password. This bypasses all of that.
+            DB::table('users')
+                ->where('id', auth()->id())
+                ->update(['email' => $this->directorEmail]);
 
             // Keep the "saving" dots on screen long enough to be seen —
             // the DB write is near-instant, so without this the loader

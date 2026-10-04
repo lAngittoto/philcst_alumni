@@ -4238,11 +4238,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                         </div>
                         @endif
                         <div>
-                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Industry</label>
-                            <div class="view-field-display">{{ $displayType ?: '—' }}</div>
-                        </div>
-                        <div>
-                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company Name</label>
+                            <label class="block text-[0.8rem] font-semibold uppercase tracking-[.05em] text-[#333333] mb-1">Company/Organization</label>
                             <div class="view-field-display">{{ $job->company_name ?: '—' }}</div>
                         </div>
                         <div>
