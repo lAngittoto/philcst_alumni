@@ -123,7 +123,8 @@ new class extends Component {
     // (no inner scrollbar). Raise it if you ever want longer pages.
     private function perPage(): int
     {
-        return 8;
+        // All + Alumni -> 100 rows/page. Director, Coordinator, Registrar -> 20.
+        return in_array($this->activeRole, ['all', 'alumni'], true) ? 100 : 20;
     }
 
     public function updatingSearch(): void { $this->currentPage = 1; }
@@ -1611,6 +1612,14 @@ select.mu-filter-input.mu-active {
    overflow:hidden and pushed the pagination footer off-screen
    entirely. Letting min-height stay at 0 (the base rule) keeps the
    block correctly sized to its share of the layout instead. ── */
+.mu-table-body-fixed {
+    height: clamp(360px, calc(100vh - 430px), 640px);
+    overflow-y: auto; overflow-x: hidden;
+    background: #fff;
+    scrollbar-width: thin; scrollbar-color: #d4b8e8 #F5F5F5;
+}
+.mu-table-body-fixed::-webkit-scrollbar { width: 6px; }
+.mu-table-body-fixed::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 99px; }
 .mu-table-block-filter {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
     padding: 0.6rem 0.875rem; flex-shrink: 0;
@@ -2112,7 +2121,8 @@ select.mu-filter-input.mu-active {
             </div>
 
             @if($pu->items->count() > 0)
-            <div class="overflow-x-hidden transition-opacity duration-200" style="background:#fff;"
+            <div class="mu-table-body-fixed transition-opacity duration-200"
+                 wire:key="mu-table-body-{{ $activeRole }}-{{ $pu->currentPage }}"
                  wire:loading.class="opacity-50 pointer-events-none"
                  wire:target="switchTab,setStatusFilter,search,goToPage,nextPage,previousPage,showProfile">
                 <table class="w-full bg-white border-collapse mu-users-table">
@@ -2204,7 +2214,7 @@ select.mu-filter-input.mu-active {
             </div>
 
             @else
-            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+            <div class="mu-table-body-fixed flex flex-col items-center justify-center gap-4 text-center px-6 bg-white">
                 <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                     <i class="fas fa-users-slash text-xl text-gray-400"></i>
                 </div>
@@ -2348,15 +2358,17 @@ select.mu-filter-input.mu-active {
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
-<div class="fixed inset-0 mu-modal-selectable"
+<div class="fixed inset-0 mu-modal-selectable {{ $isAlumni ? '' : 'flex items-center justify-center p-3 sm:p-6' }}"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
+     @if(!$isAlumni) @click.self="if(!saving){ $wire.closeModal(); setTimeout(() => muClosing = true, 220) }" @endif
      x-data="{ muClosing: false, saving: false }"
      x-show="!muClosing"
      x-init="muClosing = false; saving = false"
      @mu-save-done.window="saving = false"
      @mu-toggle-done.window="muClosing = true"
      @keydown.escape.window="if(!saving){ $wire.closeModal(); setTimeout(() => muClosing = true, 220) }">
-    <div class="w-full h-full flex flex-col" style="background:#F2F2F2;overflow:hidden;">
+    <div class="w-full flex flex-col {{ $isAlumni ? 'h-full' : 'max-w-5xl rounded-2xl shadow-2xl border border-[#E8E0F0]' }}"
+         style="background:#F2F2F2;overflow:hidden;{{ $isAlumni ? '' : 'max-height:90vh;' }}">
 
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
             @if($isAlumni)

@@ -557,22 +557,281 @@ select.adm-select-arrow {
     padding: 1rem 1.125rem;
 }
 
+
+/* ══ Card-grid layout (same design as Upcoming Events) ══ */
+.ev-main {
+    display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0;
+    gap: .75rem; width: 100%; max-width: 96rem; margin: 0 auto;
+    padding: .75rem 1rem 0;
+}
+@media (min-width: 640px)  { .ev-main { padding: 1.25rem 1.75rem 1.25rem; gap: 1rem; } }
+@media (min-width: 1024px) { .ev-main { padding: 1.5rem 2.5rem 1.5rem; } }
+
+/* Header: icon + text on the left (same pattern as Alumni Dashboard) */
+.ev-header { display: flex; align-items: center; gap: .75rem 1rem; flex-shrink: 0; width: 100%; }
+.ev-header-icon {
+    width: 2.75rem; height: 2.75rem; border-radius: 1rem; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #7A3F91; color: #ffffff; font-size: 1.05rem;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -2px rgba(0,0,0,.1);
+}
+.ev-header-text { min-width: 0; text-align: left; }
+
+/* Phones: card goes edge to edge, inputs 16px (no iOS zoom-on-focus) */
+@media (max-width: 639px) {
+    .ev-header-icon { width: 2.5rem; height: 2.5rem; border-radius: .85rem; font-size: .95rem; }
+    .ev-header h1 { font-size: 1.05rem; line-height: 1.3; }
+    .ev-header p  { font-size: .8rem; }
+    .adm-table-card {
+        margin-left: -1rem; margin-right: -1rem;
+        border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important;
+        border-radius: 0 !important; box-shadow: none !important;
+    }
+    #ev-content-block input.filter-input,
+    #ev-content-block select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
+}
+
+/* Event cards grid — 1 column on phones, 2 on small tablets, 3 per row from lg up */
+.ev-card-grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: .75rem; }
+@media (min-width: 640px)  { .ev-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .ev-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; } }
+
+/* Toolbar: Search → "FILTERS" label → status dropdown → Reset (far right).
+   Written as plain CSS (not Tailwind md:/lg: classes) so the layout does not
+   depend on which responsive utilities exist in the compiled Tailwind build.
+   Below 768px: search + a "Filters" toggle button; the panel opens as its own row. */
+.ev-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.ev-search  { position: relative; flex: 1 1 0%; min-width: 0; }
+.ev-filter-label { display: none; }
+.ev-filter-panel { display: none; width: 100%; align-items: center; gap: .5rem; }
+.ev-filter-panel.is-open { display: flex; }
+.ev-select-wrap { flex: 1 1 0%; min-width: 0; }
+.ev-select { width: 100%; }
+.ev-reset { margin-left: auto; }
+
+@media (min-width: 768px) {
+    .ev-filter-toggle { display: none !important; }
+    .ev-search { flex: 0 0 auto; width: 18rem; }
+    .ev-filter-label {
+        display: inline-block; flex-shrink: 0; padding: 0 .25rem;
+        font-size: .75rem; font-weight: 700; letter-spacing: .1em;
+        text-transform: uppercase; color: #7a3f91; user-select: none;
+    }
+    .ev-filter-panel { display: flex; width: auto; flex: 1 1 0%; min-width: 0; }
+    .ev-select-wrap { flex: 0 0 auto; }
+    .ev-select { width: 11rem; }
+}
+@media (min-width: 1024px) {
+    .ev-search { width: 20rem; }
+}
+
+/* Toolbar: search → "Filters" label → dropdown → Reset inline from md up.
+   The "Filters" toggle button exists below md only. */
+@media (min-width: 768px) {
+    .ev-filter-toggle { display: none !important; }
+    .ev-filter-panel  { display: flex !important; }
+}
+
+select.filter-input {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-position: right 0.6rem center;
+    background-repeat: no-repeat;
+    background-size: 1.1em 1.1em;
+    padding-right: 2.1rem;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+/* Search input always shows text cursor; select always shows default.
+   These beat any .ev-body-busy * override so they stay correct
+   whether or not a card load is in flight. */
+input.filter-input,
+input.filter-input:hover,
+input.filter-input:focus { cursor: text !important; }
+select.filter-input,
+select.filter-input:hover { cursor: default !important; }
+
+#ev-cursor-label {
+    position: fixed;
+    z-index: 99999;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #111827;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    border-radius: 8px;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0,0,0,.28);
+    user-select: none;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .1s ease, visibility .1s ease;
+    left: -999px;
+    top: -999px;
+}
+#ev-cursor-label svg {
+    width: 11px; height: 11px; flex-shrink: 0;
+    fill: none; stroke: #fff; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
+}
+
+[data-ev-card] { transition: border-color .15s ease, box-shadow .15s ease; position: relative; }
+[data-ev-card]:hover {
+    border-color: #c4b5d4 !important;
+    box-shadow: 0 4px 20px rgba(122,63,145,.12) !important;
+}
+
+/* ── Event card click spinner ───────────────────────────
+   Same purple "..." dot loader used on the Alumni Dashboard
+   and Job Opportunities cards, applied here since this card
+   opens the detail view via wire:click instead of a page nav. */
+[data-ev-card].is-loading > *:not(.ev-card-spinner) {
+    filter: blur(4px);
+    opacity: 0.5;
+    pointer-events: none;
+    user-select: none;
+}
+.ev-card-spinner {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    z-index: 40;
+}
+.ev-card-spinner span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #7A3F91;
+    animation: evDotPulse 1.1s ease-in-out infinite;
+}
+.ev-card-spinner span:nth-child(2) { animation-delay: 0.15s; }
+.ev-card-spinner span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes evDotPulse {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+}
+[data-ev-card].is-loading .ev-card-spinner {
+    display: flex;
+}
+[data-ev-card].is-loading {
+    pointer-events: none;
+}
+
+/* ── Global "one loading at a time" lock ──────────────────────────
+   Applied to the cards grid + filter bar while a card is opening OR
+   a filter/search request is in flight, so the alumni can't click
+   another card, change a filter, or trigger pagination mid-request.
+   Mirrors .jb-body-busy on the Job Opportunities page. */
+.ev-body-busy {
+    pointer-events: none !important;
+    cursor: default !important;
+}
+.ev-body-busy * {
+    cursor: default !important;
+}
+.ev-body-busy [data-ev-card]:not(.is-loading) {
+    opacity: 0.55;
+    cursor: default !important;
+}
+.ev-body-busy [data-ev-card].is-loading {
+    pointer-events: none !important;
+    cursor: default !important;
+}
+
+/* ── Share button spinner ────────────────────────────────────────────
+   Uses fa-spinner fa-spin — same as the close/rsvp buttons. */
+
+/* ── Lock OTHER cards while one is loading (same pattern as dashboard) ──
+   The clicked card gets .is-loading; every other card gets .is-blocked:
+   clicks swallowed, cursor drops to not-allowed, card dims slightly. */
+[data-ev-card].is-blocked {
+    pointer-events: none !important;
+    cursor: not-allowed !important;
+    opacity: 0.55;
+    filter: grayscale(25%);
+}
+[data-ev-card].is-blocked:hover {
+    box-shadow: none !important;
+    border-color: #e5e7eb !important;
+}
+
+.card-share-btn {
+    position: relative;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2rem; height: 2rem; border-radius: 0.5rem;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .1s;
+    flex-shrink: 0; z-index: 2;
+}
+.card-share-btn:hover { background: #dbeafe; border-color: #93c5fd; transform: scale(1.08); }
+.card-share-btn .tip {
+    position: absolute; bottom: calc(100% + 7px); right: 0;
+    background: #111827; color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+    padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+    pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 9999;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.card-share-btn .tip::after {
+    content: ''; position: absolute; top: 100%; right: 10px;
+    border: 4px solid transparent; border-top-color: #111827;
+}
+.card-share-btn:hover .tip { opacity: 1; }
+
+.badge-card-upcoming {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(37,99,235,0.88); color: #fff; backdrop-filter: blur(4px);
+}
+.badge-card-completed {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(21,128,61,0.88); color: #fff; backdrop-filter: blur(4px);
+}
+
+
+.badge-card-pending {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(217,119,6,0.90); color: #fff; backdrop-filter: blur(4px);
+}
+.badge-card-approved {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(37,99,235,0.88); color: #fff; backdrop-filter: blur(4px);
+}
+.badge-card-rejected {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 11px; border-radius: 999px; font-size: 13px; font-weight: 700;
+    background: rgba(220,38,38,0.90); color: #fff; backdrop-filter: blur(4px);
+}
+
+
 [x-cloak] { display:none !important; }
 </style>
 
-{{-- Hover tooltip (row) --}}
-<div id="adm-hover-tip"
-     class="fixed bg-[#111111] text-white text-[11px] font-semibold tracking-[.05em] px-3 py-1.5 rounded-[7px] whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)]"
-     style="transform: translate(12px, -110%);">
-    <i class="fas fa-eye mr-1.5"></i>View Details
-    <span class="absolute top-full left-3.5 border-[5px] border-transparent border-t-[#111111]"></span>
+{{-- Mouse-following cursor label (desktop only) --}}
+<div id="ev-cursor-label">
+    <svg viewBox="0 0 16 16"><path d="M1 8s3-5 7-5 7 5 7 5-3 5-7 5-7-5-7-5z"/><circle cx="8" cy="8" r="2.5"/></svg>
+    View Details
 </div>
 
 {{-- Action button tooltip --}}
 <div id="adm-action-tip"
-     class="fixed bg-[#111111] text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-md whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[99999] shadow-[0_4px_14px_rgba(0,0,0,.30)]"
-     style="transform: translate(-50%, -100%);">
-</div>
+     class="fixed bg-[#111111] text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-md whitespace-nowrap pointer-events-none opacity-0 transition-opacity duration-150 z-[9999]"
+     style="transform: translate(-50%, -100%);"></div>
+
 
 {{-- ── FLASH TOAST ── --}}
 <div x-data="{show:false,type:'success',msg:'',timer:null,display(t,m){this.type=t;this.msg=m;this.show=true;clearTimeout(this.timer);this.timer=setTimeout(()=>this.show=false,5000);}}"
@@ -602,24 +861,21 @@ select.adm-select-arrow {
 <div class="flex flex-col flex-1 gap-4 px-5 sm:px-7 lg:px-10 pt-6 pb-6 max-w-screen-2xl mx-auto w-full min-h-0">
 
     {{-- ── PAGE HEADER ── --}}
-    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 flex-shrink-0">
-        <div class="flex items-center gap-3">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <i class="fas fa-calendar-days text-white text-base"></i>
-            </div>
-            <div>
-                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Event Monitoring</h1>
-                <p class="text-sm text-[#7A3F91] font-normal flex flex-wrap items-center gap-x-1.5">
-                    Review and monitor submissions across
-                    <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-full text-xs">
-                        <i class="fas fa-building-columns text-[9px]"></i>
-                        all colleges
-                    </span>
-                </p>
-            </div>
+    <div class="ev-header">
+        <div class="ev-header-icon">
+            <i class="fas fa-calendar-days"></i>
+        </div>
+        <div class="ev-header-text">
+            <h1 class="text-xl font-semibold tracking-tight text-gray-900" style="user-select:none;-webkit-user-select:none;">Event Monitoring</h1>
+            <p class="text-sm font-semibold leading-relaxed mt-0.5 text-gray-700" style="user-select:none;-webkit-user-select:none;">
+                Review and monitor submissions across
+                <span class="font-semibold inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-violet-50 text-violet-700 border border-violet-200">
+                    <i class="fas fa-building-columns text-[9px]"></i> all colleges
+                </span>
+            </p>
         </div>
     </div>
+
 
     {{-- ── STAT CARDS ── --}}
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 flex-shrink-0">
@@ -669,306 +925,239 @@ select.adm-select-arrow {
 
     </div>
 
-    {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="adm-table-card rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
-        {{-- ── FILTER BAR ── --}}
-        <div data-adm-filter
-             class="bg-white border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
-             wire:loading.class="opacity-60" wire:target="search,filterStatus,filterSort,filterCollege">
+    {{-- ══ UNIFIED CARD-GRID BLOCK (same design as Upcoming Events) ══ --}}
+    <div class="adm-table-card ev-block rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
+         id="ev-content-block">
 
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#111111] z-[1]"></i>
-                <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
-                       placeholder="Search..."
-                       class="w-full pl-9 pr-4 py-2 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] placeholder-[#aaaaaa] font-normal
-                              hover:border-[#bbbbbb] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
-                       autocomplete="off" maxlength="100" spellcheck="false">
-            </div>
+        @php $hasActiveFilters = $search !== '' || $filterStatus !== '' || $filterCollege !== '' || $filterSort !== 'recent'; @endphp
+        <div class="bg-gray-50 border-b border-[#E8E0F0] px-3 sm:px-3.5 py-2.5 flex-shrink-0"
+             data-adm-filter
+             x-data="{ fOpen: false }">
+            <div class="ev-toolbar">
 
-            <div class="flex items-center gap-2 px-3 h-[38px] rounded-xl shrink-0 font-bold text-sm uppercase tracking-wide text-[#7a3f91]">
-                Filters
-            </div>
+                {{-- 1) Search --}}
+                <div class="ev-search"
+                     wire:ignore
+                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none"></i>
+                    <input type="text" x-model="q" @input.debounce.350ms="$wire.set('search',q)"
+                           placeholder="Search events…"
+                           class="filter-input w-full pl-8 pr-3 py-[7px] text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                  hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition"
+                           autocomplete="off" maxlength="100" spellcheck="false">
+                </div>
 
-            <select wire:model.live="filterStatus"
-                    class="py-2 px-3 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] font-normal
-                           hover:border-[#bbbbbb] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition adm-select-arrow">
-                <option value="">All Statuses</option>
-                <option value="PENDING">Pending</option>
-                <option value="APPROVED">Approved</option>
-                <option value="REJECTED">Rejected</option>
-                <option value="COMPLETED">Completed</option>
-            </select>
-
-            <select wire:model.live="filterCollege"
-                    class="py-2 px-3 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] font-normal
-                           hover:border-[#bbbbbb] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition adm-select-arrow hidden sm:block">
-                <option value="">All Colleges</option>
-                @foreach($this->colleges as $col)
-                    <option value="{{ $col }}">{{ $col }}</option>
-                @endforeach
-            </select>
-
-            {{-- Active pill: Status --}}
-            @if($filterStatus)
-            @php
-                $pillMap = [
-                    'PENDING'   => ['label' => 'Pending',   'cls' => 'bg-yellow-50 border-yellow-300 text-yellow-800'],
-                    'APPROVED'  => ['label' => 'Approved',  'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
-                    'REJECTED'  => ['label' => 'Rejected',  'cls' => 'bg-red-50 border-red-300 text-red-800'],
-                    'COMPLETED' => ['label' => 'Completed', 'cls' => 'bg-green-50 border-green-300 text-green-800'],
-                ];
-                $pill = $pillMap[$filterStatus] ?? null;
-            @endphp
-            @if($pill)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $pill['cls'] }}">
-                <i class="fas fa-filter text-[9px]"></i>
-                {{ $pill['label'] }}
-                <button wire:click="$set('filterStatus', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
+                {{-- 2) Filters toggle — small screens only --}}
+                <button type="button"
+                        @click="fOpen = !fOpen"
+                        :aria-expanded="fOpen.toString()"
+                        aria-controls="ev-filter-panel"
+                        class="ev-filter-toggle inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-[13px] font-semibold bg-white border transition active:scale-95 flex-shrink-0"
+                        :class="fOpen ? 'border-[#7a3f91] text-[#7a3f91]' : 'border-gray-200 text-gray-700'">
+                    <i class="fas fa-sliders text-xs"></i>
+                    <span>Filters</span>
+                    @if($hasActiveFilters)
+                        <span class="w-1.5 h-1.5 rounded-full bg-[#7a3f91]"></span>
+                    @endif
+                    <i class="fas fa-chevron-down text-[9px] transition-transform duration-200" :class="fOpen ? 'rotate-180' : ''"></i>
                 </button>
-            </span>
-            @endif
-            @endif
 
-            {{-- Active pill: College --}}
-            @if($filterCollege)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
-                <i class="fas fa-building-columns text-[9px]"></i>
-                {{ $filterCollege }}
-                <button wire:click="$set('filterCollege', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
+                {{-- 3) Filters panel --}}
+                <div id="ev-filter-panel" class="ev-filter-panel" :class="fOpen ? 'is-open' : ''">
 
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    @if($search === '' && $filterStatus === '' && $filterCollege === '' && $filterSort === 'recent') disabled @endif
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold text-[#111111]
-                           bg-white border border-[#E0E0E0] hover:bg-[#f5f5f5] transition active:scale-95 disabled:pointer-events-none disabled:opacity-40 cursor-pointer">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#111111]"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline">Reset</span>
-            </button>
+                    <span class="ev-filter-label">Filters</span>
 
-            {{-- Mobile college select --}}
-            <select wire:model.live="filterCollege"
-                    class="py-2 px-3 text-sm border border-[#E0E0E0] rounded-lg bg-white text-[#111111] flex-1 sm:hidden adm-select-arrow">
-                <option value="">All Colleges</option>
-                @foreach($this->colleges as $col)<option value="{{ $col }}">{{ $col }}</option>@endforeach
-            </select>
+                    <div class="ev-select-wrap">
+                        <select wire:model.live="filterStatus"
+                                aria-label="Filter events by status"
+                                class="filter-input ev-select py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                       hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
+                            <option value="">All Statuses</option>
+                            <option value="PENDING">Pending</option>
+                            <option value="APPROVED">Approved</option>
+                            <option value="REJECTED">Rejected</option>
+                            <option value="COMPLETED">Completed</option>
+                        </select>
+                    </div>
+
+                    <div class="ev-select-wrap">
+                        <select wire:model.live="filterCollege"
+                                aria-label="Filter events by college"
+                                class="filter-input ev-select py-[7px] px-3 text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
+                                       hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
+                            <option value="">All Colleges</option>
+                            @foreach($this->colleges as $col)
+                                <option value="{{ $col }}">{{ $col }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+
+                    <button wire:click="resetFilters"
+                            wire:loading.attr="disabled"
+                            wire:loading.class="opacity-60 cursor-wait"
+                            wire:target="resetFilters"
+                            data-ev-reset
+                            @disabled(!$hasActiveFilters)
+                            class="ev-reset inline-flex items-center gap-1.5 px-3 py-[7px] rounded-lg text-xs font-semibold flex-shrink-0
+                                   border transition active:scale-95
+                                   {{ $hasActiveFilters
+                                        ? 'bg-white border-gray-200 text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
+                                        : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed' }}">
+                        <span wire:loading.remove wire:target="resetFilters"><i class="fas fa-rotate-left text-xs"></i></span>
+                        <span wire:loading wire:target="resetFilters"><i class="fas fa-spinner fa-spin text-xs" style="color:#7a3f91;"></i></span>
+                        <span>Reset</span>
+                    </button>
+                </div>
+            </div>
         </div>
 
-        {{-- ── TABLE WRAPPER ── --}}
-        <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+        {{-- Loading overlay --}}
+        <div class="hidden absolute inset-0 z-30 items-center justify-center pointer-events-none"
+             wire:loading.flex wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
+            <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
+        </div>
 
-            {{-- Centered loading spinner — mirrors Manage Event (Director)'s table overlay --}}
-            <div class="absolute inset-0 z-20 items-center justify-center hidden"
-                 wire:loading.flex wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
-                <i class="fas fa-spinner fa-spin" style="font-size:38px; color:#7a3f91;"></i>
-            </div>
+        {{-- Cards --}}
+        <div class="bg-white p-3 sm:p-4 relative flex-1 min-h-0 overflow-y-auto adm-scroll transition-opacity duration-200"
+             wire:loading.class="opacity-40 pointer-events-none"
+             wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage">
 
             @if($this->events->count() > 0)
-            <div class="flex-1 min-h-0 overflow-x-hidden overflow-y-auto adm-scroll bg-white transition-opacity duration-200"
-                 wire:loading.class="opacity-50" wire:target="search,filterStatus,filterSort,filterCollege,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
-                {{-- ── DESKTOP / TABLET: table view ── --}}
-                <table class="w-full bg-white border-collapse hidden md:table table-fixed">
-                    <colgroup>
-                        <col style="width:32%;"><col style="width:20%;"><col style="width:22%;"><col style="width:14%;"><col style="width:12%;">
-                    </colgroup>
-                    <thead class="sticky top-0 z-10 bg-white" style="box-shadow: 0 1px 0 #e0e0e0;">
-                        <tr>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Event Title</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Date &amp; Time</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-left text-xs font-semibold uppercase tracking-widest text-[#555555]">Coordinator</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 sm:px-5 py-3.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-[#F5F5F5]">
-                        @foreach($this->events as $index => $event)
-                        @php
-                            $isCompleted = $event->status === 'COMPLETED';
-                            $isApproved  = $event->status === 'APPROVED';
-                            $isPending   = $event->status === 'PENDING';
-                            $isRejected  = $event->status === 'REJECTED';
-                            $eventDate   = $event->event_date->setTimezone('Asia/Manila');
-                            $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
-                        @endphp
-                        <tr class="bg-white cursor-pointer transition-colors duration-100 hover:bg-[#f5f0fa]"
-                            wire:click="viewEvent({{ $event->id }})"
-                            wire:key="adm-event-row-{{ $event->id }}"
-                            data-adm-row>
+            <div class="ev-card-grid">
+                @foreach($this->events as $event)
+                @php
+                    $isCompleted = $event->status === 'COMPLETED';
+                    $isApproved  = $event->status === 'APPROVED';
+                    $isPending   = $event->status === 'PENDING';
+                    $isRejected  = $event->status === 'REJECTED';
+                    $eventDate   = $event->event_date->setTimezone('Asia/Manila');
+                    $evPhotoUrl  = $this->eventPhotoUrl($event);
+                    $hasPhoto    = !empty($evPhotoUrl);
+                    $descPreview = $event->description ? \Illuminate\Support\Str::limit(strip_tags($event->description), 90) : null;
+                    $canShare    = $isApproved || $isCompleted;
+                    $orgName     = $event->organizer?->name ?? 'Alumni Director';
+                @endphp
 
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($event->title, $search) !!}</p>
-                                <p class="text-xs mt-0.5 text-[#666666] truncate">{{ $eventDate->diffForHumans() }}</p>
-                            </td>
+                <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
+                            cursor-pointer relative select-none flex flex-col group"
+                     wire:key="adm-event-card-{{ $event->id }}"
+                     data-ev-card
+                     wire:click="viewEvent({{ $event->id }})"
+                     role="button" tabindex="0"
+                     onkeypress="if(event.key==='Enter')this.click()">
 
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                <p class="text-sm font-semibold text-[#111111] truncate">{{ $eventDate->format('M d, Y') }}</p>
-                                <p class="text-xs mt-0.5 text-[#555555] truncate">
-                                    {{ $eventDate->format('g:i A') }}
-                                    @if($event->event_end_date)
-                                        &ndash; {{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}
-                                    @endif
-                                </p>
-                            </td>
+                    <div class="ev-card-spinner"><span></span><span></span><span></span></div>
 
-                            <td class="px-4 sm:px-5 py-4 overflow-hidden">
-                                @if($event->organizer)
-                                    <p class="text-sm font-semibold text-[#111111] truncate">{{ $event->organizer->name }}</p>
-                                    <p class="text-xs mt-0.5 text-[#7a3f91] font-semibold truncate">{{ $event->organizer->department }}</p>
-                                @else
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-[#f5eef9] text-[#7a3f91] border border-[#d4aaeb] rounded-full text-xs font-bold whitespace-nowrap">
-                                        Alumni Director
-                                    </span>
-                                @endif
-                            </td>
-
-                            <td class="px-4 sm:px-5 py-4 text-center whitespace-nowrap">
-                                @if($isCompleted)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
-                                        <i class="fas fa-flag-checkered text-[9px] mr-1"></i>Completed
-                                    </span>
-                                @elseif($isApproved)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
-                                        <i class="fas fa-circle-check text-[9px] mr-1"></i>Approved
-                                    </span>
-                                @elseif($isPending)
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
-                                        <i class="fas fa-hourglass-half text-[9px] mr-1"></i>Pending
-                                    </span>
-                                @else
-                                    <span class="inline-flex items-center text-xs font-semibold px-2.5 py-1.5 rounded-xl border border-red-200 bg-red-50 text-red-700 whitespace-nowrap">
-                                        <i class="fas fa-circle-xmark text-[9px] mr-1"></i>Rejected
-                                    </span>
-                                @endif
-                            </td>
-
-                            <td class="px-4 sm:px-5 py-4 text-center overflow-visible">
-                                <div class="flex items-center justify-center gap-1.5" @click.stop>
-                                    @if($isApproved || $isCompleted)
-                                        <span class="adm-share-tip-wrap">
-                                            <button wire:click.stop="openShareModal({{ $event->id }})"
-                                                    wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }}),viewEvent({{ $event->id }})"
-                                                    data-adm-action
-                                                    class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer
-                                                           bg-blue-100 text-blue-600 border border-blue-200 hover:bg-white hover:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
-                                                <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
-                                                <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
-                                            </button>
-                                            <span class="adm-share-tip-bubble">Share</span>
-                                        </span>
-                                    @else
-                                        <span class="text-xs text-[#bbbbbb]">&mdash;</span>
-                                    @endif
-                                </div>
-                            </td>
-                        </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-
-                {{-- ── MOBILE: stacked card list ── --}}
-                <div class="block md:hidden">
-                    @foreach($this->events as $index => $event)
-                    @php
-                        $isCompleted = $event->status === 'COMPLETED';
-                        $isApproved  = $event->status === 'APPROVED';
-                        $isPending   = $event->status === 'PENDING';
-                        $isRejected  = $event->status === 'REJECTED';
-                        $eventDate   = $event->event_date->setTimezone('Asia/Manila');
-                        $rowNum      = ($this->events->currentPage() - 1) * $this->events->perPage() + $index + 1;
-                    @endphp
-                    <div class="adm-mrow"
-                         wire:click="viewEvent({{ $event->id }})"
-                         wire:key="adm-event-mrow-{{ $event->id }}">
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-start justify-between gap-2">
-                                <p class="font-semibold text-sm leading-snug line-clamp-2 text-[#111111]">{!! $this->highlight($event->title, $search) !!}</p>
-                                <span class="flex-shrink-0">
-                                    @if($isCompleted)
-                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-green-200 bg-green-50 text-green-700 whitespace-nowrap">
-                                            <i class="fas fa-flag-checkered text-[8px] mr-1"></i>Completed
-                                        </span>
-                                    @elseif($isApproved)
-                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 whitespace-nowrap">
-                                            <i class="fas fa-circle-check text-[8px] mr-1"></i>Approved
-                                        </span>
-                                    @elseif($isPending)
-                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 whitespace-nowrap">
-                                            <i class="fas fa-hourglass-half text-[8px] mr-1"></i>Pending
-                                        </span>
-                                    @else
-                                        <span class="inline-flex items-center text-[10px] font-semibold px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 whitespace-nowrap">
-                                            <i class="fas fa-circle-xmark text-[8px] mr-1"></i>Rejected
-                                        </span>
-                                    @endif
-                                </span>
-                            </div>
-                            <p class="text-xs mt-1 text-[#666666]">
-                                {{ $eventDate->format('M d, Y · g:i A') }}
-                            </p>
-                            <div class="flex items-center justify-between mt-2">
-                                <p class="text-xs text-[#7a3f91] font-semibold truncate">
-                                    {{ $event->organizer?->name ?? 'Alumni Director' }}
-                                </p>
-                                @if($isApproved || $isCompleted)
-                                    <button wire:click.stop="openShareModal({{ $event->id }})"
-                                            wire:loading.attr="disabled" wire:target="openShareModal({{ $event->id }}),viewEvent({{ $event->id }})"
-                                            aria-label="Share"
-                                            class="w-8 h-8 inline-flex items-center justify-center rounded-lg text-xs font-semibold transition cursor-pointer flex-shrink-0
-                                                   bg-blue-100 text-blue-600 border border-blue-200 active:bg-white active:border-blue-400 disabled:opacity-60 disabled:cursor-wait">
-                                        <i class="fas fa-share-nodes" wire:loading.remove wire:target="openShareModal({{ $event->id }})"></i>
-                                        <i class="fas fa-spinner fa-spin" wire:loading wire:target="openShareModal({{ $event->id }})"></i>
-                                    </button>
-                                @endif
-                            </div>
+                    @if($hasPhoto)
+                    <div class="relative w-full flex-shrink-0 bg-white" style="height:150px;">
+                        <img src="{{ $evPhotoUrl }}" alt="{{ $event->title }}"
+                             loading="lazy"
+                             class="w-full h-full object-contain"
+                             onerror="this.onerror=null;this.style.display='none';">
+                        <div class="absolute top-2.5 right-2.5">
+                            @if($isCompleted)
+                                <span class="badge-card-completed"><i class="fas fa-flag-checkered text-[11px]"></i> Completed</span>
+                            @elseif($isApproved)
+                                <span class="badge-card-approved"><i class="fas fa-circle-check text-[11px]"></i> Approved</span>
+                            @elseif($isPending)
+                                <span class="badge-card-pending"><i class="fas fa-hourglass-half text-[11px]"></i> Pending</span>
+                            @else
+                                <span class="badge-card-rejected"><i class="fas fa-circle-xmark text-[11px]"></i> Rejected</span>
+                            @endif
                         </div>
                     </div>
-                    @endforeach
+                    @else
+                    <div class="relative w-full flex items-center justify-center flex-shrink-0"
+                         style="height:100px; background:linear-gradient(135deg,#7a3f91 0%,#4a1f6a 100%);">
+                        <i class="fas fa-calendar-days text-white/20 text-3xl"></i>
+                        <div class="absolute top-2.5 right-2.5">
+                            @if($isCompleted)
+                                <span class="badge-card-completed"><i class="fas fa-flag-checkered text-[11px]"></i> Completed</span>
+                            @elseif($isApproved)
+                                <span class="badge-card-approved"><i class="fas fa-circle-check text-[11px]"></i> Approved</span>
+                            @elseif($isPending)
+                                <span class="badge-card-pending"><i class="fas fa-hourglass-half text-[11px]"></i> Pending</span>
+                            @else
+                                <span class="badge-card-rejected"><i class="fas fa-circle-xmark text-[11px]"></i> Rejected</span>
+                            @endif
+                        </div>
+                    </div>
+                    @endif
+
+                    <div class="flex flex-col flex-1 p-3.5 gap-2">
+
+                        <h3 class="font-semibold text-[15px] leading-snug line-clamp-2" style="color:#333333;">{!! $this->highlight($event->title, $search) !!}</h3>
+
+                        @if($event->target_participants)
+                        <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
+                            <i class="fas fa-users text-[11px]" style="color:#999;"></i>{{ \Illuminate\Support\Str::limit($event->target_participants, 40) }}
+                        </p>
+                        @else
+                        <p class="text-[13px] italic" style="color:#333333;">No target specified</p>
+                        @endif
+
+                        <p class="text-[13px] truncate flex items-center gap-1.5" style="color:#333333;">
+                            <i class="fas fa-calendar-day text-[11px]" style="color:#999;"></i>
+                            {{ $eventDate->format('M d, Y · g:i A') }}@if($event->event_end_date) &ndash; {{ $event->event_end_date->setTimezone('Asia/Manila')->format('g:i A') }}@endif
+                        </p>
+
+                        @if($descPreview)
+                        <p class="text-[13px] line-clamp-2 leading-relaxed" style="color:#333333;">{{ $descPreview }}</p>
+                        @endif
+
+                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto gap-2">
+                            <div class="flex flex-col gap-0.5 min-w-0">
+                                <span class="text-[12px]" style="color:#333333;">{{ \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila')->diffForHumans() }}</span>
+                                <span class="inline-flex items-center gap-1 text-[12px] font-semibold truncate" style="color:#7a3f91;">
+                                    <i class="fas fa-user-tie text-[10px]"></i>
+                                    <span class="truncate">{{ $orgName }}</span>
+                                </span>
+                            </div>
+
+                            @if($canShare)
+                            <button type="button"
+                                    data-ev-share
+                                    wire:click.stop="openShareModal({{ $event->id }})"
+                                    wire:loading.attr="disabled"
+                                    wire:target="openShareModal({{ $event->id }})"
+                                    class="card-share-btn">
+                                <span wire:loading.remove wire:target="openShareModal({{ $event->id }})"><i class="fas fa-share-nodes text-[11px]"></i></span>
+                                <span wire:loading wire:target="openShareModal({{ $event->id }})"><i class="fas fa-spinner fa-spin text-[11px]" style="color:#1d4ed8;"></i></span>
+                                <span class="tip">Share</span>
+                            </button>
+                            @endif
+                        </div>
+                    </div>
                 </div>
+                @endforeach
             </div>
 
             @else
-            <div class="flex-1 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
-                <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-[#f2f2f2]">
-                    <i class="fas fa-calendar-days text-xl text-[#111111]"></i>
+            <div class="flex flex-col items-center justify-center gap-4 text-center px-6 py-16 h-full">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
+                    <i class="fas fa-calendar-days text-xl text-gray-400"></i>
                 </div>
                 <div>
-                    <p class="font-bold text-base text-[#111111]">
+                    <p class="font-semibold text-base text-gray-700">
                         @if($search || $filterStatus || $filterCollege) No events match your filters
-                        @else No events yet
-                        @endif
+                        @else No events yet @endif
                     </p>
-                    <p class="text-sm mt-1 text-[#111111]">
+                    <p class="text-sm mt-1 text-gray-500">
                         @if($search || $filterStatus || $filterCollege) Try clearing your filters to see all events.
-                        @else No events have been submitted yet.
-                        @endif
+                        @else No events have been submitted yet. @endif
                     </p>
                 </div>
                 @if($search || $filterStatus || $filterCollege)
-                    <button wire:click="resetFilters"
+                    <button wire:click="resetFilters" data-ev-reset
                             class="px-4 py-2 rounded-xl text-sm font-bold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
                         <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
                     </button>
                 @endif
             </div>
             @endif
-
         </div>
+
 
         {{-- ── PAGINATION ── --}}
         @php
@@ -2013,5 +2202,95 @@ select.adm-select-arrow {
             detail: { id: payload.id, message: message }
         }));
     });
+})();
+</script>
+
+<script>
+(function () {
+    function isTouchOrSmall() {
+        return window.matchMedia('(max-width: 767px)').matches || window.matchMedia('(pointer: coarse)').matches;
+    }
+    function init() {
+        var label = document.getElementById('ev-cursor-label');
+        var activeCard = null;
+
+        function show() {
+            if (!label || isTouchOrSmall()) return;
+            if (document.querySelector('[data-ev-card].is-loading')) return;
+            label.style.opacity = '1'; label.style.visibility = 'visible';
+        }
+        function hide() {
+            if (!label) return;
+            label.style.opacity = '0'; label.style.visibility = 'hidden';
+        }
+        function onMouseMove(e) {
+            if (!label) return;
+            label.style.left = (e.clientX + 16) + 'px';
+            label.style.top  = (e.clientY + 14) + 'px';
+            if (activeCard && !activeCard.contains(e.target)) hide();
+        }
+        function onEnter(e) {
+            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+            activeCard = e.currentTarget;
+            document.addEventListener('mousemove', onMouseMove);
+            show();
+        }
+        function onLeave(e) {
+            if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) return;
+            activeCard = null; hide();
+            document.removeEventListener('mousemove', onMouseMove);
+        }
+        function lockCards(clicked) {
+            document.querySelectorAll('[data-ev-card]').forEach(function (el) {
+                if (el === clicked) { el.classList.remove('is-blocked'); el.classList.add('is-loading'); }
+                else { el.classList.remove('is-loading'); el.classList.add('is-blocked'); }
+            });
+        }
+        function clearCards() {
+            document.querySelectorAll('[data-ev-card]').forEach(function (el) {
+                el.classList.remove('is-loading', 'is-blocked');
+            });
+        }
+        function onClick(e) {
+            if (e.target.closest('[data-ev-share]')) return;
+            var card = e.currentTarget;
+            if (card.classList.contains('is-blocked')) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+            var loading = document.querySelector('[data-ev-card].is-loading');
+            if (loading && loading !== card) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+            lockCards(card); hide();
+        }
+        function bind() {
+            document.querySelectorAll('[data-ev-card]').forEach(function (card) {
+                if (card._evBound) return;
+                card._evBound = true;
+                card.addEventListener('mouseenter', onEnter);
+                card.addEventListener('mouseleave', onLeave);
+                card.addEventListener('click', onClick);
+                var sb = card.querySelector('[data-ev-share]');
+                if (sb) {
+                    sb.addEventListener('mouseenter', hide);
+                    sb.addEventListener('mouseleave', function () { if (activeCard) show(); });
+                }
+            });
+        }
+        var queued = false;
+        function queueRebind() {
+            if (queued) return; queued = true;
+            requestAnimationFrame(function () { queued = false; bind(); });
+        }
+        bind();
+        window.addEventListener('pageshow', clearCards);
+        document.addEventListener('livewire:navigated', function () { clearCards(); queueRebind(); });
+        document.addEventListener('livewire:update', function () { hide(); activeCard = null; });
+        if (window.Livewire) {
+            window.Livewire.hook('morph.updated', queueRebind);
+            try {
+                window.Livewire.hook('commit', function (c) {
+                    c.succeed(clearCards); c.fail(clearCards); queueRebind();
+                });
+            } catch (e) {}
+        }
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
 </script>

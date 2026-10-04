@@ -383,7 +383,7 @@ new class extends Component {
         </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 flex-1 min-h-0 items-start">
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-5 flex-1 min-h-0 items-start mt-8 lg:mt-10">
 
         {{-- ── Add / Edit Form ──────────────────────────────────────── --}}
         <div class="lg:col-span-2">
