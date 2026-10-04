@@ -523,6 +523,11 @@ new class extends Component {
 
 /* ── Main grid ── */
 .dir-main-grid { display: grid; grid-template-columns: 300px 1fr; gap: 1rem; align-items: start; }
+/* Desktop: nudge the profile/stat cards down a bit so the block sits
+   visually centered under the greeting (greeting itself is untouched). */
+@media (min-width: 1024px) {
+    .dir-main-grid { margin-top: clamp(0.75rem, 7vh, 4.5rem); }
+}
 @media (max-width: 1023px) {
     .dir-main-grid { grid-template-columns: 1fr; gap: 0.85rem; }
 }

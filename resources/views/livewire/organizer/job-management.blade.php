@@ -2102,7 +2102,7 @@ select.form-input {
 
 /* ── Disabled select styling (used for locked "Industry" field when PHILCST) ── */
 select:disabled {
-    background-color: #f3f4f6 !important;
+    background-color: #ffffff !important;
     color: #999999 !important;
     cursor: not-allowed !important;
     opacity: 1;
@@ -2186,7 +2186,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     border-radius: 12px;
     transition: border-color 0.2s, background 0.2s;
     cursor: pointer;
-    background: #fafafa;
+    background: #ffffff;
 }
 .img-upload-zone:hover {
     border-color: #7a3f91;
@@ -2219,7 +2219,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
 .view-field-display {
     padding: 0.5rem 0.75rem;
-    background: #fafafa;
+    background: #ffffff;
     border: 1.5px solid #e8e0f0;
     border-radius: 0.75rem;
     font-size: 0.875rem;

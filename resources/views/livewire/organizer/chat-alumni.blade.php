@@ -2579,10 +2579,12 @@ new class extends Component {
             }
         }
 
-        // Coordinators of this department (never yourself)
+        // Coordinators (never yourself, ACTIVE only - inactive ones can't be
+        // mentioned). Staff room: every active coordinator is a member, so all
+        // of them show up. Alumni rooms: only the coordinators of this department.
         $cQ = DB::table('organizer')->where('status','ACTIVE')->whereNull('deleted_at')
-            ->where('department', $this->department)
             ->where('id', '!=', $this->coordinatorId);
+        if (! $this->isStaffRoom) $cQ->where('department', $this->department);
         $applyTerms($cQ);
         foreach ($cQ->limit($hardCap)->get(['id','first_name','last_name','profile_photo']) as $o) {
             $items[] = ['id'=>(int)$o->id,'name'=>trim($o->first_name.' '.$o->last_name),'type'=>'coordinator','sub'=>'Coordinator','photo'=>$this->resolvePhotoUrl($o->profile_photo ?? null)];
@@ -2630,9 +2632,10 @@ new class extends Component {
             if (! str_contains($bodyLc, '@' . mb_strtolower($name))) continue;
 
             $ok = match ($type) {
-                'alumni'      => DB::table('alumni')->where('id', $id)->exists(),
-                'coordinator' => DB::table('organizer')->where('id', $id)->exists(),
-                'director'    => DB::table('director')->where('id', $id)->exists(),
+                'alumni'      => ! $this->isStaffRoom && DB::table('alumni')->where('id', $id)->whereNull('deleted_at')->exists(),
+                'coordinator' => DB::table('organizer')->where('id', $id)->where('status', 'ACTIVE')->whereNull('deleted_at')
+                                    ->when(! $this->isStaffRoom, fn($q) => $q->where('department', $this->department))->exists(),
+                'director'    => $this->isStaffRoom && DB::table('director')->where('id', $id)->where('status', 'ACTIVE')->whereNull('deleted_at')->exists(),
             };
             if (! $ok) continue;
             $add($type === 'coordinator' ? 'organizer' : $type, $id);
@@ -2650,18 +2653,22 @@ new class extends Component {
 
                 if (! $this->isStaffRoom && $this->room) {
                     if ($this->isCollegeRoom && ! empty($this->deptCourseCodes)) {
-                        $fa = DB::table('alumni')->whereIn('course_code', $this->deptCourseCodes)->whereRaw($nameSql, [$like])->value('id');
+                        $fa = DB::table('alumni')->whereNull('deleted_at')->whereIn('course_code', $this->deptCourseCodes)->whereRaw($nameSql, [$like])->value('id');
                     } else {
-                        $aq = DB::table('alumni')->where('course_code', $this->room['course_code'])->whereRaw($nameSql, [$like]);
+                        $aq = DB::table('alumni')->whereNull('deleted_at')->where('course_code', $this->room['course_code'])->whereRaw($nameSql, [$like]);
                         if (! $this->isCourseRoom) $aq->where('batch', $this->room['batch']);
                         $fa = $aq->value('id');
                     }
                     if ($fa) $add('alumni', (int) $fa);
                 }
-                $fc = DB::table('organizer')->whereRaw($nameSql, [$like])->value('id');
+                $fcQ = DB::table('organizer')->where('status', 'ACTIVE')->whereNull('deleted_at')->whereRaw($nameSql, [$like]);
+                if (! $this->isStaffRoom) $fcQ->where('department', $this->department);
+                $fc = $fcQ->value('id');
                 if ($fc) $add('organizer', (int) $fc);
-                $fd = DB::table('director')->where('status','ACTIVE')->whereNull('deleted_at')->whereRaw($nameSql, [$like])->value('id');
-                if ($fd) $add('director', (int) $fd);
+                if ($this->isStaffRoom) {
+                    $fd = DB::table('director')->where('status','ACTIVE')->whereNull('deleted_at')->whereRaw($nameSql, [$like])->value('id');
+                    if ($fd) $add('director', (int) $fd);
+                }
             }
         }
     }
@@ -3472,10 +3479,9 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block"></span>
                         <span class="text-white/75 text-xs font-semibold">{{ $onlineCount }}/{{ $totalCount }} online</span>
                     </div>
-                    <span class="text-white/30 text-xs hidden sm:inline">·</span>
+                    @if(! $isStaffRoom)<span class="text-white/30 text-xs hidden sm:inline">·</span>@endif
                     @endif
                     @if($isStaffRoom)
-                    <span class="text-white/60 text-xs font-semibold items-center gap-1 hidden sm:flex"><i class="fa-solid fa-lock text-[10px]"></i>Internal · Directors + Coordinators</span>
                     @elseif($isCollegeRoom)
                     <span class="text-white/60 text-xs font-semibold items-center gap-1 hidden sm:flex"><i class="fa-solid fa-school text-[10px]"></i>All Courses & Batches · {{ $totalCount }} members total</span>
                     @elseif($isCourseRoom)
