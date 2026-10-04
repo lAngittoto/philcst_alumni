@@ -1494,7 +1494,7 @@ select.tw-select-arrow[disabled] {
 .dir-mrow:active { background: #F7F4FA; }
 
 /* ══ Table container height — mirrors event-organizer's flex-fill card ══ */
-.dir-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.dir-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0%; overflow: hidden; }
 
 /* ══ Event Overview — same flex-fill card as Job Overview (header, filter bar and
    pagination stay fixed; only the table body scrolls) ══ */
@@ -1709,7 +1709,7 @@ select.tw-select-arrow[disabled] {
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}
-        <div class="relative flex-1 min-h-0 bg-white">
+        <div class="relative flex-1 min-h-0 bg-white" style="min-height:0;">
 
             <div class="absolute inset-0 z-20 items-center justify-center hidden"
                  wire:loading.flex wire:target="search,filterStatus,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
@@ -1717,7 +1717,7 @@ select.tw-select-arrow[disabled] {
             </div>
 
             @if($this->events->count() > 0)
-            <div id="evt-table-scroll" class="scroll-c h-full overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
+            <div id="evt-table-scroll" class="scroll-c absolute inset-0 overflow-y-auto overflow-x-hidden bg-white transition-opacity duration-200"
                  wire:loading.class="opacity-50" wire:target="search,filterStatus,filterCollege,filterSort,resetFilters,previousPage,nextPage,gotoPage,viewEvent">
 
                 {{-- ── DESKTOP / TABLET: table view ── --}}
@@ -1971,7 +1971,7 @@ select.tw-select-arrow[disabled] {
             </div>
 
             @else
-            <div class="h-full min-h-[240px] flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
+            <div class="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center px-6 py-16 bg-white">
                 <div class="w-14 h-14 rounded-2xl flex items-center justify-center bg-gray-100">
                     <i class="fas fa-calendar-days text-xl text-gray-400"></i>
                 </div>

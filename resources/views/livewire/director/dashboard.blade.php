@@ -206,22 +206,32 @@ new class extends Component {
     {
         $this->savingEmail = true;
 
-        $this->validate([
-            'directorEmail' => [
-                'required',
-                'email',
-                'max:255',
-                \Illuminate\Validation\Rule::unique('users', 'email')->ignore(auth()->id()),
-            ],
-        ]);
+        try {
+            $this->validate([
+                'directorEmail' => [
+                    'required',
+                    'email',
+                    'max:255',
+                    \Illuminate\Validation\Rule::unique('users', 'email')->ignore(auth()->id()),
+                ],
+            ]);
 
-        DB::table('director')->where('user_id', auth()->id())
-            ->update(['email' => $this->directorEmail]);
+            DB::table('director')->where('user_id', auth()->id())
+                ->update(['email' => $this->directorEmail]);
 
-        auth()->user()->update(['email' => $this->directorEmail]);
+            auth()->user()->update(['email' => $this->directorEmail]);
 
-        $this->savingEmail  = false;
-        $this->editingEmail = false;
+            // Keep the "saving" dots on screen long enough to be seen —
+            // the DB write is near-instant, so without this the loader
+            // flashes and disappears before the user notices it.
+            usleep(600000);
+
+            $this->editingEmail = false;
+        } finally {
+            // Always reset, even if validation throws (previously the flag
+            // stayed true after a validation error).
+            $this->savingEmail = false;
+        }
     }
 
     private function loadStats(): void
@@ -566,6 +576,8 @@ new class extends Component {
 .dir-email-save-btn { min-width: 62px; }
 .dir-email-save-spinner { z-index: 5; }
 .dir-email-save-dot {
+    display: inline-block;
+    flex-shrink: 0;
     width: 5px;
     height: 5px;
     border-radius: 50%;
@@ -885,7 +897,7 @@ new class extends Component {
                                         style="font-size:10.5px;">
 
                                     {{-- Purple "..." dot loader — shown while wire:click="saveEmail" is in flight --}}
-                                    <span wire:loading wire:target="saveEmail"
+                                    <span wire:loading.flex wire:target="saveEmail"
                                           class="dir-email-save-spinner absolute inset-0 flex items-center justify-center gap-1 rounded-md bg-[#7A3F91]">
                                         <span class="dir-email-save-dot"></span>
                                         <span class="dir-email-save-dot"></span>
