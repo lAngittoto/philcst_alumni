@@ -1750,10 +1750,7 @@ new class extends Component {
                      style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                     <i class="fas fa-chart-column text-white text-base"></i>
                 </div>
-                <div>
-                    <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
-                    <p class="text-[#7A3F91] text-xs sm:text-sm font-normal mt-0.5">System-wide alumni employment analytics &amp; records</p>
-                </div>
+
             </div>
 
             {{-- Hidden source for the "Report will include" text inside the

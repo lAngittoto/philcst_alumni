@@ -1571,10 +1571,7 @@ public function closeImportModal(): void
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                 <i class="fas fa-user-plus text-white text-base"></i>
             </div>
-            <div class="min-w-0">
-                <h1 class="text-xl sm:text-2xl font-semibold text-[#333333] leading-tight">Register Alumni</h1>
-                <p class="text-xs sm:text-sm font-normal" style="color:#7A3F91;">Add new alumni to the system with their details and credentials</p>
-            </div>
+
         </div>
 
         <div class="import-btn-wrap">
