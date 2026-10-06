@@ -599,26 +599,14 @@ new class extends Component {
          data-emp-route="{{ route('registrar.employment.tracking') }}">
     </div>
 
-    <div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-4 max-w-screen-2xl mx-auto">
-
-        {{-- PAGE HEADER --}}
-        <div class="flex items-center gap-3 mb-4">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <i class="fas fa-gauge-high text-white text-base"></i>
-            </div>
-            <div>
-                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Registrar Dashboard</h1>
-                <p class="text-sm font-semibold" style="color:#7A3F91;">{{ now()->format('l, F j, Y') }}</p>
-            </div>
-        </div>
+    <div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-4 max-w-screen-2xl mx-auto w-full">
 
         {{-- ─── STAT CARDS ─────────────────────────────────────── --}}
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-5 mt-0">
 
             {{-- Total Alumni --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=all"
-               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 sm:p-5
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -637,10 +625,10 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">Total</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalAlumni) }}</p>
-                <p class="text-sm text-[#333333] mt-1 font-normal">Alumni Records</p>
+                <p class="text-4xl sm:text-5xl font-bold text-[#111111] leading-none">{{ number_format($this->totalAlumni) }}</p>
+                <p class="text-base text-[#333333] mt-1 font-medium">Alumni Records</p>
                 @if($this->newThisMonth > 0)
-                    <p class="text-xs text-[#7A3F91] font-semibold mt-2 flex items-center gap-1">
+                    <p class="text-xs sm:text-sm text-[#7A3F91] font-semibold mt-2 flex items-center gap-1">
                         <i class="fas fa-arrow-trend-up text-sm"></i> +{{ $this->newThisMonth }} this month
                     </p>
                 @endif
@@ -648,7 +636,7 @@ new class extends Component {
 
             {{-- Profile Complete --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=complete"
-               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 sm:p-5
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -666,18 +654,18 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase">Complete</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileComplete) }}</p>
-                <p class="text-sm text-[#333333] mt-1 font-normal">Profiles Filled</p>
+                <p class="text-4xl sm:text-5xl font-bold text-[#111111] leading-none">{{ number_format($this->profileComplete) }}</p>
+                <p class="text-base text-[#333333] mt-1 font-medium">Profiles Filled</p>
                 <div class="mt-2 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
                     <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
                          style="width:{{ $this->completionRate }}%;"></div>
                 </div>
-                <p class="text-xs text-emerald-600 font-semibold mt-1">{{ $this->completionRate }}% completion rate</p>
+                <p class="text-xs sm:text-sm text-emerald-600 font-semibold mt-1">{{ $this->completionRate }}% completion rate</p>
             </a>
 
             {{-- Profile Pending --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=incomplete"
-               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 sm:p-5
                       hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -695,10 +683,10 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Pending</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileIncomplete) }}</p>
-                <p class="text-sm text-[#333333] mt-1 font-normal">Pending Profiles</p>
+                <p class="text-4xl sm:text-5xl font-bold text-[#111111] leading-none">{{ number_format($this->profileIncomplete) }}</p>
+                <p class="text-base text-[#333333] mt-1 font-medium">Pending Profiles</p>
                 @if($this->totalAlumni > 0)
-                    <p class="text-xs text-amber-600 font-semibold mt-2">
+                    <p class="text-xs sm:text-sm text-amber-600 font-semibold mt-2">
                         {{ round(($this->profileIncomplete / $this->totalAlumni) * 100) }}% still need info
                     </p>
                 @endif
@@ -707,7 +695,7 @@ new class extends Component {
             {{-- Total Programs --}}
             <div wire:click="openAlumniModal('courses')"
                  wire:loading.class="is-loading" wire:target="openAlumniModal('courses')"
-                 class="dash-card-clickable group relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+                 class="dash-card-clickable group relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 sm:p-5
                         hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985]">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -725,9 +713,9 @@ new class extends Component {
                     </div>
                     <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500 text-white border border-blue-500 uppercase">Programs</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
-                <p class="text-sm text-[#333333] mt-1 font-normal">All Programs</p>
-                <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
+                <p class="text-4xl sm:text-5xl font-bold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
+                <p class="text-base text-[#333333] mt-1 font-medium">All Programs</p>
+                <p class="text-xs sm:text-sm text-blue-600 font-semibold mt-2 flex items-center gap-1">
                     More on Programs <i class="fas fa-chevron-right text-[10px]"></i>
                 </p>
             </div>

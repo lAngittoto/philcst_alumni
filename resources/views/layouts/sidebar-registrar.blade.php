@@ -1808,10 +1808,35 @@
              Pages can override via @section('page_title'), @section('page_subtitle')
              and @section('page_icon'); the dashboard gets its title by default. --}}
         @php
-            $isDashboardRoute = request()->routeIs('registrar.dashboard');
-            $pageTitle    = trim($__env->yieldContent('page_title'))    ?: ($isDashboardRoute ? 'Registrar Dashboard' : '');
-            $pageSubtitle = trim($__env->yieldContent('page_subtitle')) ?: ($isDashboardRoute ? now()->format('l, F j, Y') : '');
-            $pageIcon     = trim($__env->yieldContent('page_icon'))     ?: 'gauge-high';
+            $currentRoute = request()->route()?->getName() ?? '';
+
+            $routeMeta = [
+                'registrar.dashboard' => [
+                    'title'    => 'Registrar Dashboard',
+                    'subtitle' => now()->format('l, F j, Y'),
+                    'icon'     => 'gauge-high',
+                ],
+                'registrar.alumni' => [
+                    'title'    => 'Alumni Records',
+                    'subtitle' => 'View and manage alumni information and records.',
+                    'icon'     => 'users',
+                ],
+                'registrar.alumni.register' => [
+                    'title'    => 'Register Alumni',
+                    'subtitle' => 'Add new alumni to the system with their details and credentials',
+                    'icon'     => 'user-plus',
+                ],
+                'registrar.employment.tracking' => [
+                    'title'    => 'Employment Tracking',
+                    'subtitle' => 'System-wide alumni employment analytics & records',
+                    'icon'     => 'chart-line',
+                ],
+            ];
+
+            $meta         = $routeMeta[$currentRoute] ?? null;
+            $pageTitle    = trim($__env->yieldContent('page_title'))    ?: ($meta['title']    ?? '');
+            $pageSubtitle = trim($__env->yieldContent('page_subtitle')) ?: ($meta['subtitle'] ?? '');
+            $pageIcon     = trim($__env->yieldContent('page_icon'))     ?: ($meta['icon']     ?? 'gauge-high');
         @endphp
         <header class="sticky top-0 flex items-center justify-between gap-3 px-4 lg:px-8 h-24 bg-white
                        border-b border-[#E5E5E5] shrink-0 z-30">
