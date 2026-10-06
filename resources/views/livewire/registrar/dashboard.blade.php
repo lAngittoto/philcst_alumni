@@ -476,6 +476,55 @@ new class extends Component {
             user-select: text;
         }
 
+        /* ── Page stage: vertically centers the stat cards + charts in the
+           space BELOW the top bar (title now lives in the layout header).
+           min-height = viewport − header (6rem) − layout padding, so the
+           content sits in the middle on tall screens and simply scrolls
+           (never gets cut off) on short ones. 100dvh avoids the mobile
+           browser URL-bar jump; 100vh is the fallback for old browsers. ── */
+        .dash-stage {
+            --dash-header: 6rem;
+            --dash-pad: 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: .75rem;
+            width: 100%;
+            max-width: 96rem;
+            margin-left: auto;
+            margin-right: auto;
+            padding: .75rem .75rem calc(.75rem + env(safe-area-inset-bottom, 0px));
+            min-height: calc(100vh - var(--dash-header) - var(--dash-pad));
+            min-height: calc(100dvh - var(--dash-header) - var(--dash-pad));
+        }
+        @media (min-width: 640px) {
+            .dash-stage { gap: 1rem; padding: 1rem 1.25rem; }
+        }
+        @media (min-width: 1024px) {
+            .dash-stage { --dash-pad: 4rem; gap: 1.25rem; padding: 1rem 1.5rem; }
+        }
+        /* Phones: go edge-to-edge (cancel the layout's p-4) so the dashboard
+           fills the whole screen under the top bar. */
+        @media (max-width: 639px) {
+            .dash-stage {
+                --dash-pad: 0rem;
+                margin: -1rem;
+                width: auto;
+                max-width: none;
+            }
+        }
+        /* Phones + tablets: the chart row grows to fill any leftover height
+           so the screen is always fully used. Desktop keeps natural height
+           (centered). */
+        @media (max-width: 1023px) {
+            .dash-fill { flex: 1 1 auto; }
+        }
+        /* Chart wrappers scale with the viewport height. The canvas sits in an
+           absolutely-positioned box so it can never push the layout taller
+           (prevents the Chart.js resize-loop on flex/grid parents). */
+        .dash-pie-wrap { min-height: clamp(170px, 26vh, 300px); }
+        .dash-bar-wrap { min-height: clamp(240px, 36vh, 460px); }
+
         /* ── Search highlight (matches Alumni Records) ─────────────── */
         mark.ar-hl {
             background: #BFDBFE;
@@ -599,26 +648,16 @@ new class extends Component {
          data-emp-route="{{ route('registrar.employment.tracking') }}">
     </div>
 
-    <div class="flex flex-col px-3 sm:px-5 lg:px-6 pt-4 pb-4 max-w-screen-2xl mx-auto">
+    <div class="dash-stage">
 
-        {{-- PAGE HEADER --}}
-        <div class="flex items-center gap-3 mb-4">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
-                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
-                <i class="fas fa-gauge-high text-white text-base"></i>
-            </div>
-            <div>
-                <h1 class="text-2xl font-semibold text-[#111111] leading-tight">Registrar Dashboard</h1>
-                <p class="text-sm font-semibold" style="color:#7A3F91;">{{ now()->format('l, F j, Y') }}</p>
-            </div>
-        </div>
+        {{-- The "Registrar Dashboard" title + date now live in the layout's top bar. --}}
 
         {{-- ─── STAT CARDS ─────────────────────────────────────── --}}
-        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 lg:gap-4 shrink-0">
 
             {{-- Total Alumni --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=all"
-               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 sm:p-4
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -631,13 +670,13 @@ new class extends Component {
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View All Alumni Records
                 </span>
                 <div class="flex items-start justify-between mb-3">
-                    <div class="w-10 h-10 rounded-xl flex items-center justify-center shadow"
+                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shadow"
                          style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
                         <i class="fas fa-users text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">Total</span>
+                    <span class="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0] uppercase">Total</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalAlumni) }}</p>
+                <p class="text-2xl sm:text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalAlumni) }}</p>
                 <p class="text-sm text-[#333333] mt-1 font-normal">Alumni Records</p>
                 @if($this->newThisMonth > 0)
                     <p class="text-xs text-[#7A3F91] font-semibold mt-2 flex items-center gap-1">
@@ -648,7 +687,7 @@ new class extends Component {
 
             {{-- Profile Complete --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=complete"
-               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 sm:p-4
                       hover:shadow-md hover:border-emerald-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -661,12 +700,12 @@ new class extends Component {
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Complete Profiles
                 </span>
                 <div class="flex items-start justify-between mb-3">
-                    <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
+                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-500 flex items-center justify-center shadow">
                         <i class="fas fa-circle-check text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase">Complete</span>
+                    <span class="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 uppercase">Complete</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileComplete) }}</p>
+                <p class="text-2xl sm:text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileComplete) }}</p>
                 <p class="text-sm text-[#333333] mt-1 font-normal">Profiles Filled</p>
                 <div class="mt-2 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
                     <div class="h-full bg-emerald-500 rounded-full transition-all duration-700"
@@ -677,7 +716,7 @@ new class extends Component {
 
             {{-- Profile Pending --}}
             <a href="{{ route('registrar.alumni') }}?profile_filter=incomplete"
-               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+               class="dash-card-clickable group relative overflow-visible bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 sm:p-4
                       hover:shadow-md hover:border-amber-300 transition-all duration-200 active:scale-[.985] block no-underline">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -690,12 +729,12 @@ new class extends Component {
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Pending Profiles
                 </span>
                 <div class="flex items-start justify-between mb-3">
-                    <div class="w-10 h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
+                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-400 flex items-center justify-center shadow">
                         <i class="fas fa-clock text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Pending</span>
+                    <span class="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-100 uppercase">Pending</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileIncomplete) }}</p>
+                <p class="text-2xl sm:text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->profileIncomplete) }}</p>
                 <p class="text-sm text-[#333333] mt-1 font-normal">Pending Profiles</p>
                 @if($this->totalAlumni > 0)
                     <p class="text-xs text-amber-600 font-semibold mt-2">
@@ -707,7 +746,7 @@ new class extends Component {
             {{-- Total Programs --}}
             <div wire:click="openAlumniModal('courses')"
                  wire:loading.class="is-loading" wire:target="openAlumniModal('courses')"
-                 class="dash-card-clickable group relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4
+                 class="dash-card-clickable group relative overflow-visible cursor-pointer bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-3 sm:p-4
                         hover:shadow-md hover:border-blue-300 transition-all duration-200 active:scale-[.985]">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
                 <span class="ar-tip absolute bottom-[calc(100%+8px)] left-1/2 -translate-x-1/2
@@ -720,12 +759,12 @@ new class extends Component {
                     <i class="fas fa-eye mr-1.5" style="font-size:.65rem;"></i>View Active Programs
                 </span>
                 <div class="flex items-start justify-between mb-3">
-                    <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
+                    <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow">
                         <i class="fas fa-book-open text-white text-base"></i>
                     </div>
-                    <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500 text-white border border-blue-500 uppercase">Programs</span>
+                    <span class="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500 text-white border border-blue-500 uppercase">Programs</span>
                 </div>
-                <p class="text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
+                <p class="text-2xl sm:text-3xl font-semibold text-[#111111] leading-none">{{ number_format($this->totalCourses) }}</p>
                 <p class="text-sm text-[#333333] mt-1 font-normal">All Programs</p>
                 <p class="text-xs text-blue-600 font-semibold mt-2 flex items-center gap-1">
                     More on Programs <i class="fas fa-chevron-right text-[10px]"></i>
@@ -735,7 +774,7 @@ new class extends Component {
         </div>
 
         {{-- ─── MAIN GRID ───────────────────────────────────────── --}}
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4" style="align-items:stretch;">
+        <div class="dash-fill grid grid-cols-1 md:grid-cols-5 xl:grid-cols-3 gap-3 sm:gap-4 lg:gap-5" style="align-items:stretch;">
 
             {{-- ── Employment Overview — PIE CHART ── --}}
             @php
@@ -745,8 +784,8 @@ new class extends Component {
                 $submittedPct = $total > 0 ? round(($submitted / $total) * 100) : 0;
             @endphp
 
-            <div class="lg:col-span-1 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-visible flex flex-col">
-                <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
+            <div class="md:col-span-2 xl:col-span-1 min-w-0 bg-white rounded-2xl border border-[#E8E0F0] shadow-sm overflow-visible flex flex-col">
+                <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap items-center justify-between gap-x-3 gap-y-1 shrink-0">
                     <div class="flex items-center gap-[7px]">
                         <div class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></div>
                         <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Employment Overview</span>
@@ -773,9 +812,8 @@ new class extends Component {
                     </div>
 
                     {{-- PIE CHART CANVAS --}}
-                    <div id="dashEmpPieChartWrap" class="dash-chart-loading-wrap relative flex items-center justify-center" wire:ignore
-                         style="width:100%; height:200px;">
-                        <canvas id="dashEmpPieChart" style="max-width:100%; max-height:100%;"></canvas>
+                    <div id="dashEmpPieChartWrap" class="dash-chart-loading-wrap dash-pie-wrap relative w-full flex-1" wire:ignore>
+                        <div class="absolute inset-0"><canvas id="dashEmpPieChart"></canvas></div>
                         <div class="dash-chart-loading-overlay">
                             <span></span><span></span><span></span>
                         </div>
@@ -806,10 +844,10 @@ new class extends Component {
 
             {{-- ── Alumni by Batch Year ── --}}
             @if($this->allBatches->count() > 0)
-            <div class="lg:col-span-2 bg-white border border-[#E8E0F0] rounded-[14px] shadow-sm overflow-hidden flex flex-col
+            <div class="md:col-span-3 xl:col-span-2 min-w-0 bg-white border border-[#E8E0F0] rounded-[14px] shadow-sm overflow-hidden flex flex-col
                         transition-all duration-200 hover:shadow-[0_5px_16px_rgba(122,63,145,.11)] hover:border-[rgba(122,63,145,.28)]">
-                <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex items-center justify-between shrink-0">
-                    <div class="flex items-center gap-[7px]">
+                <div class="px-[14px] py-2 border-b border-[#E8E0F0] bg-[#F5F5F5] flex flex-wrap items-center justify-between gap-x-3 gap-y-1 shrink-0">
+                    <div class="flex flex-wrap items-center gap-x-[7px] gap-y-1">
                         <div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
                         <span class="text-[.78rem] font-bold text-[#111111] uppercase tracking-[.06em]">Alumni by Batch Year</span>
                         <span class="text-[.8rem] text-[#555555] font-medium flex items-center gap-[3px] ml-2 pointer-events-none">
@@ -834,8 +872,8 @@ new class extends Component {
                         </button>
                     </div>
                 </div>
-                <div id="dashChartBatchWrap" class="dash-chart-loading-wrap relative p-[10px] flex-1 min-h-[200px] max-h-[400px]" wire:ignore>
-                    <canvas id="dashChartBatch" style="width:100%;height:100%;"></canvas>
+                <div id="dashChartBatchWrap" class="dash-chart-loading-wrap dash-bar-wrap relative flex-1" wire:ignore>
+                    <div class="absolute inset-[10px]"><canvas id="dashChartBatch"></canvas></div>
                     <div class="dash-chart-loading-overlay">
                         <span></span><span></span><span></span>
                     </div>
@@ -1633,9 +1671,34 @@ new class extends Component {
     var LOW_COUNT_COLOR    = { bg: 'rgba(236,72,153,0.88)', border: '#db2777' };
     var LOW_COUNT_THRESHOLD = 2;
 
-    var BATCH_PAGE_SIZE = 8;
+    // Fewer bars per page on phones so labels/bars stay readable.
+    function calcBatchPageSize() {
+        return (window.matchMedia && window.matchMedia('(max-width: 639px)').matches) ? 5 : 8;
+    }
+    var BATCH_PAGE_SIZE = calcBatchPageSize();
     var dashBatchIndex  = 0;
     var dashBatchAll    = null;
+
+    // Re-slice the bar chart when the screen crosses the phone breakpoint
+    // (rotate / resize). Listener is bound once per full page load; the
+    // handler is swapped on every SPA navigation so it never goes stale.
+    window.__dashRelayout = function () {
+        var size = calcBatchPageSize();
+        if (size === BATCH_PAGE_SIZE || !dashBatchAll) return;
+        BATCH_PAGE_SIZE = size;
+        dashBatchIndex  = Math.max(0, dashBatchAll.length - size);
+        buildDashBatchChart(dashBatchAll, dashBatchIndex);
+        bindDashBatchNav();
+    };
+    if (!window.__dashRelayoutBound) {
+        window.__dashRelayoutBound = true;
+        window.addEventListener('resize', function () {
+            clearTimeout(window.__dashRelayoutT);
+            window.__dashRelayoutT = setTimeout(function () {
+                if (window.__dashRelayout) window.__dashRelayout();
+            }, 200);
+        });
+    }
 
     function readDashBatchData() {
         var el = document.getElementById('__dash_batch_data');
@@ -1734,7 +1797,7 @@ new class extends Component {
                 scales: {
                     x: {
                         grid: { display: false },
-                        ticks: { font: { size: 11, weight: '600' }, color: '#111111' },
+                        ticks: { font: { size: 11, weight: '600' }, color: '#111111', autoSkip: false, maxRotation: 0 },
                     },
                     y: {
                         grid: { color: '#f3f4f6' },

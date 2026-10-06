@@ -285,6 +285,46 @@
         @keyframes reg-spin { to { transform: rotate(360deg); } }
         .reg-logout-text-swap { display: inline-flex; align-items: center; }
 
+        /* ── Page title inside the top bar (icon + title + subtitle) ── */
+        .reg-page-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background: linear-gradient(155deg, #7A3F91 0%, #5A2270 100%);
+            box-shadow: 0 3px 10px rgba(90,34,112,0.28);
+            color: #fff;
+            font-size: 17px;
+        }
+        .reg-page-title {
+            font-size: 1.5rem;
+            font-weight: 800;
+            line-height: 1.15;
+            color: #000000;
+            letter-spacing: -0.01em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .reg-page-subtitle {
+            font-size: 0.85rem;
+            font-weight: 600;
+            line-height: 1.2;
+            margin-top: 2px;
+            color: #7A3F91;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        @media (max-width: 1023px) {
+            .reg-page-icon { width: 38px; height: 38px; font-size: 15px; border-radius: 10px; }
+            .reg-page-title { font-size: 1.1rem; }
+            .reg-page-subtitle { font-size: 0.72rem; }
+        }
+
         /* ── Top bar bell ── */
         .reg-topbar-bell {
             -webkit-appearance: none !important;
@@ -1610,7 +1650,7 @@
       @@livewire:navigated.window="navClickedRoute = null; sidebarOpen = false; sidebarSettled = false; requestAnimationFrame(function () { requestAnimationFrame(function () { sidebarSettled = true; }); });">
 
 
-<div class="flex h-screen bg-[#F5F5F5] font-sans overflow-hidden">
+<div class="flex h-screen h-dvh bg-white font-sans overflow-hidden">
 
     {{-- Mobile overlay --}}
     <div x-show="sidebarOpen && !($store.modal && $store.modal.open)"
@@ -1761,23 +1801,47 @@
              aria-hidden="true">
         </div>
 
-        {{-- Top bar: the white box/border was removed on request. It is now a
-             transparent strip (same page background) that only holds the
-             hamburger (mobile) and the notification bell. --}}
-        <header class="sticky top-0 flex items-center justify-between px-4 lg:px-8 h-16 bg-transparent
-                       shrink-0 z-30">
-            <button @click="sidebarOpen = !sidebarOpen"
-                    class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden">
-                <div class="w-6 h-5 relative flex flex-col justify-between">
-                    <span :class="sidebarOpen ? 'rotate-45 translate-y-2' : ''"
-                          class="reg-hamburger-line w-full h-0.5 transition-all duration-300 origin-center"></span>
-                    <span :class="sidebarOpen ? 'opacity-0' : ''"
-                          class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
-                    <span :class="sidebarOpen ? '-rotate-45 -translate-y-2.5' : ''"
-                          class="reg-hamburger-line w-full h-0.5 transition-all duration-300 origin-center"></span>
-                </div>
-            </button>
-            <span class="hidden lg:block"></span>
+        {{-- Top bar: white background with the page title (icon + title + date)
+             on the left, hamburger (mobile) before it, and the notification
+             bell on the right. Same height + bottom border as the sidebar
+             brand header (h-24) so the two lines align across the page.
+             Pages can override via @section('page_title'), @section('page_subtitle')
+             and @section('page_icon'); the dashboard gets its title by default. --}}
+        @php
+            $isDashboardRoute = request()->routeIs('registrar.dashboard');
+            $pageTitle    = trim($__env->yieldContent('page_title'))    ?: ($isDashboardRoute ? 'Registrar Dashboard' : '');
+            $pageSubtitle = trim($__env->yieldContent('page_subtitle')) ?: ($isDashboardRoute ? now()->format('l, F j, Y') : '');
+            $pageIcon     = trim($__env->yieldContent('page_icon'))     ?: 'gauge-high';
+        @endphp
+        <header class="sticky top-0 flex items-center justify-between gap-3 px-4 lg:px-8 h-24 bg-white
+                       border-b border-[#E5E5E5] shrink-0 z-30">
+            <div class="flex items-center gap-3 min-w-0">
+                <button @click="sidebarOpen = !sidebarOpen"
+                        class="text-[#333333] focus:outline-none p-2 rounded-lg hover:bg-[#F5F5F5] transition-colors lg:hidden shrink-0">
+                    <div class="w-6 h-5 relative flex flex-col justify-between">
+                        <span :class="sidebarOpen ? 'rotate-45 translate-y-2' : ''"
+                              class="reg-hamburger-line w-full h-0.5 transition-all duration-300 origin-center"></span>
+                        <span :class="sidebarOpen ? 'opacity-0' : ''"
+                              class="reg-hamburger-line w-full h-0.5 transition-all duration-300"></span>
+                        <span :class="sidebarOpen ? '-rotate-45 -translate-y-2.5' : ''"
+                              class="reg-hamburger-line w-full h-0.5 transition-all duration-300 origin-center"></span>
+                    </div>
+                </button>
+
+                @if($pageTitle !== '')
+                    <div class="flex items-center gap-3 min-w-0">
+                        <div class="reg-page-icon">
+                            <i class="fa-solid fa-{{ $pageIcon }}"></i>
+                        </div>
+                        <div class="min-w-0">
+                            <h1 class="reg-page-title">{{ $pageTitle }}</h1>
+                            @if($pageSubtitle !== '')
+                                <p class="reg-page-subtitle">{{ $pageSubtitle }}</p>
+                            @endif
+                        </div>
+                    </div>
+                @endif
+            </div>
 
             {{-- Notifications bell --}}
             <button
@@ -1811,7 +1875,7 @@
         </header>
 
         {{-- Page content --}}
-        <div class="flex-1 overflow-y-auto no-scrollbar bg-[#F5F5F5] p-4 lg:p-8">
+        <div class="flex-1 overflow-y-auto no-scrollbar bg-white p-4 lg:p-8">
             <div class="container mx-auto">
                 @yield('content')
             </div>
