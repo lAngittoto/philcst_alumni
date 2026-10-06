@@ -1746,8 +1746,14 @@ new class extends Component {
     <div class="emp-page-header-wrap shrink-0">
         <div class="emp-header-row">
             <div class="flex items-center gap-3 emp-page-header">
-  
-
+                <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                    <i class="fas fa-chart-column text-white text-base"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Employment Tracking</h1>
+                    <p class="text-[#7A3F91] text-xs sm:text-sm font-normal mt-0.5">System-wide alumni employment analytics &amp; records</p>
+                </div>
             </div>
 
             {{-- Hidden source for the "Report will include" text inside the

@@ -1865,7 +1865,14 @@ new class extends Component {
     {{-- Header --}}
     <div class="ar-header-row mb-3 shrink-0">
         <div class="ar-header-left">
-
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-graduation-cap text-white text-base"></i>
+            </div>
+            <div class="min-w-0">
+                <h1 class="text-2xl sm:text-2xl font-semibold text-[#333333] leading-tight">Alumni Records</h1>
+                <p class="text-[#7A3F91] text-xs sm:text-sm font-normal">View and manage alumni information and records.</p>
+            </div>
         </div>
 
         <div class="relative shrink-0" wire:ignore

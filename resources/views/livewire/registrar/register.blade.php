@@ -1567,8 +1567,14 @@ public function closeImportModal(): void
     {{-- Header --}}
     <div class="flex items-center justify-between gap-3 mb-3 px-3 sm:px-0 pt-3 sm:pt-0 shrink-0">
         <div class="flex items-center gap-3 min-w-0">
-  
-
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center shadow-lg shrink-0"
+                 style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+                <i class="fas fa-user-plus text-white text-base"></i>
+            </div>
+            <div class="min-w-0">
+                <h1 class="text-xl sm:text-2xl font-semibold text-[#333333] leading-tight">Register Alumni</h1>
+                <p class="text-xs sm:text-sm font-normal" style="color:#7A3F91;">Add new alumni to the system with their details and credentials</p>
+            </div>
         </div>
 
         <div class="import-btn-wrap">
