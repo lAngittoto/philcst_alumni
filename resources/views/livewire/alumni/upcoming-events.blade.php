@@ -1911,10 +1911,10 @@ select.filter-input:hover { cursor: default !important; }
          copied:false,
          downloading:false,
          downloaded:false,
-         shareText:  {{ json_encode($fbPostText) }},
-         eventTitle: {{ json_encode($shareEventTitle) }},
-         baseUrl:    {{ json_encode($shareBaseUrl) }},
-         imageUrl:   {{ json_encode($sharePhotoUrl) }},
+         shareText:  {{ json_encode($fbPostText,     JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         eventTitle: {{ json_encode($shareEventTitle, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         baseUrl:    {{ json_encode($shareBaseUrl,    JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         imageUrl:   {{ json_encode($sharePhotoUrl,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
 
          // ── Detect mobile/tablet to choose how to open FB/Messenger ──
          isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
@@ -1992,6 +1992,26 @@ select.filter-input:hover { cursor: default !important; }
              // taps "Facebook" or "Messenger" they want THAT specific app to
              // open, not the OS share sheet. Always show the download-confirm
              // modal first, then route to the correct platform.
+             //
+             // IMPORTANT: copy the caption to the clipboard RIGHT HERE, while
+             // still inside the synchronous click handler. Clipboard writes
+             // require an active "user gesture" (transient activation). If we
+             // wait until after an `await fetch(...)` (the image download) or
+             // after window.open() has already blurred/redirected the tab,
+             // that activation window is gone and
+             // navigator.clipboard.writeText() silently rejects in most
+             // mobile browsers (Safari especially) — which is exactly why
+             // "Could not auto-copy caption" was firing every single time.
+             // Copying synchronously here, before any await, fixes it.
+             this.autoCopyCaption().then(ok => {
+                 $wire.dispatch('flash-message', {
+                     type: ok ? 'success' : 'warning',
+                     message: ok
+                         ? 'Caption copied! Long-press → Paste it after the window opens.'
+                         : 'Could not auto-copy caption — use Copy Caption below, then paste manually.'
+                 });
+             });
+
              this.pendingTarget = target;
              this.showDlConfirm = true;
          },
@@ -2042,15 +2062,10 @@ select.filter-input:hover { cursor: default !important; }
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Auto-copy caption — user just long-presses Paste inside FB
-             this.autoCopyCaption().then(ok => {
-                 $wire.dispatch('flash-message', {
-                     type: ok ? 'success' : 'warning',
-                     message: ok
-                         ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
-                         : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
-                 });
-             });
+             // Caption was already copied synchronously in askShare() —
+             // doing it again here (after window.open/await) is exactly
+             // what caused the clipboard write to fail before, so it's
+             // intentionally NOT repeated.
          },
 
          // ── openMessenger ─────────────────────────────────────────────────
@@ -2108,15 +2123,10 @@ select.filter-input:hover { cursor: default !important; }
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Auto-copy caption regardless of platform
-             this.autoCopyCaption().then(ok => {
-                 $wire.dispatch('flash-message', {
-                     type: ok ? 'success' : 'warning',
-                     message: ok
-                         ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
-                         : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
-                 });
-             });
+             // Caption was already copied synchronously in askShare() —
+             // doing it again here (after window.open/await) is exactly
+             // what caused the clipboard write to fail before, so it's
+             // intentionally NOT repeated.
          },
 
          async copyLinkFn() {

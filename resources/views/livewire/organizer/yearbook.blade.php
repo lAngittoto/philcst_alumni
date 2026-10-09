@@ -635,7 +635,7 @@ new class extends Component {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
     padding: 0.5rem 0.75rem; flex-shrink: 0;
     position: relative; z-index: 50; overflow: visible;
-    pointer-events: all !important;
+    pointer-events: all;
     cursor: default !important;
     display: flex;
     flex-wrap: wrap;
@@ -643,6 +643,16 @@ new class extends Component {
     align-items: center;
     /* match parent's top border-radius since parent has overflow:visible */
     border-radius: 1rem 1rem 0 0;
+}
+/* The !important above previously defeated .yb-sidebar-blur's pointer-events:none,
+   so the filter bar (and the dropdown buttons inside it) stayed clickable even
+   while the sidebar overlay was open and the rest of the page was blurred/locked.
+   These rules put it back under the sidebar's control. */
+.yb-sidebar-active .yb-filter-bar,
+body.sidebar-open .yb-filter-bar,
+.sidebar-open .yb-filter-bar,
+[data-sidebar-open="true"] .yb-filter-bar {
+    pointer-events: none !important;
 }
 
 /* Row 1 on mobile: search fills the full width */
@@ -694,12 +704,23 @@ new class extends Component {
     .yb-filter-search-wrap { max-width: 320px; }
 }
 
-/* ── Keep filter controls always interactive during Livewire loading ── */
+/* ── Keep filter controls interactive during Livewire loading — but NOT
+   while the mobile sidebar is open. The old blanket !important here is
+   what kept the filter bar and dropdowns clickable/unblurred underneath
+   the sidebar overlay; the :not() guard restores the sidebar's control
+   while still beating Livewire's wire:loading state in normal use. ── */
 .yb-filter-bar *,
 .yb-dd-btn,
 .yb-dd-panel,
 .yb-dd-item,
 .yb-search-input {
+    pointer-events: all;
+}
+html:not(.yb-sidebar-active):not(.sidebar-open) body:not(.sidebar-open) .yb-filter-bar *,
+html:not(.yb-sidebar-active):not(.sidebar-open) body:not(.sidebar-open) .yb-dd-btn,
+html:not(.yb-sidebar-active):not(.sidebar-open) body:not(.sidebar-open) .yb-dd-panel,
+html:not(.yb-sidebar-active):not(.sidebar-open) body:not(.sidebar-open) .yb-dd-item,
+html:not(.yb-sidebar-active):not(.sidebar-open) body:not(.sidebar-open) .yb-search-input {
     pointer-events: all !important;
 }
 .yb-dd-btn        { cursor: pointer !important; }
@@ -795,21 +816,45 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
     .yb-pagination-bar p { font-size: 10px; }
     .yb-pg-btn { min-width: 26px; height: 26px; padding: 0 6px; font-size: 11px; }
 
-    /* Dropdowns: ensure panels aren't clipped on mobile; let them overflow down */
+    /* Dropdowns: ensure panels aren't clipped on mobile; let them overflow down.
+       z-index is kept BELOW the sidebar overlay (see .yb-sidebar-blur block)
+       so that when the sidebar opens, these fixed-position panels blur and
+       sit under it instead of floating on top of it. They're also closed
+       automatically the moment the sidebar opens (see JS watcher below). */
     .yb-dd-panel {
         position: fixed !important;
         /* JS sets top/left dynamically via data attrs */
         top: var(--dd-top, auto);
         left: var(--dd-left, auto);
         min-width: var(--dd-width, 140px);
-        max-width: calc(100vw - 1.5rem);
+        width: var(--dd-width, 140px);
+        max-width: min(calc(100vw - 1.5rem), 280px);
         max-height: 50vh;
-        z-index: 9999;
+        z-index: 400;
+    }
+    /* Dropdown items must wrap on mobile — long program names like
+       "Bachelor of Science in Information Technology" were overflowing
+       the panel width (nowrap) and spilling past the screen edge. */
+    .yb-dd-item {
+        white-space: normal !important;
+        word-break: break-word;
+        line-height: 1.3;
     }
 
-    /* Truncate dropdown labels on very small screens */
-    .yb-dd-btn { font-size: 0.8rem; padding-right: 2rem; max-width: 110px; }
+    /* Keep the trigger button itself readable — don't over-truncate it */
+    .yb-dd-btn { font-size: 0.8rem; padding-right: 2rem; max-width: 150px; }
     .yb-dd-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ── Fixed-position dropdown panels must blur/hide along with everything
+     else when the sidebar opens — being position:fixed normally escapes
+     an ancestor's filter:blur(), so they need their own explicit rule. ── */
+.yb-sidebar-active .yb-dd-panel,
+body.sidebar-open .yb-dd-panel,
+.sidebar-open .yb-dd-panel,
+[data-sidebar-open="true"] .yb-dd-panel {
+    filter: blur(3px);
+    pointer-events: none !important;
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -1301,9 +1346,18 @@ body.sidebar-open .yb-sidebar-blur,
 
         function applySidebarBlur() {
             var open = isSidebarOpen();
-            var parent = document.querySelector('.yb-sidebar-blur')?.closest('[class*="sidebar"]')
-                      || document.body;
+            var wasOpen = document.body.classList.contains('yb-sidebar-active');
             document.body.classList.toggle('yb-sidebar-active', open);
+
+            // Close any open filter dropdown the moment the sidebar opens,
+            // so a stale panel doesn't sit there blurred-but-visible.
+            if (open && !wasOpen) {
+                var filterBar = document.querySelector('.yb-filter-bar');
+                if (filterBar && window.Alpine) {
+                    var data = window.Alpine.$data(filterBar);
+                    if (data) data.openDd = '';
+                }
+            }
         }
 
         // MutationObserver: watch class changes on body, html, and sidebar candidates

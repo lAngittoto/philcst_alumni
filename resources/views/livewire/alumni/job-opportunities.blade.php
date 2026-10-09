@@ -1858,15 +1858,15 @@ select.filter-input option {
 
          async confirmDownloadThenGo() {
              await this.downloadImage();
-             this.proceedToTarget();
+             await this.proceedToTarget();
          },
 
-         proceedToTarget() {
+         async proceedToTarget() {
              this.showDlConfirm = false;
              const target = this.pendingTarget;
              this.pendingTarget = null;
-             if (target === 'facebook') this.openFacebook();
-             else if (target === 'messenger') this.openMessenger();
+             if (target === 'facebook') await this.openFacebook();
+             else if (target === 'messenger') await this.openMessenger();
          },
 
          cancelDlConfirm() {
@@ -1875,14 +1875,13 @@ select.filter-input option {
          },
 
          // ── openFacebook ─────────────────────────────────────────────────
-         // Always open the sharer with BOTH u= (the job URL, so Facebook
-         // scrapes the OG image/title from the page) and quote= (the
-         // pre-filled caption text — respected by the FB web composer and
-         // some mobile clients).  On mobile the browser hands the URL off
-         // to the Facebook app via universal/intent links if it's installed;
-         // on desktop we get a centred popup.  The caption is also copied to
-         // the clipboard so the user can paste it if FB strips the quote.
-         openFacebook() {
+         // Caption is copied FIRST (while the page still has focus and the
+         // user-gesture is still active) — opening window.open() shifts focus
+         // to the popup which causes clipboard.writeText() to fail.
+         async openFacebook() {
+             // Copy before opening popup — clipboard requires page focus
+             const ok = await this.autoCopyCaption();
+
              const jobUrl   = encodeURIComponent(this.baseUrl);
              const caption  = encodeURIComponent(this.shareText);
              const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
@@ -1902,14 +1901,11 @@ select.filter-input option {
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Auto-copy caption — user just long-presses Paste inside FB
-             this.autoCopyCaption().then(ok => {
-                 $wire.dispatch('flash-message', {
-                     type: ok ? 'success' : 'warning',
-                     message: ok
-                         ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
-                         : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
-                 });
+             $wire.dispatch('flash-message', {
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
              });
          },
 
@@ -1922,9 +1918,11 @@ select.filter-input option {
          //             (messenger.com/share) in case Messenger isn't installed
          //             and the system didn't navigate away.
          // Desktop  → messenger.com/share popup (proper share URL, not /new).
-         // In all cases the caption is auto-copied to the clipboard so the
-         // user can paste it into the Messenger compose box.
-         openMessenger() {
+         // Caption is copied FIRST — same reason as openFacebook above.
+         async openMessenger() {
+             // Copy before opening anything — clipboard requires page focus
+             const ok = await this.autoCopyCaption();
+
              const jobUrl  = encodeURIComponent(this.baseUrl);
              const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
 
@@ -1970,14 +1968,11 @@ select.filter-input option {
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Auto-copy caption regardless of platform
-             this.autoCopyCaption().then(ok => {
-                 $wire.dispatch('flash-message', {
-                     type: ok ? 'success' : 'warning',
-                     message: ok
-                         ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
-                         : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
-                 });
+             $wire.dispatch('flash-message', {
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
              });
          },
 
