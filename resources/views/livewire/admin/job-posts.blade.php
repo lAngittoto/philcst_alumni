@@ -1092,18 +1092,31 @@ select.filter-input option {
     @php
         $vj = $showViewModal ? $this->viewingJob : null;
         if ($vj) {
-            $isActive     = $vj->status === 'ACTIVE';
-            $vDl          = \Carbon\Carbon::parse($vj->deadline)->setTimezone('Asia/Manila');
-            $vDaysLeft    = (int) now('Asia/Manila')->startOfDay()->diffInDays($vDl->copy()->startOfDay(), false);
-            $vIsExp       = $vDaysLeft < 0;
-            $vIsUrgent    = $vDaysLeft <= 7 && !$vIsExp;
-            if ($vDaysLeft === 0)      $dlLabel = 'Closes today';
-            elseif ($vDaysLeft === 1)  $dlLabel = '1 day left';
-            elseif ($vDaysLeft > 1)    $dlLabel = $vDaysLeft . ' days left';
-            else                       $dlLabel = 'Deadline passed';
-            $dlIsUrgent   = $vDaysLeft <= 3;
-            $dlIsSoon     = !$dlIsUrgent && $vDaysLeft <= 14;
-            $dlValueClass = $vIsExp ? 'text-gray-500 font-bold' : ($dlIsUrgent ? 'text-red-600 font-bold' : ($dlIsSoon ? 'text-orange-700 font-bold' : 'text-gray-900 font-semibold'));
+            $isActive       = $vj->status === 'ACTIVE';
+            $vHasDeadline   = !empty($vj->deadline);
+            if ($vHasDeadline) {
+                $vDl          = \Carbon\Carbon::parse($vj->deadline)->setTimezone('Asia/Manila');
+                $vDaysLeft    = (int) now('Asia/Manila')->startOfDay()->diffInDays($vDl->copy()->startOfDay(), false);
+                $vIsExp       = $vDaysLeft < 0;
+                $vIsUrgent    = $vDaysLeft <= 7 && !$vIsExp;
+                if ($vDaysLeft === 0)      $dlLabel = 'Closes today';
+                elseif ($vDaysLeft === 1)  $dlLabel = '1 day left';
+                elseif ($vDaysLeft > 1)    $dlLabel = $vDaysLeft . ' days left';
+                else                       $dlLabel = 'Deadline passed';
+                $dlIsUrgent   = $vDaysLeft <= 3;
+                $dlIsSoon     = !$dlIsUrgent && $vDaysLeft <= 14;
+                $dlValueClass = $vIsExp ? 'text-gray-500 font-bold' : ($dlIsUrgent ? 'text-red-600 font-bold' : ($dlIsSoon ? 'text-orange-700 font-bold' : 'text-gray-900 font-semibold'));
+            } else {
+                $vDl          = null;
+                $vDaysLeft    = null;
+                $vIsExp       = false;
+                $vIsUrgent    = false;
+                $dlLabel      = '';
+                $dlIsUrgent   = false;
+                $dlIsSoon     = false;
+                $dlValueClass = 'text-gray-500 font-semibold';
+            }
+            $displayEmpType = ($vj->employment_type === 'Contract') ? 'Contractual' : $vj->employment_type;
             $vCreatedPH   = \Carbon\Carbon::parse($vj->created_at)->setTimezone('Asia/Manila');
             $displayType  = ($vj->company_type === $vj->company_name) ? 'PHILCST' : $vj->company_type;
             $isPhilcst    = $displayType === 'PHILCST';
@@ -1250,12 +1263,20 @@ select.filter-input option {
                 @if($this->jobPostings->count() > 0)
                     @foreach($this->jobPostings as $job)
                     @php
-                        $rActive    = $job->status === 'ACTIVE';
-                        $rPassed    = $job->_isDeadlinePassed ?? false;
-                        $rDl        = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
-                        $rDaysLeft  = (int) now('Asia/Manila')->startOfDay()->diffInDays($rDl->copy()->startOfDay(), false);
-                        $rUrgent    = $rActive && !$rPassed && $rDaysLeft <= 7;
-                        $rLabel     = $rDaysLeft === 0 ? 'Closes today' : ($rDaysLeft === 1 ? '1 day left' : $rDaysLeft . ' days left');
+                        $rActive      = $job->status === 'ACTIVE';
+                        $rPassed      = $job->_isDeadlinePassed ?? false;
+                        $rHasDeadline = !empty($job->deadline);
+                        if ($rHasDeadline) {
+                            $rDl       = \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila');
+                            $rDaysLeft = (int) now('Asia/Manila')->startOfDay()->diffInDays($rDl->copy()->startOfDay(), false);
+                            $rUrgent   = $rActive && !$rPassed && $rDaysLeft <= 7;
+                            $rLabel    = $rDaysLeft === 0 ? 'Closes today' : ($rDaysLeft === 1 ? '1 day left' : $rDaysLeft . ' days left');
+                        } else {
+                            $rUrgent   = false;
+                            $rLabel    = '';
+                            $rDaysLeft = null;
+                        }
+                        $rEmpType   = ($job->employment_type === 'Contract') ? 'Contractual' : $job->employment_type;
                         $rCanShare  = $rActive && !$rPassed;
                         $rOrgName   = $job->organizer?->name ?? 'Alumni Director';
                         $rImg       = $this::jobImageUrl($job->job_image ?? null);
@@ -1264,8 +1285,7 @@ select.filter-input option {
 
                     <div wire:key="job-card-{{ $job->id }}"
                          class="jb-list-row relative cursor-pointer select-none border-b border-gray-100 transition-colors
-                                {{ $rSelected ? 'jb-list-row-active' : '' }}
-                                {{ (!$rActive || $rPassed) ? 'opacity-70' : '' }}"
+                                {{ $rSelected ? 'jb-list-row-active' : '' }}"
                          data-jb-card
                          wire:click="viewJob({{ $job->id }})"
                          role="button" tabindex="0"
@@ -1291,7 +1311,7 @@ select.filter-input option {
                                     @endif
                                     @if($job->employment_type)
                                     <span class="text-[13px] text-gray-500 flex items-center gap-1">
-                                        <i class="fas fa-briefcase text-[12px] text-[#7a3f91]/60"></i>{{ $job->employment_type }}
+                                        <i class="fas fa-briefcase text-[12px] text-[#7a3f91]/60"></i>{{ $rEmpType }}
                                     </span>
                                     @endif
                                     @if($job->salary)
@@ -1308,7 +1328,7 @@ select.filter-input option {
                                     <span class="text-[13px] text-gray-400">{{ \Carbon\Carbon::parse($job->created_at)->setTimezone('Asia/Manila')->diffForHumans() }}</span>
                                     <div class="flex items-center gap-2">
                                         @if(!$rActive)
-                                            <span class="text-[12px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                            <span class="text-[12px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300">
                                                 <i class="fas fa-ban text-[11px] mr-0.5"></i>Inactive
                                             </span>
                                         @elseif($rPassed)
@@ -1488,15 +1508,17 @@ select.filter-input option {
                         <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
                         <p class="detail-side-value">{{ $vj->location ?: '—' }}</p>
                     </div>
+                    @if($vHasDeadline)
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
                         <p class="detail-side-value {{ $dlValueClass }}">
                             {{ $vDl->format('M d, Y') }} <span class="font-normal text-xs">(@if($dlIsUrgent && !$vIsExp)<i class="fas fa-fire"></i> @endif{{ $dlLabel }})</span>
                         </p>
                     </div>
+                    @endif
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-briefcase"></i></span>
-                        <p class="detail-side-value">{{ $vj->employment_type }}</p>
+                        <p class="detail-side-value">{{ $displayEmpType }}</p>
                     </div>
                     @if($vj->experience_level)
                     <div class="detail-side-item">
@@ -1527,7 +1549,7 @@ select.filter-input option {
                     </div>
                 </div>
 
-                @if($vIsUrgent)
+                @if($vIsUrgent && $vHasDeadline)
                 <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg px-4 py-3 text-sm text-gray-900 leading-relaxed">
                     @if($vDaysLeft === 0) Deadline is <strong class="text-red-600">today</strong>.
                     @elseif($vDaysLeft === 1) Only <strong class="text-red-600">1 day</strong> left.
@@ -1666,15 +1688,17 @@ select.filter-input option {
                         <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
                         <p class="detail-side-value">{{ $vj->location ?: '—' }}</p>
                     </div>
+                    @if($vHasDeadline)
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
                         <p class="detail-side-value {{ $dlValueClass }}">
                             {{ $vDl->format('M d, Y') }} <span class="font-normal text-xs">(@if($dlIsUrgent && !$vIsExp)<i class="fas fa-fire"></i> @endif{{ $dlLabel }})</span>
                         </p>
                     </div>
+                    @endif
                     <div class="detail-side-item">
                         <span class="detail-side-icon"><i class="fas fa-briefcase"></i></span>
-                        <p class="detail-side-value">{{ $vj->employment_type }}</p>
+                        <p class="detail-side-value">{{ $displayEmpType }}</p>
                     </div>
                     @if($vj->experience_level)
                     <div class="detail-side-item">
@@ -1705,7 +1729,7 @@ select.filter-input option {
                     </div>
                 </div>
 
-                @if($vIsUrgent)
+                @if($vIsUrgent && $vHasDeadline)
                 <div class="bg-red-50 border border-red-200 border-l-4 border-l-red-600 rounded-lg px-4 py-3 text-sm text-gray-900 leading-relaxed">
                     @if($vDaysLeft === 0) Deadline is <strong class="text-red-600">today</strong>.
                     @elseif($vDaysLeft === 1) Only <strong class="text-red-600">1 day</strong> left.
@@ -1781,7 +1805,8 @@ select.filter-input option {
     $sjLines[] = strtoupper($shareJobTitle);
     $sjLines[] = '';
     $sjLines[] = "Company: {$shareJobCompany}" . ($shareJobLocation ? " · {$shareJobLocation}" : '');
-    $sjLines[] = "{$shareJobEmpType}" . ($shareJobExpLevel ? " · {$shareJobExpLevel}" : '');
+    $sjEmpTypeDisplay = ($shareJobEmpType === 'Contract') ? 'Contractual' : $shareJobEmpType;
+    $sjLines[] = "{$sjEmpTypeDisplay}" . ($shareJobExpLevel ? " · {$shareJobExpLevel}" : '');
     if ($shareJobSalary)  $sjLines[] = "Salary: {$shareJobSalary}";
     if ($shareJobTarget)  $sjLines[] = "Open for: {$sjTargets}";
     $sjLines[] = "Apply by: {$shareJobDeadline}";

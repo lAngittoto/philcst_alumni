@@ -580,7 +580,7 @@ new class extends Component {
         $yes = [
             'technology'=>['developer','programmer','software','web dev','mobile app','network engineer','database admin','sysadmin','devops','cloud engineer','cybersecurity','data scientist','data analyst','ui/ux','it support','qa engineer','ml engineer','ai engineer','tech lead','systems analyst','ict','computer engineer','full stack','backend','frontend','it officer','helpdesk','network admin','it manager','it specialist','information technology','computer science','system developer','software engineer','it instructor','computer instructor','computer science instructor','it teacher','computer teacher','computer science teacher','programming instructor','ict instructor'],
             'nursing'=>['nurse','nursing','rn ','registered nurse','icu','er nurse','surgical nurse','ward nurse','dialysis nurse','pediatric nurse','public health nurse','head nurse','charge nurse','clinical nurse','operating room nurse','or nurse','nursing instructor','clinical instructor'],
-            'education'=>['teacher','instructor','professor','tutor','faculty','educator','academic coordinator','school principal','curriculum developer','lecturer','teaching','special education','classroom teacher','school admin','school head','subject teacher','grade school','high school teacher','college instructor','tesda trainer','tesda teacher','vocational trainer','skills trainer'],
+            'education'=>['teacher','instructor','professor','faculty','educator','academic coordinator','school principal','curriculum developer','lecturer','teaching','special education','classroom teacher','school admin','school head','subject teacher','grade school','high school teacher','college instructor','tesda trainer','tesda teacher','vocational trainer','skills trainer'],
             'accounting'=>['accountant','auditor','cpa','tax specialist','bookkeeper','accounting','finance officer','budget analyst','payroll','internal auditor','external auditor','financial analyst','management accountant','cost accountant','revenue officer','accounting instructor','accounting professor'],
             'business'=>['marketing manager','sales manager','business analyst','hr officer','operations manager','management trainee','business owner','entrepreneur','brand manager','product manager','account manager','business development','merchandising','trade marketing','retail manager','commercial manager','business instructor','marketing instructor'],
             'engineering'=>['engineer','civil engineer','mechanical engineer','electrical engineer','structural engineer','construction manager','project engineer','quality engineer','process engineer','industrial engineer','plant engineer','design engineer','site engineer','engineering manager','chief engineer','engineering instructor','engineering professor'],
@@ -776,7 +776,8 @@ new class extends Component {
 
     protected function loadEmploymentRecord(): void
     {
-        $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contract','project_based'=>'Freelance'];
+        // ── FIX: 'contractual' label updated to 'Contractual' ──
+        $typeLabels   = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Freelance'];
         $workLocLabels= ['local'=>'Local / PH','abroad'=>'OFW / Abroad'];
         $relLabels    = ['yes'=>'Related to Program','no'=>'Not Related','partially'=>'Partially Related'];
         $unLabels     = ['seeking_employment'=>'Actively Seeking Employment','not_looking'=>'Not Currently Looking'];
@@ -1580,12 +1581,13 @@ function phAddressEscapeHtml(str) {
     }[c]));
 }
 
-function phAddress(initial) {
+function phAddress(initial, startEditing) {
     return {
-        loading: true, loadFailed: false, provinces: [], cities: [], barangays: [],
+        loading: false, loadFailed: false, provinces: [], cities: [], barangays: [],
         mode: 'dropdown',
         selected: { provinceCode: '', cityCode: '', barangayCode: '' },
         initialValues: initial,
+        _dataLoaded: false,
 
         get filteredCities() {
             if (!this.selected.provinceCode) return [];
@@ -1649,9 +1651,11 @@ function phAddress(initial) {
         },
         retryLoad() { this.loading = true; this.loadFailed = false; this.loadData(true); },
         loadData(force) {
+            if (this._dataLoaded && !force) return;
+            this.loading = true;
             loadPhAddressData(force).then(({ provinces, cities, barangays }) => {
                 this.provinces = provinces; this.cities = cities; this.barangays = barangays;
-                this.loading = false; this.loadFailed = false;
+                this.loading = false; this.loadFailed = false; this._dataLoaded = true;
                 const norm = v => (v || '').trim().toUpperCase();
                 const savedProvince = norm(this.initialValues.province);
                 const savedCity     = norm(this.initialValues.municipality);
@@ -1674,11 +1678,22 @@ function phAddress(initial) {
                 }
             }).catch((err) => {
                 console.error('PH address list failed to load:', err);
-                this.loading = false; this.loadFailed = true;
+                this.loading = false; this.loadFailed = true; this._dataLoaded = false;
                 this.mode = 'manual';
             });
         },
-        init() { this.loadData(false); },
+        // ── Lazy init: only fetch the 3 large JSON files when the address
+        //    section is actually in edit mode. For alumni who already have a
+        //    complete profile and just open the page to VIEW their info, the
+        //    fetch is skipped entirely — eliminating the lag on page open.
+        //    When the user clicks "Edit Profile", Livewire re-renders the
+        //    component with startEditing=true and Alpine re-inits, triggering
+        //    the load at the right moment. ──
+        init() {
+            if (startEditing) {
+                this.loadData(false);
+            }
+        },
     };
 }
 </script>
@@ -1900,12 +1915,16 @@ function phAddress(initial) {
                     </div>
 
                     {{-- Current Address --}}
+                    {{-- ── phAddress second arg: pass editingProfile so the 3 large
+                         JSON files are only fetched when the user is actually editing.
+                         For alumni with a complete profile just viewing their info,
+                         no network requests are made — eliminating the lag on open. ── --}}
                     <div class="ai-card"
                          x-data="phAddress({
                              province: @js($address_province),
                              municipality: @js($address_municipality),
                              barangay: @js($address_barangay),
-                         })" x-init="init()">
+                         }, @js($editingProfile))" x-init="init()">
                         <div class="ai-card-header">
                             <div class="ai-card-header-title"><i class="fas fa-location-dot" style="color:#7A3F91 !important;"></i><p>Current Address</p></div>
                             @if($editingProfile)
@@ -2492,8 +2511,9 @@ function phAddress(initial) {
                             <div>
                                 <label class="emp-label-sm">Employment Type <span class="text-red-500">*</span></label>
                                 <div class="flex flex-wrap gap-2">
+                                    {{-- ── FIX: 'Contract' → 'Contractual' ── --}}
                                     @php
-                                        $empTypeOptions = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contract','project_based'=>'Freelance'];
+                                        $empTypeOptions = ['full_time'=>'Full-Time','part_time'=>'Part-Time','contractual'=>'Contractual','project_based'=>'Freelance'];
                                     @endphp
                                     @foreach($empTypeOptions as $val=>$lbl)
                                     <label class="emp-radio-tile">

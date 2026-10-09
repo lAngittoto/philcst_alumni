@@ -86,7 +86,6 @@ new #[Layout('app')] class extends Component {
     private function cacheEmailKey(int $id): string           { return "fp_email:{$id}"; }
     private function cacheOtpLockKey(int $id): string         { return "fp_otp_locked:{$id}"; }
     private function cacheOtpAttemptsKey(int $id): string     { return "fp_otp_attempts:{$id}"; }
-    private function cacheLastResetKey(int $id): string       { return "fp_last_reset:{$id}"; }
 
     /**
      * FIX: previously this was cacheStep3DeadlineKey() — a cache value
@@ -122,29 +121,6 @@ new #[Layout('app')] class extends Component {
         $this->successMessage = '';
         $this->studentIdError = '';
         $this->emailError     = '';
-    }
-
-    private function getCooldownRemaining(int $alumniId): ?string
-    {
-        $resetAt = cache()->get($this->cacheLastResetKey($alumniId));
-        if (!$resetAt) return null;
-
-        $availableAt = \Carbon\Carbon::parse($resetAt)->addDays(5);
-        $now         = \Carbon\Carbon::now();
-
-        if ($now->greaterThanOrEqualTo($availableAt)) {
-            cache()->forget($this->cacheLastResetKey($alumniId));
-            return null;
-        }
-
-        $diff    = $now->diff($availableAt);
-        $days    = (int) $diff->days;
-        $hours   = (int) $diff->h;
-        $minutes = (int) $diff->i;
-
-        if ($days > 0)  return "{$days} day(s) and {$hours} hour(s)";
-        if ($hours > 0) return "{$hours} hour(s) and {$minutes} minute(s)";
-        return "{$minutes} minute(s)";
     }
 
     private function maskEmail(string $email): string
@@ -651,13 +627,6 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        // ── Cooldown ──────────────────────────────────────────────────────
-        $remaining = $this->getCooldownRemaining($alumni->id);
-        if ($remaining !== null) {
-            $this->errorMessage = "You recently reset your password. For security reasons, Forgot Password can only be used once every 5 days. Please try again in {$remaining}.";
-            return;
-        }
-
         // ── No valid email on file ────────────────────────────────────────
         $dbEmail = trim($alumni->email ?? '');
         if (empty($dbEmail) || str_ends_with($dbEmail, '@pending.local')) {
@@ -1082,12 +1051,6 @@ new #[Layout('app')] class extends Component {
                 ]);
             });
 
-            cache()->put(
-                $this->cacheLastResetKey($alumni->id),
-                now()->toIso8601String(),
-                now()->addDays(5)->addHour()
-            );
-
             session()->forget(['alumni_forgot_step', 'alumni_forgot_id']);
             cache()->forget($this->cacheEmailKey($alumni->id));
             cache()->forget($this->cacheOtpAttemptsKey($alumni->id));
@@ -1186,13 +1149,6 @@ new #[Layout('app')] class extends Component {
                         <h2 class="text-xl sm:text-2xl font-bold" style="color: #333333;">Password Reset!</h2>
                         <p class="text-sm sm:text-base font-medium" style="color: #333333;">Your password has been updated successfully.</p>
                         <p class="text-sm" style="color: #555555; line-height: 1.6;">You can now log in to your alumni account using your new password.</p>
-                    </div>
-
-                    <div class="rounded-lg border px-4 py-3 flex items-start gap-2 text-left" style="background: #FFFBEB; border-color: #FDE68A;">
-                        <i class="fa-solid fa-clock text-amber-500 mt-0.5 flex-shrink-0 text-sm"></i>
-                        <p class="text-xs sm:text-sm" style="color: #92400e; line-height: 1.5;">
-                            <strong>Security note:</strong> You can use Forgot Password again after <strong>5 days</strong>.
-                        </p>
                     </div>
 
                     <button wire:click="goToLogin"
