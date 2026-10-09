@@ -1874,21 +1874,35 @@ select.filter-input option {
              this.pendingTarget = null;
          },
 
-         // ── openFacebook: window.open FIRST (sync, before any await) so
-         //    iOS doesn't block it as an unsolicited popup, then copy the
-         //    caption. On mobile a new tab opens in the browser; on desktop
-         //    a centred popup appears. ──
+         // ── openFacebook ─────────────────────────────────────────────────
+         // Always open the sharer with BOTH u= (the job URL, so Facebook
+         // scrapes the OG image/title from the page) and quote= (the
+         // pre-filled caption text — respected by the FB web composer and
+         // some mobile clients).  On mobile the browser hands the URL off
+         // to the Facebook app via universal/intent links if it's installed;
+         // on desktop we get a centred popup.  The caption is also copied to
+         // the clipboard so the user can paste it if FB strips the quote.
          openFacebook() {
-             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             let win;
+             const jobUrl   = encodeURIComponent(this.baseUrl);
+             const caption  = encodeURIComponent(this.shareText);
+             const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
+                            + '?u='     + jobUrl
+                            + '&quote=' + caption;
              if (this.isMobile) {
-                 win = window.open(url, '_blank', 'noopener,noreferrer');
+                 // _blank in mobile browser → system opens FB app (if installed)
+                 // via Android intent / iOS universal link; otherwise falls
+                 // back to mobile web FB.
+                 window.open(shareUrl, '_blank', 'noopener,noreferrer');
              } else {
-                 const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-                 win = window.open(url, 'philcst_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 const w=680,h=560,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_fb_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Copy caption after opening (still in click-event microtask queue)
+             // Auto-copy caption — user just long-presses Paste inside FB
              this.autoCopyCaption().then(ok => {
                  $wire.dispatch('flash-message', {
                      type: ok ? 'success' : 'warning',
@@ -1899,20 +1913,69 @@ select.filter-input option {
              });
          },
 
-         // ── openMessenger: same pattern as openFacebook ──
+         // ── openMessenger ────────────────────────────────────────────────
+         // Mobile strategy (two-tier):
+         //   Android → intent:// URI so the OS either launches Messenger or
+         //             offers to install it from the Play Store.
+         //   iOS     → fb-messenger:// custom scheme; a hidden <a> click
+         //             triggers the app.  We fire a 1.5-second fallback
+         //             (messenger.com/share) in case Messenger isn't installed
+         //             and the system didn't navigate away.
+         // Desktop  → messenger.com/share popup (proper share URL, not /new).
+         // In all cases the caption is auto-copied to the clipboard so the
+         // user can paste it into the Messenger compose box.
          openMessenger() {
-             let win;
+             const jobUrl  = encodeURIComponent(this.baseUrl);
+             const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
+
              if (this.isMobile) {
-                 win = window.open('https://www.messenger.com/new', '_blank', 'noopener,noreferrer');
+                 const isAndroid = /Android/i.test(navigator.userAgent);
+                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                 if (isAndroid) {
+                     // Android intent URI — opens Messenger directly if installed;
+                     // otherwise Android asks to find it in the Play Store.
+                     window.open(
+                         'intent://share/?link=' + jobUrl +
+                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+                         '_blank'
+                     );
+                 } else if (isIOS) {
+                     // iOS: trigger the fb-messenger:// URL scheme via a
+                     // temporary <a> so we don't navigate the current page away.
+                     const a  = document.createElement('a');
+                     a.href   = 'fb-messenger://share/?link=' + jobUrl;
+                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     // If Messenger wasn't installed the URL scheme silently
+                     // fails — open the web share page as a backup.
+                     setTimeout(() => {
+                         if (!document.hidden) {
+                             window.open(webLink, '_blank', 'noopener,noreferrer');
+                         }
+                     }, 1500);
+                 } else {
+                     // Other mobile (e.g. Windows Phone, KaiOS) → web fallback
+                     window.open(webLink, '_blank', 'noopener,noreferrer');
+                 }
              } else {
-                 win = window.open('https://www.messenger.com/new', 'philcst_messenger_share', 'noopener,noreferrer');
+                 // Desktop — centred popup pointing at the proper share URL
+                 const w=700,h=580,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(webLink, 'philcst_messenger_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
+             // Auto-copy caption regardless of platform
              this.autoCopyCaption().then(ok => {
                  $wire.dispatch('flash-message', {
                      type: ok ? 'success' : 'warning',
                      message: ok
-                         ? 'Caption copied! Switch to Messenger and long-press → Paste to add the text.'
+                         ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
                          : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
                  });
              });

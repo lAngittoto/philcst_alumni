@@ -333,7 +333,7 @@ new class extends Component {
 };
 ?>
 
-<div class="yb-noselect yb-root-height flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full">
+<div class="yb-noselect yb-root-height yb-sidebar-blur flex flex-col gap-2 sm:gap-4 px-4 sm:px-7 lg:px-10 pt-3 sm:pt-6 pb-2 sm:pb-6 max-w-screen-2xl mx-auto w-full">
 
 <style>
 /* ── Disable text selection/copy across the whole Alumni Yearbook page ── */
@@ -620,10 +620,12 @@ new class extends Component {
 /* ── Main block ─────────────────────────────────────────── */
 .yb-table-block {
     display: flex; flex-direction: column;
-    border-radius: 1rem; overflow: hidden;
+    border-radius: 1rem; overflow: visible;
     border: 1px solid #E8E0F0;
     box-shadow: 0 1px 4px rgba(0,0,0,.06);
     flex: 1; min-height: 0;
+    /* overflow:visible so dropdown panels escape the container;
+       children handle their own border-radius at corners */
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -639,6 +641,8 @@ new class extends Component {
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
+    /* match parent's top border-radius since parent has overflow:visible */
+    border-radius: 1rem 1rem 0 0;
 }
 
 /* Row 1 on mobile: search fills the full width */
@@ -717,6 +721,9 @@ new class extends Component {
     justify-content: space-between; gap: 0.5rem;
     flex-wrap: wrap; border-top: 1px solid rgba(122,63,145,.3);
     position: sticky; bottom: 0; z-index: 30;
+    /* match parent's bottom border-radius */
+    border-radius: 0 0 1rem 1rem;
+    overflow: hidden;
 }
 .yb-pg-btn {
     display: inline-flex; align-items: center; justify-content: center;
@@ -769,6 +776,10 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
     }
     .yb-root-height > div:first-of-type { padding: 0 .75rem; }
     .yb-table-block { border-radius: 1rem 1rem 0 0; border-left: 0; border-right: 0; border-bottom: 0; box-shadow: none; }
+    /* Keep filter bar top radius matching table-block on mobile */
+    .yb-filter-bar { border-radius: 1rem 1rem 0 0; }
+    /* No bottom radius on mobile (block goes to screen edge) */
+    .yb-pagination-bar { border-radius: 0; }
 
     /* Compact page header */
     .yb-mobile-subtitle      { display: none; }
@@ -784,9 +795,47 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
     .yb-pagination-bar p { font-size: 10px; }
     .yb-pg-btn { min-width: 26px; height: 26px; padding: 0 6px; font-size: 11px; }
 
+    /* Dropdowns: ensure panels aren't clipped on mobile; let them overflow down */
+    .yb-dd-panel {
+        position: fixed !important;
+        /* JS sets top/left dynamically via data attrs */
+        top: var(--dd-top, auto);
+        left: var(--dd-left, auto);
+        min-width: var(--dd-width, 140px);
+        max-width: calc(100vw - 1.5rem);
+        max-height: 50vh;
+        z-index: 9999;
+    }
+
     /* Truncate dropdown labels on very small screens */
     .yb-dd-btn { font-size: 0.8rem; padding-right: 2rem; max-width: 110px; }
     .yb-dd-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ─────────────────────────────────────────────────────────
+   SIDEBAR BLUR — content blurs when the left sidebar opens
+   on mobile. Detects sidebar open state via JS below.
+───────────────────────────────────────────────────────── */
+.yb-sidebar-blur {
+    transition: filter 0.2s ease, opacity 0.2s ease;
+}
+.yb-sidebar-active .yb-sidebar-blur {
+    filter: blur(3px);
+    pointer-events: none;
+    user-select: none;
+}
+/* Also handle common layout class conventions */
+body.sidebar-open .yb-sidebar-blur,
+.sidebar-open .yb-sidebar-blur,
+[data-sidebar-open="true"] .yb-sidebar-blur {
+    filter: blur(3px);
+    pointer-events: none;
+}
+
+/* ── Scrollable area clipping fix (replaces overflow:hidden on table-block) ── */
+/* The scrollable cards area still clips its own content via absolute inset */
+#yb-organizer-scroll {
+    /* already has overflow-y: auto; absolute inset-0 handles the bounds */
 }
 
 @media (min-width: 768px) and (max-width: 1023px) {
@@ -865,7 +914,13 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
                 {{-- Batch dropdown ── --}}
                 <div class="relative shrink-0" @click.outside="if(openDd==='batch') openDd=''">
                     <button type="button"
-                            @click="openDd = openDd === 'batch' ? '' : 'batch'"
+                            @click="
+                                const r = $el.getBoundingClientRect();
+                                $el.closest('.yb-filter-bar').style.setProperty('--dd-top', (r.bottom + 4) + 'px');
+                                $el.closest('.yb-filter-bar').style.setProperty('--dd-left', r.left + 'px');
+                                $el.closest('.yb-filter-bar').style.setProperty('--dd-width', r.width + 'px');
+                                openDd = openDd === 'batch' ? '' : 'batch'
+                            "
                             :class="{ 'active': $wire.batch !== '' }"
                             :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
                             wire:loading.attr="disabled"
@@ -898,7 +953,13 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
                 {{-- Program dropdown ── --}}
                 <div class="relative shrink-0" @click.outside="if(openDd==='course') openDd=''">
                     <button type="button"
-                            @click="openDd = openDd === 'course' ? '' : 'course'"
+                            @click="
+                                const r = $el.getBoundingClientRect();
+                                $el.closest('.yb-filter-bar').style.setProperty('--dd-top', (r.bottom + 4) + 'px');
+                                $el.closest('.yb-filter-bar').style.setProperty('--dd-left', r.left + 'px');
+                                $el.closest('.yb-filter-bar').style.setProperty('--dd-width', Math.max(r.width, 200) + 'px');
+                                openDd = openDd === 'course' ? '' : 'course'
+                            "
                             :class="{ 'active': $wire.course !== '' }"
                             :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
                             wire:loading.attr="disabled"
@@ -1175,12 +1236,6 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
 <script>
 (function () {
     // ── Reset results scroll to top on filter/search/pagination changes ──
-    // Without this, changing search/batch/course/resetFilters/pagination
-    // leaves #yb-organizer-scroll at whatever scroll position the user was
-    // previously at. Since the new (filtered) result set is shorter/differs,
-    // the user lands mid-list looking at a leftover course-group section
-    // instead of the top of the new results — reading as "the filter didn't
-    // clear" even though the data underneath is correct.
     var watchedActions = ['search', 'batch', 'course', 'resetFilters', 'previousPage', 'nextPage', 'gotoPage'];
 
     function resetScroll() {
@@ -1198,5 +1253,70 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
             });
         }
     });
+
+    // ── Sidebar blur detection ──
+    // Watches the document for any common sidebar-open indicators and blurs
+    // the yearbook content when the sidebar overlaps on mobile.
+    (function () {
+        function isSidebarOpen() {
+            // Common class-based conventions
+            if (document.body.classList.contains('sidebar-open')) return true;
+            if (document.documentElement.classList.contains('sidebar-open')) return true;
+
+            // Alpine store: try common store names
+            try {
+                if (window.Alpine) {
+                    var stores = ['sidebar', 'nav', 'layout'];
+                    for (var i = 0; i < stores.length; i++) {
+                        var s = window.Alpine.store(stores[i]);
+                        if (s && (s.open === true || s.isOpen === true || s.visible === true)) return true;
+                    }
+                }
+            } catch (e) {}
+
+            // Check for a visible mobile overlay/backdrop element
+            var overlays = document.querySelectorAll(
+                '[data-sidebar-overlay], .sidebar-overlay, .nav-overlay, .mobile-overlay, [x-ref="sidebarOverlay"]'
+            );
+            for (var j = 0; j < overlays.length; j++) {
+                var o = overlays[j];
+                var style = window.getComputedStyle(o);
+                if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') return true;
+            }
+
+            // Check translate state: sidebar elements commonly use translate-x-0 when open
+            var sidebars = document.querySelectorAll('aside, [data-sidebar], .sidebar, #sidebar, nav.sidebar');
+            for (var k = 0; k < sidebars.length; k++) {
+                var el = sidebars[k];
+                // If sidebar is visually overlapping (fixed/absolute + left ≥ 0)
+                var cs = window.getComputedStyle(el);
+                if ((cs.position === 'fixed' || cs.position === 'absolute') && el.getBoundingClientRect().left >= 0) {
+                    // Check if its data indicates open
+                    if (el.dataset.sidebarOpen === 'true' || el.getAttribute('aria-expanded') === 'true') return true;
+                }
+            }
+
+            return false;
+        }
+
+        function applySidebarBlur() {
+            var open = isSidebarOpen();
+            var parent = document.querySelector('.yb-sidebar-blur')?.closest('[class*="sidebar"]')
+                      || document.body;
+            document.body.classList.toggle('yb-sidebar-active', open);
+        }
+
+        // MutationObserver: watch class changes on body, html, and sidebar candidates
+        var mo = new MutationObserver(applySidebarBlur);
+        mo.observe(document.body,            { attributes: true, attributeFilter: ['class', 'data-sidebar-open'] });
+        mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
+        // Also watch subtree for sidebar visibility changes (display/style toggling)
+        var sto = new MutationObserver(applySidebarBlur);
+        sto.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class', 'style', 'data-sidebar-open', 'aria-expanded'] });
+
+        // Initial check
+        applySidebarBlur();
+    })();
 })();
 </script>
