@@ -647,12 +647,21 @@ new class extends Component {
 /* The !important above previously defeated .yb-sidebar-blur's pointer-events:none,
    so the filter bar (and the dropdown buttons inside it) stayed clickable even
    while the sidebar overlay was open and the rest of the page was blurred/locked.
-   These rules put it back under the sidebar's control. */
+   These rules put it back under the sidebar's control.
+   The filter bar also gets its own EXPLICIT filter:blur() here (not just relying
+   on inheriting it from the .yb-sidebar-blur ancestor): because .yb-filter-bar has
+   its own position:relative + z-index:50 + overflow:visible, it forms its own
+   stacking context, and — depending on the host layout/sidebar implementation —
+   can end up rendered on its own compositor layer that visually "pops out" above
+   the blurred ancestor instead of blurring along with it. Setting the blur
+   directly on this element guarantees it always blurs, regardless of stacking. */
 .yb-sidebar-active .yb-filter-bar,
 body.sidebar-open .yb-filter-bar,
 .sidebar-open .yb-filter-bar,
 [data-sidebar-open="true"] .yb-filter-bar {
     pointer-events: none !important;
+    filter: blur(3px) !important;
+    user-select: none !important;
 }
 
 /* Row 1 on mobile: search fills the full width */
@@ -1339,6 +1348,36 @@ body.sidebar-open .yb-sidebar-blur,
                     // Check if its data indicates open
                     if (el.dataset.sidebarOpen === 'true' || el.getAttribute('aria-expanded') === 'true') return true;
                 }
+            }
+
+            // Generic fallback: this layout's mobile nav rail doesn't match any
+            // of the named conventions above (no .sidebar-open class, no Alpine
+            // store, no [data-sidebar-overlay] element, no aria-expanded flag).
+            // What IS reliably true whenever that rail is open is that a large,
+            // dark, semi-transparent, fixed/absolute full-viewport backdrop
+            // appears behind it (the dimming effect itself) and sits above our
+            // yearbook content in paint order. Detect that directly instead of
+            // depending on the other app's class names.
+            var allEls = document.querySelectorAll('body *');
+            for (var m = 0; m < allEls.length; m++) {
+                var el2 = allEls[m];
+                if (el2.closest('.yb-root-height')) continue; // ignore our own elements
+                var cs2 = window.getComputedStyle(el2);
+                if (cs2.position !== 'fixed' && cs2.position !== 'absolute') continue;
+                if (cs2.display === 'none' || cs2.visibility === 'hidden' || parseFloat(cs2.opacity) === 0) continue;
+                var rect2 = el2.getBoundingClientRect();
+                var coversMost = rect2.width >= window.innerWidth * 0.7 && rect2.height >= window.innerHeight * 0.7;
+                if (!coversMost) continue;
+                // Must actually look like a dimming backdrop: a semi-transparent
+                // dark background (not plain white/transparent page chrome).
+                var bg = cs2.backgroundColor || '';
+                var rgbaMatch = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+))?\)/);
+                if (!rgbaMatch) continue;
+                var r = +rgbaMatch[1], g = +rgbaMatch[2], b = +rgbaMatch[3];
+                var a = rgbaMatch[4] !== undefined ? +rgbaMatch[4] : 1;
+                var isDark = (r + g + b) / 3 < 120;
+                var isTranslucent = a > 0 && a < 0.95;
+                if (isDark && isTranslucent) return true;
             }
 
             return false;

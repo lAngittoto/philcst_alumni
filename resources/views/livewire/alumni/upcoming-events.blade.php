@@ -1987,21 +1987,21 @@ select.filter-input:hover { cursor: default !important; }
          },
 
          askShare(target) {
-             // Never intercept with native share here — the generic "Share"
+             // Never intercept with native share here — the generic Share
              // button at the top calls nativeShare() directly. When the user
-             // taps "Facebook" or "Messenger" they want THAT specific app to
+             // taps Facebook or Messenger they want THAT specific app to
              // open, not the OS share sheet. Always show the download-confirm
              // modal first, then route to the correct platform.
              //
              // IMPORTANT: copy the caption to the clipboard RIGHT HERE, while
              // still inside the synchronous click handler. Clipboard writes
-             // require an active "user gesture" (transient activation). If we
-             // wait until after an `await fetch(...)` (the image download) or
+             // require an active user-gesture (transient activation). If we
+             // wait until after an await fetch(...) (the image download) or
              // after window.open() has already blurred/redirected the tab,
              // that activation window is gone and
              // navigator.clipboard.writeText() silently rejects in most
              // mobile browsers (Safari especially) — which is exactly why
-             // "Could not auto-copy caption" was firing every single time.
+             // the could-not-auto-copy warning was firing every single time.
              // Copying synchronously here, before any await, fixes it.
              this.autoCopyCaption().then(ok => {
                  $wire.dispatch('flash-message', {
