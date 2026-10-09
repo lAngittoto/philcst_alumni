@@ -1150,7 +1150,8 @@ select.filter-input option {
                                 <option value="">All Types</option>
                                 <option value="Full-Time">Full-Time</option>
                                 <option value="Part-Time">Part-Time</option>
-                                <option value="Contract">Contract</option>
+                                {{-- ── FIX: display label changed to "Contractual", DB value stays "Contract" ── --}}
+                                <option value="Contract">Contractual</option>
                                 <option value="Freelance">Freelance</option>
                             </select>
                         </label>
@@ -1712,12 +1713,7 @@ select.filter-input option {
 </div>
 @endif
 
-{{-- ══ SHARE MODAL — simplified: icon + label only per option (no
-     subtext). Facebook/Messenger no longer auto-download the image —
-     instead, a small confirm modal asks the alumni if they want to
-     download the photo first (Download / Skip), THEN the Facebook or
-     Messenger tab opens. The caption is still auto-copied to clipboard
-     either way, since that part isn't disruptive. ══ --}}
+{{-- ══ SHARE MODAL ══ --}}
 @if($showShareModal)
 @php
     $shareBaseUrl     = $this->jobDetailUrl($shareJobId);
@@ -1729,11 +1725,6 @@ select.filter-input option {
         ? mb_substr($shareDescription, 0, 160) . '…'
         : $shareDescription;
 
-    // Qualifications / instructions for the currently-shared job, needed
-    // here because the detail-view's $hasQual/$qualLines/$hasInstr/
-    // $instrLines only exist inside the @if($showDetail) block above —
-    // this is a separate @if scope with its own $job-less context, so we
-    // recompute them from the share* properties captured in openShareModal().
     $shareJobModel = \App\Models\JobPosting::find($shareJobId);
     $hasQual  = $shareJobModel && !empty($shareJobModel->qualifications);
     $hasInstr = $shareJobModel && !empty($shareJobModel->application_instructions);
@@ -1745,20 +1736,6 @@ select.filter-input option {
         ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $shareJobModel->application_instructions)), fn($l) => $l !== ''))
         : [];
 
-    // NOTE: this text is meant to be posted directly (via the native share
-    // sheet / pasted into Facebook) as the post's own caption — it does
-    // NOT include the job link, since the alumni portal isn't deployed
-    // publicly yet and a raw "alumniphilcst.com" link would just show up
-    // as a dead/unusable link box in the post composer.
-    //
-    // SMART CAPTION:
-    // - PHILCST posting  → alumni already know it's PHILCST, so the meta
-    //   line (company/location/employment/experience/deadline) is skipped
-    //   entirely. Goes straight from "WE ARE HIRING" into the description.
-    // - Partner-company posting → the meta line IS included (company,
-    //   location, employment type, experience level, deadline) right
-    //   after the opener, since it's not obviously a PHILCST post and
-    //   readers need that context before the description.
     $fbLines   = [];
     $fbLines[] = "WE ARE HIRING: " . strtoupper($shareJobTitle);
 
@@ -1797,9 +1774,6 @@ select.filter-input option {
         }
     }
 
-    // PHILCST postings skip the meta line up top, so give partner-company
-    // postings that already showed the deadline once a plain closing —
-    // no need to repeat it again down here for either case.
     $fbLines[] = '';
     $fbLines[] = "Apply now through PHILCST Alumni Connect 💜";
     $fbLines[] = "#YourFutureStarsHere";
@@ -1809,7 +1783,6 @@ select.filter-input option {
 <div class="fixed inset-0 z-[10002] flex items-center justify-center p-0 sm:p-4 bg-black/45"
      x-data="{
          copied:false,
-         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
          downloading:false,
          downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
@@ -1819,7 +1792,10 @@ select.filter-input option {
 
          // Pre-share confirm modal state
          showDlConfirm: false,
-         pendingTarget: null, // 'facebook' | 'messenger'
+         pendingTarget: null,
+
+         // ── Detect mobile / tablet (used to choose how to open FB/Messenger)
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
          async buildImageFile() {
              if (!this.imageUrl) return null;
@@ -1871,32 +1847,20 @@ select.filter-input option {
              }
          },
 
-         async nativeShare() {
-             try {
-                 const shareData = { title: this.jobTitle, text: this.shareText };
-                 const file = await this.buildImageFile();
-                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-                     shareData.files = [file];
-                 }
-                 await navigator.share(shareData);
-             } catch (e) { /* cancelled by user, nothing to do */ }
-         },
-
-         // Step 1: user taps Facebook or Messenger -> open the download
-         // choice modal first (no auto-download anymore).
+         // ── askShare: always show the download-confirm modal first.
+         //    NOTE: the native share button has been removed — we always
+         //    route to Facebook/Messenger directly in the browser so the
+         //    caption can be properly copied and pasted. ──
          askShare(target) {
-             if (this.nativeShareSupported) { this.nativeShare(); return; }
              this.pendingTarget = target;
              this.showDlConfirm = true;
          },
 
-         // Step 2a: user chose to download the image in the confirm modal.
          async confirmDownloadThenGo() {
              await this.downloadImage();
              this.proceedToTarget();
          },
 
-         // Step 2b: user chose to skip the download.
          proceedToTarget() {
              this.showDlConfirm = false;
              const target = this.pendingTarget;
@@ -1910,38 +1874,47 @@ select.filter-input option {
              this.pendingTarget = null;
          },
 
-         // Copies the caption FIRST, while this page still has focus, then
-         // opens the Facebook/Messenger window. This order matters: some
-         // browsers (Firefox especially) silently fail
-         // navigator.clipboard.writeText() once focus has already moved to
-         // another window/tab, which left the user's OLD clipboard content
-         // in place instead of the caption — that's why the wrong text
-         // (page source) was showing up pasted into Facebook's composer.
-         // Copying before opening/focusing the popup guarantees the write
-         // happens while this document is still the focused one.
-         async openFacebook() {
-             const copyOk = await this.autoCopyCaption();
-             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+         // ── openFacebook: window.open FIRST (sync, before any await) so
+         //    iOS doesn't block it as an unsolicited popup, then copy the
+         //    caption. On mobile a new tab opens in the browser; on desktop
+         //    a centred popup appears. ──
+         openFacebook() {
              const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             const win = window.open(url, 'philcst_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             if (win) { try { win.focus(); } catch(e) {} }
-             $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
+             let win;
+             if (this.isMobile) {
+                 win = window.open(url, '_blank', 'noopener,noreferrer');
+             } else {
+                 const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+                 win = window.open(url, 'philcst_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
+             // Copy caption after opening (still in click-event microtask queue)
+             this.autoCopyCaption().then(ok => {
+                 $wire.dispatch('flash-message', {
+                     type: ok ? 'success' : 'warning',
+                     message: ok
+                         ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                         : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
+                 });
              });
          },
 
-         async openMessenger() {
-             const copyOk = await this.autoCopyCaption();
-             const win = window.open('https://www.messenger.com/new', 'philcst_messenger_share', 'noopener,noreferrer');
-             if (win) { try { win.focus(); } catch(e) {} }
-             $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
+         // ── openMessenger: same pattern as openFacebook ──
+         openMessenger() {
+             let win;
+             if (this.isMobile) {
+                 win = window.open('https://www.messenger.com/new', '_blank', 'noopener,noreferrer');
+             } else {
+                 win = window.open('https://www.messenger.com/new', 'philcst_messenger_share', 'noopener,noreferrer');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
+             this.autoCopyCaption().then(ok => {
+                 $wire.dispatch('flash-message', {
+                     type: ok ? 'success' : 'warning',
+                     message: ok
+                         ? 'Caption copied! Switch to Messenger and long-press → Paste to add the text.'
+                         : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
+                 });
              });
          },
 
@@ -2007,25 +1980,16 @@ select.filter-input option {
                 <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
                     <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
                     <p class="text-xs leading-relaxed" style="color:#333333;">
-                        The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                        into the Facebook or Messenger window that opens.
+                        The caption is copied automatically — long-press → Paste it into the Facebook or Messenger window that opens.
                     </p>
                 </div>
             </div>
 
-            {{-- RIGHT: Share buttons --}}
+            {{-- RIGHT: Share buttons (3 buttons only — native Share button removed) --}}
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 md:overflow-y-auto scroll-thin">
                 <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                <template x-if="nativeShareSupported">
-                    <button type="button" @click="nativeShare()" class="share-option-btn" style="background:#7a3f91;">
-                        <span class="icon-wrap">
-                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
-                        </span>
-                        <span class="label-text text-xs font-semibold">Share</span>
-                    </button>
-                </template>
-
+                {{-- ── Facebook — opens browser tab on mobile, popup on desktop ── --}}
                 <button type="button" @click="askShare('facebook')" class="share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
@@ -2033,6 +1997,7 @@ select.filter-input option {
                     <span class="label-text text-xs font-semibold">Share on Facebook</span>
                 </button>
 
+                {{-- ── Messenger — opens browser tab on mobile, new window on desktop ── --}}
                 <button type="button" @click="askShare('messenger')" class="share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
@@ -2042,6 +2007,7 @@ select.filter-input option {
                     <span class="label-text text-xs font-semibold">Send via Messenger</span>
                 </button>
 
+                {{-- ── Share to Batch Chat (internal) ── --}}
                 <button type="button" wire:click="openForwardModal"
                         class="share-option-btn" style="background:#7a3f91;">
                     <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
@@ -2074,10 +2040,7 @@ select.filter-input option {
         </div>
     </div>
 
-    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ──
-         Shown right after tapping Facebook/Messenger, before opening the
-         target window. Lets the alumni choose Download or Skip (they may
-         already have the photo saved from a previous share). --}}
+    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ── --}}
     <div x-show="showDlConfirm" x-cloak
          x-transition:enter="transition ease-out duration-150"
          x-transition:enter-start="opacity-0"
@@ -2211,7 +2174,6 @@ select.filter-input option {
 
         function show() {
             if (isTouchOrSmall()) return;
-            // Hide while any card/filter is locked
             if (document.querySelector('[data-jb-card].is-blocked, [data-jb-card].is-loading')) return;
             label.style.opacity    = '1';
             label.style.visibility = 'visible';
@@ -2251,19 +2213,11 @@ select.filter-input option {
             }
         });
 
-        // Hide label during any Livewire update
         document.addEventListener('livewire:update', () => { hide(); activeCard = null; });
     }
 
     // ─── LOCK / UNLOCK (dashboard .is-blocked pattern) ───────────────────
-    // lockJbAll(clickedCard):
-    //   • clickedCard → .is-loading (spinner visible, content blurred)
-    //   • every other card → .is-blocked (dimmed, no pointer, no hover)
-    //   • all filter inputs, selects, pagination buttons → .jb-el-blocked
-    // clearAll(): removes all lock classes everywhere.
-
     function lockJbAll(clickedCard) {
-        // Cards
         document.querySelectorAll('[data-jb-card]').forEach(el => {
             if (el === clickedCard) {
                 el.classList.remove('is-blocked');
@@ -2273,7 +2227,6 @@ select.filter-input option {
                 el.classList.add('is-blocked');
             }
         });
-        // Filter inputs, selects, pagination buttons
         document.querySelectorAll(
             '#jb-content-block .filter-input, ' +
             '#jb-content-block select, ' +
@@ -2283,7 +2236,6 @@ select.filter-input option {
     }
 
     function lockJbFilters() {
-        // Called when a filter/search/sort/pagination fires (no specific card)
         document.querySelectorAll('[data-jb-card]').forEach(el => {
             el.classList.remove('is-loading');
             el.classList.add('is-blocked');
@@ -2311,15 +2263,12 @@ select.filter-input option {
             if (card._jbClickBound) return;
             card._jbClickBound = true;
             card.addEventListener('click', function (e) {
-                // Ignore if clicking the share button inside the card
                 if (e.target.closest('[data-jb-share]')) return;
-                // If already blocked, swallow the click
                 if (card.classList.contains('is-blocked')) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
                     return;
                 }
-                // If another card is already loading, swallow
                 if (document.querySelector('[data-jb-card].is-loading')) {
                     e.preventDefault();
                     e.stopImmediatePropagation();
@@ -2331,28 +2280,6 @@ select.filter-input option {
     }
 
     // ─── FILTER / SELECT / PAGINATION CHANGE & CLICK ─────────────────────
-    // Selects fire 'change'; pagination/reset fire 'click' (capture).
-    //
-    // FIX (freeze bug): listeners are stored in module-level refs so
-    // removeEventListener can replace them cleanly. The old code used
-    // block._jbFilterBound as a one-way guard but then reset it to false
-    // in queueRebind() and called bindFilterElements() again — meaning a
-    // SECOND anonymous listener was added after every Livewire morph.
-    //
-    // With two capture listeners on the block, clicking Reset would:
-    //   • Listener 1: nothing locked yet → lockJbFilters() → reset button
-    //                 gets .jb-el-blocked
-    //   • Listener 2: sees .jb-el-blocked on btn → stopImmediatePropagation()
-    //                 → Livewire never receives the click → no commit fires
-    //                 → clearAll() never runs → permanent freeze.
-    //
-    // Fix: store the two function refs (_jbChangeFn / _jbClickCaptureFn)
-    // and removeEventListener the old ones before re-adding, so only ONE
-    // listener ever exists at a time regardless of how many morphs happen.
-    // bindFilterElements() is also removed from queueRebind() — event
-    // delegation on #jb-content-block survives morph (the element itself
-    // is morphed in-place, not replaced), so rebinding on every morph was
-    // never necessary for filter elements, only for per-card listeners.
     var _jbChangeFn = null;
     var _jbClickCaptureFn = null;
 
@@ -2360,32 +2287,19 @@ select.filter-input option {
         const block = document.getElementById('jb-content-block');
         if (!block) return;
 
-        // Always remove old listeners first — safe even on first call
-        // when refs are null (removeEventListener is a no-op for null).
         if (_jbChangeFn)       block.removeEventListener('change', _jbChangeFn);
         if (_jbClickCaptureFn) block.removeEventListener('click',  _jbClickCaptureFn, true);
 
-        // Select change (filterType, filterLevel)
         _jbChangeFn = function (e) {
             if (!e.target.matches('select')) return;
             if (document.querySelector('[data-jb-card].is-blocked, .jb-el-blocked')) return;
             lockJbFilters();
         };
 
-        // Buttons with wire:click (pagination, resetFilters) — capture phase
-        // so this runs BEFORE Livewire's own handler and can block it.
-        //
-        // FIX (reset freeze): the reset button ([data-jb-reset]) must never
-        // be blocked by lockJbFilters() — if it gets .jb-el-blocked before
-        // Livewire receives the click, the commit never fires and clearAll()
-        // never runs, freezing the UI permanently. Skip it entirely here;
-        // Livewire's own wire:loading handling on the button is enough.
         _jbClickCaptureFn = function (e) {
             const btn = e.target.closest('button[wire\\:click], button[wire\\:click\\.prevent]');
             if (!btn) return;
-            // Reset button — never lock it; let Livewire handle it freely.
             if (btn.hasAttribute('data-jb-reset')) return;
-            // Already locked — block the click so Livewire can't double-fire.
             if (btn.classList.contains('jb-el-blocked')) {
                 e.preventDefault();
                 e.stopImmediatePropagation();
@@ -2414,27 +2328,19 @@ select.filter-input option {
         } catch (e) {}
     }
 
-    // ─── REBIND (coalesced per rAF tick, avoids double-paint) ────────────
-    // Only rebinds per-card listeners and the cursor label — both need
-    // refreshing after morph because new card DOM nodes appear. Filter
-    // element listeners are intentionally NOT rebind here: they use event
-    // delegation on #jb-content-block which survives morph in-place, so
-    // rebinding them on every morph was what caused the listener
-    // accumulation that froze the reset button.
+    // ─── REBIND (coalesced per rAF tick) ─────────────────────────────────
     var jbRebindQueued = false;
     function queueRebind() {
         if (jbRebindQueued) return;
         jbRebindQueued = true;
         requestAnimationFrame(() => {
             jbRebindQueued = false;
-            // Reset per-card binding flags so new/morphed cards get listeners.
             document.querySelectorAll('[data-jb-card]').forEach(c => {
                 c._jbClickBound = false;
                 c._jbLabelBound = false;
             });
             bindCardClicks();
             initCursorLabel();
-            // bindFilterElements intentionally omitted — see comment above.
         });
     }
 
@@ -2442,20 +2348,17 @@ select.filter-input option {
     function init() {
         bindCardClicks();
         initCursorLabel();
-        bindFilterElements(); // bound once; event delegation survives morph
+        bindFilterElements();
         initLivewireHook();
 
         if (window.Livewire) {
             window.Livewire.hook('morph.updated', () => queueRebind());
         }
         document.addEventListener('livewire:navigated', () => {
-            // Full SPA navigation: new DOM, so rebind everything including
-            // filter elements (bindFilterElements removes old refs first).
             clearAll();
             bindFilterElements();
             queueRebind();
         });
-        // Safety net: bfcache restore
         window.addEventListener('pageshow', clearAll);
     }
 

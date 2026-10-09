@@ -1887,12 +1887,14 @@ select.filter-input:hover { cursor: default !important; }
 <div id="share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45"
      x-data="{
          copied:false,
-         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
          downloading:false,
          downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
          eventTitle: {{ json_encode($shareEventTitle) }},
          imageUrl:  {{ json_encode($sharePhotoUrl) }},
+
+         // ── Detect mobile/tablet to choose how to open FB/Messenger ──
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
          showDlConfirm: false,
          pendingTarget: null,

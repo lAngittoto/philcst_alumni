@@ -690,6 +690,9 @@ new class extends Component {
     max-height: calc(100dvh - var(--yb-topbar) - var(--yb-page-pad));
     min-height: 420px;
     overflow: hidden;
+    /* Isolate this component's stacking context so nothing inside bleeds
+       above the sidebar overlay (backdrop-filter blur + z-index). */
+    isolation: isolate;
 }
 @media (min-width: 640px)  { .yb-root { padding: 1.25rem 1.75rem 1.25rem; gap: .75rem; } }
 @media (min-width: 1024px) { .yb-root { padding: 1.5rem 2.5rem 1.5rem; } }
@@ -722,9 +725,29 @@ new class extends Component {
 
 /* ── Mobile responsiveness ──────────────────────────────── */
 @media (max-width: 640px) {
-    .yb-filter-bar { gap: 6px; }
-    /* Search takes full row on mobile */
+    .yb-filter-bar { gap: 6px; flex-wrap: wrap; }
+
+    /* Search stays in row 1 alongside Filters label + Reset */
     .yb-filter-bar > .relative.flex-1 { min-width: 0; }
+
+    /* "All Programs" pushes to its own full-width row below search
+       so it's always visible on small screens and never gets clipped */
+    .yb-filter-dd {
+        order: 10;
+        width: 100%;
+        flex: 1 1 100%;
+    }
+    .yb-filter-dd .yb-dd-btn {
+        width: 100%;
+        text-align: left;
+    }
+    /* Dropdown panel spans the full width of the button row */
+    .yb-filter-dd .yb-dd-panel {
+        left: 0 !important;
+        right: 0 !important;
+        max-width: 100% !important;
+        width: 100%;
+    }
 }
 
 /* Extra-small phones */
@@ -781,6 +804,14 @@ new class extends Component {
         left: auto;
         right: 0;
         max-width: calc(100vw - 1.5rem);
+    }
+}
+/* On mobile the button is full-width so panel spans full button width */
+@media (max-width: 640px) {
+    .yb-filter-dd .yb-dd-panel {
+        left: 0 !important;
+        right: 0 !important;
+        max-width: 100% !important;
     }
 }
 
@@ -853,7 +884,7 @@ new class extends Component {
                        autocomplete="off" spellcheck="false">
             </div>
 
-            <div class="relative" x-data="{ open: false }" @click.outside="open = false">
+            <div class="relative yb-filter-dd" x-data="{ open: false }" @click.outside="open = false">
                 <button type="button"
                         @click="if (courseBusy) return; open = !open"
                         :class="{ 'active': $wire.course !== '', 'opacity-50 cursor-not-allowed': courseBusy }"

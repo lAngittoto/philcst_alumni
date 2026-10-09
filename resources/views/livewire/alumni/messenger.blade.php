@@ -1989,6 +1989,73 @@ new class extends \Livewire\Volt\Component {
                 box-shadow: -10px 0 28px rgba(26,15,34,.14);
             }
         }
+
+        /* ═══════════════════════════════════════════════════════════
+           MOBILE VIEWPORT FIXES
+           ═══════════════════════════════════════════════════════════ */
+
+        /* ── Reaction toolbar: escape overflow clipping on mobile ──────
+           The toolbar is position:absolute, but its parent chain has
+           overflow:hidden on .msgr-shell AND overflow-y:auto on #msg-list
+           (which implicitly clips overflow-x too). On a narrow phone the
+           emoji row is wider than the bubble, so the clipped ends are
+           simply invisible — the user can't see or tap them.
+
+           Fix: switch to position:fixed on mobile screens so the toolbar
+           escapes every overflow container and is always fully visible in
+           the viewport. Centered horizontally and floated above the
+           composer bar (6 rem ≈ 96 px clears the base composer height;
+           a slight overlap with the optional reply/edit bar is acceptable
+           since the bar is visible just above it and the toolbar can be
+           dismissed with a tap anywhere on the chat). ──────────────── */
+        @media (max-width: 639px) {
+            .msgr-reaction-toolbar {
+                position: fixed !important;
+                bottom: 6rem !important;
+                top: auto !important;
+                left: 50% !important;
+                right: auto !important;
+                transform: translateX(-50%) !important;
+                margin: 0 !important;
+                z-index: 500;
+                max-width: calc(100vw - 2rem);
+                /* Subtle border makes it read as a floating card */
+                border: 1.5px solid #E8E0F0;
+                /* Allow wrap on extreme narrow (< 320 px) or landscape */
+                flex-wrap: wrap;
+                justify-content: center;
+                row-gap: 0.25rem;
+            }
+        }
+
+        /* ── Reactions who-reacted popup: responsive height ────────────
+           Fixed 420px height overflows the visual viewport on small phones
+           when the on-screen keyboard is open (viewport shrinks to ~60 % of
+           screen height). Use max-height with dvh so the internal list
+           scrolls inside the popup instead of the popup itself overflowing. */
+        @media (max-width: 639px) {
+            .msgr-reactions-popup {
+                height: auto !important;
+                max-height: min(420px, 80dvh) !important;
+            }
+        }
+
+        /* ── Delete confirm modal + reactions popup: extra-narrow phones ─
+           320 px wide (old iPhone SE, small Android) — tighten the
+           backdrop padding so the card gets the full available width. */
+        @media (max-width: 374px) {
+            .msgr-modal-backdrop,
+            .msgr-reactions-backdrop { padding: 10px !important; }
+            .msgr-modal-card         { max-width: 100% !important; }
+            .msgr-reactions-popup    { max-width: 100% !important; }
+        }
+
+        /* ── Page isolation: prevent z-index bleed over the app sidebar ─
+           Same fix as the yearbook page. Creates an isolated stacking
+           context for the whole messenger so nothing inside it
+           (toolbars, dropdowns, panels) can bleed above the app's own
+           sidebar overlay or its backdrop-filter blur. ─────────────── */
+        .msgr-page { isolation: isolate; }
     </style>
 
     @php
