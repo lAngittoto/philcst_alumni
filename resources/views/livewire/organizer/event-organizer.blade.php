@@ -1730,7 +1730,7 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
     // instead of Facebook/Messenger only getting the generic events list.
     public function eventDetailUrl(int $id): string
     {
-        return $this->eventsBaseUrl() . '?event=' . $id;
+        return $this->eventsBaseUrl() . '?event=' . $id . '&type=ORGANIZER';
     }
 
     private function resetFormFields(): void
@@ -4164,7 +4164,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
     }
 
     $fbLines[] = '';
-    $fbLines[] = 'View more and RSVP here: ' . $shareBaseUrl;
+    $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp
@@ -4188,12 +4188,18 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 <div id="eo-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 eo-share-backdrop"
      x-data="{
          copied:false,
-         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
          downloading:false,
          downloaded:false,
-         shareText: {{ json_encode($fbPostText) }},
-         eventTitle: {{ json_encode($shareEventTitle) }},
-         imageUrl:  {{ json_encode($shareEventPhotoUrl) }},
+         shareText:  {{ json_encode($fbPostText,     JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         eventTitle: {{ json_encode($shareEventTitle, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         baseUrl:    {{ json_encode($shareBaseUrl,    JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         imageUrl:   {{ json_encode($shareEventPhotoUrl,   JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+
+         // ── Detect mobile/tablet to choose how to open FB/Messenger ──
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
+
+         // Native Web Share API — available on mobile Chrome/Safari/Edge
+         nativeShareSupported: (typeof navigator !== 'undefined' && 'share' in navigator),
 
          showDlConfirm: false,
          pendingTarget: null,
@@ -4260,7 +4266,31 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
          },
 
          askShare(target) {
-             if (this.nativeShareSupported) { this.nativeShare(); return; }
+             // Never intercept with native share here — the generic Share
+             // button at the top calls nativeShare() directly. When the user
+             // taps Facebook or Messenger they want THAT specific app to
+             // open, not the OS share sheet. Always show the download-confirm
+             // modal first, then route to the correct platform.
+             //
+             // IMPORTANT: copy the caption to the clipboard RIGHT HERE, while
+             // still inside the synchronous click handler. Clipboard writes
+             // require an active user-gesture (transient activation). If we
+             // wait until after an await fetch(...) (the image download) or
+             // after window.open() has already blurred/redirected the tab,
+             // that activation window is gone and
+             // navigator.clipboard.writeText() silently rejects in most
+             // mobile browsers (Safari especially) — which is exactly why
+             // the could-not-auto-copy warning was firing every single time.
+             // Copying synchronously here, before any await, fixes it.
+             this.autoCopyCaption().then(ok => {
+                 $wire.dispatch('flash-message', {
+                     type: ok ? 'success' : 'warning',
+                     message: ok
+                         ? 'Caption copied! Long-press → Paste it after the window opens.'
+                         : 'Could not auto-copy caption — use Copy Caption below, then paste manually.'
+                 });
+             });
+
              this.pendingTarget = target;
              this.showDlConfirm = true;
          },
@@ -4283,34 +4313,99 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
              this.pendingTarget = null;
          },
 
-         // Copy the caption FIRST while this page still has focus, then
-         // open/focus the target window. Copying after focus has already
-         // moved elsewhere can silently fail in some browsers, leaving
-         // stale clipboard content behind instead of the caption.
-         async openFacebook() {
-             const copyOk = await this.autoCopyCaption();
-             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             const win = window.open(url, 'philcst_eo_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             if (win) { try { win.focus(); } catch(e) {} }
-             $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
-             });
+         // ── openFacebook ──────────────────────────────────────────────────
+         // Always include BOTH u= (the event URL, so Facebook scrapes the OG
+         // image/title from the page) and quote= (the caption text — respected
+         // by the FB web composer and some mobile clients).
+         // On mobile the browser hands the URL off to the Facebook app via
+         // universal/intent links if it is installed; on desktop we get a
+         // centred popup.  The caption is also copied to the clipboard so the
+         // user can paste it if FB strips the quote.
+         openFacebook() {
+             const evUrl    = encodeURIComponent(this.baseUrl);
+             const caption  = encodeURIComponent(this.shareText);
+             const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
+                            + '?u='     + evUrl
+                            + '&quote=' + caption;
+             if (this.isMobile) {
+                 // _blank in mobile browser → system opens FB app (if installed)
+                 // via Android intent / iOS universal link; falls back to mobile
+                 // web FB otherwise.
+                 window.open(shareUrl, '_blank', 'noopener,noreferrer');
+             } else {
+                 const w=680,h=560,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_eo_fb_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
+             // Caption was already copied synchronously in askShare() —
+             // doing it again here (after window.open/await) is exactly
+             // what caused the clipboard write to fail before, so it's
+             // intentionally NOT repeated.
          },
 
-         async openMessenger() {
-             const copyOk = await this.autoCopyCaption();
-             const win = window.open('https://www.messenger.com/new', 'philcst_eo_messenger_share', 'noopener,noreferrer');
-             if (win) { try { win.focus(); } catch(e) {} }
-             $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
-             });
+         // ── openMessenger ─────────────────────────────────────────────────
+         // Mobile strategy (two-tier):
+         //   Android → intent:// URI so the OS either launches Messenger or
+         //             offers to install it from the Play Store.
+         //   iOS     → fb-messenger:// custom scheme via a hidden <a> click;
+         //             1.5-second fallback to messenger.com/share if app is
+         //             not installed and the system didn't navigate away.
+         // Desktop  → messenger.com/share popup (proper share URL, not /new).
+         // In all cases the caption is auto-copied to the clipboard.
+         openMessenger() {
+             const evUrl   = encodeURIComponent(this.baseUrl);
+             const webLink = 'https://www.messenger.com/share?link=' + evUrl;
+
+             if (this.isMobile) {
+                 const isAndroid = /Android/i.test(navigator.userAgent);
+                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                 if (isAndroid) {
+                     // Android intent URI — opens Messenger directly if installed;
+                     // otherwise Android asks to find it in the Play Store.
+                     window.open(
+                         'intent://share/?link=' + evUrl +
+                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+                         '_blank'
+                     );
+                 } else if (isIOS) {
+                     // iOS: trigger the fb-messenger:// URL scheme via a
+                     // temporary <a> so we don't navigate the current page away.
+                     const a  = document.createElement('a');
+                     a.href   = 'fb-messenger://share/?link=' + evUrl;
+                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     // If Messenger wasn't installed the URL scheme silently
+                     // fails — open the web share page as a backup.
+                     setTimeout(() => {
+                         if (!document.hidden) {
+                             window.open(webLink, '_blank', 'noopener,noreferrer');
+                         }
+                     }, 1500);
+                 } else {
+                     // Other mobile → web fallback
+                     window.open(webLink, '_blank', 'noopener,noreferrer');
+                 }
+             } else {
+                 // Desktop — centred popup pointing at the proper share URL
+                 const w=700,h=580,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(webLink, 'philcst_eo_messenger_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
+             // Caption was already copied synchronously in askShare() —
+             // doing it again here (after window.open/await) is exactly
+             // what caused the clipboard write to fail before, so it's
+             // intentionally NOT repeated.
          },
 
          async copyLinkFn() {
@@ -4374,6 +4469,13 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
+                </div>
+
+                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                    <p class="text-xs leading-relaxed" style="color:#333333;">
+                        The caption is copied automatically — long-press → Paste it into the Facebook or Messenger window that opens.
+                    </p>
                 </div>
             </div>
 

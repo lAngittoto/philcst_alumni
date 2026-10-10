@@ -4532,7 +4532,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
          // the user taps Facebook/Messenger we can save it + open the target
          // app IN THE SAME CLICK (no awaiting a network fetch in between —
          // that delay is what made browsers silently BLOCK the popup/app
-         // hand-off, which is why Share on Facebook/Messenger "did nothing").
+         // hand-off, which is why Share on Facebook/Messenger did nothing).
          imageBlob: null,
          async prefetchImage() {
              if (!this.imageUrl || this.imageBlob) return;
@@ -4557,7 +4557,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
          // Facebook / Messenger buttons: ask about the photo first (if the job
          // has one), otherwise go straight to the target. The native share
-         // sheet has its own dedicated "Share" button, so these two buttons
+         // sheet has its own dedicated Share button, so these two buttons
          // always open Facebook / Messenger themselves.
          askShare(target) {
              if (this.imageUrl) {
@@ -4653,7 +4653,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
          // ── Messenger ────────────────────────────────────────────────────
          // Mobile: hand off to the Messenger app via its share link (Android
          // intent / iOS scheme) with a web fallback.
-         // Desktop: Messenger has no public "share link" web endpoint (the
+         // Desktop: Messenger has no public share-link web endpoint (the
          // old messenger.com/share URL just opens a blank page), so the link +
          // caption are copied and messenger.com is opened — paste into any chat.
          async openMessenger() {

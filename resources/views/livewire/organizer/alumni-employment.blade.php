@@ -955,8 +955,11 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 
 /* ── Mobile filter toggle + full-screen modal ─────────────────────── */
 @media (max-width: 1023px) {
-    .ae-filter-bar { display: none !important; }
-    .ae-filter-bar.ae-filter-open { display: flex !important; }
+    /* Search is ALWAYS visible; everything else (the dropdown filters)
+       only shows after tapping "Show Filters". */
+    .ae-filter-bar { display: flex !important; }
+    .ae-filter-bar:not(.ae-filter-open) > *:not(.ae-search-wrap) { display: none !important; }
+    .ae-search-wrap { flex: 1 1 100%; max-width: none !important; min-width: 0 !important; }
 }
 @media (max-width: 639px) {
     .ae-modal-panel { border-radius: 0 !important; max-width: 100% !important; }
@@ -971,30 +974,26 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     .ae-mobile-row { min-height: 84px; }
 }
 
-/* ── Mobile/tablet table block — FIXED height, same idea as the desktop
-   .ae-main-row rule above, but written as real CSS instead of Tailwind
-   arbitrary-value classes (max-lg:h-[calc(100dvh-360px)] etc. on the div
-   itself), because those were not reliably taking effect — the block was
-   still shrinking to fit only 2-3 rows (see screenshot: list ends right
-   after "Kim Tzy" instead of filling the remaining screen like the stat
-   cards column above it does). A plain class selector here is immune to
-   whatever purge/JIT issue was dropping the arbitrary-value classes, and
-   it applies unconditionally — empty state, a couple of rows, or a full
-   page all get the exact same block height, so nothing ever jumps or
-   looks short next to the stat cards. ── */
+/* ── Mobile/tablet table block — FULL SCREEN ──────────────────────────
+   The block is pinned edge to edge, from just under the page header
+   (--ae-top, measured by JS) all the way to the bottom of the screen,
+   so the list is as long as possible. ── */
 @media (max-width: 1023px) {
     .ae-table-block {
-        height: calc(100dvh - 200px) !important;
-        max-height: calc(100dvh - 200px) !important;
-        min-height: 420px !important;
+        position: fixed !important;
+        left: 0; right: 0; bottom: 0;
+        top: var(--ae-top, 190px);
+        z-index: 30;
+        width: auto !important;
+        height: auto !important;
+        max-height: none !important;
+        min-height: 0 !important;
+        border-radius: 1rem 1rem 0 0 !important;
+        border-left: 0 !important; border-right: 0 !important; border-bottom: 0 !important;
+        box-shadow: 0 -2px 10px rgba(0,0,0,.06) !important;
     }
-}
-@media (max-width: 639px) {
-    .ae-table-block {
-        height: calc(100dvh - 210px) !important;
-        max-height: calc(100dvh - 210px) !important;
-        min-height: 420px !important;
-    }
+    /* block is already full screen → the extra Full Screen button is redundant */
+    .ae-fullscreen-btn { display: none !important; }
 }
 
 /* ── Stat cards on tablet/mobile — HIDDEN by default so the table can
@@ -1053,6 +1052,9 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
    the dvh unit, and lock background scroll so iOS doesn't rubber-band
    the page behind the fixed modal instead of scrolling the modal body
    itself (a very common cause of "modal won't scroll" on iOS). */
+@media (max-width: 1023px) {
+    html:has(.ae-page-root), body:has(.ae-page-root) { overflow: hidden !important; }
+}
 @media (max-width: 1023px) {
     body.ae-modal-lock {
         position: fixed;
@@ -1285,10 +1287,9 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     </div>
                     <p class="text-base font-semibold text-[#333333] truncate">Employment Summary</p>
                 </div>
-                <button type="button" @click="cardsOpen = false"
-                        class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-xs font-bold uppercase tracking-wide bg-[#7a3f91] text-white border border-[#7a3f91] transition active:scale-95 cursor-pointer flex-shrink-0">
-                    <i class="fas fa-xmark text-[11px]"></i>
-                    Close
+                <button type="button" @click="cardsOpen = false" aria-label="Close"
+                        class="inline-flex items-center justify-center w-9 h-9 rounded-xl bg-[#7a3f91] text-white border border-[#7a3f91] transition active:scale-95 cursor-pointer flex-shrink-0">
+                    <i class="fas fa-xmark text-sm"></i>
                 </button>
             </div>
 
@@ -1460,7 +1461,28 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
              independently of the window). --}}
         <div class="ae-table-block flex-1 min-w-0 w-full lg:order-1 lg:h-full flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm transition-all duration-300
                     [container-type:inline-size] [container-name:ae-tbl]"
-             x-data="{ fullscreen: false, mobileFilters: false }"
+             x-data="{
+                fullscreen: false,
+                mobileFilters: false,
+                _raf: null,
+                setTop() {
+                    const h = document.querySelector('.ae-page-header-noselect');
+                    if (!h) return;
+                    const top = Math.round(h.getBoundingClientRect().bottom + 12);
+                    document.documentElement.style.setProperty('--ae-top', top + 'px');
+                },
+                queueTop() {
+                    if (this._raf) cancelAnimationFrame(this._raf);
+                    this._raf = requestAnimationFrame(() => { this.setTop(); setTimeout(() => this.setTop(), 250); });
+                }
+             }"
+             x-init="
+                setTop();
+                $nextTick(() => queueTop());
+                window.addEventListener('resize', () => queueTop(), { passive: true });
+                window.addEventListener('orientationchange', () => queueTop(), { passive: true });
+                document.addEventListener('livewire:navigated', () => queueTop());
+             "
              :class="fullscreen ? 'ae-fullscreen-active fixed! inset-0! z-[999]! h-dvh! max-h-dvh! min-h-dvh! w-screen! rounded-none! border-none!' : ''"
              @keydown.escape.window="fullscreen = false">
 
@@ -1493,7 +1515,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                 {{-- Search — placed FIRST before the filter dropdowns.
                      Text selection re-enabled so the person can still
                      select/copy/edit what they type. --}}
-                <div class="relative min-w-[180px] max-w-xs"
+                <div class="ae-search-wrap relative min-w-[180px] max-w-xs"
                      wire:ignore
                      x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#555555] z-[1]"></i>
@@ -1915,7 +1937,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                      room there. --}}
                 <button type="button"
                         @click="fullscreen = !fullscreen"
-                        class="lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
+                        class="ae-fullscreen-btn lg:hidden inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold
                                bg-white border border-[#E8E0F0] transition active:scale-95 cursor-pointer ml-auto text-[#7a3f91]">
                     <i class="fas" :class="fullscreen ? 'fa-compress' : 'fa-expand'"></i>
                     <span x-text="fullscreen ? 'Exit' : 'Full Screen'"></span>
