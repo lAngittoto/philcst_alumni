@@ -599,11 +599,18 @@ new class extends Component {
 /* ── Dropdown panel ─────────────────────────────────────── */
 .yb-dd-panel {
     position: absolute; top: calc(100% + 4px); left: 0;
-    min-width: 100%; max-height: 224px; overflow-y: auto;
+    min-width: 100%; max-height: 180px; overflow-y: auto;
     background: #fff; border: 1.5px solid #E8E0F0;
     border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
     z-index: 600; padding: 4px;
     scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
+    /* Smooth, native-feeling scroll for long lists (Programs especially) —
+       scroll-behavior handles wheel/anchor scrolls, -webkit-overflow-
+       scrolling gives iOS Safari real inertia/momentum scroll instead of
+       the stiff, step-by-step default it uses otherwise. */
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
 }
 .yb-dd-panel::-webkit-scrollbar       { width: 4px; }
 .yb-dd-panel::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
@@ -840,6 +847,9 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
         max-width: min(calc(100vw - 1.5rem), 280px);
         max-height: 50vh;
         z-index: 400;
+        scroll-behavior: smooth;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
     }
     /* Dropdown items must wrap on mobile — long program names like
        "Bachelor of Science in Information Technology" were overflowing
@@ -1389,6 +1399,26 @@ body.sidebar-open .yb-sidebar-blur,
                 var isNearWhite = r > 240 && g > 240 && b > 240;
                 if (isTranslucent && !isNearWhite) return true;
             }
+
+            // Last-resort fallback: body/html scroll-lock. Almost every
+            // mobile sidebar/drawer implementation — regardless of its
+            // class names, Alpine store names, or overlay markup, all of
+            // which the checks above already tried to guess — locks page
+            // scroll while it's open (overflow:hidden / position:fixed on
+            // <body> or <html>, sometimes via an inline style, sometimes
+            // via a utility class). This doesn't depend on knowing any of
+            // that host app's naming conventions at all, so it catches the
+            // sidebar even when every named-convention + color-sampling
+            // check above misses it (e.g. a very light/near-white overlay
+            // under the isNearWhite guard, or an overlay element that
+            // hasn't painted large enough yet to pass coversMost).
+            var bodyCs = window.getComputedStyle(document.body);
+            var htmlCs = window.getComputedStyle(document.documentElement);
+            var scrollLocked =
+                bodyCs.overflow === 'hidden' || bodyCs.overflowY === 'hidden' ||
+                htmlCs.overflow === 'hidden' || htmlCs.overflowY === 'hidden' ||
+                bodyCs.position === 'fixed';
+            if (scrollLocked && window.innerWidth < 768) return true;
 
             return false;
         }

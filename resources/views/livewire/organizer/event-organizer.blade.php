@@ -1724,6 +1724,15 @@ Cache::forget('organizer_has_alumni_' . ($this->organizerDepartment ?: 'all'));
         return $base . $path;
     }
 
+    // Direct link back to a specific event's detail view on the alumni-facing
+    // Upcoming Events page — mirrors jobDetailUrl() in Job Management, so a
+    // shared event opens straight into that event for whoever clicks it,
+    // instead of Facebook/Messenger only getting the generic events list.
+    public function eventDetailUrl(int $id): string
+    {
+        return $this->eventsBaseUrl() . '?event=' . $id;
+    }
+
     private function resetFormFields(): void
     {
         $this->title = $this->description = $this->event_date = $this->start_time = $this->end_time = '';
@@ -4133,6 +4142,11 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 @php
     $shTimeStr        = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
     $isCompleted      = $shareEventIsCompleted;
+    // Direct link to this event — mirrors Job Management's $shareBaseUrl,
+    // so Facebook gets a real link-preview card (via the sharer's "u="
+    // param) instead of plain quoted text, and the link is included in
+    // the caption itself for Messenger / manual-paste / copy-link use.
+    $shareBaseUrl     = $this->eventDetailUrl($shareEventId);
 
     $fbLines   = [];
     $fbLines[] = $isCompleted ? "EVENT HIGHLIGHTS: " . strtoupper($shareEventTitle) : strtoupper($shareEventTitle);
@@ -4150,7 +4164,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
     }
 
     $fbLines[] = '';
-    $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
+    $fbLines[] = 'View more and RSVP here: ' . $shareBaseUrl;
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp

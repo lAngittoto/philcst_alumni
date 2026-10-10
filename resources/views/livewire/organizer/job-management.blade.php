@@ -2468,6 +2468,19 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         overflow-y: visible !important;
     }
 }
+/* ── Mobile "Show/Hide Filters" toggle ──────────────────────────────
+   The filter bar used to rely on Tailwind's `flex!` important-modifier
+   class, applied via :class="mobileFilters ? 'flex!' : ''" on top of a
+   base "hidden lg:flex" — but that important-modifier class wasn't
+   reliably present at runtime, so "hidden" kept winning and the filter
+   bar never actually appeared on mobile no matter how many times Show
+   Filters was tapped. Plain CSS here is immune to that and always wins
+   by specificity, independent of whatever purge/JIT issue dropped the
+   Tailwind class. ── */
+@media (max-width: 1023px) {
+    .jm-filter-bar { display: none; }
+    .jm-filter-bar.jm-filter-open { display: flex !important; }
+}
 /* ── Filter bar lock while a filter request is loading ──
    Livewire sets data-jm-busy on the bar (wire:loading.attr) only while a
    filter/search/reset request is in flight. Everything in the bar becomes
@@ -2538,10 +2551,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 .jm-form-modal textarea:not(.bg-red-50) {
     border: 1px solid #e5e7eb;
 }
-/* Mobile: photo/company panel hidden until the Filter button opens it */
+/* Mobile: Post Job modal's photo/company panel hidden until "Details" opens it
+   (that modal still has a real toggle — new post, no job photo yet, so
+   hiding it by default saves space). */
 @media (max-width: 1023px) {
     .jm-left-col { display: none; }
     .jm-left-col.jm-left-open { display: flex; max-height: 55vh; }
+}
+/* Mobile: View/Edit Job modal's left panel (Job Photo etc.) — no toggle,
+   no "Details" button. It just stacks above the form in document order
+   (the parent is already flex-col on mobile), same as every other
+   section of the modal, instead of being hidden behind an extra tap that
+   served no real purpose here — there's no competing layout to save
+   space from like there is in the brand-new Post Job form. */
+@media (max-width: 1023px) {
+    .jm-left-col-static { display: flex; max-height: 55vh; }
 }
 </style>
 
@@ -2700,8 +2724,8 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
         {{-- ── FILTER BAR ── --}}
         <div class="jm-filter-bar bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex-wrap gap-2 items-center transition-opacity duration-200
-                    hidden lg:flex"
-             :class="mobileFilters ? 'flex!' : ''"
+                    lg:flex"
+             :class="{ 'jm-filter-open': mobileFilters }"
              wire:loading.class="opacity-60" wire:loading.attr="data-jm-busy"
              wire:target="search,filterStatus,filterType,filterSource,resetFilters">
             <div class="relative flex-1 min-w-[160px] max-w-xs"
@@ -3607,7 +3631,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 <div class="jm-form-modal fixed inset-0 z-50 flex flex-col bg-gray-100 fs-in overflow-hidden"
      @keydown.escape.window="$wire.closeEditModal()"
      wire:key="edit-modal-{{ $editingJobId }}-{{ $editJobIsActive ? 'active' : 'inactive' }}-{{ $editIsAlumniDirectorJob ? 'dir' : 'org' }}"
-     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }}, mobilePanel: false }">
+     x-data="{ editMode: {{ $editModeAllowed ? 'true' : 'false' }} }">
 
     <div class="flex items-center justify-between px-4 sm:px-6 lg:px-10 py-3 bg-[#7a3f91] flex-shrink-0 shadow-lg jm-modal-header-row">
         <div class="flex items-center gap-3 min-w-0">
@@ -3634,13 +3658,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
         </div>
         <div class="flex items-center gap-1.5 flex-shrink-0">
-            <button type="button" @click="mobilePanel = !mobilePanel"
-                    class="jm-mobile-filter-btn lg:hidden inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-semibold transition active:scale-95"
-                    :aria-expanded="mobilePanel.toString()" aria-label="Toggle photo and company panel">
-                <i class="fas fa-image text-[11px]" x-show="!mobilePanel"></i>
-                <i class="fas fa-xmark text-[11px]" x-show="mobilePanel" x-cloak></i>
-                <span x-text="mobilePanel ? 'Hide' : 'Details'"></span>
-            </button>
             @if($editingJob && !$editIsAlumniDirectorJob)
                 @php
                     $editJobDeadlinePassed = $editingJob->deadline && \Carbon\Carbon::parse($editingJob->deadline)->setTimezone('Asia/Manila')->startOfDay()->lt(now('Asia/Manila')->startOfDay());
@@ -3788,8 +3805,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     <div class="jm-modal-body-scroll flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
 
         {{-- LEFT: Company Details + Job Info --}}
-        <div class="jm-left-col jm-modal-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c"
-             :class="{ 'jm-left-open': mobilePanel }">
+        <div class="jm-left-col-static jm-modal-col w-full lg:w-[290px] xl:w-[310px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-gray-200 overflow-y-auto bg-white scroll-c">
             <div class="p-3 space-y-3">
 
                 @if($editingJob)

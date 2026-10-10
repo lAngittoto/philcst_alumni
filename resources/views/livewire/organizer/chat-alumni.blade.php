@@ -2962,10 +2962,24 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
            A small caret echoes the message side so it still reads as
            "attached" to the bubble that opened it. */
         @media (max-width: 767px) {
+            /* position:fixed is the actual fix here. The old "left:50%;
+               transform:translateX(-50%)" centered the toolbar against its
+               own nearest positioned ancestor — the message's own narrow
+               bubble column (max-w-[82%]) — NOT the screen. For a bubble
+               sitting near the right edge (e.g. any of YOUR OWN messages,
+               which are right-aligned), centering on that bubble still
+               pushed half the toolbar off the right side of the viewport —
+               exactly the cut-off reactions row from the screenshot. fixed
+               positioning + JS-measured centering (x-init below) anchors
+               the toolbar to the real viewport, so it always fits fully
+               on-screen no matter which edge the bubble sits near. */
             .org-reaction-toolbar {
-                left: 50% !important;
+                position: fixed !important;
+                top: var(--org-rt-top, auto);
+                left: var(--org-rt-left, 50%) !important;
                 right: auto !important;
-                transform: translateX(-50%);
+                bottom: auto !important;
+                transform: none;
                 max-width: calc(100vw - 1.5rem);
                 width: max-content;
                 flex-wrap: nowrap;
@@ -3837,16 +3851,10 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                                     flex items-center gap-0.5 bg-white rounded-2xl px-2 py-1.5 shadow-xl whitespace-nowrap animate-[orgPop_.14s_ease-out]"
                                              x-data
                                              x-init="
-                                                 // Desktop-only belt-and-suspenders viewport clamp. On
-                                                 // mobile the CSS media query above takes full ownership
-                                                 // of positioning (centers the toolbar, clamps its width,
-                                                 // allows horizontal scroll) — running this correction on
-                                                 // top of that would fight it and drag the toolbar back
-                                                 // toward the bubble edge the CSS just moved it away from.
-                                                 // Above 767px the toolbar is still anchored right:0/left:0
-                                                 // to the bubble like before, so the original edge-nudge
-                                                 // still applies there.
                                                  if (window.innerWidth > 767) {
+                                                     // Desktop: toolbar stays anchored right:0/left:0 to
+                                                     // the bubble (CSS above); this just nudges it back
+                                                     // on-screen if that placement runs past the edge.
                                                      $el.addEventListener('animationend', () => {
                                                          const r = $el.getBoundingClientRect();
                                                          const margin = 8;
@@ -3855,6 +3863,29 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                                          else if (r.right > window.innerWidth - margin) shiftX = (window.innerWidth - margin) - r.right;
                                                          if (shiftX !== 0) $el.style.transform = 'translateX(' + shiftX + 'px)';
                                                      }, { once: true });
+                                                 } else {
+                                                     // Mobile: the toolbar is position:fixed (CSS media
+                                                     // query above), so it has no bubble ancestor to
+                                                     // anchor to anymore -- its top/left must be computed
+                                                     // in real viewport pixels. We read the triggering
+                                                     // bubble's own on-screen rect, place the toolbar
+                                                     // just above it, then clamp both axes so it can
+                                                     // never run off any edge of the screen -- fixing
+                                                     // the cut-off reactions row regardless of how close
+                                                     // to the left or right side the bubble sits.
+                                                     const bubble = $el.parentElement.querySelector('.org-bubble, .org-msg-unsent');
+                                                     const margin = 8;
+                                                     requestAnimationFrame(() => {
+                                                         const br = bubble ? bubble.getBoundingClientRect() : null;
+                                                         const tw = $el.offsetWidth;
+                                                         const th = $el.offsetHeight;
+                                                         let left = br ? (br.left + br.width / 2 - tw / 2) : (window.innerWidth - tw) / 2;
+                                                         left = Math.max(margin, Math.min(left, window.innerWidth - tw - margin));
+                                                         let top = br ? (br.top - th - margin) : margin;
+                                                         if (top < margin) top = margin;
+                                                         $el.style.setProperty('--org-rt-left', left + 'px');
+                                                         $el.style.setProperty('--org-rt-top', top + 'px');
+                                                     });
                                                  }
                                              "
                                              @click.stop>

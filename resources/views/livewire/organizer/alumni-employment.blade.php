@@ -971,6 +971,41 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     .ae-mobile-row { min-height: 84px; }
 }
 
+/* ── Mobile/tablet table block — FIXED height, same idea as the desktop
+   .ae-main-row rule above, but written as real CSS instead of Tailwind
+   arbitrary-value classes (max-lg:h-[calc(100dvh-360px)] etc. on the div
+   itself), because those were not reliably taking effect — the block was
+   still shrinking to fit only 2-3 rows (see screenshot: list ends right
+   after "Kim Tzy" instead of filling the remaining screen like the stat
+   cards column above it does). A plain class selector here is immune to
+   whatever purge/JIT issue was dropping the arbitrary-value classes, and
+   it applies unconditionally — empty state, a couple of rows, or a full
+   page all get the exact same block height, so nothing ever jumps or
+   looks short next to the stat cards. ── */
+@media (max-width: 1023px) {
+    .ae-table-block {
+        height: calc(100dvh - 360px) !important;
+        max-height: calc(100dvh - 360px) !important;
+        min-height: 380px !important;
+    }
+}
+@media (max-width: 639px) {
+    .ae-table-block {
+        height: calc(100dvh - 380px) !important;
+        max-height: calc(100dvh - 380px) !important;
+        min-height: 360px !important;
+    }
+}
+/* Full-screen mode (the "Full Screen" button on mobile) must win over the
+   fixed height above — it already sets fixed!/inset-0!/h-dvh! inline via
+   Alpine's :class binding, but !important here would otherwise fight it. */
+@media (max-width: 1023px) {
+    .ae-table-block.ae-fullscreen-active {
+        height: 100dvh !important;
+        max-height: 100dvh !important;
+    }
+}
+
 /* ── Modal scroll fix (mobile) ───────────────────────────────────────
    100dvh on iOS Safari is recalculated as the browser chrome (address
    bar) shows/hides, which can momentarily report a LARGER height than
@@ -1368,12 +1403,10 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
              column visibility reacts to the TABLE's own width, not the
              viewport (matters because the sidebar can collapse/expand
              independently of the window). --}}
-        <div class="flex-1 min-w-0 w-full lg:order-1 lg:h-full flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm transition-all duration-300
-                    [container-type:inline-size] [container-name:ae-tbl]
-                    max-lg:h-[calc(100dvh-360px)] max-lg:max-h-[calc(100dvh-360px)] max-lg:min-h-[380px]
-                    max-sm:h-[calc(100dvh-380px)] max-sm:max-h-[calc(100dvh-380px)] max-sm:min-h-[360px]"
+        <div class="ae-table-block flex-1 min-w-0 w-full lg:order-1 lg:h-full flex flex-col rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm transition-all duration-300
+                    [container-type:inline-size] [container-name:ae-tbl]"
              x-data="{ fullscreen: false, mobileFilters: false }"
-             :class="fullscreen ? 'fixed! inset-0! z-[999]! h-dvh! max-h-dvh! min-h-dvh! w-screen! rounded-none! border-none!' : ''"
+             :class="fullscreen ? 'ae-fullscreen-active fixed! inset-0! z-[999]! h-dvh! max-h-dvh! min-h-dvh! w-screen! rounded-none! border-none!' : ''"
              @keydown.escape.window="fullscreen = false">
 
             {{-- MOBILE FILTER TOGGLE (hidden on lg+, where the filter bar is always visible) --}}
