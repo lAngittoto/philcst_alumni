@@ -1991,8 +1991,25 @@ public function openEditModal(int $id): void
     public function jobsBaseUrl(): string
     {
         $base = rtrim(config('app.url'), '/');
-        try { $path = route('jobs.index', [], false); } catch (\Throwable) { $path = '/jobs'; }
+        try {
+            // Matches Job Opportunities' own jobsBaseUrl(): the real named
+            // route for the alumni-facing job board is 'job.opportunities'
+            // (not 'jobs.index', which doesn't exist and was silently
+            // falling back to the wrong '/jobs' path every time).
+            $path = route('job.opportunities', [], false);
+        } catch (\Throwable) {
+            $path = '/job/opportunities';
+        }
         return $base . $path;
+    }
+
+    // Direct link back to a specific job's detail view on the alumni-facing
+    // Job Opportunities page — mirrors jobDetailUrl() there so a job shared
+    // from Job Management opens straight into that job for whoever clicks
+    // it, instead of linking (or not linking at all) to a generic page.
+    public function jobDetailUrl(int $id): string
+    {
+        return $this->jobsBaseUrl() . '?job=' . $id;
     }
 };
 ?>
@@ -2665,10 +2682,26 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     </div>
 
     {{-- ══ UNIFIED TABLE BLOCK ══ --}}
-    <div class="jm-table-card rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0">
+    <div class="jm-table-card rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm flex-1 min-h-0"
+         x-data="{ mobileFilters: false }">
+
+        {{-- MOBILE FILTER TOGGLE (hidden on lg+, where the filter bar is always visible) --}}
+        <div class="lg:hidden flex items-center justify-between gap-2 px-3.5 py-2.5 bg-white border-b border-[#E8E0F0] flex-shrink-0">
+            <button type="button" @click="mobileFilters = !mobileFilters"
+                    :aria-expanded="mobileFilters.toString()"
+                    class="inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition active:scale-95"
+                    :class="mobileFilters ? 'bg-[#7a3f91] text-white border-[#7a3f91]' : 'bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0]'">
+                <i class="fas fa-sliders text-[11px]"></i>
+                <span x-text="mobileFilters ? 'Hide Filters' : 'Show Filters'"></span>
+                <i class="fas text-[10px]" :class="mobileFilters ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+            </button>
+            <span class="text-[11px] font-semibold text-[#777777] truncate">{{ ($search !== '' || $filterStatus !== '' || $filterType !== '' || $filterSource !== '') ? 'Filtered' : 'All jobs' }}</span>
+        </div>
 
         {{-- ── FILTER BAR ── --}}
-        <div class="jm-filter-bar bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+        <div class="jm-filter-bar bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex-wrap gap-2 items-center transition-opacity duration-200
+                    hidden lg:flex"
+             :class="mobileFilters ? 'flex!' : ''"
              wire:loading.class="opacity-60" wire:loading.attr="data-jm-busy"
              wire:target="search,filterStatus,filterType,filterSource,resetFilters">
             <div class="relative flex-1 min-w-[160px] max-w-xs"
@@ -2788,7 +2821,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell text-[#555555]">Type</th>
                             <th class="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-widest hidden lg:table-cell text-[#555555]">Company/Organization</th>
                             <th class="px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-widest text-[#555555]">Status</th>
-                            <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-36 text-[#555555]">Action</th>
+                            <th class="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-widest w-36 hidden sm:table-cell text-[#555555]">Action</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2844,7 +2877,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                                 @endif
                             </td>
 
-                            <td class="px-4 py-3.5">
+                            <td class="px-4 py-3.5 hidden sm:table-cell">
                                 <div class="flex items-center justify-end gap-1.5" @click.stop>
 
                                     {{-- Share --}}
@@ -3058,9 +3091,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             <button type="button" @click="mobilePanel = !mobilePanel"
                     class="jm-mobile-filter-btn lg:hidden inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-semibold transition active:scale-95"
                     :aria-expanded="mobilePanel.toString()" aria-label="Toggle photo and company panel">
-                <i class="fas fa-sliders text-[11px]" x-show="!mobilePanel"></i>
+                <i class="fas fa-image text-[11px]" x-show="!mobilePanel"></i>
                 <i class="fas fa-xmark text-[11px]" x-show="mobilePanel" x-cloak></i>
-                <span x-text="mobilePanel ? 'Hide' : 'Filter'"></span>
+                <span x-text="mobilePanel ? 'Hide' : 'Details'"></span>
             </button>
             {{-- Reset Post Form --}}
             <button wire:click="resetPostForm" type="button"
@@ -3604,9 +3637,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             <button type="button" @click="mobilePanel = !mobilePanel"
                     class="jm-mobile-filter-btn lg:hidden inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-semibold transition active:scale-95"
                     :aria-expanded="mobilePanel.toString()" aria-label="Toggle photo and company panel">
-                <i class="fas fa-sliders text-[11px]" x-show="!mobilePanel"></i>
+                <i class="fas fa-image text-[11px]" x-show="!mobilePanel"></i>
                 <i class="fas fa-xmark text-[11px]" x-show="mobilePanel" x-cloak></i>
-                <span x-text="mobilePanel ? 'Hide' : 'Filter'"></span>
+                <span x-text="mobilePanel ? 'Hide' : 'Details'"></span>
             </button>
             @if($editingJob && !$editIsAlumniDirectorJob)
                 @php
@@ -4350,7 +4383,11 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 {{-- ══ SHARE MODAL ══ --}}
 @if($showShareModal)
 @php
-    $shareBaseUrl     = $this->jobsBaseUrl();
+    // Direct link to this specific job on the alumni-facing Job
+    // Opportunities page — mirrors Job Opportunities' own share modal so
+    // whoever receives this share can click straight into the job
+    // instead of just reading a text caption with no actual link.
+    $shareBaseUrl     = $this->jobDetailUrl($shareJobId);
     $shareDlFormatted = $shareDeadline ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y') : '';
 
     $fbLines   = [];
@@ -4371,7 +4408,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     }
 
     $fbLines[] = '';
-    $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
+    $fbLines[] = 'View and apply here: ' . $shareBaseUrl;
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp
@@ -4384,7 +4421,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
          downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
          jobTitle: {{ json_encode($shareJobTitle) }},
+         baseUrl:  {{ json_encode($shareBaseUrl) }},
          imageUrl:  {{ json_encode($sharePhotoUrl) }},
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
          showDlConfirm: false,
          pendingTarget: null,
@@ -4474,12 +4513,26 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              this.pendingTarget = null;
          },
 
+         // ── openFacebook ─────────────────────────────────────────────────
+         // Caption is copied FIRST (while the page still has focus and the
+         // user-gesture is still active) — opening window.open() shifts
+         // focus to the popup which causes clipboard.writeText() to fail.
+         // The job's direct link (baseUrl) is passed as "u=" so Facebook
+         // renders a real link-preview card instead of just plain text.
          async openFacebook() {
-             const copyOk = await this.autoCopyCaption();
-             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             const win = window.open(url, 'philcst_jm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             if (win) { try { win.focus(); } catch(e) {} }
+             const copyOk  = await this.autoCopyCaption();
+             const jobUrl  = encodeURIComponent(this.baseUrl);
+             const caption = encodeURIComponent(this.shareText);
+             const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
+                             + '?u='     + jobUrl
+                             + '&quote=' + caption;
+             if (this.isMobile) {
+                 window.open(shareUrl, '_blank', 'noopener,noreferrer');
+             } else {
+                 const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_jm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
              $wire.dispatch('flash-message', {
                  type: copyOk ? 'success' : 'warning',
                  message: copyOk
@@ -4488,10 +4541,43 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              });
          },
 
+         // ── openMessenger ────────────────────────────────────────────────
+         // Mobile: tries to hand off straight to the Messenger app (Android
+         // intent URI / iOS fb-messenger:// scheme) with the job's direct
+         // link attached, falling back to messenger.com/share if the app
+         // isn't installed. Desktop: messenger.com/share popup. Mirrors
+         // Job Opportunities' own openMessenger() so sharing behaves the
+         // same from either side.
          async openMessenger() {
              const copyOk = await this.autoCopyCaption();
-             const win = window.open('https://www.messenger.com/new', 'philcst_jm_messenger_share', 'noopener,noreferrer');
-             if (win) { try { win.focus(); } catch(e) {} }
+             const jobUrl  = encodeURIComponent(this.baseUrl);
+             const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
+
+             if (this.isMobile) {
+                 const isAndroid = /Android/i.test(navigator.userAgent);
+                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                 if (isAndroid) {
+                     window.open(
+                         'intent://share/?link=' + jobUrl +
+                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+                         '_blank'
+                     );
+                 } else if (isIOS) {
+                     const a = document.createElement('a');
+                     a.href  = 'fb-messenger://share/?link=' + jobUrl;
+                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     setTimeout(() => { window.open(webLink, '_blank', 'noopener,noreferrer'); }, 1500);
+                 } else {
+                     window.open(webLink, '_blank', 'noopener,noreferrer');
+                 }
+             } else {
+                 const win = window.open(webLink, 'philcst_jm_messenger_share', 'noopener,noreferrer');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
              $wire.dispatch('flash-message', {
                  type: copyOk ? 'success' : 'warning',
                  message: copyOk

@@ -1,4 +1,4 @@
-\{{-- resources/views/livewire/organizer/chat-alumni.blade.php --}}
+{{-- resources/views/livewire/organizer/chat-alumni.blade.php --}}
 
 <?php
 
@@ -2952,29 +2952,37 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
         .org-reaction-toolbar { z-index: 300; }
         .org-reaction-toolbar .org-tooltip { z-index: 301; }
 
-        /* ── Reaction toolbar — keep it inside the viewport on mobile ──
-           With 6 reaction buttons (36px each) + a divider + up to 4 more
-           action buttons (32px each) + gaps/padding, the toolbar's natural
-           width can exceed ~360px — wider than many phone screens. Anchored
-           with right:0 on "my" messages (near the right screen edge) or
-           left:0 on others, it has nowhere to grow but off-screen, and the
-           scroll container clips whatever falls outside it. Clamp max-width
-           to the viewport and allow it to wrap onto a second row instead of
-           being cut off. */
+        /* ── Reaction toolbar — mobile layout ──────────────────────────
+           On phones the toolbar centers itself above the bubble on its
+           own floating card instead of hugging the message's left/right
+           edge. This keeps every button the same compact size (no wrap,
+           no stretching), keeps the whole row on one line, and guarantees
+           it never runs off either side of the screen, regardless of
+           whether the triggering bubble sits near the left or right edge.
+           A small caret echoes the message side so it still reads as
+           "attached" to the bubble that opened it. */
         @media (max-width: 767px) {
             .org-reaction-toolbar {
-                max-width: calc(100vw - 2rem);
-                flex-wrap: wrap;
-                row-gap: 2px;
+                left: 50% !important;
+                right: auto !important;
+                transform: translateX(-50%);
+                max-width: calc(100vw - 1.5rem);
+                width: max-content;
+                flex-wrap: nowrap;
                 justify-content: center;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
             }
-            /* When anchored to the right edge (is_mine messages), a toolbar
-               wider than the bubble above it would still overflow past the
-               left edge of the screen on narrow phones — pull it back in. */
-            .org-reaction-toolbar.right-0 {
-                right: 0;
-                left: auto;
-                max-width: min(calc(100vw - 2rem), 320px);
+            .org-reaction-toolbar::-webkit-scrollbar { display: none; }
+            /* Slightly tighter buttons on phones so all 6 reactions + the
+               divider + action icons comfortably fit one row on common
+               screen widths (360–430px) without needing the scroll
+               fallback above. */
+            .org-reaction-toolbar .org-tooltip-wrap button {
+                width: 2rem;
+                height: 2rem;
+                font-size: 1.125rem;
             }
         }
 
@@ -3829,23 +3837,25 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                                     flex items-center gap-0.5 bg-white rounded-2xl px-2 py-1.5 shadow-xl whitespace-nowrap animate-[orgPop_.14s_ease-out]"
                                              x-data
                                              x-init="
-                                                 // Belt-and-suspenders viewport clamp: the CSS max-width
-                                                 // rules above keep the toolbar from being wider than the
-                                                 // screen, but a toolbar anchored with right:0/left:0 can
-                                                 // still have its edge pushed past the viewport if the
-                                                 // message bubble itself sits near a screen edge (common
-                                                 // on narrow phones). Nudge it back on-screen once its
-                                                 // open/pop-in animation (orgPop, 140ms) has finished, so
-                                                 // our correction doesn't fight the animation's own
-                                                 // transform and get overwritten when it ends.
-                                                 $el.addEventListener('animationend', () => {
-                                                     const r = $el.getBoundingClientRect();
-                                                     const margin = 8;
-                                                     let shiftX = 0;
-                                                     if (r.left < margin) shiftX = margin - r.left;
-                                                     else if (r.right > window.innerWidth - margin) shiftX = (window.innerWidth - margin) - r.right;
-                                                     if (shiftX !== 0) $el.style.transform = 'translateX(' + shiftX + 'px)';
-                                                 }, { once: true });
+                                                 // Desktop-only belt-and-suspenders viewport clamp. On
+                                                 // mobile the CSS media query above takes full ownership
+                                                 // of positioning (centers the toolbar, clamps its width,
+                                                 // allows horizontal scroll) — running this correction on
+                                                 // top of that would fight it and drag the toolbar back
+                                                 // toward the bubble edge the CSS just moved it away from.
+                                                 // Above 767px the toolbar is still anchored right:0/left:0
+                                                 // to the bubble like before, so the original edge-nudge
+                                                 // still applies there.
+                                                 if (window.innerWidth > 767) {
+                                                     $el.addEventListener('animationend', () => {
+                                                         const r = $el.getBoundingClientRect();
+                                                         const margin = 8;
+                                                         let shiftX = 0;
+                                                         if (r.left < margin) shiftX = margin - r.left;
+                                                         else if (r.right > window.innerWidth - margin) shiftX = (window.innerWidth - margin) - r.right;
+                                                         if (shiftX !== 0) $el.style.transform = 'translateX(' + shiftX + 'px)';
+                                                     }, { once: true });
+                                                 }
                                              "
                                              @click.stop>
                                             @foreach(['heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','happy'=>'😄','sad'=>'😢'] as $rk=>$re)

@@ -961,6 +961,34 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 @media (max-width: 639px) {
     .ae-modal-panel { border-radius: 0 !important; max-width: 100% !important; }
 }
+
+/* ── Mobile card rows — taller, roomier rows instead of the previous
+   cramped px-3.5/py-3 + 40px-photo layout. Each row now has a comfortable
+   minimum height so the list reads as a proper list rather than squeezed
+   text, while still letting a row with extra wrapped content (long job
+   titles) grow taller naturally. ── */
+@media (max-width: 1023px) {
+    .ae-mobile-row { min-height: 84px; }
+}
+
+/* ── Modal scroll fix (mobile) ───────────────────────────────────────
+   100dvh on iOS Safari is recalculated as the browser chrome (address
+   bar) shows/hides, which can momentarily report a LARGER height than
+   what's actually visible on screen right when the modal opens — the
+   inner scroll container then computes zero/negative scrollable space
+   for an instant and the whole panel reads as "stuck"/non-scrolling
+   until the user has already given up. Pin an explicit, stable height
+   via JS (visualViewport when available) instead of relying purely on
+   the dvh unit, and lock background scroll so iOS doesn't rubber-band
+   the page behind the fixed modal instead of scrolling the modal body
+   itself (a very common cause of "modal won't scroll" on iOS). */
+@media (max-width: 1023px) {
+    body.ae-modal-lock {
+        position: fixed;
+        left: 0; right: 0;
+        overflow: hidden !important;
+    }
+}
 </style>
 
 {{-- FLASH TOAST --}}
@@ -1971,7 +1999,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                             $photoUrl = $this->getPhotoUrl($row->profile_photo ?? null);
                         @endphp
 
-                        <div class="cursor-pointer select-none bg-white border-b border-[#F5F5F5] px-3.5 py-3 flex items-center gap-2.5 transition-colors duration-100 active:bg-[#f5f0fa]"
+                        <div class="ae-mobile-row cursor-pointer select-none bg-white border-b border-[#F5F5F5] px-4 py-4 flex items-center gap-3.5 transition-colors duration-100 active:bg-[#f5f0fa]"
                              wire:click="viewDetail({{ $row->id }})"
                              wire:key="ae-mrow-{{ $row->id }}"
                              wire:loading.class="ae-row-busy"
@@ -1982,35 +2010,35 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 
                             <img src="{{ $photoUrl }}"
                                  alt="{{ $row->full_name }}"
-                                 class="w-10 h-10 rounded-lg object-cover flex-shrink-0 ring-1 ring-[#E8E0F0]">
+                                 class="w-14 h-14 rounded-xl object-cover flex-shrink-0 ring-1 ring-[#E8E0F0]">
 
                             <div class="flex-1 min-w-0">
-                                <p class="font-semibold text-sm uppercase truncate text-[#333333]">{!! $this->highlight($row->full_name, $this->search) !!}</p>
+                                <p class="font-semibold text-base uppercase truncate text-[#333333]">{!! $this->highlight($row->full_name, $this->search) !!}</p>
 
-                                <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                                    <span class="inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
+                                <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                                    <span class="inline-block px-2.5 py-1 rounded-full text-xs font-semibold uppercase bg-[#F9F7FC] text-[#7A3F91] border border-[#E8E0F0]">
                                         {{ $row->course_code ?? '—' }}
                                     </span>
                                     <span class="text-[#CCCCCC] text-xs">&bull;</span>
-                                    <span class="font-mono text-xs font-semibold text-[#666666]">Batch {{ $row->batch ?? '—' }}</span>
+                                    <span class="font-mono text-sm font-semibold text-[#666666]">Batch {{ $row->batch ?? '—' }}</span>
                                 </div>
 
-                                <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                                    <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold border {{ $statusClass }}">
-                                        <i class="fa-solid {{ $statusIcon }} text-[8px]"></i>
+                                <div class="flex items-center gap-1.5 mt-2 flex-wrap">
+                                    <span class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-semibold border {{ $statusClass }}">
+                                        <i class="fa-solid {{ $statusIcon }} text-[9px]"></i>
                                         {{ $statusLabel }}
                                     </span>
                                     @if($row->job_title)
-                                        <span class="text-xs font-medium truncate text-[#555555]">{!! $this->highlight($row->job_title, $this->search) !!}</span>
+                                        <span class="text-sm font-medium truncate text-[#555555]">{!! $this->highlight($row->job_title, $this->search) !!}</span>
                                     @elseif($row->employment_status === 'unemployed')
-                                        <span class="text-xs italic text-[#999999]">
+                                        <span class="text-sm italic text-[#999999]">
                                             {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '' }}
                                         </span>
                                     @endif
                                 </div>
                             </div>
 
-                            <i class="fas fa-chevron-right text-[#CCCCCC] text-xs shrink-0"></i>
+                            <i class="fas fa-chevron-right text-[#CCCCCC] text-sm shrink-0"></i>
                         </div>
                         @endforeach
                     </div>
@@ -2160,8 +2188,50 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
      Compact two-column layout so all info fits without scrolling on most screens.
      Responsive: stacks to single column on mobile. --}}
 <div class="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4"
-     x-data="{ open: false, isClosing: false, closing(){ if (this.isClosing) return; this.isClosing = true; this.open = false; window.dispatchEvent(new CustomEvent('open-sidebar')); setTimeout(() => $wire.closeModal(), 180); } }"
-     x-init="requestAnimationFrame(() => open = true)"
+     x-data="{
+         open: false,
+         isClosing: false,
+         vh: null,
+         lockBody(){
+             document.body.classList.add('ae-modal-lock');
+             document.body.style.top = '-' + window.scrollY + 'px';
+         },
+         unlockBody(){
+             var y = document.body.style.top;
+             document.body.classList.remove('ae-modal-lock');
+             document.body.style.top = '';
+             if (y) window.scrollTo(0, parseInt(y || '0') * -1);
+         },
+         setVh(){
+             // Pin a stable pixel height instead of trusting 100dvh alone —
+             // visualViewport.height reflects what's ACTUALLY visible right
+             // now (already net of any mobile browser chrome), so the
+             // modal never ends up taller than the real viewport for that
+             // brief window right after opening where dvh can overshoot.
+             // Mobile-only: at sm+ widths the dialog is a centered card
+             // (not full-screen), so the existing calc(100dvh-2rem)
+             // utility classes should keep governing its height there.
+             if (window.innerWidth >= 640) { this.vh = null; return; }
+             var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+             this.vh = h + 'px';
+         },
+         closing(){
+             if (this.isClosing) return;
+             this.isClosing = true;
+             this.open = false;
+             this.unlockBody();
+             window.dispatchEvent(new CustomEvent('open-sidebar'));
+             setTimeout(() => $wire.closeModal(), 180);
+         }
+     }"
+     x-init="
+         setVh();
+         lockBody();
+         requestAnimationFrame(() => open = true);
+         window.visualViewport && window.visualViewport.addEventListener('resize', setVh.bind(this));
+         window.addEventListener('resize', setVh.bind(this));
+         $cleanup(() => unlockBody());
+     "
      x-show="open"
      x-transition:enter="transition ease-out duration-200"
      x-transition:enter-start="opacity-0"
@@ -2175,9 +2245,13 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
     {{-- Backdrop --}}
     <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px]" @click="closing()"></div>
 
-    {{-- Modal panel --}}
+    {{-- Modal panel — height pinned via inline style from vh (mobile-safe,
+         see setVh() above); sm+ screens still use the calc(100dvh-2rem)
+         utility classes since the stable-viewport fix only matters where
+         address-bar show/hide actually happens (phones). --}}
     <div class="ae-modal-panel relative z-10 w-full max-w-6xl bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden
-                h-[100dvh] max-h-[100dvh] sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]"
+                sm:h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-2rem)]"
+         :style="vh ? ('height:' + vh + '; max-height:' + vh + ';') : ''"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95 translate-y-2"
          x-transition:enter-end="opacity-100 scale-100 translate-y-0"

@@ -1378,6 +1378,16 @@ body.sidebar-open .yb-sidebar-blur,
                 var isDark = (r + g + b) / 3 < 120;
                 var isTranslucent = a > 0 && a < 0.95;
                 if (isDark && isTranslucent) return true;
+                // Some sidebar implementations use a lighter gray dimming
+                // overlay instead of a dark one — it may not trip the
+                // isDark<120 check above even though it visually reads as
+                // a dimming layer (this is what the screenshot showed: a
+                // mid-gray translucent overlay, not a near-black one).
+                // A large, translucent, non-white overlay is already a
+                // strong enough signal on its own — no need to also
+                // require it be dark.
+                var isNearWhite = r > 240 && g > 240 && b > 240;
+                if (isTranslucent && !isNearWhite) return true;
             }
 
             return false;
@@ -1407,6 +1417,33 @@ body.sidebar-open .yb-sidebar-blur,
         // Also watch subtree for sidebar visibility changes (display/style toggling)
         var sto = new MutationObserver(applySidebarBlur);
         sto.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class', 'style', 'data-sidebar-open', 'aria-expanded'] });
+
+        // Also watch for new nodes appearing/disappearing — some sidebars
+        // mount/unmount their overlay+rail rather than toggling a class,
+        // which the attribute-only observers above would miss entirely.
+        var cto = new MutationObserver(applySidebarBlur);
+        cto.observe(document.body, { childList: true, subtree: true });
+
+        // Short-interval safety-net poll for the first couple seconds after
+        // any detected DOM change, in case the overlay's dimming is driven
+        // by a CSS transition (opacity animating in) rather than an
+        // instant style/class flip — a mutation can fire before the
+        // overlay is visually "translucent enough" to be detected yet.
+        var pollTimer = null;
+        function scheduleRecheck() {
+            if (pollTimer) return;
+            var ticks = 0;
+            pollTimer = setInterval(function () {
+                applySidebarBlur();
+                if (++ticks > 6) { clearInterval(pollTimer); pollTimer = null; }
+            }, 50);
+        }
+        mo.disconnect(); sto.disconnect(); cto.disconnect();
+        var moWrap = new MutationObserver(function (m) { applySidebarBlur(); scheduleRecheck(); });
+        moWrap.observe(document.body,            { attributes: true, attributeFilter: ['class', 'data-sidebar-open'] });
+        moWrap.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        moWrap.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class', 'style', 'data-sidebar-open', 'aria-expanded'] });
+        moWrap.observe(document.body, { childList: true, subtree: true });
 
         // Initial check
         applySidebarBlur();
