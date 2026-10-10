@@ -1990,7 +1990,22 @@ public function openEditModal(int $id): void
 
     public function jobsBaseUrl(): string
     {
-        $base = rtrim(config('app.url'), '/');
+        $base = rtrim((string) config('app.url'), '/');
+
+        // FIX (Share on Facebook/Messenger): if APP_URL isn't set on the
+        // server it defaults to http://localhost, so the shared job link
+        // pointed at localhost and Facebook/Messenger rejected it. Fall back
+        // to the real host the app is actually being served from (https on
+        // any non-local host, since the proxy often reports plain http).
+        if ($base === '' || preg_match('#//(localhost|127\.0\.0\.1|0\.0\.0\.0)#i', $base)) {
+            $req     = request();
+            $host    = $req->getHost();
+            $isLocal = in_array($host, ['localhost', '127.0.0.1'], true)
+                || str_ends_with($host, '.test') || str_ends_with($host, '.local');
+            $scheme  = $isLocal ? $req->getScheme() : 'https';
+            $base    = $scheme . '://' . $req->getHttpHost();
+        }
+
         try {
             // Matches Job Opportunities' own jobsBaseUrl(): the real named
             // route for the alumni-facing job board is 'job.opportunities'
@@ -2551,12 +2566,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 .jm-form-modal textarea:not(.bg-red-50) {
     border: 1px solid #e5e7eb;
 }
-/* Mobile: Post Job modal's photo/company panel hidden until "Details" opens it
-   (that modal still has a real toggle — new post, no job photo yet, so
-   hiding it by default saves space). */
+/* Mobile: Post Job modal — the "Details" toggle button was removed, so the
+   photo/company panel is now ALWAYS shown, stacked above the form (same as
+   the View/Edit modal). Required company fields live in this panel, so it
+   must never be hidden with no way to open it. */
 @media (max-width: 1023px) {
-    .jm-left-col { display: none; }
-    .jm-left-col.jm-left-open { display: flex; max-height: 55vh; }
+    .jm-left-col { display: flex; max-height: 45vh; max-width: 100%; min-width: 0; }
+    .jm-left-col > div { min-width: 0; max-width: 100%; }
 }
 /* Mobile: View/Edit Job modal's left panel (Job Photo etc.) — no toggle,
    no "Details" button. It just stacks above the form in document order
@@ -2565,7 +2581,21 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
    served no real purpose here — there's no competing layout to save
    space from like there is in the brand-new Post Job form. */
 @media (max-width: 1023px) {
-    .jm-left-col-static { display: flex; max-height: 55vh; }
+    /* FIX (cut-off on mobile): this used to be display:flex in ROW direction,
+       so its single child (.p-3 wrapper) became a flex item sized to its
+       content — a long "truncate" company address made it wider than the
+       screen and everything (photo, company card) ran off the right edge.
+       Column direction + width:100% + min-width:0 forces the wrapper to
+       match the screen width, so the photo fits and the address truncates
+       properly instead of stretching the layout. */
+    .jm-left-col-static {
+        display: flex; flex-direction: column;
+        max-height: 55vh;
+        width: 100%; max-width: 100%; min-width: 0;
+        overflow-x: hidden;
+    }
+    .jm-left-col-static > * { flex-shrink: 0; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+    .jm-left-col-static .truncate { max-width: 100%; }
 }
 </style>
 
@@ -3112,13 +3142,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </div>
         </div>
         <div class="flex items-center gap-1.5">
-            <button type="button" @click="mobilePanel = !mobilePanel"
-                    class="jm-mobile-filter-btn lg:hidden inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-white/10 border border-white/15 hover:bg-white/20 text-white text-xs font-semibold transition active:scale-95"
-                    :aria-expanded="mobilePanel.toString()" aria-label="Toggle photo and company panel">
-                <i class="fas fa-image text-[11px]" x-show="!mobilePanel"></i>
-                <i class="fas fa-xmark text-[11px]" x-show="mobilePanel" x-cloak></i>
-                <span x-text="mobilePanel ? 'Hide' : 'Details'"></span>
-            </button>
             {{-- Reset Post Form --}}
             <button wire:click="resetPostForm" type="button"
                     wire:loading.attr="disabled" wire:target="resetPostForm,savePost"
@@ -4505,23 +4528,65 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              } catch (e) { /* cancelled by user — nothing to do */ }
          },
 
-         askShare(target) {
-             if (this.nativeShareSupported) { this.nativeShare(); return; }
-             this.pendingTarget = target;
-             this.showDlConfirm = true;
+         // Pre-download the job photo as soon as the modal opens, so that when
+         // the user taps Facebook/Messenger we can save it + open the target
+         // app IN THE SAME CLICK (no awaiting a network fetch in between —
+         // that delay is what made browsers silently BLOCK the popup/app
+         // hand-off, which is why Share on Facebook/Messenger "did nothing").
+         imageBlob: null,
+         async prefetchImage() {
+             if (!this.imageUrl || this.imageBlob) return;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 this.imageBlob = await resp.blob();
+             } catch (e) { this.imageBlob = null; }
+         },
+         saveBlob(blob) {
+             try {
+                 const ext = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 const url = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url; a.download = 'job-photo.' + ext;
+                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                 setTimeout(() => URL.revokeObjectURL(url), 4000);
+                 this.downloaded = true;
+                 setTimeout(() => this.downloaded = false, 4000);
+                 return true;
+             } catch (e) { return false; }
          },
 
-         async confirmDownloadThenGo() {
-             await this.downloadImage();
-             this.proceedToTarget();
+         // Facebook / Messenger buttons: ask about the photo first (if the job
+         // has one), otherwise go straight to the target. The native share
+         // sheet has its own dedicated "Share" button, so these two buttons
+         // always open Facebook / Messenger themselves.
+         askShare(target) {
+             if (this.imageUrl) {
+                 this.pendingTarget = target;
+                 this.showDlConfirm = true;
+                 return;
+             }
+             this.goTo(target);
+         },
+
+         // Download tapped: save the (pre-fetched) photo and open the target
+         // immediately — all inside this one click so nothing gets blocked.
+         confirmDownloadThenGo() {
+             const target = this.pendingTarget;
+             this.showDlConfirm = false;
+             this.pendingTarget = null;
+             if (this.imageBlob) {
+                 this.saveBlob(this.imageBlob);
+             } else {
+                 this.downloadImage();   // photo still loading — fetch in background
+             }
+             this.goTo(target);
          },
 
          proceedToTarget() {
-             this.showDlConfirm = false;
              const target = this.pendingTarget;
+             this.showDlConfirm = false;
              this.pendingTarget = null;
-             if (target === 'facebook') this.openFacebook();
-             else if (target === 'messenger') this.openMessenger();
+             this.goTo(target);
          },
 
          cancelDlConfirm() {
@@ -4529,76 +4594,93 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              this.pendingTarget = null;
          },
 
-         // ── openFacebook ─────────────────────────────────────────────────
-         // Caption is copied FIRST (while the page still has focus and the
-         // user-gesture is still active) — opening window.open() shifts
-         // focus to the popup which causes clipboard.writeText() to fail.
-         // The job's direct link (baseUrl) is passed as "u=" so Facebook
-         // renders a real link-preview card instead of just plain text.
+         goTo(target) {
+             if (target === 'facebook') this.openFacebook();
+             else if (target === 'messenger') this.openMessenger();
+         },
+
+         // ── Clipboard copy that starts SYNCHRONOUSLY inside the click ────
+         // (returns a promise; callers must NOT await it before opening the
+         // window/app, or the browser treats the open as a blocked popup).
+         copyCaptionNow() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) {
+                     return navigator.clipboard.writeText(this.shareText).then(() => true).catch(() => this.legacyCopy());
+                 }
+             } catch (e) {}
+             return Promise.resolve(this.legacyCopy());
+         },
+         legacyCopy() {
+             try {
+                 const ta = document.createElement('textarea');
+                 ta.value = this.shareText; ta.setAttribute('readonly','');
+                 ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                 document.body.appendChild(ta); ta.focus(); ta.select();
+                 const ok = document.execCommand('copy');
+                 document.body.removeChild(ta);
+                 return !!ok;
+             } catch (e) { return false; }
+         },
+
+         // ── Facebook ─────────────────────────────────────────────────────
+         // 1) start copying the caption (no await),
+         // 2) open Facebook's share dialog right away with the job's public
+         //    link (Facebook builds the link-preview card from it),
+         // 3) only then wait for the copy result to show the right toast.
+         // Facebook ignores pre-filled text, so the caption is pasted manually.
          async openFacebook() {
-             const copyOk  = await this.autoCopyCaption();
-             const jobUrl  = encodeURIComponent(this.baseUrl);
-             const caption = encodeURIComponent(this.shareText);
+             const copyPromise = this.copyCaptionNow();
              const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
-                             + '?u='     + jobUrl
-                             + '&quote=' + caption;
+                             + '?u=' + encodeURIComponent(this.baseUrl)
+                             + '&hashtag=' + encodeURIComponent('#YourFutureStarsHere');
              if (this.isMobile) {
                  window.open(shareUrl, '_blank', 'noopener,noreferrer');
              } else {
                  const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
                  const win = window.open(shareUrl, 'philcst_jm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-                 if (win) { try { win.focus(); } catch(e) {} }
+                 if (!win) { window.open(shareUrl, '_blank'); }   // popup blocked → plain new tab
+                 else { try { win.focus(); } catch(e) {} }
              }
+             const copyOk = await copyPromise;
              $wire.dispatch('flash-message', {
                  type: copyOk ? 'success' : 'warning',
                  message: copyOk
                      ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button, then paste it into Facebook.'
              });
          },
 
-         // ── openMessenger ────────────────────────────────────────────────
-         // Mobile: tries to hand off straight to the Messenger app (Android
-         // intent URI / iOS fb-messenger:// scheme) with the job's direct
-         // link attached, falling back to messenger.com/share if the app
-         // isn't installed. Desktop: messenger.com/share popup. Mirrors
-         // Job Opportunities' own openMessenger() so sharing behaves the
-         // same from either side.
+         // ── Messenger ────────────────────────────────────────────────────
+         // Mobile: hand off to the Messenger app via its share link (Android
+         // intent / iOS scheme) with a web fallback.
+         // Desktop: Messenger has no public "share link" web endpoint (the
+         // old messenger.com/share URL just opens a blank page), so the link +
+         // caption are copied and messenger.com is opened — paste into any chat.
          async openMessenger() {
-             const copyOk = await this.autoCopyCaption();
+             const copyPromise = this.copyCaptionNow();
              const jobUrl  = encodeURIComponent(this.baseUrl);
-             const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
+             const webFallback = 'https://www.messenger.com/';
 
              if (this.isMobile) {
                  const isAndroid = /Android/i.test(navigator.userAgent);
-                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-
                  if (isAndroid) {
-                     window.open(
-                         'intent://share/?link=' + jobUrl +
-                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
-                         '_blank'
-                     );
-                 } else if (isIOS) {
-                     const a = document.createElement('a');
-                     a.href  = 'fb-messenger://share/?link=' + jobUrl;
-                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
-                     document.body.appendChild(a);
-                     a.click();
-                     document.body.removeChild(a);
-                     setTimeout(() => { window.open(webLink, '_blank', 'noopener,noreferrer'); }, 1500);
+                     window.location.href = 'intent://share/?link=' + jobUrl
+                         + '#Intent;package=com.facebook.orca;scheme=fb-messenger;'
+                         + 'S.browser_fallback_url=' + encodeURIComponent(webFallback) + ';end';
                  } else {
-                     window.open(webLink, '_blank', 'noopener,noreferrer');
+                     window.location.href = 'fb-messenger://share/?link=' + jobUrl;
+                     setTimeout(() => { if (!document.hidden) window.open(webFallback, '_blank', 'noopener,noreferrer'); }, 1500);
                  }
              } else {
-                 const win = window.open(webLink, 'philcst_jm_messenger_share', 'noopener,noreferrer');
+                 const win = window.open(webFallback, '_blank', 'noopener,noreferrer');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
+             const copyOk = await copyPromise;
              $wire.dispatch('flash-message', {
                  type: copyOk ? 'success' : 'warning',
                  message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
+                     ? 'Caption & link copied! Paste it (Ctrl+V) into a Messenger chat.'
+                     : 'Could not copy the caption automatically — use the Copy Caption button, then paste it into Messenger.'
              });
          },
 
@@ -4616,6 +4698,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              } catch(e) { console.warn('Copy failed', e); }
          }
      }"
+     x-init="prefetchImage()"
      x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"

@@ -599,18 +599,11 @@ new class extends Component {
 /* ── Dropdown panel ─────────────────────────────────────── */
 .yb-dd-panel {
     position: absolute; top: calc(100% + 4px); left: 0;
-    min-width: 100%; max-height: 180px; overflow-y: auto;
+    min-width: 100%; max-height: 224px; overflow-y: auto;
     background: #fff; border: 1.5px solid #E8E0F0;
     border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
     z-index: 600; padding: 4px;
     scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
-    /* Smooth, native-feeling scroll for long lists (Programs especially) —
-       scroll-behavior handles wheel/anchor scrolls, -webkit-overflow-
-       scrolling gives iOS Safari real inertia/momentum scroll instead of
-       the stiff, step-by-step default it uses otherwise. */
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
 }
 .yb-dd-panel::-webkit-scrollbar       { width: 4px; }
 .yb-dd-panel::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
@@ -641,7 +634,10 @@ new class extends Component {
 .yb-filter-bar {
     background: #F5F5F5; border-bottom: 1px solid #E8E0F0;
     padding: 0.5rem 0.75rem; flex-shrink: 0;
-    position: relative; z-index: 50; overflow: visible;
+    /* z-index lowered from 50 → 10: at 50 the filter bar formed a stacking
+       context that sat ABOVE the mobile sidebar overlay, so it "popped out"
+       over the sidebar instead of staying underneath/blurred with the page. */
+    position: relative; z-index: 10; overflow: visible;
     pointer-events: all;
     cursor: default !important;
     display: flex;
@@ -847,9 +843,6 @@ html:has(.yb-root-height)::-webkit-scrollbar, body:has(.yb-root-height)::-webkit
         max-width: min(calc(100vw - 1.5rem), 280px);
         max-height: 50vh;
         z-index: 400;
-        scroll-behavior: smooth;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior: contain;
     }
     /* Dropdown items must wrap on mobile — long program names like
        "Bachelor of Science in Information Technology" were overflowing
@@ -913,6 +906,82 @@ body.sidebar-open .yb-sidebar-blur,
     .yb-dd-btn { max-width: 96px; font-size: 0.75rem; }
     .yb-chip   { padding: 3px 8px; font-size: 10px; }
 }
+
+/* ─────────────────────────────────────────────────────────
+   MOBILE/TABLET FILTER TOGGLE + SMOOTH COLLAPSE (<1024px)
+   Filters are hidden by default and slide open/closed smoothly
+   (grid 0fr → 1fr). The cards area is flex:1, so opening the
+   bar just shrinks the cards — the page never grows past the
+   screen and the pagination bar never gets pushed off the bottom.
+   Desktop (≥1024px) is unchanged: filter bar always visible.
+───────────────────────────────────────────────────── */
+.yb-mobile-toggle { display: none; }
+.yb-filter-collapse { display: block; }
+
+@media (max-width: 1023px) {
+    .yb-mobile-toggle {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        flex-shrink: 0;
+        padding: 0.45rem 0.75rem;
+        background: #fff; border-bottom: 1px solid #E8E0F0;
+        border-radius: 1rem 1rem 0 0;
+    }
+    .yb-toggle-btn {
+        display: inline-flex; align-items: center; gap: 7px;
+        height: 32px; padding: 0 12px; border-radius: 10px;
+        font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+        background: #F9F7FC; color: #7A3F91; border: 1px solid #E8E0F0;
+        cursor: pointer; transition: background .18s, color .18s, border-color .18s, transform .1s;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .yb-toggle-btn:active { transform: scale(.96); }
+    .yb-toggle-btn.on { background: #7A3F91; color: #fff; border-color: #7A3F91; }
+    .yb-toggle-found {
+        display: inline-flex; align-items: center; gap: 6px;
+        font-size: 11px; font-weight: 700; text-transform: uppercase; white-space: nowrap;
+        padding: 4px 10px; border-radius: 9999px;
+        background: #F9F7FC; color: #7A3F91; border: 1.5px solid #E8E0F0;
+    }
+    .yb-toggle-dot { width: 6px; height: 6px; border-radius: 50%; background: #7A3F91; display: inline-block; }
+
+    /* Smooth collapse: grid row animates 0fr → 1fr, content fades. */
+    .yb-filter-collapse {
+        display: grid; grid-template-rows: 0fr;
+        flex-shrink: 0;
+        opacity: 0; visibility: hidden;
+        transition: grid-template-rows .26s cubic-bezier(.4,0,.2,1),
+                    opacity .2s ease,
+                    visibility 0s linear .26s;
+    }
+    .yb-filter-collapse.yb-open {
+        grid-template-rows: 1fr;
+        opacity: 1; visibility: visible;
+        transition: grid-template-rows .26s cubic-bezier(.4,0,.2,1),
+                    opacity .2s ease .04s,
+                    visibility 0s linear 0s;
+    }
+    .yb-filter-collapse-inner { min-height: 0; overflow: hidden; }
+    .yb-filter-collapse-inner > .yb-filter-bar { border-radius: 0; padding: 0.45rem 0.75rem; gap: 6px; }
+
+    /* "N found" lives in the toggle row on tablet/mobile */
+    .yb-found-count { display: none !important; }
+}
+
+/* Tablet (768–1023px): the collapse wrapper clips overflow, so dropdown
+   panels must be fixed-position here too (mobile already does this). */
+@media (min-width: 768px) and (max-width: 1023px) {
+    .yb-dd-panel {
+        position: fixed !important;
+        top: var(--dd-top, auto);
+        left: var(--dd-left, auto);
+        min-width: var(--dd-width, 160px);
+        width: var(--dd-width, 160px);
+        max-width: min(calc(100vw - 1.5rem), 320px);
+        max-height: 50vh;
+        z-index: 400;
+    }
+    .yb-dd-item { white-space: normal !important; word-break: break-word; line-height: 1.3; }
+}
 </style>
 
     {{-- ══ PAGE HEADER ══ --}}
@@ -938,19 +1007,40 @@ body.sidebar-open .yb-sidebar-blur,
     </div>
 
     {{-- ══ UNIFIED BLOCK — filter + cards + pagination ══ --}}
-    <div class="yb-table-block">
+    {{-- openDd tracks which dropdown is currently open ('batch'|'course'|'').
+         mobileFilters controls the Show/Hide Filters toggle on tablet/mobile
+         (the filter bar is always visible on desktop). Both live on the block
+         so the toggle row and the filter bar share the same state. --}}
+    <div class="yb-table-block"
+         x-data="{
+            openDd: '',
+            mobileFilters: false,
+            init() {
+                document.addEventListener('livewire:request', () => { this.openDd = ''; });
+            }
+         }">
 
-        {{-- ── FILTER BAR ── --}}
-        {{-- openDd tracks which dropdown is currently open ('batch'|'course'|'').
-             When one is open, the other button gets pointer-events:none + cursor:default
-             so only one dropdown can be interacted with at a time. --}}
-        <div class="yb-filter-bar"
-             x-data="{
-                openDd: '',
-                init() {
-                    document.addEventListener('livewire:request', () => { this.openDd = ''; });
-                }
-             }">
+        {{-- ── MOBILE/TABLET FILTER TOGGLE (hidden on desktop) ── --}}
+        <div class="yb-mobile-toggle">
+            <button type="button"
+                    @click="mobileFilters = !mobileFilters; openDd = ''"
+                    :aria-expanded="mobileFilters.toString()"
+                    :class="{ 'on': mobileFilters }"
+                    class="yb-toggle-btn">
+                <i class="fas fa-sliders" style="font-size:11px;"></i>
+                <span x-text="mobileFilters ? 'Hide Filters' : 'Show Filters'"></span>
+                <i class="fas" style="font-size:10px;" :class="mobileFilters ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+            </button>
+            <span class="yb-toggle-found">
+                @if($search !== '' || $batch !== '' || $course !== '')<span class="yb-toggle-dot"></span>@endif
+                {{ number_format($this->totalFiltered) }} found
+            </span>
+        </div>
+
+        {{-- ── FILTER BAR (collapsible with smooth animation on tablet/mobile) ── --}}
+        <div class="yb-filter-collapse" :class="{ 'yb-open': mobileFilters }">
+        <div class="yb-filter-collapse-inner">
+        <div class="yb-filter-bar">
 
             {{-- Row 1: Search (full width on mobile, inline on ≥sm) --}}
             <div class="yb-filter-search-wrap"
@@ -1083,7 +1173,9 @@ body.sidebar-open .yb-sidebar-blur,
                 </button>
 
             </div>{{-- /yb-filter-controls --}}
-        </div>
+        </div>{{-- /yb-filter-bar --}}
+        </div>{{-- /yb-filter-collapse-inner --}}
+        </div>{{-- /yb-filter-collapse --}}
 
         {{-- ── SCROLLABLE CARDS AREA ── --}}
         <div class="flex-1 min-h-0 relative" style="background:#f3f4f6;"
@@ -1400,26 +1492,6 @@ body.sidebar-open .yb-sidebar-blur,
                 if (isTranslucent && !isNearWhite) return true;
             }
 
-            // Last-resort fallback: body/html scroll-lock. Almost every
-            // mobile sidebar/drawer implementation — regardless of its
-            // class names, Alpine store names, or overlay markup, all of
-            // which the checks above already tried to guess — locks page
-            // scroll while it's open (overflow:hidden / position:fixed on
-            // <body> or <html>, sometimes via an inline style, sometimes
-            // via a utility class). This doesn't depend on knowing any of
-            // that host app's naming conventions at all, so it catches the
-            // sidebar even when every named-convention + color-sampling
-            // check above misses it (e.g. a very light/near-white overlay
-            // under the isNearWhite guard, or an overlay element that
-            // hasn't painted large enough yet to pass coversMost).
-            var bodyCs = window.getComputedStyle(document.body);
-            var htmlCs = window.getComputedStyle(document.documentElement);
-            var scrollLocked =
-                bodyCs.overflow === 'hidden' || bodyCs.overflowY === 'hidden' ||
-                htmlCs.overflow === 'hidden' || htmlCs.overflowY === 'hidden' ||
-                bodyCs.position === 'fixed';
-            if (scrollLocked && window.innerWidth < 768) return true;
-
             return false;
         }
 
@@ -1431,7 +1503,7 @@ body.sidebar-open .yb-sidebar-blur,
             // Close any open filter dropdown the moment the sidebar opens,
             // so a stale panel doesn't sit there blurred-but-visible.
             if (open && !wasOpen) {
-                var filterBar = document.querySelector('.yb-filter-bar');
+                var filterBar = document.querySelector('.yb-table-block');
                 if (filterBar && window.Alpine) {
                     var data = window.Alpine.$data(filterBar);
                     if (data) data.openDd = '';

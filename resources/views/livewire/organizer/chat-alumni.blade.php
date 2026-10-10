@@ -2975,29 +2975,44 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                on-screen no matter which edge the bubble sits near. */
             .org-reaction-toolbar {
                 position: fixed !important;
-                top: var(--org-rt-top, auto);
-                left: var(--org-rt-left, 50%) !important;
+                top: var(--org-rt-top, 0px);
+                left: var(--org-rt-left, 0px) !important;
                 right: auto !important;
                 bottom: auto !important;
-                transform: none;
-                max-width: calc(100vw - 1.5rem);
+                margin: 0 !important;
+                transform: none !important;
+                max-width: calc(100vw - 1rem);
                 width: max-content;
                 flex-wrap: nowrap;
                 justify-content: center;
+                gap: 0 !important;
+                padding: 4px 6px !important;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
                 scrollbar-width: none;
+                /* Hidden until JS has measured + positioned it, so it never
+                   flashes at a wrong spot first — then fades in smoothly. */
+                opacity: var(--org-rt-ready, 0);
+                transition: opacity .12s ease-out;
+                animation: none !important;
+                will-change: opacity;
             }
             .org-reaction-toolbar::-webkit-scrollbar { display: none; }
-            /* Slightly tighter buttons on phones so all 6 reactions + the
-               divider + action icons comfortably fit one row on common
-               screen widths (360–430px) without needing the scroll
-               fallback above. */
+            /* Compact buttons so all 6 reactions + divider + the 4 action
+               icons fit ONE row on a 360px screen (~300px total) with no
+               cut-off and no scrolling needed. */
+            .org-reaction-toolbar .org-tooltip-wrap { flex: 0 0 auto; }
             .org-reaction-toolbar .org-tooltip-wrap button {
-                width: 2rem;
-                height: 2rem;
-                font-size: 1.125rem;
+                width: 1.75rem;
+                height: 1.75rem;
+                font-size: 1rem;
+                border-radius: .6rem;
             }
+            .org-reaction-toolbar .org-tooltip-wrap button i { font-size: .7rem; }
+            .org-reaction-toolbar > span.w-px { margin: 0 2px !important; }
+            /* Hover scale makes no sense on touch and can push past the edge */
+            .org-reaction-toolbar .org-tooltip-wrap button:hover,
+            .org-reaction-toolbar .org-tooltip-wrap button:active { transform: none !important; }
         }
 
         .org-reactions-popup-list {
@@ -3873,19 +3888,39 @@ html:has(.mh-page-root)::-webkit-scrollbar, body:has(.mh-page-root)::-webkit-scr
                                                      // never run off any edge of the screen -- fixing
                                                      // the cut-off reactions row regardless of how close
                                                      // to the left or right side the bubble sits.
-                                                     const bubble = $el.parentElement.querySelector('.org-bubble, .org-msg-unsent');
+                                                     const bubble = $el.parentElement.querySelector('.org-bubble, .org-msg-unsent, .msgr-post-card');
                                                      const margin = 8;
-                                                     requestAnimationFrame(() => {
+                                                     const tb = $el;
+                                                     const place = (reveal) => {
+                                                         if (!tb.isConnected) return;
                                                          const br = bubble ? bubble.getBoundingClientRect() : null;
-                                                         const tw = $el.offsetWidth;
-                                                         const th = $el.offsetHeight;
-                                                         let left = br ? (br.left + br.width / 2 - tw / 2) : (window.innerWidth - tw) / 2;
-                                                         left = Math.max(margin, Math.min(left, window.innerWidth - tw - margin));
+                                                         const vw = document.documentElement.clientWidth || window.innerWidth;
+                                                         const tw = tb.offsetWidth;
+                                                         const th = tb.offsetHeight;
+                                                         let left = br ? (br.left + br.width / 2 - tw / 2) : (vw - tw) / 2;
+                                                         left = Math.max(margin, Math.min(left, vw - tw - margin));
                                                          let top = br ? (br.top - th - margin) : margin;
-                                                         if (top < margin) top = margin;
-                                                         $el.style.setProperty('--org-rt-left', left + 'px');
-                                                         $el.style.setProperty('--org-rt-top', top + 'px');
-                                                     });
+                                                         // No room above the bubble -> drop it just below instead
+                                                         if (br && top < margin) top = br.bottom + margin;
+                                                         top = Math.max(margin, Math.min(top, window.innerHeight - th - margin));
+                                                         tb.style.setProperty('--org-rt-left', left + 'px');
+                                                         tb.style.setProperty('--org-rt-top', top + 'px');
+                                                         if (reveal) tb.style.setProperty('--org-rt-ready', '1');
+                                                     };
+                                                     // Measure first (toolbar is invisible), then fade in already in place.
+                                                     requestAnimationFrame(() => place(true));
+                                                     // Fixed-position toolbar must follow the bubble while scrolling / resizing.
+                                                     const list = document.getElementById('msg-list');
+                                                     const follow = () => {
+                                                         if (!tb.isConnected) {
+                                                             list && list.removeEventListener('scroll', follow);
+                                                             window.removeEventListener('resize', follow);
+                                                             return;
+                                                         }
+                                                         place(false);
+                                                     };
+                                                     list && list.addEventListener('scroll', follow, { passive: true });
+                                                     window.addEventListener('resize', follow);
                                                  }
                                              "
                                              @click.stop>

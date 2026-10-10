@@ -984,17 +984,53 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
    looks short next to the stat cards. ── */
 @media (max-width: 1023px) {
     .ae-table-block {
-        height: calc(100dvh - 360px) !important;
-        max-height: calc(100dvh - 360px) !important;
-        min-height: 380px !important;
+        height: calc(100dvh - 200px) !important;
+        max-height: calc(100dvh - 200px) !important;
+        min-height: 420px !important;
     }
 }
 @media (max-width: 639px) {
     .ae-table-block {
-        height: calc(100dvh - 380px) !important;
-        max-height: calc(100dvh - 380px) !important;
-        min-height: 360px !important;
+        height: calc(100dvh - 210px) !important;
+        max-height: calc(100dvh - 210px) !important;
+        min-height: 420px !important;
     }
+}
+
+/* ── Stat cards on tablet/mobile — HIDDEN by default so the table can
+   use the full height. A "Cards" button in the table's mobile toolbar
+   opens them as a full-screen overlay (with a Close button). On desktop
+   (lg+) the cards stay as the normal right-side column, untouched. ── */
+@media (max-width: 1023px) {
+    .ae-statcards-col { display: none !important; }
+    .ae-statcards-col.ae-cards-open {
+        display: grid !important;
+        position: fixed;
+        inset: 0;
+        z-index: 999;
+        background: #F5F3F8;
+        overflow-y: auto;
+        padding: 0 16px 24px;
+        align-content: start;
+        height: 100dvh;
+    }
+    .ae-cards-overlay-head {
+        grid-column: 1 / -1;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 0 12px;
+        margin-bottom: 4px;
+        background: #F5F3F8;
+        border-bottom: 1px solid #E8E0F0;
+    }
+}
+@media (min-width: 1024px) {
+    .ae-cards-overlay-head { display: none !important; }
 }
 /* Full-screen mode (the "Full Screen" button on mobile) must win over the
    fixed height above — it already sets fixed!/inset-0!/h-dvh! inline via
@@ -1217,13 +1253,15 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
          just wrap in the grid) and ONLY the table block below gets a
          capped height so it scrolls on its own instead of the whole page
          growing tall. --}}
-    <div class="ae-main-row flex flex-col lg:flex-row gap-4 w-full lg:h-[calc(100vh-280px)] transition-all duration-300 ease-in-out">
+    <div class="ae-main-row flex flex-col lg:flex-row gap-4 w-full lg:h-[calc(100vh-280px)] transition-all duration-300 ease-in-out"
+         x-data="{ cardsOpen: false }"
+         @keydown.escape.window="cardsOpen = false">
 
         {{-- STAT CARDS — side column, ordered AFTER the table (right side)
              on large screens via lg:order-2. Always visible, no toggle.
              On tablet/mobile it is NOT independently scrollable (shows in
              full). On desktop it scrolls on its own (lg:h-full lg:overflow-y-auto). --}}
-        <div class="ae-statcards-noselect w-full lg:w-56 xl:w-64 flex-shrink-0 lg:order-2
+        <div class="ae-statcards-col ae-statcards-noselect w-full lg:w-56 xl:w-64 flex-shrink-0 lg:order-2
                     grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-1 gap-3 content-start
                     lg:h-full lg:overflow-y-auto lg:pr-1
                     [scrollbar-width:thin] [scrollbar-color:#d1d5db_#f3f4f6]
@@ -1234,8 +1272,25 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     transition-opacity duration-200"
              style="-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none;-webkit-touch-callout:none;"
              onselectstart="return false;" oncopy="return false;" oncut="return false;" ondragstart="return false;"
+             :class="cardsOpen ? 'ae-cards-open' : ''"
              wire:loading.class="opacity-50"
              wire:target="search,toggleFilterStatus,clearFilterStatuses,selectAllFilterStatuses,applyFilterStatuses,toggleFilterCourse,clearFilterCourses,selectAllFilterCourses,applyFilterCourses,setSingleBatchYear,clearFilterBatch,setBatchRange,clearFilters">
+
+            {{-- Overlay header — only visible on tablet/mobile while the
+                 cards are open full-screen. Hidden on desktop via CSS. --}}
+            <div class="ae-cards-overlay-head">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-[#7a3f91] to-[#5e2f72]">
+                        <i class="fas fa-chart-pie text-white text-sm"></i>
+                    </div>
+                    <p class="text-base font-semibold text-[#333333] truncate">Employment Summary</p>
+                </div>
+                <button type="button" @click="cardsOpen = false"
+                        class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-xs font-bold uppercase tracking-wide bg-[#7a3f91] text-white border border-[#7a3f91] transition active:scale-95 cursor-pointer flex-shrink-0">
+                    <i class="fas fa-xmark text-[11px]"></i>
+                    Close
+                </button>
+            </div>
 
             {{-- Total Alumni --}}
             <div class="bg-white rounded-2xl border border-[#E8E0F0] shadow-sm p-4 text-left w-full select-none">
@@ -1419,7 +1474,12 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     <span x-text="mobileFilters ? 'Hide Filters' : 'Show Filters'"></span>
                     <i class="fas text-[10px]" :class="mobileFilters ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
                 </button>
-                <span class="text-[11px] font-semibold text-[#777777] truncate">{{ $search !== '' || !empty($filterStatuses) || !empty($filterCourses) || $filterBatchFrom !== '' || $filterBatchTo !== '' ? 'Filtered' : 'All alumni' }}</span>
+                <button type="button" @click="cardsOpen = true"
+                        class="inline-flex items-center gap-2 h-9 px-3.5 rounded-xl text-xs font-bold uppercase tracking-wide border transition active:scale-95 bg-[#F9F7FC] text-[#7a3f91] border-[#E8E0F0] cursor-pointer flex-shrink-0">
+                    <i class="fas fa-chart-pie text-[11px]"></i>
+                    <span>Cards</span>
+                </button>
+                <span class="hidden sm:inline text-[11px] font-semibold text-[#777777] truncate ml-auto">{{ $search !== '' || !empty($filterStatuses) || !empty($filterCourses) || $filterBatchFrom !== '' || $filterBatchTo !== '' ? 'Filtered' : 'All alumni' }}</span>
             </div>
 
             {{-- FILTER BAR --}}
