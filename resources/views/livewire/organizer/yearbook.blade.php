@@ -14,6 +14,7 @@ new class extends Component {
 
     public string $search = '';
     public string $course = '';
+    public string $batch  = '';
 
     // Logged-in alumni details
     public string $myBatch       = '';
@@ -44,6 +45,21 @@ new class extends Component {
 
     public function updatingCourse() { $this->resetPage(); }
     public function updatingSearch() { $this->resetPage(); }
+    public function updatingBatch()  { $this->resetPage(); }
+
+    public function setBatch(string $b): void
+    {
+        $this->batch  = $b;
+        $this->course = '';          // program list depends on the batch
+        $this->resetPage();
+    }
+
+    public function clearBatch(): void
+    {
+        $this->batch  = '';
+        $this->course = '';
+        $this->resetPage();
+    }
 
     public function setCourse(string $code): void
     {
@@ -61,8 +77,8 @@ new class extends Component {
     public function courses()
     {
         $q = Alumni::query();
-        if ($this->myBatch !== '') {
-            $q->where('batch', $this->myBatch);
+        if ($this->batch !== '') {
+            $q->where('batch', $this->batch);
         }
 
         $codes = $q->pluck('course_code')->unique()->filter()->values();
@@ -77,6 +93,17 @@ new class extends Component {
     }
 
     #[Computed]
+    public function batches()
+    {
+        return Alumni::query()
+            ->whereNotNull('batch')
+            ->where('batch', '!=', '')
+            ->distinct()
+            ->orderBy('batch', 'desc')
+            ->pluck('batch');
+    }
+
+    #[Computed]
     public function alumniRecords()
     {
         $q = Alumni::query()
@@ -87,8 +114,8 @@ new class extends Component {
                       'mother_last_name', 'mother_given_name', 'mother_middle_name',
                       'motto']);
 
-        if ($this->myBatch !== '') {
-            $q->where('batch', $this->myBatch);
+        if ($this->batch !== '') {
+            $q->where('batch', $this->batch);
         }
 
         if (trim($this->search) !== '') {
@@ -147,7 +174,7 @@ new class extends Component {
 
     public function resetFilters(): void
     {
-        $this->reset(['search', 'course']);
+        $this->reset(['search', 'course', 'batch']);
         $this->resetPage();
     }
 
@@ -746,35 +773,30 @@ new class extends Component {
 
 /* ── Mobile responsiveness ──────────────────────────────── */
 @media (max-width: 640px) {
-    .yb-filter-bar { gap: 6px; flex-wrap: wrap; }
-
-    /* Search stays in row 1 alongside Filters label + Reset */
-    .yb-filter-bar > .relative.flex-1 { min-width: 0; }
-
-    /* "All Programs" pushes to its own full-width row below search
-       so it's always visible on small screens and never gets clipped */
+    /* Row 1: Search + Reset.  Row 2: FILTERS label + All Batches + All Programs */
+    .yb-filter-bar { gap: 6px; flex-wrap: wrap; align-items: center; }
+    .yb-search-wrap  { order: 1; flex: 1 1 0 !important; min-width: 0 !important; max-width: none !important; }
+    .yb-reset-btn    { order: 2; margin-left: 0 !important; }
+    .yb-filter-label { order: 3; }
+    .yb-filter-dd.yb-dd-batch { order: 4; }
+    .yb-filter-dd.yb-dd-prog  { order: 5; }
     .yb-filter-dd {
-        order: 10;
-        width: 100%;
-        flex: 1 1 100%;
+        position: static;            /* panel anchors to the filter bar → full width */
+        flex: 1 1 0; min-width: 0;
     }
-    .yb-filter-dd .yb-dd-btn {
-        width: 100%;
-        text-align: left;
-    }
-    /* Dropdown panel spans the full width of the button row */
+    .yb-filter-dd.yb-dd-prog { flex-grow: 1.4; }
+    .yb-filter-dd .yb-dd-btn { width: 100%; min-width: 0; text-align: left; }
     .yb-filter-dd .yb-dd-panel {
-        left: 0 !important;
-        right: 0 !important;
-        max-width: 100% !important;
-        width: 100%;
+        left: 0 !important; right: 0 !important;
+        width: auto; max-width: none !important;
+        margin: 0 .5rem;
     }
 }
+.yb-dd-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
 /* Extra-small phones */
 @media (max-width: 400px) {
     .yb-filter-bar { flex-wrap: wrap; }
-    .yb-filter-bar > .relative.flex-1 { width: 100%; flex: 1 1 100%; }
     .yb-dd-btn { font-size: 0.78rem; padding-left: 0.6rem; padding-right: 1.9rem; }
     .yb-card-name-band { padding: 6px 28px 6px 10px; }
 }
@@ -832,7 +854,7 @@ new class extends Component {
     .yb-filter-dd .yb-dd-panel {
         left: 0 !important;
         right: 0 !important;
-        max-width: 100% !important;
+        max-width: none !important;
     }
 }
 
@@ -882,15 +904,10 @@ new class extends Component {
     {{-- UNIFIED BLOCK --}}
     <div class="yb-table-block">
 
-        {{-- FILTER BAR --}}
+        {{-- FILTER BAR: Search → FILTERS label → All Batches → All Programs → Reset --}}
         <div class="yb-filter-bar flex flex-wrap gap-2 items-center">
 
-            <div class="flex items-center gap-2 px-1 h-[32px] sm:h-[38px] rounded-xl shrink-0 font-semibold text-xs sm:text-sm uppercase tracking-wide"
-                 style="color:#7a3f91;">
-                Filters
-            </div>
-
-            <div class="relative flex-1 min-w-[100px] max-w-xs" wire:ignore
+            <div class="yb-search-wrap relative flex-1 min-w-[100px] max-w-xs" wire:ignore
                  x-data="{
                     q: @js($search),
                     init() {
@@ -909,40 +926,40 @@ new class extends Component {
                        autocomplete="off" spellcheck="false">
             </div>
 
-            <div class="relative yb-filter-dd"
+            <div class="yb-filter-label flex items-center gap-2 px-1 h-[32px] sm:h-[38px] rounded-xl shrink-0 font-semibold text-xs sm:text-sm uppercase tracking-wide"
+                 style="color:#7a3f91;">
+                Filters
+            </div>
+
+            <div class="relative yb-filter-dd yb-dd-batch"
                  x-data="{
                     open: false,
                     panelMax: 224,
                     fit() {
-                        const btn = this.$refs.ddbtn;
-                        if (!btn) return;
-                        const r = btn.getBoundingClientRect();
+                        const p = this.$refs.ddpanel;
+                        if (!p) return;
                         const bar = document.querySelector('.yb-pagination-bar');
                         const limit = bar ? bar.getBoundingClientRect().top : window.innerHeight;
-                        const room = Math.floor(limit - r.bottom - 12);
+                        const room = Math.floor(limit - p.getBoundingClientRect().top - 12);
                         this.panelMax = Math.max(120, Math.min(room, 360));
                     },
                     toggle() {
                         if (courseBusy) return;
-                        if (!this.open) this.fit();
                         this.open = !this.open;
+                        if (this.open) this.$nextTick(() => this.fit());
                     }
                  }"
                  @click.outside="open = false"
                  @resize.window.debounce.150ms="if (open) fit()">
                 <button type="button"
-                        x-ref="ddbtn"
                         @click="toggle()"
-                        :class="{ 'active': $wire.course !== '', 'opacity-50 cursor-not-allowed': courseBusy }"
+                        :class="{ 'active': $wire.batch !== '', 'opacity-50 cursor-not-allowed': courseBusy }"
                         :disabled="courseBusy"
                         class="yb-dd-btn">
-                    @if($course !== '')
-                        <span>{{ $this->courses->firstWhere('code', $course)?->name ?? $course }}</span>
-                    @else
-                        <span>All Programs</span>
-                    @endif
+                    <span class="yb-dd-label">{{ $batch !== '' ? 'Batch ' . $batch : 'All Batches' }}</span>
                 </button>
                 <div x-show="open"
+                     x-ref="ddpanel"
                      x-transition:enter="transition ease-out duration-100"
                      x-transition:enter-start="opacity-0"
                      x-transition:enter-end="opacity-100"
@@ -951,7 +968,70 @@ new class extends Component {
                      x-transition:leave-end="opacity-0"
                      class="yb-dd-panel"
                      :style="'max-height:' + panelMax + 'px'"
-                     style="display:none; min-width:220px;">
+                     style="display:none; min-width:200px;">
+                    <button type="button"
+                            :disabled="courseBusy"
+                            :class="{ 'sel': $wire.batch === '', 'opacity-50 cursor-not-allowed': courseBusy }"
+                            @click="
+                                if (courseBusy) return;
+                                open = false;
+                                courseBusy = true;
+                                $wire.clearBatch().then(() => { courseBusy = false; });
+                            "
+                            class="yb-dd-item">All Batches</button>
+                    @foreach($this->batches as $b)
+                    <button type="button"
+                            :disabled="courseBusy"
+                            :class="{ 'sel': $wire.batch === '{{ $b }}', 'opacity-50 cursor-not-allowed': courseBusy }"
+                            @click="
+                                if (courseBusy) return;
+                                open = false;
+                                courseBusy = true;
+                                $wire.setBatch('{{ $b }}').then(() => { courseBusy = false; });
+                            "
+                            class="yb-dd-item">Batch {{ $b }}</button>
+                    @endforeach
+                </div>
+            </div>
+
+            <div class="relative yb-filter-dd yb-dd-prog"
+                 x-data="{
+                    open: false,
+                    panelMax: 224,
+                    fit() {
+                        const p = this.$refs.ddpanel;
+                        if (!p) return;
+                        const bar = document.querySelector('.yb-pagination-bar');
+                        const limit = bar ? bar.getBoundingClientRect().top : window.innerHeight;
+                        const room = Math.floor(limit - p.getBoundingClientRect().top - 12);
+                        this.panelMax = Math.max(120, Math.min(room, 360));
+                    },
+                    toggle() {
+                        if (courseBusy) return;
+                        this.open = !this.open;
+                        if (this.open) this.$nextTick(() => this.fit());
+                    }
+                 }"
+                 @click.outside="open = false"
+                 @resize.window.debounce.150ms="if (open) fit()">
+                <button type="button"
+                        @click="toggle()"
+                        :class="{ 'active': $wire.course !== '', 'opacity-50 cursor-not-allowed': courseBusy }"
+                        :disabled="courseBusy"
+                        class="yb-dd-btn">
+                    <span class="yb-dd-label">{{ $course !== '' ? ($this->courses->firstWhere('code', $course)?->name ?? $course) : 'All Programs' }}</span>
+                </button>
+                <div x-show="open"
+                     x-ref="ddpanel"
+                     x-transition:enter="transition ease-out duration-100"
+                     x-transition:enter-start="opacity-0"
+                     x-transition:enter-end="opacity-100"
+                     x-transition:leave="transition ease-in duration-75"
+                     x-transition:leave-start="opacity-100"
+                     x-transition:leave-end="opacity-0"
+                     class="yb-dd-panel"
+                     :style="'max-height:' + panelMax + 'px'"
+                     style="display:none; min-width:200px;">
                     <button type="button"
                             :disabled="courseBusy"
                             :class="{ 'sel': $wire.course === '', 'opacity-50 cursor-not-allowed': courseBusy }"
@@ -974,20 +1054,20 @@ new class extends Component {
                             "
                             class="yb-dd-item">{{ $c->name }}</button>
                     @empty
-                    <p class="px-3 py-2 text-xs" style="color:#999;">No other courses in your batch yet.</p>
+                    <p class="px-3 py-2 text-xs" style="color:#999;">No courses found for this batch.</p>
                     @endforelse
                 </div>
             </div>
 
             {{-- Reset --}}
-            @php $hasActiveFilters = $search !== '' || $course !== ''; @endphp
+            @php $hasActiveFilters = $search !== '' || $course !== '' || $batch !== ''; @endphp
             <button wire:click="resetFilters"
                     @click="activeFilter = null"
                     wire:loading.attr="disabled"
                     wire:loading.class="opacity-60 cursor-wait"
                     wire:target="resetFilters"
                     @disabled(!$hasActiveFilters)
-                    class="ml-auto inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold
+                    class="yb-reset-btn ml-auto inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold
                            border transition active:scale-95 whitespace-nowrap flex-shrink-0
                            {{ $hasActiveFilters
                                 ? 'bg-white border-[#E8E0F0] text-gray-600 hover:text-gray-900 hover:border-gray-300 cursor-pointer'
@@ -1005,7 +1085,7 @@ new class extends Component {
 
         {{-- LOADING SPINNER --}}
         <div class="hidden absolute inset-0 z-[9999] items-center justify-center pointer-events-none"
-             wire:loading.flex wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
+             wire:loading.flex wire:target="search,course,batch,setCourse,clearCourse,setBatch,clearBatch,resetFilters,previousPage,nextPage,gotoPage">
             <i class="fas fa-spinner fa-spin" style="font-size:36px;color:#7a3f91;"></i>
         </div>
 
@@ -1018,11 +1098,11 @@ new class extends Component {
                  class="yb-scroll absolute inset-0 overflow-y-auto overflow-x-hidden p-2 sm:p-3 lg:p-4 pb-4 sm:pb-6 transition-opacity duration-200"
                  style="z-index: 1;"
                  wire:loading.class="opacity-40 pointer-events-none"
-                 wire:target="search,course,setCourse,clearCourse,resetFilters,previousPage,nextPage,gotoPage">
+                 wire:target="search,course,batch,setCourse,clearCourse,setBatch,clearBatch,resetFilters,previousPage,nextPage,gotoPage">
 
                 @if($this->alumniRecords->count() > 0)
                     <div class="yb-grid-wrap space-y-2"
-                         wire:key="results-{{ md5($search . '|' . $course . '|' . $this->alumniRecords->currentPage()) }}">
+                         wire:key="results-{{ md5($search . '|' . $course . '|' . $batch . '|' . $this->alumniRecords->currentPage()) }}">
                         @foreach($this->groupedAlumni as $courseName => $group)
                             <div wire:key="group-{{ Str::slug($courseName) }}">
                                 <div class="flex items-center gap-2 pt-2 pb-2 px-1">
@@ -1147,7 +1227,7 @@ new class extends Component {
             <p class="text-white/80 text-xs font-normal whitespace-nowrap">
                 Showing <strong class="text-white font-bold">{{ number_format($from) }}–{{ number_format($to) }}</strong>
                 of <strong class="text-white font-bold">{{ number_format($total) }}</strong> alumni
-                @if($search || $course)
+                @if($search || $course || $batch)
                     <span class="text-white/50 text-xs ml-1">(filtered)</span>
                 @endif
             </p>

@@ -2493,8 +2493,12 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
    by specificity, independent of whatever purge/JIT issue dropped the
    Tailwind class. ── */
 @media (max-width: 1023px) {
-    .jm-filter-bar { display: none; }
-    .jm-filter-bar.jm-filter-open { display: flex !important; }
+    /* Search is ALWAYS visible on mobile/tablet. Everything else in the bar
+       (Filters label, dropdowns, active-filter pills, Reset) only shows
+       after tapping "Show Filters". */
+    .jm-filter-bar { display: flex !important; }
+    .jm-filter-bar:not(.jm-filter-open) > *:not(.jm-search-wrap) { display: none !important; }
+    .jm-search-wrap { flex: 1 1 100%; max-width: none !important; min-width: 0 !important; }
 }
 /* ── Filter bar lock while a filter request is loading ──
    Livewire sets data-jm-busy on the bar (wire:loading.attr) only while a
@@ -2758,7 +2762,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              :class="{ 'jm-filter-open': mobileFilters }"
              wire:loading.class="opacity-60" wire:loading.attr="data-jm-busy"
              wire:target="search,filterStatus,filterType,filterSource,resetFilters">
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
+            <div class="jm-search-wrap relative flex-1 min-w-[160px] max-w-xs"
                  wire:ignore
                  x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
                 <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
