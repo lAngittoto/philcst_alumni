@@ -2969,6 +2969,20 @@ select.tw-select-arrow[disabled] {
         height: 100vh !important;
         max-height: 100vh !important;
     }
+
+    /* On mobile the preview and the (now single-button) share panel used to
+       be two separately-scrolling boxes stacked in a fixed-height row, which
+       could clip the preview out of view. Turn that row into one normal
+       scrollable column instead, so the user can simply scroll down past
+       the share options to see the full preview. */
+    .dir-share-sheet .flex-col.md\:flex-row {
+        overflow-y: auto !important;
+        display: block !important;
+    }
+    .dir-share-sheet .flex-col.md\:flex-row > div {
+        overflow-y: visible !important;
+        min-height: 0 !important;
+    }
 }
 
 .dir-share-close-btn {
@@ -3242,31 +3256,6 @@ select.tw-select-arrow[disabled] {
 
             <div class="w-full md:w-[280px] flex-shrink-0 min-h-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
-
-                <template x-if="nativeShareSupported">
-                    <button type="button" @click="nativeShare()" class="dir-share-option-btn" style="background:#7a3f91;">
-                        <span class="icon-wrap">
-                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
-                        </span>
-                        <span class="label-text text-xs font-semibold">Share</span>
-                    </button>
-                </template>
-
-                <button type="button" @click="askShare('facebook')" class="dir-share-option-btn" style="background:#1877F2;">
-                    <span class="icon-wrap">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
-                    </span>
-                    <span class="label-text text-xs font-semibold">Share on Facebook</span>
-                </button>
-
-                <button type="button" @click="askShare('messenger')" class="dir-share-option-btn" style="background:#0084FF;">
-                    <span class="icon-wrap">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
-                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
-                        </svg>
-                    </span>
-                    <span class="label-text text-xs font-semibold">Send via Messenger</span>
-                </button>
 
                 <button type="button"
                         wire:click="postToBatchChat"

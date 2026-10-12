@@ -2281,6 +2281,31 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
         height: 100vh !important;
         max-height: 100vh !important;
     }
+
+    /* The desktop layout splits Post Preview and Share Via into two
+       independently-scrolling flex panes fighting over the same fixed
+       modal height — on a short mobile viewport that squashes the
+       preview to almost nothing. Mobile instead becomes ONE column that
+       scrolls top-to-bottom as a whole: Post Preview first (sized by its
+       own content, not forced to flex:1), then Share Via below it. */
+    #jm-share-body {
+        flex-direction: column !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    #jm-share-preview-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
+    }
+    #jm-share-preview-text {
+        max-height: 220px !important;
+    }
+    #jm-share-via-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
+        width: 100% !important;
+    }
 }
 
 .jm-share-close-btn {
@@ -4729,9 +4754,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             </button>
         </div>
 
-        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+        <div id="jm-share-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-c">
+            <div id="jm-share-preview-pane" class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($sharePhotoUrl)
@@ -4748,14 +4773,14 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-hidden">
                     {{-- Caption capped at a fixed height and scrolls inside, so long
                          descriptions don't stretch the whole modal. --}}
-                    <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:220px;">
+                    <div id="jm-share-preview-text" class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:220px;">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
                 </div>
             </div>
 
-            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
+            <div id="jm-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 <button type="button" @click="askShare('facebook')" class="jm-share-option-btn" style="background:#1877F2;">

@@ -1955,6 +1955,34 @@ select.tw-select-arrow {
         height: 100vh !important;
         max-height: 100vh !important;
     }
+
+    /* The desktop layout splits Post Preview and Share Via into two
+       independently-scrolling flex panes fighting over the same fixed
+       modal height — on a short mobile viewport that squashes the
+       preview to almost nothing. Mobile instead becomes ONE column that
+       scrolls top-to-bottom as a whole: Post Preview first (sized by its
+       own content, not forced to flex:1), then Share Via below it. */
+    #eo-share-body {
+        flex-direction: column !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch;
+    }
+    #eo-share-preview-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
+        min-height: 0 !important;
+    }
+    #eo-share-preview-text {
+        flex: 0 0 auto !important;
+        max-height: 180px !important;
+        overflow-y: auto !important;
+    }
+    #eo-share-via-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
+        width: 100% !important;
+    }
 }
 
 /* ── Share modal close button (mirrors upcoming-events share-close-btn,
@@ -4458,9 +4486,9 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             </button>
         </div>
 
-        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+        <div id="eo-share-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            <div class="flex-1 min-w-0 min-h-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-hidden">
+            <div id="eo-share-preview-pane" class="flex-1 min-w-0 min-h-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-hidden">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($shareEventPhotoUrl)
@@ -4474,7 +4502,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 scroll-c" style="flex:1 1 0; min-height:0; overflow-y:auto;">
+                <div id="eo-share-preview-text" class="rounded-xl border border-gray-200 scroll-c" style="flex:1 1 0; min-height:0; overflow-y:auto;">
                     <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
@@ -4489,7 +4517,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                 </div>
             </div>
 
-            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
+            <div id="eo-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 <button type="button" @click="askShare('facebook')" class="eo-share-option-btn" style="background:#1877F2;">

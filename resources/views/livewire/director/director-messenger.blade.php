@@ -1415,7 +1415,15 @@ new class extends Component {
         border-right: none !important;
         border-bottom: none !important;
         box-shadow: none !important;
+        /* 100vh on mobile includes the browser's address bar / bottom nav
+           area, which isn't real visible space — that's what was pushing
+           the message input off-screen. 100dvh ("dynamic viewport height")
+           tracks the *actual* visible area and shrinks/grows as the mobile
+           browser chrome shows/hides, so the input stays on screen. The
+           100vh rule right before it is a fallback for older browsers that
+           don't support dvh yet (the dvh rule overrides it when supported). */
         height: calc(100vh - 150px) !important;
+        height: calc(100dvh - 150px) !important;
     }
 
     /* Reaction pill — trim padding/sizing so it never overflows the bubble
@@ -1428,6 +1436,26 @@ new class extends Component {
     }
     .dm-reaction-pill .dm-reaction-emoji { font-size: 13px !important; }
     .dm-reaction-pill .dm-reaction-avatars > div { width: 1rem !important; height: 1rem !important; }
+
+    /* ── Quick-react toolbar popup (the row of 6 big emoji + Reply/Pin/etc
+       that opens when you tap a bubble) — on narrow screens the emoji were
+       too wide to fit, forcing the popup past the edge of the screen and
+       clipping the "message input" styling below it out of view. Shrink
+       the emoji, tighten the gaps/padding, and clamp the popup to the
+       actual screen width so it always stays fully visible and wraps
+       instead of overflowing. ── */
+    #dm-chat-card [id^="toolbar-anchor-"] {
+        gap: 0.35rem !important;
+        padding: 0.4rem 0.5rem !important;
+        max-width: calc(100vw - 1.5rem) !important;
+        max-width: calc(100dvw - 1.5rem) !important;
+    }
+    #dm-chat-card [id^="toolbar-anchor-"] button.text-\[1\.7rem\] {
+        font-size: 1.3rem !important;
+    }
+    #dm-chat-card [id^="toolbar-anchor-"] .flex-wrap {
+        row-gap: 0.35rem !important;
+    }
 }
 
     /* ── Shared Job/Event post-preview card — mirrors alumni-side
