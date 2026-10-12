@@ -4183,6 +4183,16 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
     flex-direction: column;
     overflow: hidden;
 }
+
+/* Share sheet full-screen mobile override takes priority over the
+   86vh/560px cap above — the !important height rule for mobile lives
+   in the global stylesheet (.eo-share-backdrop .eo-share-sheet, max-width:767px). */
+@media (max-width: 767px) {
+    .eo-share-modal-wrapper {
+        height: 100vh !important;
+        max-height: 100vh !important;
+    }
+}
 </style>
 
 <div id="eo-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 eo-share-backdrop"
@@ -4481,15 +4491,6 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
-
-                <template x-if="nativeShareSupported">
-                    <button type="button" @click="nativeShare()" class="eo-share-option-btn" style="background:#7a3f91;">
-                        <span class="icon-wrap">
-                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
-                        </span>
-                        <span class="label-text text-xs font-semibold">Share</span>
-                    </button>
-                </template>
 
                 <button type="button" @click="askShare('facebook')" class="eo-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">

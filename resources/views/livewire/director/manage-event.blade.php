@@ -50,6 +50,7 @@ new class extends Component {
     public string $filterStatus  = '';
     public string $filterSort    = 'recent';
     public string $filterCollege = '';
+    public bool   $showFilters   = false;
 
     public string $myDisplayName = '';
     public int    $directorId    = 0;
@@ -1603,6 +1604,20 @@ select.tw-select-arrow[disabled] {
         border-bottom: none !important;
         box-shadow: none !important;
     }
+    /* Edge-to-edge page on mobile, matching the table card above */
+    #dir-manageevent-root {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+    #dir-manageevent-root > .flex.flex-col.sm\:flex-row,
+    #dir-manageevent-root > .dir-table-card {
+        margin-left: 0;
+        margin-right: 0;
+    }
+    #dir-manageevent-root > .flex.flex-col.sm\:flex-row {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
 }
 </style>
 
@@ -1685,6 +1700,8 @@ select.tw-select-arrow[disabled] {
         {{-- ── FILTER BAR ── --}}
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterCollege,filterSort">
+
+            {{-- Row 1: search + filters toggle (always visible) --}}
             <div class="flex flex-wrap gap-2 items-center">
 
                 <div class="relative flex-1 min-w-[160px] max-w-xs"
@@ -1698,61 +1715,26 @@ select.tw-select-arrow[disabled] {
                            autocomplete="off" maxlength="100" spellcheck="false">
                 </div>
 
-                <div class="hidden sm:flex items-center px-2 h-[38px] shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                    Filters
-                </div>
-
-                <select wire:model.live="filterStatus"
-                        wire:loading.attr="disabled"
-                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
-                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
-                    <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
-                    <option value="PENDING">Pending</option>
-                    <option value="APPROVED">Approved</option>
-                    <option value="REJECTED">Rejected</option>
-                    <option value="COMPLETED">Completed</option>
-                </select>
-
-                <select wire:model.live="filterCollege"
-                        wire:loading.attr="disabled"
-                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal flex-1 sm:flex-none sm:min-w-[200px] sm:max-w-[280px]
-                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
-                    <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
-                    @foreach($this->colleges as $col)
-                        <option value="{{ $col }}">{{ $col }}</option>
-                    @endforeach
-                </select>
-
-                <select wire:model.live="filterSort"
-                        wire:loading.attr="disabled"
-                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal
-                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
-                    <option value="recent">Newest First</option>
-                    <option value="oldest">Oldest First</option>
-                </select>
-
+                {{-- Filters toggle — drives show/hide of the selects row on mobile;
+                     on sm+ the selects stay visible regardless ── --}}
                 @php $mgEventHasActiveFilters = $search || $filterStatus || $filterCollege || $filterSort !== 'recent'; @endphp
-                <button wire:click="resetFilters"
-                        wire:loading.attr="disabled"
-                        wire:loading.class="opacity-60 cursor-wait"
-                        wire:target="resetFilters"
-                        {{ !$mgEventHasActiveFilters ? 'disabled' : '' }}
-                        title="{{ $mgEventHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
-                        class="ml-auto inline-flex items-center gap-1.5 h-[38px] px-3 rounded-lg text-sm font-normal text-[#333333]
-                               bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-                    <span wire:loading.remove wire:target="resetFilters">
-                        <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                    </span>
-                    <span wire:loading wire:target="resetFilters">
-                        <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                    </span>
-                    <span class="hidden sm:inline" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
+                @php $mgEventActiveFilterCount = ($filterStatus ? 1 : 0) + ($filterCollege ? 1 : 0) + ($filterSort !== 'recent' ? 1 : 0); @endphp
+                <button wire:click="$toggle('showFilters')" type="button"
+                        class="flex items-center gap-1.5 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide transition cursor-pointer
+                               {{ $showFilters ? 'bg-[#7a3f91] text-white' : 'bg-white text-[#7a3f91] border border-[#E8E0F0] hover:bg-[#f5f0fa]' }}"
+                        style="user-select:none;">
+                    <i class="fas fa-sliders text-xs"></i>
+                    Filters
+                    @if($mgEventActiveFilterCount)
+                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold {{ $showFilters ? 'bg-white text-[#7a3f91]' : 'bg-[#7a3f91] text-white' }}">
+                            {{ $mgEventActiveFilterCount }}
+                        </span>
+                    @endif
+                    <i class="fas fa-chevron-down text-[10px] transition-transform {{ $showFilters ? 'rotate-180' : '' }}"></i>
                 </button>
-            </div>
 
-            {{-- Active pills --}}
-            @if($filterStatus || $filterCollege)
-            <div class="flex flex-wrap gap-2 items-center mt-2.5 px-1">
+                {{-- Active-filter pills stay on the top row even when the filter
+                     controls themselves are collapsed ── --}}
                 @if($filterStatus && isset($evtStatusMap[$filterStatus]))
                 <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $evtStatusMap[$filterStatus][1] }}">
                     <i class="fas fa-filter text-[9px]"></i>
@@ -1773,8 +1755,58 @@ select.tw-select-arrow[disabled] {
                     </button>
                 </span>
                 @endif
+
+                <button wire:click="resetFilters"
+                        wire:loading.attr="disabled"
+                        wire:loading.class="opacity-60 cursor-wait"
+                        wire:target="resetFilters"
+                        {{ !$mgEventHasActiveFilters ? 'disabled' : '' }}
+                        title="{{ $mgEventHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
+                        class="ml-auto inline-flex items-center gap-1.5 h-[38px] px-3 rounded-lg text-sm font-normal text-[#333333]
+                               bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                    <span wire:loading.remove wire:target="resetFilters">
+                        <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                    </span>
+                    <span wire:loading wire:target="resetFilters">
+                        <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                    </span>
+                    <span class="hidden sm:inline" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
+                </button>
             </div>
-            @endif
+
+            {{-- Row 2: the actual filter selects — collapsible on mobile via
+                 showFilters, always shown on sm+ screens regardless of the toggle ── --}}
+            <div class="flex-wrap gap-2 items-center mt-2 {{ $showFilters ? 'flex' : 'hidden' }} sm:flex">
+
+                <select wire:model.live="filterStatus"
+                        wire:loading.attr="disabled"
+                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal flex-1 min-w-[140px] sm:flex-none
+                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                    <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
+                    <option value="PENDING">Pending</option>
+                    <option value="APPROVED">Approved</option>
+                    <option value="REJECTED">Rejected</option>
+                    <option value="COMPLETED">Completed</option>
+                </select>
+
+                <select wire:model.live="filterCollege"
+                        wire:loading.attr="disabled"
+                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal flex-1 min-w-[140px] sm:flex-none sm:min-w-[200px] sm:max-w-[280px]
+                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                    <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
+                    @foreach($this->colleges as $col)
+                        <option value="{{ $col }}">{{ $col }}</option>
+                    @endforeach
+                </select>
+
+                <select wire:model.live="filterSort"
+                        wire:loading.attr="disabled"
+                        class="h-[38px] px-3 text-sm border border-[#E8E0F0] rounded-lg bg-white text-[#333333] font-normal flex-1 min-w-[140px] sm:flex-none
+                               hover:border-[#c4b5d4] focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition tw-select-arrow">
+                    <option value="recent">Newest First</option>
+                    <option value="oldest">Oldest First</option>
+                </select>
+            </div>
         </div>
 
         {{-- ── TABLE WRAPPER ── --}}

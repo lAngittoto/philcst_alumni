@@ -55,6 +55,7 @@ new class extends Component {
     public string $filterCollege  = '';
     public string $filterPostedBy = '';
     public string $filterSort     = 'recent';
+    public bool   $showFilters    = false;
 
     public string $myDisplayName = '';
     public int    $directorId    = 0;
@@ -2042,6 +2043,15 @@ mark.mgjob-hl {
         border-bottom: none !important;
         box-shadow: none !important;
     }
+    /* Edge-to-edge page on mobile, matching the table card above */
+    #dir-managejob-root {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+    }
+    #dir-managejob-root > .flex.flex-col.sm\:flex-row {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
 }
 
 /* ══ Mobile stacked card rows (same interaction language as coord-mrow) ══ */
@@ -2407,155 +2417,154 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     <div class="job-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+        <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="search,filterStatus,filterType,filterCollege,filterPostedBy,filterSort">
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
-                <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
-                       placeholder="Search..."
-                       class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 pl-9 rounded-lg w-full transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] placeholder-[#a78bbd]"
-                       autocomplete="off" maxlength="100" spellcheck="false">
+
+            {{-- Row 1: search + filters toggle (always visible) --}}
+            <div class="flex flex-wrap gap-2 items-center">
+                <div class="relative flex-1 min-w-[160px] max-w-xs"
+                     wire:ignore
+                     x-data="{q:'',init(){this.q=$wire.search??'';$wire.$watch('search',v=>{if(v!==this.q)this.q=v;});}}">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
+                    <input type="text" x-model="q" @input.debounce.400ms="$wire.set('search',q)"
+                           placeholder="Search..."
+                           class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 pl-9 rounded-lg w-full transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] placeholder-[#a78bbd]"
+                           autocomplete="off" maxlength="100" spellcheck="false">
+                </div>
+
+                {{-- Filters toggle — drives show/hide of the selects row on mobile;
+                     on sm+ the selects stay visible regardless ── --}}
+                @php $mgJobHasActiveFilters = $search || $filterStatus || $filterType || $filterCollege || $filterPostedBy; @endphp
+                @php $mgJobActiveFilterCount = ($filterStatus ? 1 : 0) + ($filterType ? 1 : 0) + ($filterCollege ? 1 : 0) + ($filterPostedBy ? 1 : 0); @endphp
+                <button wire:click="$toggle('showFilters')" type="button"
+                        class="flex items-center gap-1.5 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide transition cursor-pointer
+                               {{ $showFilters ? 'bg-[#7a3f91] text-white' : 'bg-white text-[#7a3f91] border border-[#E8E0F0] hover:bg-[#f5f0fa]' }}"
+                        style="user-select:none;">
+                    <i class="fas fa-sliders text-xs"></i>
+                    Filters
+                    @if($mgJobActiveFilterCount)
+                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold {{ $showFilters ? 'bg-white text-[#7a3f91]' : 'bg-[#7a3f91] text-white' }}">
+                            {{ $mgJobActiveFilterCount }}
+                        </span>
+                    @endif
+                    <i class="fas fa-chevron-down text-[10px] transition-transform {{ $showFilters ? 'rotate-180' : '' }}"></i>
+                </button>
+
+                {{-- Active-filter pills stay on the top row even when the filter
+                     controls themselves are collapsed ── --}}
+                @if($filterStatus)
+                @php
+                    $statusPillMap = [
+                        'ACTIVE'   => ['label' => 'Active',   'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
+                        'INACTIVE' => ['label' => 'Inactive', 'cls' => 'bg-amber-50 border-amber-300 text-amber-800'],
+                    ];
+                    $sPill = $statusPillMap[$filterStatus] ?? null;
+                @endphp
+                @if($sPill)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $sPill['cls'] }}">
+                    <i class="fas fa-filter text-[9px]"></i>{{ $sPill['label'] }}
+                    <button wire:click="$set('filterStatus', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
+                @endif
+
+                @if($filterType)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-blue-50 border-blue-300 text-blue-800">
+                    <i class="fas fa-filter text-[9px]"></i>{{ $filterType }}
+                    <button wire:click="$set('filterType', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
+
+                @if($filterCollege)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
+                    <i class="fas fa-building-columns text-[9px]"></i>{{ $filterCollege }}
+                    <button wire:click="$set('filterCollege', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
+
+                @if($filterPostedBy)
+                @php
+                    $postedByPillMap = [
+                        'director'    => ['label' => 'You Posted',             'cls' => 'bg-indigo-50 border-indigo-300 text-indigo-800', 'icon' => 'fa-user-tie'],
+                        'coordinator' => ['label' => 'Posted by Coordinator',  'cls' => 'bg-teal-50 border-teal-300 text-teal-800',       'icon' => 'fa-user-group'],
+                    ];
+                    $pbPill = $postedByPillMap[$filterPostedBy] ?? null;
+                @endphp
+                @if($pbPill)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $pbPill['cls'] }}">
+                    <i class="fas {{ $pbPill['icon'] }} text-[9px]"></i>{{ $pbPill['label'] }}
+                    <button wire:click="$set('filterPostedBy', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
+                @endif
+
+                <button wire:click="resetFilters"
+                        wire:loading.attr="disabled"
+                        wire:loading.class="opacity-60 cursor-wait"
+                        wire:target="resetFilters"
+                        {{ !$mgJobHasActiveFilters ? 'disabled' : '' }}
+                        title="{{ $mgJobHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
+                        class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                    <span wire:loading.remove wire:target="resetFilters">
+                        <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                    </span>
+                    <span wire:loading wire:target="resetFilters">
+                        <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                    </span>
+                    <span class="hidden sm:inline text-[#333333]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
+                </button>
             </div>
 
-            <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                Filters
+            {{-- Row 2: the actual filter selects — collapsible on mobile via
+                 showFilters, always shown on sm+ screens regardless of the toggle ── --}}
+            <div class="flex-wrap gap-2 items-center mt-2 {{ $showFilters ? 'flex' : 'hidden' }} sm:flex">
+
+                <select wire:model.live="filterStatus"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                    <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                </select>
+
+                <select wire:model.live="filterType"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                    <option value="" {{ $filterType ? 'disabled' : '' }}>All Types</option>
+                    @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
+                        <option value="{{ $opt->label }}">{{ $opt->label }}</option>
+                    @endforeach
+                </select>
+
+                <select wire:model.live="filterCollege"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                    <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
+                    @foreach($this->collegesWithDepts as $college)
+                        <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
+                    @endforeach
+                </select>
+
+                <select wire:model.live="filterPostedBy"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                    <option value="" {{ $filterPostedBy ? 'disabled' : '' }}>All Posted By</option>
+                    <option value="director">You Posted</option>
+                    <option value="coordinator">Posted by Coordinator</option>
+                </select>
             </div>
-
-            <select wire:model.live="filterStatus"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4]">
-                <option value="" {{ $filterStatus ? 'disabled' : '' }}>All Statuses</option>
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-            </select>
-
-            <select wire:model.live="filterType"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
-                <option value="" {{ $filterType ? 'disabled' : '' }}>All Types</option>
-                @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
-                    <option value="{{ $opt->label }}">{{ $opt->label }}</option>
-                @endforeach
-            </select>
-
-            <select wire:model.live="filterCollege"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
-                <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
-                @foreach($this->collegesWithDepts as $college)
-                    <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
-                @endforeach
-            </select>
-
-            <select wire:model.live="filterPostedBy"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
-                <option value="" {{ $filterPostedBy ? 'disabled' : '' }}>All Posted By</option>
-                <option value="director">You Posted</option>
-                <option value="coordinator">Posted by Coordinator</option>
-            </select>
-
-            @if($filterStatus)
-            @php
-                $statusPillMap = [
-                    'ACTIVE'   => ['label' => 'Active',   'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
-                    'INACTIVE' => ['label' => 'Inactive', 'cls' => 'bg-amber-50 border-amber-300 text-amber-800'],
-                ];
-                $sPill = $statusPillMap[$filterStatus] ?? null;
-            @endphp
-            @if($sPill)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $sPill['cls'] }}">
-                <i class="fas fa-filter text-[9px]"></i>{{ $sPill['label'] }}
-                <button wire:click="$set('filterStatus', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
-            @endif
-
-            @if($filterType)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-blue-50 border-blue-300 text-blue-800">
-                <i class="fas fa-filter text-[9px]"></i>{{ $filterType }}
-                <button wire:click="$set('filterType', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
-
-            @if($filterCollege)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
-                <i class="fas fa-building-columns text-[9px]"></i>{{ $filterCollege }}
-                <button wire:click="$set('filterCollege', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
-
-            @if($filterPostedBy)
-            @php
-                $postedByPillMap = [
-                    'director'    => ['label' => 'You Posted',             'cls' => 'bg-indigo-50 border-indigo-300 text-indigo-800', 'icon' => 'fa-user-tie'],
-                    'coordinator' => ['label' => 'Posted by Coordinator',  'cls' => 'bg-teal-50 border-teal-300 text-teal-800',       'icon' => 'fa-user-group'],
-                ];
-                $pbPill = $postedByPillMap[$filterPostedBy] ?? null;
-            @endphp
-            @if($pbPill)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $pbPill['cls'] }}">
-                <i class="fas {{ $pbPill['icon'] }} text-[9px]"></i>{{ $pbPill['label'] }}
-                <button wire:click="$set('filterPostedBy', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
-            @endif
-
-            @php $mgJobHasActiveFilters = $search || $filterStatus || $filterType || $filterCollege || $filterPostedBy; @endphp
-            <button wire:click="resetFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetFilters"
-                    {{ !$mgJobHasActiveFilters ? 'disabled' : '' }}
-                    title="{{ $mgJobHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-                <span wire:loading.remove wire:target="resetFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                </span>
-                <span wire:loading wire:target="resetFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline text-[#333333]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
-            </button>
-
-            {{-- Mobile-only selects --}}
-            <select wire:model.live="filterType"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
-                <option value="" {{ $filterType ? 'disabled' : '' }}>All Types</option>
-                @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
-                    <option value="{{ $opt->label }}">{{ $opt->label }}</option>
-                @endforeach
-            </select>
-            <select wire:model.live="filterCollege"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
-                <option value="" {{ $filterCollege ? 'disabled' : '' }}>All Colleges</option>
-                @foreach($this->collegesWithDepts as $college)
-                    <option value="{{ $college['name'] }}">{{ $college['name'] }}</option>
-                @endforeach
-            </select>
-            <select wire:model.live="filterPostedBy"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
-                <option value="" {{ $filterPostedBy ? 'disabled' : '' }}>All Posted By</option>
-                <option value="director">You Posted</option>
-                <option value="coordinator">Posted by Coordinator</option>
-            </select>
         </div>
 
         {{-- ── TABLE WRAPPER — only this region scrolls; loading dim applies

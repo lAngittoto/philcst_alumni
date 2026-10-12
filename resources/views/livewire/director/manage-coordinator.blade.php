@@ -24,6 +24,7 @@ new class extends Component {
     public string $coordSearch  = '';
     public string $coordCollege = '';
     public string $coordStatus  = '';
+    public bool   $coordShowFilters = false;
     public string $coordFirstName         = '';
     public string $coordMiddleInitial     = '';
     public string $coordLastName          = '';
@@ -1334,95 +1335,107 @@ new class extends Component {
     <div class="coord-table-card flex-1 min-h-0 rounded-2xl overflow-hidden border border-[#E8E0F0] shadow-sm">
 
         {{-- ── FILTER BAR ── --}}
-        <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 flex flex-wrap gap-2 items-center transition-opacity duration-200"
+        <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="coordSearch,coordCollege,coordStatus">
 
-            <div class="relative flex-1 min-w-[160px] max-w-xs"
-                 wire:ignore
-                 x-data="{q:'',init(){this.q=$wire.coordSearch??'';$wire.$watch('coordSearch',v=>{if(v!==this.q)this.q=v;});}}">
-                <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
-                <input type="text" x-model="q" @input.debounce.400ms="$wire.set('coordSearch',q)"
-                       placeholder="Search..."
-                       class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 pl-9 rounded-lg w-full transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] placeholder-[#a78bbd]"
-                       autocomplete="off" maxlength="100" spellcheck="false">
+            {{-- Row 1: search + filters toggle (always visible) --}}
+            <div class="flex flex-wrap gap-2 items-center">
+                <div class="relative flex-1 min-w-[160px] max-w-xs"
+                     wire:ignore
+                     x-data="{q:'',init(){this.q=$wire.coordSearch??'';$wire.$watch('coordSearch',v=>{if(v!==this.q)this.q=v;});}}">
+                    <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
+                    <input type="text" x-model="q" @input.debounce.400ms="$wire.set('coordSearch',q)"
+                           placeholder="Search..."
+                           class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 pl-9 rounded-lg w-full transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] placeholder-[#a78bbd]"
+                           autocomplete="off" maxlength="100" spellcheck="false">
+                </div>
+
+                {{-- Filters toggle — shown on all sizes; on sm+ the selects below also stay
+                     inline, but this button is what drives show/hide on mobile ── --}}
+                @php $coordHasActiveFilters = $coordSearch || $coordCollege || $coordStatus; @endphp
+                <button wire:click="$toggle('coordShowFilters')" type="button"
+                        class="flex items-center gap-1.5 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide transition cursor-pointer
+                               {{ $coordShowFilters ? 'bg-[#7a3f91] text-white' : 'bg-white text-[#7a3f91] border border-[#E8E0F0] hover:bg-[#f5f0fa]' }}"
+                        style="user-select:none;">
+                    <i class="fas fa-sliders text-xs"></i>
+                    Filters
+                    @if($coordHasActiveFilters)
+                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold {{ $coordShowFilters ? 'bg-white text-[#7a3f91]' : 'bg-[#7a3f91] text-white' }}">
+                            {{ ($coordCollege ? 1 : 0) + ($coordStatus ? 1 : 0) }}
+                        </span>
+                    @endif
+                    <i class="fas fa-chevron-down text-[10px] transition-transform {{ $coordShowFilters ? 'rotate-180' : '' }}"></i>
+                </button>
+
+                {{-- Active-filter pills stay visible on the top row even when the
+                     filter controls themselves are collapsed ── --}}
+                @if($coordStatus)
+                @php
+                    $coordStatusPillMap = [
+                        'ACTIVE'   => ['label' => 'Active',   'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
+                        'INACTIVE' => ['label' => 'Inactive', 'cls' => 'bg-amber-50 border-amber-300 text-amber-800'],
+                    ];
+                    $cSPill = $coordStatusPillMap[$coordStatus] ?? null;
+                @endphp
+                @if($cSPill)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $cSPill['cls'] }}">
+                    <i class="fas fa-filter text-[9px]"></i>{{ $cSPill['label'] }}
+                    <button wire:click="$set('coordStatus', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
+                @endif
+
+                @if($coordCollege)
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
+                    <i class="fas fa-building-columns text-[9px]"></i>{{ $coordCollege }}
+                    <button wire:click="$set('coordCollege', '')" type="button"
+                            class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
+                        <i class="fas fa-xmark text-[10px]"></i>
+                    </button>
+                </span>
+                @endif
+
+                <button wire:click="resetCoordFilters"
+                        wire:loading.attr="disabled"
+                        wire:loading.class="opacity-60 cursor-wait"
+                        wire:target="resetCoordFilters"
+                        {{ !$coordHasActiveFilters ? 'disabled' : '' }}
+                        title="{{ $coordHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
+                        class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                    <span wire:loading.remove wire:target="resetCoordFilters">
+                        <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
+                    </span>
+                    <span wire:loading wire:target="resetCoordFilters">
+                        <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
+                    </span>
+                    <span class="hidden sm:inline text-[#333333]" style="user-select:none;">Reset</span>
+                </button>
             </div>
 
-            <div class="flex items-center px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide text-[#7a3f91]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">
-                Filters
+            {{-- Row 2: the actual filter selects — collapsible on mobile via
+                 coordShowFilters, always shown on sm+ screens regardless of the toggle ── --}}
+            <div class="flex-wrap gap-2 items-center mt-2 {{ $coordShowFilters ? 'flex' : 'hidden' }} sm:flex">
+
+                <select wire:model.live="coordCollege"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                    <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
+                    @foreach($this->orgColleges as $col)
+                        <option value="{{ $col }}">{{ $col }}</option>
+                    @endforeach
+                </select>
+
+                <select wire:model.live="coordStatus"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                    <option value="" {{ $coordStatus ? 'disabled' : '' }}>All Statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                </select>
             </div>
-
-            <select wire:model.live="coordCollege"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] hidden sm:block">
-                <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
-                @foreach($this->orgColleges as $col)
-                    <option value="{{ $col }}">{{ $col }}</option>
-                @endforeach
-            </select>
-
-            <select wire:model.live="coordStatus"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4]">
-                <option value="" {{ $coordStatus ? 'disabled' : '' }}>All Statuses</option>
-                <option value="ACTIVE">Active</option>
-                <option value="INACTIVE">Inactive</option>
-            </select>
-
-            @if($coordStatus)
-            @php
-                $coordStatusPillMap = [
-                    'ACTIVE'   => ['label' => 'Active',   'cls' => 'bg-emerald-50 border-emerald-300 text-emerald-800'],
-                    'INACTIVE' => ['label' => 'Inactive', 'cls' => 'bg-amber-50 border-amber-300 text-amber-800'],
-                ];
-                $cSPill = $coordStatusPillMap[$coordStatus] ?? null;
-            @endphp
-            @if($cSPill)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $cSPill['cls'] }}">
-                <i class="fas fa-filter text-[9px]"></i>{{ $cSPill['label'] }}
-                <button wire:click="$set('coordStatus', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
-            @endif
-
-            @if($coordCollege)
-            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
-                <i class="fas fa-building-columns text-[9px]"></i>{{ $coordCollege }}
-                <button wire:click="$set('coordCollege', '')" type="button"
-                        class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
-                    <i class="fas fa-xmark text-[10px]"></i>
-                </button>
-            </span>
-            @endif
-
-            @php $coordHasActiveFilters = $coordSearch || $coordCollege || $coordStatus; @endphp
-            <button wire:click="resetCoordFilters"
-                    wire:loading.attr="disabled"
-                    wire:loading.class="opacity-60 cursor-wait"
-                    wire:target="resetCoordFilters"
-                    {{ !$coordHasActiveFilters ? 'disabled' : '' }}
-                    title="{{ $coordHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
-                    class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-                <span wire:loading.remove wire:target="resetCoordFilters">
-                    <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
-                </span>
-                <span wire:loading wire:target="resetCoordFilters">
-                    <i class="fas fa-spinner fa-spin text-sm" style="color:#7a3f91;"></i>
-                </span>
-                <span class="hidden sm:inline text-[#333333]" style="user-select:none; -webkit-user-select:none; -moz-user-select:none; -ms-user-select:none;">Reset</span>
-            </button>
-
-            {{-- Mobile-only college select --}}
-            <select wire:model.live="coordCollege"
-                    wire:loading.attr="disabled"
-                    class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow flex-1 sm:hidden">
-                <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
-                @foreach($this->orgColleges as $col)
-                    <option value="{{ $col }}">{{ $col }}</option>
-                @endforeach
-            </select>
         </div>
 
         {{-- ── TABLE WRAPPER — only this region scrolls; loading dim applies here only
@@ -2045,16 +2058,22 @@ new class extends Component {
         $viewingProfile['suffix'] ?? ''
     );
 @endphp
-<div class="fixed inset-0 z-[9000] flex items-center justify-center p-3 sm:p-6 font-sans"
+<div class="fixed inset-0 z-[9000] flex items-center justify-center p-0 sm:p-6 font-sans"
      style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
      wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-<div class="relative w-full max-w-5xl flex flex-col rounded-2xl overflow-hidden shadow-2xl"
-     style="background:#f8f7fb; max-height:92vh;"
+<div class="relative w-full h-full sm:h-auto sm:max-w-5xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
+     style="background:#f8f7fb;"
      wire:click.stop @click.stop>
 
 <style>
 @keyframes vpFadeIn { from { opacity:0; } to { opacity:1; } }
+
+/* Full-screen on mobile, bounded card on sm+ screens */
+.vp-modal-box { max-height: 100vh; }
+@media (min-width: 640px) {
+    .vp-modal-box { max-height: 92vh; }
+}
 
 .vp-detail-card {
     background: #ffffff;

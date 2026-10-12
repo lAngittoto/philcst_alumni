@@ -1374,10 +1374,10 @@ new class extends Component {
 
 {{-- Single Livewire root: page header (same pattern as Manage Coordinator / Manage Job)
      + the chat card below it. --}}
-<div class="flex flex-col gap-4 mx-auto w-full pt-6 sm:pt-8 px-3 sm:px-5 lg:px-6" style="max-width: 1800px;">
+<div id="dm-chat-root" class="flex flex-col gap-4 mx-auto w-full pt-6 sm:pt-8 px-3 sm:px-5 lg:px-6" style="max-width: 1800px;">
 
     {{-- ══ PAGE HEADER ══ --}}
-    <div class="flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0">
+    <div id="dm-chat-header" class="flex flex-row items-center justify-between gap-3 sm:gap-4 flex-shrink-0">
         <div class="flex items-center gap-4 ml-2 sm:ml-4">
             <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg"
                  style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -1393,11 +1393,43 @@ new class extends Component {
         </div>
     </div>
 
-<div class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
+<div id="dm-chat-card" class="flex rounded-2xl border border-[#E8E0F0] bg-white shadow-sm overflow-hidden mx-auto w-full relative"
      style="height: calc(100vh - 190px); min-height: 440px; max-width: 1800px;"
      x-data="{ postNavigating: false }"
      @if(! $confirmDeleteId) wire:poll.5000ms.visible="unifiedPoll" @endif>
 <style>
+/* ── Full-screen chat card on mobile, matching Manage Coordinator / Manage
+   Job / Manage Event edge-to-edge treatment ── */
+@media (max-width: 640px) {
+    #dm-chat-root {
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        padding-top: 0.75rem !important;
+        gap: 0.5rem !important;
+    }
+    #dm-chat-header { padding-left: 0.75rem; padding-right: 0.75rem; }
+    #dm-chat-header > div { margin-left: 0 !important; }
+    #dm-chat-card {
+        border-radius: 0 !important;
+        border-left: none !important;
+        border-right: none !important;
+        border-bottom: none !important;
+        box-shadow: none !important;
+        height: calc(100vh - 150px) !important;
+    }
+
+    /* Reaction pill — trim padding/sizing so it never overflows the bubble
+       column on narrow screens, and let it wrap onto its own line cleanly. */
+    .dm-reaction-pill {
+        padding-left: 0.375rem !important;
+        padding-right: 0.375rem !important;
+        gap: 0.25rem !important;
+        max-width: 100%;
+    }
+    .dm-reaction-pill .dm-reaction-emoji { font-size: 13px !important; }
+    .dm-reaction-pill .dm-reaction-avatars > div { width: 1rem !important; height: 1rem !important; }
+}
+
     /* ── Shared Job/Event post-preview card — mirrors alumni-side
        messenger.blade.php card design (msgr-post-*) so shared events/jobs
        render as a rich card here instead of raw marker/plain text. ── */
@@ -2003,13 +2035,13 @@ new class extends Component {
                                     $pillTotal = array_sum($msg['reactions']);
                                 @endphp
                                 <button wire:click="openReactionsPopup({{ $msg['id'] }})"
-                                        class="inline-flex items-center gap-1.5 mt-0.5 px-2 py-1 rounded-full border transition-all cursor-pointer
+                                        class="dm-reaction-pill inline-flex items-center gap-1.5 mt-0.5 px-2 py-1 rounded-full border transition-all cursor-pointer max-w-full
                                                {{ $msg['my_reaction']
                                                     ? 'bg-[#f3eef8] border-[#d9c9e8]'
                                                     : 'bg-white border-[#E8E0F0] hover:border-[#d9c9e8]' }}">
                                     {{-- Stacked avatars --}}
                                     @if(! empty($pillReactorPhotos))
-                                    <div class="flex -space-x-1.5 flex-shrink-0">
+                                    <div class="dm-reaction-avatars flex -space-x-1.5 flex-shrink-0">
                                         @foreach($pillReactorPhotos as $pPhoto)
                                         <div class="w-5 h-5 rounded-full overflow-hidden border-2 border-white bg-[#7a3f91] flex items-center justify-center text-[8px] font-bold text-white flex-shrink-0">
                                             <img src="{{ $pPhoto ?? '' }}" class="w-full h-full object-cover"
@@ -2020,12 +2052,14 @@ new class extends Component {
                                     </div>
                                     @endif
                                     {{-- Emoji pills --}}
+                                    <span class="flex items-center gap-0.5 flex-shrink-0">
                                     @foreach($msg['reactions'] as $rk => $cnt)
                                     @php $emoji = match($rk) { 'heart'=>'❤️','purple'=>'💜','like'=>'👍','dislike'=>'👎','haha'=>'😂','sad'=>'😢',default=>'👍' }; @endphp
-                                    <span class="text-base leading-none">{{ $emoji }}</span>
+                                    <span class="dm-reaction-emoji text-base leading-none">{{ $emoji }}</span>
                                     @endforeach
+                                    </span>
                                     {{-- Total count --}}
-                                    <span class="text-xs font-semibold {{ $msg['my_reaction'] ? 'text-[#7a3f91]' : 'text-[#666666]' }}">{{ $pillTotal }}</span>
+                                    <span class="text-xs font-semibold flex-shrink-0 {{ $msg['my_reaction'] ? 'text-[#7a3f91]' : 'text-[#666666]' }}">{{ $pillTotal }}</span>
                                 </button>
                                 @endif
 
