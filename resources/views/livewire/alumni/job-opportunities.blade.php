@@ -1150,8 +1150,7 @@ select.filter-input option {
                                 <option value="">All Types</option>
                                 <option value="Full-Time">Full-Time</option>
                                 <option value="Part-Time">Part-Time</option>
-                                {{-- ── FIX: display label changed to "Contractual", DB value stays "Contract" ── --}}
-                                <option value="Contract">Contractual</option>
+                                <option value="Contractual">Contractual</option>
                                 <option value="Freelance">Freelance</option>
                             </select>
                         </label>
