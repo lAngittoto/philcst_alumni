@@ -3331,6 +3331,27 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
+                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or share via</span>
+                    </div>
+                </div>
+
+                <button type="button" @click="askShare('facebook')" class="dir-share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#1877F2"><path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.91h2.54V9.84c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.23.2 2.23.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56v1.88h2.78l-.44 2.91h-2.34V22c4.78-.76 8.44-4.92 8.44-9.94Z"/></svg>
+                    </span>
+                    <span class="label-text">Facebook</span>
+                </button>
+
+                <button type="button" @click="askShare('messenger')" class="dir-share-option-btn" style="background:linear-gradient(135deg,#00B2FF,#006AFF);">
+                    <span class="icon-wrap">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#006AFF"><path d="M12 2C6.48 2 2 6.15 2 11.25c0 2.9 1.44 5.49 3.69 7.18V22l3.37-1.85c.9.25 1.86.38 2.94.38 5.52 0 10-4.15 10-9.28C22 6.15 17.52 2 12 2Zm.99 12.49-2.55-2.72-4.98 2.72 5.48-5.82 2.61 2.72 4.91-2.72-5.47 5.82Z"/></svg>
+                    </span>
+                    <span class="label-text">Messenger</span>
+                </button>
+
+                <div class="relative my-0.5">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
                         <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
                     </div>
                 </div>
