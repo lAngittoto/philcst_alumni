@@ -2121,16 +2121,17 @@ mark.mgjob-hl {
         min-height: 0 !important;
         flex: none !important;
     }
-    /* The info pane (Company Details + Target College) is capped to a max
-       height on mobile below, but the rule above strips scrolling from
-       EVERY .mobile-scroll-col — including this one — so once its content
-       (like Target College) went past that cap it was simply cut off with
-       no way to reach it. Give this pane its own scroll back so everything
-       inside it, Target College included, stays reachable. */
+    /* The info pane (Company Details + Target College) used to be capped to
+       a max-height with its own inner scrollbar on mobile — that's what made
+       it look squashed/cut off (a tiny scrolling box stacked above the rest
+       of the modal). It now simply flows like every other column: no cap,
+       no height limit, no separate scrollbar — it just takes the height its
+       content needs, and the whole modal body (.mobile-scroll-body) scrolls
+       straight down through it as one continuous page. */
     .mobile-scroll-body .job-view-info-pane,
     .mobile-scroll-body .dir-view-info-pane {
-        overflow-y: auto !important;
-        -webkit-overflow-scrolling: touch;
+        overflow: visible !important;
+        max-height: none !important;
     }
     .mobile-scroll-body::-webkit-scrollbar { width: 8px; }
     .mobile-scroll-body::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 99px; }
@@ -2155,17 +2156,10 @@ mark.mgjob-hl {
         max-height: 100vh;
         max-height: 100dvh;
     }
-    /* Cap the job-details LEFT info pane so it can't eat all the modal's
-       height on mobile — this is what freed the description/qualifications
-       panel below to actually become scrollable on phones. */
-    .dir-view-info-pane {
-        max-height: 45vh;
-        max-height: 45dvh;
-    }
-    .job-view-info-pane {
-        max-height: 40vh;
-        max-height: 40dvh;
-    }
+    /* No height cap here anymore — .mobile-scroll-body above is now the
+       single scroll region for the whole modal, so the info pane can take
+       its natural height and the page just scrolls straight down through
+       it instead of trapping it in its own small scroll box. */
 }
 
 select.tw-select-arrow {
@@ -4457,18 +4451,32 @@ window.eoCompressToBase64 = eoCompressToBase64;
         max-height: 100vh !important;
     }
 
-    /* On mobile the preview and the share panel used to be two separately-
-       scrolling boxes stacked in a fixed-height row, which could clip the
-       preview out of view. Turn that row into one normal scrollable column
-       instead, so the user can simply scroll down past the share options
-       to see the full preview. */
-    .dir-share-sheet .flex-col.md\:flex-row {
+    /* The desktop layout splits Post Preview and Share Via into two
+       independently-scrolling flex panes fighting over the same fixed
+       modal height — on a short mobile viewport that squashes the
+       preview to almost nothing. Mobile instead becomes ONE column that
+       scrolls top-to-bottom as a whole: Post Preview first (sized by its
+       own content, not forced to flex:1), then Share Via below it. */
+    #dir-share-job-body {
+        flex-direction: column !important;
         overflow-y: auto !important;
-        display: block !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch;
     }
-    .dir-share-sheet .flex-col.md\:flex-row > div {
-        overflow-y: visible !important;
+    #dir-share-job-preview-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
         min-height: 0 !important;
+    }
+    #dir-share-job-preview-text {
+        flex: 0 0 auto !important;
+        max-height: 180px !important;
+        overflow-y: auto !important;
+    }
+    #dir-share-job-via-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
+        width: 100% !important;
     }
 }
 
@@ -4614,9 +4622,9 @@ window.eoCompressToBase64 = eoCompressToBase64;
             </button>
         </div>
 
-        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+        <div id="dir-share-job-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            <div class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 min-h-0">
+            <div id="dir-share-job-preview-pane" class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 min-h-0">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 <div class="dir-share-photo-preview flex-shrink-0">
@@ -4624,7 +4632,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                          onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
                 </div>
 
-                <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto scroll-c" style="max-height:180px;">
+                <div id="dir-share-job-preview-text" class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto scroll-c" style="max-height:180px;">
                     <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $sjPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
@@ -4632,7 +4640,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
                 </div>
             </div>
 
-            <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
+            <div id="dir-share-job-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 <button type="button"
@@ -4658,6 +4666,27 @@ window.eoCompressToBase64 = eoCompressToBase64;
                         </span>
                     </span>
                     <i class="fas fa-paper-plane text-sm text-[#7a3f91]"></i>
+                </button>
+
+                <div class="relative my-0.5">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
+                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or share via</span>
+                    </div>
+                </div>
+
+                <button type="button" @click="openFacebook()" class="dir-share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#1877F2"><path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.91h2.54V9.84c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.23.2 2.23.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56v1.88h2.78l-.44 2.91h-2.34V22c4.78-.76 8.44-4.92 8.44-9.94Z"/></svg>
+                    </span>
+                    <span class="label-text">Facebook</span>
+                </button>
+
+                <button type="button" @click="openMessenger()" class="dir-share-option-btn" style="background:linear-gradient(135deg,#00B2FF,#006AFF);">
+                    <span class="icon-wrap">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#006AFF"><path d="M12 2C6.48 2 2 6.15 2 11.25c0 2.9 1.44 5.49 3.69 7.18V22l3.37-1.85c.9.25 1.86.38 2.94.38 5.52 0 10-4.15 10-9.28C22 6.15 17.52 2 12 2Zm.99 12.49-2.55-2.72-4.98 2.72 5.48-5.82 2.61 2.72 4.91-2.72-5.47 5.82Z"/></svg>
+                    </span>
+                    <span class="label-text">Messenger</span>
                 </button>
 
                 <div class="relative my-0.5">

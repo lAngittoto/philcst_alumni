@@ -2616,12 +2616,20 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
        screen and everything (photo, company card) ran off the right edge.
        Column direction + width:100% + min-width:0 forces the wrapper to
        match the screen width, so the photo fits and the address truncates
-       properly instead of stretching the layout. */
+       properly instead of stretching the layout.
+
+       The max-height + its own overflow-y:auto (originally 55vh) used to
+       trap this panel in its own small scrolling box, stacked above the
+       rest of the modal — that's what made it look squashed/cut off with
+       an extra scrollbar of its own. Dropped here: no cap, no separate
+       scroll, it just takes the height its content needs and the whole
+       modal body (.jm-modal-body-scroll) scrolls straight down through it
+       as one continuous column, same as every other section. */
     .jm-left-col-static {
         display: flex; flex-direction: column;
-        max-height: 55vh;
         width: 100%; max-width: 100%; min-width: 0;
         overflow-x: hidden;
+        overflow-y: visible;
     }
     .jm-left-col-static > * { flex-shrink: 0; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
     .jm-left-col-static .truncate { max-width: 100%; }

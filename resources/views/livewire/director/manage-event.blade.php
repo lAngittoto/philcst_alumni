@@ -1406,8 +1406,7 @@ new class extends Component {
 };
 ?>
 
-<div class="flex flex-col" wire:poll.3000ms
-     style="height: calc(100vh - 120px); max-height: calc(100vh - 120px); overflow: hidden;">
+<div class="dir-page-root flex flex-col" wire:poll.3000ms>
 
 <style>
 /* ── Search highlight — same light blue mark used on Alumni Records / Coordinator Management ── */
@@ -1512,8 +1511,29 @@ select.tw-select-arrow[disabled] {
 }
 .dir-mrow:active { background: #F7F4FA; }
 
+/* ══ Page frame — mirrors event-organizer's eo-page-root: locks the page to
+   the viewport (no page scrollbar), header stays put, table card fills the
+   remaining space. Raise --dir-top-offset if the surrounding layout has a
+   fixed bar eating height. ══ */
+.dir-page-root {
+    --dir-top-offset: 120px; /* top bar + page bottom padding (desktop), matches the page's original offset */
+    height: calc(100vh - var(--dir-top-offset));
+    height: calc(100dvh - var(--dir-top-offset));
+    max-height: calc(100dvh - var(--dir-top-offset));
+    overflow: hidden;
+}
+html:has(.dir-page-root),
+body:has(.dir-page-root) { overflow: hidden !important; scrollbar-width: none; }
+html:has(.dir-page-root)::-webkit-scrollbar,
+body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
+
 /* ══ Table container height — mirrors event-organizer's flex-fill card ══ */
 .dir-table-card { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0%; overflow: hidden; }
+
+@media (max-width: 1023px) {
+    .dir-page-root { --dir-top-offset: 64px; } /* mobile: top bar 48px + bottom padding 16px — fills the screen exactly */
+    #dir-manageevent-root { padding-top: .75rem !important; padding-bottom: .5rem !important; gap: .6rem !important; }
+}
 
 /* ══ Event Overview — same flex-fill card as Job Overview (header, filter bar and
    pagination stay fixed; only the table body scrolls) ══ */
@@ -1597,8 +1617,9 @@ select.tw-select-arrow[disabled] {
 @media (hover:none) { .evt-v-btn .evt-v-tip { display:none; } }
 
 @media (max-width: 640px) {
+    #dir-manageevent-root { padding-top: .6rem !important; }
     .dir-table-card {
-        border-radius: 0 !important;
+        border-radius: 1rem 1rem 0 0 !important;
         border-left: none !important;
         border-right: none !important;
         border-bottom: none !important;
@@ -1617,6 +1638,10 @@ select.tw-select-arrow[disabled] {
     #dir-manageevent-root > .flex.flex-col.sm\:flex-row {
         padding-left: 1rem;
         padding-right: 1rem;
+        gap: .6rem !important;
+    }
+    #dir-manageevent-root > .flex.flex-col.sm\:flex-row h1 {
+        font-size: 1.2rem !important;
     }
 }
 </style>
@@ -2970,18 +2995,32 @@ select.tw-select-arrow[disabled] {
         max-height: 100vh !important;
     }
 
-    /* On mobile the preview and the (now single-button) share panel used to
-       be two separately-scrolling boxes stacked in a fixed-height row, which
-       could clip the preview out of view. Turn that row into one normal
-       scrollable column instead, so the user can simply scroll down past
-       the share options to see the full preview. */
-    .dir-share-sheet .flex-col.md\:flex-row {
+    /* The desktop layout splits Post Preview and Share Via into two
+       independently-scrolling flex panes fighting over the same fixed
+       modal height — on a short mobile viewport that squashes the
+       preview to almost nothing. Mobile instead becomes ONE column that
+       scrolls top-to-bottom as a whole: Post Preview first (sized by its
+       own content, not forced to flex:1), then Share Via below it. */
+    #dir-share-body {
+        flex-direction: column !important;
         overflow-y: auto !important;
-        display: block !important;
+        overflow-x: hidden !important;
+        -webkit-overflow-scrolling: touch;
     }
-    .dir-share-sheet .flex-col.md\:flex-row > div {
-        overflow-y: visible !important;
+    #dir-share-preview-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
         min-height: 0 !important;
+    }
+    #dir-share-preview-text {
+        flex: 0 0 auto !important;
+        max-height: 180px !important;
+        overflow-y: auto !important;
+    }
+    #dir-share-via-pane {
+        flex: 0 0 auto !important;
+        overflow: visible !important;
+        width: 100% !important;
     }
 }
 
@@ -3222,17 +3261,24 @@ select.tw-select-arrow[disabled] {
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
-            <button wire:click="closeShareModal" type="button" class="dir-share-close-btn" aria-label="Close">
-                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M2 2L12 12M12 2L2 12"/>
-                </svg>
+            <button wire:click="closeShareModal" type="button"
+                    wire:loading.attr="disabled" wire:target="closeShareModal"
+                    class="dir-share-close-btn" aria-label="Close">
+                <span wire:loading.remove wire:target="closeShareModal">
+                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 2L12 12M12 2L2 12"/>
+                    </svg>
+                </span>
+                <span wire:loading wire:target="closeShareModal">
+                    <i class="fas fa-spinner fa-spin text-xs"></i>
+                </span>
                 <span class="tip">Close</span>
             </button>
         </div>
 
-        <div class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden" style="min-height:0;">
+        <div id="dir-share-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            <div class="flex-1 min-w-0 min-h-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-c">
+            <div id="dir-share-preview-pane" class="flex-1 min-w-0 min-h-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-hidden">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($shareEventPhotoUrl)
@@ -3246,7 +3292,7 @@ select.tw-select-arrow[disabled] {
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 flex-1 min-h-0 overflow-y-auto scroll-c">
+                <div id="dir-share-preview-text" class="rounded-xl border border-gray-200 flex-1 min-h-0 overflow-y-auto scroll-c">
                     <div class="px-4 py-3">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
@@ -3254,7 +3300,7 @@ select.tw-select-arrow[disabled] {
                 </div>
             </div>
 
-            <div class="w-full md:w-[280px] flex-shrink-0 min-h-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
+            <div id="dir-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 min-h-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 <button type="button"
