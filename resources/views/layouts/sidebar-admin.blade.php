@@ -515,20 +515,8 @@
         .admin-nav-spinner {
             font-size: 16px;
             line-height: 1;
-            color: #7A3F91;
-            /* Own keyframes instead of relying only on Font Awesome's
-               fa-spin — gives the browser a GPU-composited animation
-               (transform on its own layer) so it keeps spinning smoothly
-               even while the main thread is busy morphing/mounting the
-               next page. This is what fixes the "spinner freezes instead
-               of spinning" symptom during navigation. */
-            display: inline-block;
-            animation: admin-nav-spin 0.65s linear infinite !important;
-            will-change: transform;
-            backface-visibility: hidden;
-            transform: translateZ(0);
+            color: #7A3F91 !important;
         }
-        @keyframes admin-nav-spin { to { transform: rotate(360deg) translateZ(0); } }
 
         /* Logout button */
         .admin-logout-btn {
@@ -1573,7 +1561,7 @@
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->is($link['pattern']); @endphp
                 <a href="{{ route($link['route']) }}"
-                   wire:navigate.hover
+                   wire:navigate
                    title="{{ $link['label'] }}"
                    @click="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"

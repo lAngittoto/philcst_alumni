@@ -2120,8 +2120,15 @@ select.mu-filter-input.mu-active {
                 <div class="relative" wire:key="alumni-status-dd"
                      x-data="{
                         open: false, top: 0, left: 0,
-                        toggle() {
-                            if (this.open) { this.open = false; return; }
+                        // Shared position calc — used both when the panel first
+                        // opens AND on every scroll while it's open, so it keeps
+                        // tracking the button's real on-screen spot instead of
+                        // staying pinned to the coordinates captured at the
+                        // moment it opened (that mismatch is what made the panel
+                        // visually 'detach' and drift down over the table once
+                        // the page/table scrolled).
+                        reposition() {
+                            if (!this.$refs.btn) return;
                             const r = this.$refs.btn.getBoundingClientRect();
                             // Panel is 296px wide, 8px safety margin on both
                             // sides — clamp against the ACTUAL viewport width
@@ -2138,10 +2145,20 @@ select.mu-filter-input.mu-active {
                             this.top = (spaceBelow < panelH)
                                 ? Math.max(8, r.top - panelH - 6)
                                 : r.bottom + 6;
+                        },
+                        toggle() {
+                            if (this.open) { this.open = false; return; }
+                            this.reposition();
                             this.open = true;
                         },
                         pick(v) { this.open = false; $wire.setStatusFilter(v); }
                      }"
+                     x-init="
+                        // capture:true so this also catches scroll events from
+                        // the table's own scroll containers, not just the
+                        // window — scroll events don't bubble, only capture.
+                        window.addEventListener('scroll', () => { if (open) reposition(); }, true);
+                     "
                      @keydown.escape.window="open = false"
                      @resize.window="open = false">
                     <button type="button" x-ref="btn" @click="toggle()"
