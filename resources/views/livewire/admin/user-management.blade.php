@@ -2136,15 +2136,10 @@ select.mu-filter-input.mu-active {
                             // so it can never get pushed/cut past the right
                             // edge on narrow phones.
                             this.left = Math.max(8, Math.min(r.left, window.innerWidth - 304));
-                            // Clamp vertically too: if there isn't enough room
-                            // below the button for the panel's rendered
-                            // height, open it ABOVE the button instead of
-                            // letting it run off the bottom of the screen.
-                            const panelH = this.$refs.panel ? this.$refs.panel.offsetHeight : 320;
-                            const spaceBelow = window.innerHeight - r.bottom - 8;
-                            this.top = (spaceBelow < panelH)
-                                ? Math.max(8, r.top - panelH - 6)
-                                : r.bottom + 6;
+                            // Always open BELOW the button — never flips above,
+                            // so the panel's position stays predictable no
+                            // matter how much room is left on screen.
+                            this.top = r.bottom + 6;
                         },
                         toggle() {
                             if (this.open) { this.open = false; return; }
@@ -2166,9 +2161,6 @@ select.mu-filter-input.mu-active {
                             class="mu-tab-pill {{ $aOnAlumni ? 'mu-tab-active' : 'mu-tab-inactive' }}">
                         <i class="fas fa-graduation-cap text-xs" style="color:#7a3f91;"></i>
                         <span>{{ $aCur ? $aCur[0] : 'Alumni' }}</span>
-                        @if($aCurKey && $aCurKey !== 'all')
-                            <span class="w-2 h-2 rounded-full shrink-0" style="background:{{ $aCur[2] }};"></span>
-                        @endif
                         <i class="fas fa-chevron-down text-[10px] transition-transform duration-150"
                            :class="open ? 'rotate-180' : ''" style="opacity:.7;"></i>
                     </button>

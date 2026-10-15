@@ -517,6 +517,23 @@
             line-height: 1;
             color: #7A3F91 !important;
         }
+        /* ── Mobile-only: promote the spinner to its own GPU compositor
+           layer. Desktop CPUs are fast enough that fa-spin's plain
+           main-thread-driven animation never visibly stutters, but on
+           mobile, the heavy Livewire morph work during navigation blocks
+           the main thread long enough that an un-promoted animation
+           visibly freezes instead of spinning. will-change hints the
+           browser to run the rotation on the compositor thread instead,
+           which keeps it spinning smoothly even while JS is busy —
+           without touching or overriding fa-spin's own animation, so
+           desktop stays exactly as-is. ── */
+        @media (max-width: 1023px) {
+            .admin-nav-spinner {
+                will-change: transform;
+                backface-visibility: hidden;
+                transform: translateZ(0);
+            }
+        }
 
         /* Logout button */
         .admin-logout-btn {
