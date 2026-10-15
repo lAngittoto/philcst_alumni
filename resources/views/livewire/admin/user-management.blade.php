@@ -2170,7 +2170,6 @@ select.mu-filter-input.mu-active {
                         @foreach($aOpts as $aKey => [$aLbl, $aDesc, $aClr, $aBg, $aCnt])
                         <button type="button" @click="pick('{{ $aKey }}')"
                                 class="w-full flex items-center gap-3 px-3.5 py-2.5 text-left transition hover:bg-[#F5F0FA] {{ $aCurKey === $aKey ? 'bg-[#F9F5FC]' : '' }}">
-                            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $aClr }};"></span>
                             <span class="flex-1 min-w-0 text-sm font-bold" style="color:#000000;">{{ $aLbl }}</span>
                             <i class="fas fa-check text-xs shrink-0 {{ $aCurKey === $aKey ? '' : 'invisible' }}" style="color:#7a3f91;"></i>
                         </button>
