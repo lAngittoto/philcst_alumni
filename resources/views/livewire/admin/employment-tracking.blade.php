@@ -1324,7 +1324,7 @@ new class extends Component {
                  x-transition:enter="transition ease-out duration-100"
                  x-transition:enter-start="opacity-0 scale-95"
                  x-transition:enter-end="opacity-100 scale-100"
-                 class="absolute left-0 top-[calc(100%+6px)] z-30 w-[340px] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
+                 class="absolute left-0 top-[calc(100%+6px)] z-30 w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
 
                 <label class="flex items-center gap-2.5 px-3.5 py-2 text-[0.82rem] font-semibold text-[#333333] hover:bg-[#faf7fc] cursor-pointer border-b border-[#F0EAF5]">
                     <span class="adm-chk shrink-0" :class="isAllSelected() ? 'adm-chk-on' : ''" @click.prevent="toggleAll()">

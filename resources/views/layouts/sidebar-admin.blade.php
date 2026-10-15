@@ -311,7 +311,42 @@
             font-size: 10.5px;
             font-weight: 800;
             letter-spacing: 0.16em;
-            color: #333333;
+            color: #9A8AA8;
+        }
+        .admin-sidebar-header {
+            background: #7A3F91;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+        }
+        .admin-header-inner {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            min-width: 0;
+            flex: 1;
+            position: relative;
+            z-index: 10;
+        }
+        .admin-badge-icon {
+            width: 42px; height: 42px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.14);
+            border: 1px solid rgba(255,255,255,0.22);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            backdrop-filter: blur(2px);
+        }
+        .admin-nav-link:not(.is-active):hover {
+            background: #FAF6FE;
+        }
+        .admin-nav-link:not(.is-active):hover .admin-nav-icon-wrap {
+            transform: scale(1.07);
+        }
+        .admin-nav-link.is-active {
+            background: #F3EBFA !important;
+            border: 1px solid #E0CFEE !important;
         }
         .admin-collapse-icon-btn {
             display: flex;
@@ -357,8 +392,8 @@
             }
             #admin-sidebar-aside.is-collapsed .admin-sidebar-header {
                 justify-content: center;
-                padding-left: 0;
-                padding-right: 0;
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
             }
             #admin-sidebar-aside.is-collapsed nav a {
                 justify-content: center;
@@ -454,14 +489,15 @@
             text-transform: uppercase;
             letter-spacing: 0.12em;
             color: #fff;
-            background: linear-gradient(135deg, #7A3F91, #6a3080);
+            background: #7A3F91;
             border: none;
             cursor: pointer;
-            transition: opacity 0.2s ease, transform 0.15s ease;
+            overflow: hidden;
+            transition: background-color 0.2s ease, transform 0.15s ease;
         }
-        .admin-logout-btn:hover   { opacity: 0.92; }
+        .admin-logout-btn:hover   { background: #6A3580; }
         .admin-logout-btn:active  { transform: scale(0.97); }
-        .admin-logout-btn:disabled { cursor: not-allowed; opacity: 0.85; }
+        .admin-logout-btn:disabled { cursor: not-allowed; background: #8E5DA3; }
 
         /* Single ring spinner for logout (same as the organizer sidebar) */
         .admin-logout-spinner {
@@ -1341,20 +1377,24 @@
         style="z-index: 9991;">
 
         {{-- Sidebar header --}}
-        <div class="admin-sidebar-header flex items-center justify-between h-24 px-5 border-b border-[#E8E0F0] shrink-0">
-
-            <div class="admin-collapsible-text text-left min-w-0 flex-1 pr-2">
-                <h1 class="text-2xl font-semibold tracking-tighter uppercase text-[#333333] leading-tight">
-                    Admin<span class="font-semibold opacity-70 text-[#7A3F91]">Portal</span>
-                </h1>
-                <p class="text-[10px] uppercase tracking-[0.2em] opacity-60 text-[#333333] font-semibold">
-                    System Administration
-                </p>
+        <div class="admin-sidebar-header h-24 px-5 shrink-0">
+            <div class="admin-header-inner">
+                <div class="admin-badge-icon">
+                    <i class="fa-solid fa-shield-halved text-white" style="font-size:17px;"></i>
+                </div>
+                <div class="min-w-0 admin-collapsible-text">
+                    <h1 class="text-[19px] font-bold tracking-tight text-white leading-tight truncate">
+                        Admin<span class="font-semibold text-white/70">Portal</span>
+                    </h1>
+                    <p class="text-[10px] uppercase tracking-[0.2em] text-white/60 font-semibold">
+                        System Administration
+                    </p>
+                </div>
             </div>
 
             {{-- Mobile close --}}
             <button @click="open = false"
-                    class="lg:hidden text-[#7A3F91] hover:text-[#6A3A7F] transition-colors ml-2 shrink-0">
+                    class="lg:hidden text-white/80 hover:text-white transition-colors ml-2 shrink-0 relative z-10">
                 <i class="fa-solid fa-circle-xmark text-xl"></i>
             </button>
         </div>
@@ -1444,9 +1484,7 @@
                    @click="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; if (window.innerWidth < 1024) open = false; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
                    class="admin-nav-link flex items-center px-4 py-3 transition-all duration-200 rounded-xl group
-                          {{ $isActive
-                              ? 'bg-[#F5F5F5] border border-[#E8E0F0] shadow-sm'
-                              : 'hover:bg-[#F9F7FC]' }}">
+                          {{ $isActive ? 'is-active' : '' }}">
 
                     <div class="admin-nav-icon-wrap w-10 h-10 flex items-center justify-center rounded-lg
                                 transition-transform duration-200 group-hover:scale-110 shrink-0 mr-4"
@@ -1466,8 +1504,8 @@
 
                     @if($isActive)
                         <template x-if="navClickedRoute !== '{{ $link['route'] }}'">
-                            <span class="admin-nav-active-dot ml-auto w-1.5 h-5 rounded-full shrink-0 opacity-70"
-                                  style="background:{{ $link['color'] }};"></span>
+                            <span class="admin-nav-active-dot ml-auto w-1.5 h-6 rounded-full shrink-0"
+                                  style="background:#7A3F91;"></span>
                         </template>
                     @endif
                 </a>

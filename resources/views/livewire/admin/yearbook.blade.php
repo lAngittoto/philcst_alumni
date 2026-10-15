@@ -545,14 +545,32 @@ mark.yb-adm-hl {
 .yb-adm-dd-btn:focus  { border-color: #7a3f91; box-shadow: 0 0 0 2px rgba(122,63,145,.10); }
 .yb-adm-dd-btn:disabled { pointer-events: none !important; cursor: default !important; opacity: 0.5; }
 
-/* ── Dropdown panel ── */
+/* ── Dropdown panel ──
+   Was position:absolute anchored to the button's left edge with no
+   boundary check and no max-width — a long option (e.g. "Bachelor of
+   Science in Computer Science") could force the panel wider than its
+   button, and a button sitting near the right side of a phone screen
+   (like the Program dropdown in the filter row) had nowhere for that
+   extra width to go but straight off the edge. It's now position:fixed
+   with top/left computed in JS from the button's actual on-screen spot
+   each time it opens (see the `place()` calls on each dropdown) —
+   fixed positioning also means it's never clipped by an ancestor's
+   overflow:hidden (e.g. the rounded table block), which absolute
+   positioning was vulnerable to. max-width caps it to the viewport on
+   every screen, and dropdown item text wraps instead of forcing the
+   panel wider. */
 .yb-adm-dd-panel {
-    position: absolute; top: calc(100% + 4px); left: 0;
-    min-width: 100%; max-height: 224px; overflow-y: auto;
+    position: fixed;
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    max-height: 224px; overflow-y: auto; overflow-x: hidden;
     background: #fff; border: 1.5px solid #E8E0F0;
     border-radius: 10px; box-shadow: 0 8px 24px rgba(122,63,145,.13);
-    z-index: 600; padding: 4px;
+    z-index: 9999; padding: 4px;
     scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
+}
+@media (min-width: 640px) {
+    .yb-adm-dd-panel { max-width: 280px; }
 }
 .yb-adm-dd-panel::-webkit-scrollbar       { width: 4px; }
 .yb-adm-dd-panel::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
@@ -561,7 +579,8 @@ mark.yb-adm-hl {
     border-radius: 7px; text-align: left;
     font-size: 12px; font-weight: 600; color: #333333;
     background: transparent; border: none; cursor: pointer;
-    white-space: nowrap; transition: background .12s, color .12s;
+    white-space: normal; word-break: break-word; line-height: 1.3;
+    transition: background .12s, color .12s;
 }
 .yb-adm-dd-item:hover { background: #F5F0FA; color: #7A3F91; }
 .yb-adm-dd-item.sel   { background: #F0E6F8; color: #7A3F91; }
@@ -790,10 +809,35 @@ mark.yb-adm-hl {
                     Filters
                 </div>
 
-                {{-- Batch dropdown ── --}}
-                <div class="relative shrink-0" @click.outside="if(openDd==='batch') openDd=''">
-                    <button type="button"
-                            @click="openDd = openDd === 'batch' ? '' : 'batch'"
+                {{-- Batch dropdown ──
+                     Panel is position:fixed with its top/left computed in JS
+                     right before it opens, from the button's own on-screen
+                     position (getBoundingClientRect). This is what actually
+                     fixes the cut-off panel: the old version was
+                     position:absolute anchored to the button's left edge
+                     with no boundary check, so a panel wider than the
+                     remaining space (or one sitting inside any ancestor
+                     with overflow:hidden, like the rounded table block)
+                     could run straight off the screen edge or get clipped.
+                     Fixed positioning + explicit math keeps it fully
+                     visible and un-clippable on any screen size. --}}
+                <div class="relative shrink-0"
+                     x-data="{
+                        top: 0, left: 0,
+                        place() {
+                            const r = this.$refs.batchBtn.getBoundingClientRect();
+                            const panelMaxW = Math.min(window.innerWidth - 16, 280);
+                            this.top  = r.bottom + 4;
+                            this.left = Math.max(8, Math.min(r.left, window.innerWidth - panelMaxW - 8));
+                        }
+                     }"
+                     @click.outside="if(openDd==='batch') openDd=''"
+                     @resize.window="if (openDd === 'batch') place()">
+                    <button type="button" x-ref="batchBtn"
+                            @click="
+                                if (openDd === 'batch') { openDd = ''; }
+                                else { place(); openDd = 'batch'; }
+                            "
                             :class="{ 'active': $wire.batch !== '' }"
                             :style="openDd === 'course' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
                             wire:loading.attr="disabled"
@@ -801,15 +845,15 @@ mark.yb-adm-hl {
                             class="yb-adm-dd-btn">
                         <span x-text="$wire.batch !== '' ? 'Batch ' + $wire.batch : 'All Batches'"></span>
                     </button>
-                    <div x-show="openDd === 'batch'"
+                    <div x-show="openDd === 'batch'" x-cloak
                          x-transition:enter="transition ease-out duration-100"
                          x-transition:enter-start="opacity-0 scale-95"
                          x-transition:enter-end="opacity-100 scale-100"
                          x-transition:leave="transition ease-in duration-75"
                          x-transition:leave-start="opacity-100 scale-100"
                          x-transition:leave-end="opacity-0 scale-95"
-                         class="yb-adm-dd-panel"
-                         style="display:none;">
+                         :style="`top:${top}px; left:${left}px;`"
+                         class="yb-adm-dd-panel">
                         <button type="button"
                                 @click="$wire.set('batch', ''); openDd = ''"
                                 :class="{ 'sel': $wire.batch === '' }"
@@ -823,10 +867,28 @@ mark.yb-adm-hl {
                     </div>
                 </div>
 
-                {{-- Program dropdown ── --}}
-                <div class="relative shrink-0" @click.outside="if(openDd==='course') openDd=''">
-                    <button type="button"
-                            @click="openDd = openDd === 'course' ? '' : 'course'"
+                {{-- Program dropdown ── same fixed-position placement as
+                     Batch above. This is the one in the screenshot — it
+                     sits further right in the row, so on a phone screen
+                     the old left:0 anchoring had the least room to work
+                     with and overflowed the most visibly. --}}
+                <div class="relative shrink-0"
+                     x-data="{
+                        top: 0, left: 0,
+                        place() {
+                            const r = this.$refs.courseBtn.getBoundingClientRect();
+                            const panelMaxW = Math.min(window.innerWidth - 16, 280);
+                            this.top  = r.bottom + 4;
+                            this.left = Math.max(8, Math.min(r.left, window.innerWidth - panelMaxW - 8));
+                        }
+                     }"
+                     @click.outside="if(openDd==='course') openDd=''"
+                     @resize.window="if (openDd === 'course') place()">
+                    <button type="button" x-ref="courseBtn"
+                            @click="
+                                if (openDd === 'course') { openDd = ''; }
+                                else { place(); openDd = 'course'; }
+                            "
                             :class="{ 'active': $wire.course !== '' }"
                             :style="openDd === 'batch' ? 'pointer-events:none;cursor:default;opacity:.5;' : ''"
                             wire:loading.attr="disabled"
@@ -838,15 +900,16 @@ mark.yb-adm-hl {
                             <span>All Programs</span>
                         @endif
                     </button>
-                    <div x-show="openDd === 'course'"
+                    <div x-show="openDd === 'course'" x-cloak
                          x-transition:enter="transition ease-out duration-100"
                          x-transition:enter-start="opacity-0 scale-95"
                          x-transition:enter-end="opacity-100 scale-100"
                          x-transition:leave="transition ease-in duration-75"
                          x-transition:leave-start="opacity-100 scale-100"
                          x-transition:leave-end="opacity-0 scale-95"
+                         :style="`top:${top}px; left:${left}px;`"
                          class="yb-adm-dd-panel"
-                         style="display:none; min-width:200px;">
+                         style="min-width:200px;">
                         <button type="button"
                                 @click="$wire.set('course', ''); openDd = ''"
                                 :class="{ 'sel': $wire.course === '' }"
