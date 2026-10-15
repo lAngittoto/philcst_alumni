@@ -9,7 +9,13 @@
     <meta http-equiv="Expires" content="0">
     <title>{{ config('app.name', 'Philcst') }} - Admin</title>
 
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+    {{-- Loaded non-blocking: full FontAwesome CSS is heavy and was delaying
+         first paint on mobile. media="print" trick loads it async, then
+         flips to "all" once fetched; <noscript> covers JS-disabled. --}}
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" as="style">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"
+          media="print" onload="this.media='all'"/>
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/></noscript>
 
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 
@@ -562,6 +568,7 @@
             open:       false,
             items:      [],
             _pollTimer: null,
+            _lastFp:    null,
             _deleting:  false,
             navigating: false,
             loadingId:  null,
@@ -575,7 +582,12 @@
             _startPolling() {
                 if (this._pollTimer) clearInterval(this._pollTimer);
                 var self = this;
-                this._pollTimer = setInterval(function () { self._fetch(); }, 1500);
+                this._pollTimer = setInterval(function () {
+                    // Skip background tabs entirely — no point burning
+                    // battery/data on a screen nobody's looking at.
+                    if (document.visibilityState !== 'visible') return;
+                    self._fetch();
+                }, self.open ? 5000 : 20000); // panel open = fresher, closed = light
             },
 
             async _fetch() {
@@ -588,7 +600,15 @@
                     });
                     if (res.ok) {
                         var raw = await res.json();
-                        this.items = this._groupByDay(raw);
+                        // Cheap fingerprint so an unchanged poll (the common
+                        // case) skips the regroup/sort pass entirely.
+                        var fp = raw.length + ':' + raw.map(function (n) {
+                            return n.id + (n.read ? 'r' : 'u');
+                        }).join(',');
+                        if (fp !== this._lastFp) {
+                            this._lastFp = fp;
+                            this.items = this._groupByDay(raw);
+                        }
                     }
                 } catch (e) { /* silently fail */ }
             },
@@ -741,8 +761,12 @@
             toggle() {
                 this.open = !this.open;
                 if (this.open) this._fetch();
+                this._startPolling(); // re-pick cadence for the new state
             },
-            close()  { this.open = false; },
+            close()  {
+                this.open = false;
+                this._startPolling();
+            },
 
             async markRead(item) {
                 if (item.read) return;
@@ -929,27 +953,21 @@
         if (s && !s._pollTimer) s.init();
     };
 
-    // PATH A
+    // Single boot path: register the store, then init it once Alpine is
+    // actually ready. (Previously there were 5 competing boot paths here —
+    // each one calling .init()/._fetch(), which meant duplicate requests
+    // stacking up on every page load. That was the main mobile lag source.)
     document.addEventListener('alpine:init', function () {
-        Alpine.store('adminNotifs', window.__makeAdminNotifsStore());
+        if (!Alpine.store('adminNotifs')) {
+            Alpine.store('adminNotifs', window.__makeAdminNotifsStore());
+        }
     });
-
-    // PATH B
     document.addEventListener('alpine:initialized', function () {
-        setTimeout(function () {
-            var s = window.__safeAdminNotifsStore();
-            if (s && !s._pollTimer) s.init();
-        }, 0);
-    });
-
-    // PATH C
-    window.addEventListener('load', function () {
         var s = window.__safeAdminNotifsStore();
-        if (s) { if (s.items.length === 0) s.init(); }
-        else    { window.__bootAdminNotifsStore(); }
+        if (s && !s._pollTimer) s.init();
     });
 
-    // PATH D — livewire:navigated
+    // livewire:navigated
     document.addEventListener('livewire:navigated', function () {
         setTimeout(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
@@ -982,17 +1000,6 @@
             }
         }, 150);
     });
-
-    // PATH E — IIFE
-    ;(function () {
-        if (!window.Alpine || typeof Alpine.store !== 'function') return;
-        var s = Alpine.store('adminNotifs');
-        if (!s) {
-            Alpine.store('adminNotifs', window.__makeAdminNotifsStore());
-            s = Alpine.store('adminNotifs');
-        }
-        if (s && !s._pollTimer) setTimeout(function () { s.init(); }, 100);
-    })();
 
     // Re-fetch on tab focus
     document.addEventListener('visibilitychange', function () {

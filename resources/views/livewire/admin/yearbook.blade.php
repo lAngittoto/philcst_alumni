@@ -606,7 +606,10 @@ mark.yb-adm-hl {
     max-width: 100%;
     position: relative;
 }
-/* Row 2 on mobile: dropdowns + count + reset in one row */
+/* Row 2 on mobile: dropdowns + count + reset in one row.
+   Collapsed by default on mobile behind the Show/Hide Filters toggle
+   below the search bar — search itself (row 1) is never touched by
+   this and stays visible at all times. */
 .yb-adm-filter-controls {
     display: flex;
     flex-wrap: nowrap;
@@ -619,10 +622,30 @@ mark.yb-adm-hl {
 .yb-adm-filter-label { display: none; }
 .yb-adm-found-count  { flex-shrink: 0; margin-left: auto; }
 
+/* Mobile-only Show/Hide Filters toggle button — hidden entirely on
+   desktop, where the dropdown row is always visible instead. */
+.yb-adm-filter-toggle-btn {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 10px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #7a3f91;
+    background: #fff;
+    border: 1.5px solid #E8E0F0;
+    transition: background-color .15s ease;
+}
+.yb-adm-filter-toggle-btn:active { background: #faf7fc; }
+
 @media (min-width: 640px) {
     .yb-adm-filter-search-wrap { flex: 1 1 160px; max-width: 280px; }
-    .yb-adm-filter-controls    { width: auto; flex: 1; }
+    .yb-adm-filter-controls    { width: auto; flex: 1; display: flex !important; }
     .yb-adm-filter-label       { display: flex; }
+    .yb-adm-filter-toggle-btn  { display: none; }
 }
 @media (min-width: 768px) {
     .yb-adm-filter-bar { padding: 0.6rem 0.875rem; gap: 8px; }
@@ -723,6 +746,7 @@ mark.yb-adm-hl {
         <div class="yb-adm-filter-bar"
              x-data="{
                 openDd: '',
+                filtersOpen: (window.innerWidth >= 640) || @js($batch !== '' || $course !== ''),
                 init() {
                     document.addEventListener('livewire:request', () => { this.openDd = ''; });
                 }
@@ -742,8 +766,23 @@ mark.yb-adm-hl {
                        autocomplete="off" spellcheck="false">
             </div>
 
+            {{-- Mobile-only toggle — search above is always visible; this
+                 shows/hides the Batch/Program dropdowns + count + reset
+                 row below it. Auto-opens if a filter is already active. --}}
+            <button type="button"
+                    @click="filtersOpen = !filtersOpen"
+                    class="yb-adm-filter-toggle-btn">
+                <i class="fa-solid fa-sliders text-[11px]"></i>
+                <span x-text="filtersOpen ? 'Hide Filters' : 'Show Filters'"></span>
+                <i class="fa-solid fa-chevron-down text-[10px] transition-transform duration-150" :class="filtersOpen ? 'rotate-180' : ''"></i>
+            </button>
+
             {{-- Row 2 (mobile) / inline (≥sm): Filters label + dropdowns + count + reset --}}
-            <div class="yb-adm-filter-controls">
+            <div class="yb-adm-filter-controls"
+                 x-show="filtersOpen"
+                 x-transition:enter="transition ease-out duration-150"
+                 x-transition:enter-start="opacity-0 -translate-y-1"
+                 x-transition:enter-end="opacity-100 translate-y-0">
 
                 {{-- FILTERS label (hidden on mobile) --}}
                 <div class="yb-adm-filter-label items-center gap-2 px-2 h-[34px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide"

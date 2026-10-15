@@ -2450,19 +2450,24 @@ select.mu-filter-input.mu-active {
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
-<div class="fixed inset-0 mu-modal-selectable {{ $isAlumni ? '' : 'flex items-center justify-center p-3 sm:p-6' }}"
+<div class="fixed inset-0 mu-modal-selectable {{ $isAlumni ? '' : 'sm:flex sm:items-center sm:justify-center sm:p-6' }}"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     @if(!$isAlumni) @click.self="if(!saving && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" @endif
+     @if(!$isAlumni) @click.self="if(!saving && !closing && window.innerWidth >= 640){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" @endif
      x-data="{ muClosing: false, saving: false, closing: false }"
      x-show="!muClosing"
      x-init="muClosing = false; saving = false; closing = false"
      @mu-save-done.window="saving = false"
      @mu-toggle-done.window="muClosing = true"
      @keydown.escape.window="if(!saving && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }">
-    <div class="w-full flex flex-col {{ $isAlumni ? 'h-full' : 'max-w-5xl rounded-2xl shadow-2xl border border-[#E8E0F0]' }}"
-         style="background:#F2F2F2;overflow:hidden;{{ $isAlumni ? '' : 'max-height:90vh;' }}">
+    {{-- Mobile: always full-screen (h-full, no radius, no max-width) so it
+         fits every screen edge-to-edge with no clipped corners or dead
+         margin. Desktop (sm+): the original centered card look. --}}
+    <div class="w-full h-full flex flex-col {{ $isAlumni ? '' : 'sm:h-auto sm:max-w-5xl sm:rounded-2xl sm:shadow-2xl sm:border sm:border-[#E8E0F0]' }}"
+         style="background:#F2F2F2;overflow:hidden;{{ $isAlumni ? '' : 'max-height:100vh;' }}"
+         x-bind:style="window.innerWidth >= 640 ? 'background:#F2F2F2;overflow:hidden;max-height:90vh;' : 'background:#F2F2F2;overflow:hidden;max-height:100vh;'">
 
-        <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
+        <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0"
+             style="background:linear-gradient(135deg,#7A3F91,#9b59b6);padding-top:max(0.75rem, env(safe-area-inset-top));">
             @if($isAlumni)
             <div class="flex items-center gap-3 min-w-0">
                 <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">

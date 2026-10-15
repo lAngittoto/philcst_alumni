@@ -432,6 +432,16 @@ mark.ev-hl {
     min-height: 300px !important;
     max-height: var(--ev-table-h, 74vh) !important;
 }
+/* Mobile: no fixed/vh height — let the card grid size itself to its
+   content and scroll with the page naturally (matches the JS fit()
+   script above, which skips setting --ev-table-h below 1024px). */
+@media (max-width: 1023px) {
+    .adm-table-card {
+        flex: 1 1 auto !important;
+        height: auto !important;
+        max-height: none !important;
+    }
+}
 
 /* ── Share button tooltip (table rows) — pure CSS hover, no JS dependency ── */
 .adm-share-tip-wrap { position: relative; display: inline-flex; }
@@ -1385,7 +1395,8 @@ select.filter-input:hover { cursor: default !important; }
      @keydown.escape.window="$wire.closeViewModal()">
 
     {{-- Purple header bar --}}
-    <div class="flex items-center justify-between px-6 py-3 flex-shrink-0 shadow-sm" style="background:#7a3f91;">
+    <div class="flex items-center justify-between px-6 py-3 flex-shrink-0 shadow-sm"
+         style="background:#7a3f91;padding-top:max(0.75rem, env(safe-area-inset-top));">
         <div class="min-w-0">
             <p class="text-white/60 text-xs font-bold uppercase tracking-widest">Event Details</p>
             <h2 class="text-white font-bold text-base leading-tight truncate">{{ $ev->title }}</h2>
@@ -2327,6 +2338,17 @@ select.filter-input:hover { cursor: default !important; }
         var el = document.getElementById('ev-content-block');
         if (!el) return;
 
+        // Mobile: let the card grid flow with the page instead of forcing a
+        // JS-measured fixed height — on phones this fought the browser's
+        // own address-bar show/hide (innerHeight changing mid-scroll) and
+        // made scrolling feel janky. Desktop keeps the fixed-height table
+        // behavior (same threshold as job-posts' equivalent fit script).
+        var root = document.documentElement;
+        if (window.innerWidth < 1024) {
+            root.style.removeProperty('--ev-table-h');
+            return;
+        }
+
         // Top of the table at scroll position 0 (add back every ancestor's scrollTop)
         var top = el.getBoundingClientRect().top + (window.scrollY || 0);
         var node = el.parentElement;
@@ -2335,7 +2357,6 @@ select.filter-input:hover { cursor: default !important; }
             node = node.parentElement;
         }
 
-        var root = document.documentElement;
         var h = Math.max(MIN_H, Math.floor(window.innerHeight - top - BOTTOM_GAP));
         root.style.setProperty('--ev-table-h', h + 'px');
 

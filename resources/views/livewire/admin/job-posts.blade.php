@@ -1620,7 +1620,8 @@ select.filter-input option {
 <div class="detail-page lg:hidden fixed inset-0 z-[9995] flex flex-col bg-gray-100 overflow-y-auto"
      @keydown.escape.window="$wire.closeViewModal()">
 
-    <div class="flex items-center justify-between px-5 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4">
+    <div class="flex items-center justify-between px-5 h-[52px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-4"
+         style="padding-top:env(safe-area-inset-top, 0px);height:calc(52px + env(safe-area-inset-top, 0px));">
         <div class="flex items-center gap-3 flex-1 min-w-0">
             <div class="w-8 h-8 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
                 <i class="fas fa-briefcase text-white text-sm"></i>

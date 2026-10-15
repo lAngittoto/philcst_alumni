@@ -1033,7 +1033,34 @@ new class extends Component {
          Batch Year control stages its picks in Alpine state (list mode or
          range mode) and only writes them into the two hidden
          batch_from/batch_to inputs at the moment of Apply. ── --}}
+    @php
+        $empHasActiveFilter = $filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses);
+    @endphp
+    {{-- ── Mobile Show/Hide Filters toggle — the filter bar (Filters
+         label + Batch + Program dropdowns + Reset) wraps into several
+         crowded rows on small screens and eats a lot of vertical space
+         before the admin even sees a stat card. On mobile (below sm)
+         it now starts collapsed behind this one button; desktop is
+         untouched — the bar always shows there. Starts expanded if a
+         filter is already active (e.g. arriving from a dashboard link)
+         so the admin can see what's applied. x-data lives on this
+         wrapper and the <form> below shares it via x-show, so no
+         Livewire round-trip is needed to expand/collapse it. ── --}}
+    <div x-data="{ empFiltersOpen: (window.innerWidth >= 640) || @js($empHasActiveFilter) }" class="flex flex-col gap-2 flex-shrink-0">
+
+        <button type="button" @click="empFiltersOpen = !empFiltersOpen"
+                class="sm:hidden flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-semibold border transition active:scale-[0.98]"
+                style="background:#F5F5F5;border-color:#E8E0F0;color:#7a3f91;">
+            <i class="fa-solid fa-sliders text-xs"></i>
+            <span x-text="empFiltersOpen ? 'Hide Filters' : 'Show Filters'"></span>
+            <i class="fa-solid fa-chevron-down text-[0.65rem] transition-transform duration-150" :class="empFiltersOpen ? 'rotate-180' : ''"></i>
+        </button>
+
     <form method="GET" action="{{ route('employment.tracking') }}"
+          x-show="empFiltersOpen"
+          x-transition:enter="transition ease-out duration-150"
+          x-transition:enter-start="opacity-0 -translate-y-1"
+          x-transition:enter-end="opacity-100 translate-y-0"
           class="flex flex-wrap gap-2 items-center flex-shrink-0 bg-[#F5F5F5] border border-[#E8E0F0] rounded-xl px-3.5 py-2.5">
 
         <script>
@@ -1345,9 +1372,6 @@ new class extends Component {
              pages' Reset buttons. Since this is an <a>, not a <button>,
              the HTML disabled attribute doesn't apply — pointer-events
              and the onclick guard do the disabling instead. ── --}}
-        @php
-            $empHasActiveFilter = $filterBatchFrom !== '' || $filterBatchTo !== '' || !empty($filterCourses);
-        @endphp
         <a href="{{ route('employment.tracking') }}"
            @if($empHasActiveFilter) onclick="window.__admEmpShowFilterLoading()" @else onclick="return false;" @endif
            @if(!$empHasActiveFilter) aria-disabled="true" tabindex="-1" @endif
@@ -1359,6 +1383,8 @@ new class extends Component {
             <span class="hidden sm:inline">Reset</span>
         </a>
     </form>
+
+    </div>{{-- /empFiltersOpen wrapper --}}
 
     {{-- ══ FILTER-CHANGE LOADING OVERLAY — shown the instant a filter
          pick (Batch/Program Apply) or Reset triggers its full-page
@@ -1401,7 +1427,7 @@ new class extends Component {
          x-transition:leave="transition ease-in duration-150"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0 scale-95"
-         class="fixed top-4 right-4 z-[200] flex items-start gap-3 px-4 py-3 rounded-xl shadow-2xl max-w-sm border-l-4 bg-white"
+         class="fixed top-4 left-4 right-4 sm:left-auto sm:right-4 z-[200] flex items-start gap-3 px-4 py-3 rounded-xl shadow-2xl sm:max-w-sm border-l-4 bg-white"
          :class="{ 'border-emerald-500':type==='success','border-red-500':type==='error','border-blue-500':type==='info' }"
          style="display:none">
         <i class="fas mt-0.5 text-base shrink-0"
