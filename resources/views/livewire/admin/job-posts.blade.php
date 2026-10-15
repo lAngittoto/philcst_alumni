@@ -625,19 +625,27 @@ select.adm-select-arrow {
     border-radius: 1rem;
     border: 1.5px solid #e8e0f0;
     background: #ffffff;
-    padding: 0.625rem 0.625rem;
+    padding: 0.5rem 0.4rem;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.375rem;
     min-width: 0;
 }
 .adm-stat-icon {
-    width: 2rem; height: 2rem;
-    border-radius: 0.625rem;
+    width: 1.75rem; height: 1.75rem;
+    border-radius: 0.5rem;
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
 }
-.adm-stat-card p { white-space: nowrap; }
+.adm-stat-card p {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+@media (max-width: 374px) {
+    .adm-stat-card { padding: 0.45rem 0.35rem; gap: 0.3rem; }
+    .adm-stat-icon { width: 1.5rem; height: 1.5rem; }
+}
 @media (min-width: 640px) {
     .adm-stat-card { padding: 0.875rem 1.125rem; gap: 0.75rem; }
     .adm-stat-icon { width: 2.25rem; height: 2.25rem; }
@@ -1061,35 +1069,35 @@ select.filter-input option {
 
     {{-- ── STAT CARDS (Expiring Soon removed → 3 cards) ── --}}
     @php $s = $this->stats; @endphp
-    <div class="grid grid-cols-3 gap-2 sm:gap-3 flex-shrink-0">
+    <div class="grid grid-cols-3 gap-1.5 sm:gap-3 flex-shrink-0">
 
         <div class="adm-stat-card">
             <div class="adm-stat-icon" style="background:#f5eef9;">
-                <i class="fas fa-briefcase text-xs sm:text-sm" style="color:#7a3f91;"></i>
+                <i class="fas fa-briefcase text-[10px] sm:text-sm" style="color:#7a3f91;"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[10px] sm:text-xs font-bold uppercase tracking-wide sm:tracking-widest text-[#111111]">Total</p>
-                <p class="text-base sm:text-xl font-bold leading-tight text-[#111111]">{{ $s['total'] }}</p>
+                <p class="text-[8px] xs:text-[9px] sm:text-xs font-bold uppercase tracking-tight sm:tracking-widest text-[#111111]">Total</p>
+                <p class="text-sm sm:text-xl font-bold leading-tight text-[#111111]">{{ $s['total'] }}</p>
             </div>
         </div>
 
         <div class="adm-stat-card">
             <div class="adm-stat-icon bg-emerald-50">
-                <i class="fas fa-circle-check text-xs sm:text-sm text-emerald-600"></i>
+                <i class="fas fa-circle-check text-[10px] sm:text-sm text-emerald-600"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[10px] sm:text-xs font-bold uppercase tracking-wide sm:tracking-widest text-[#111111]">Active</p>
-                <p class="text-base sm:text-xl font-bold leading-tight text-emerald-600">{{ $s['active'] }}</p>
+                <p class="text-[8px] xs:text-[9px] sm:text-xs font-bold uppercase tracking-tight sm:tracking-widest text-[#111111]">Active</p>
+                <p class="text-sm sm:text-xl font-bold leading-tight text-emerald-600">{{ $s['active'] }}</p>
             </div>
         </div>
 
         <div class="adm-stat-card">
             <div class="adm-stat-icon bg-amber-50">
-                <i class="fas fa-ban text-xs sm:text-sm text-amber-600"></i>
+                <i class="fas fa-ban text-[10px] sm:text-sm text-amber-600"></i>
             </div>
             <div class="min-w-0">
-                <p class="text-[10px] sm:text-xs font-bold uppercase tracking-wide sm:tracking-widest text-[#111111]">Inactive</p>
-                <p class="text-base sm:text-xl font-bold leading-tight text-amber-600">{{ $s['inactive'] }}</p>
+                <p class="text-[8px] xs:text-[9px] sm:text-xs font-bold uppercase tracking-tight sm:tracking-widest text-[#111111]">Inactive</p>
+                <p class="text-sm sm:text-xl font-bold leading-tight text-amber-600">{{ $s['inactive'] }}</p>
             </div>
         </div>
     </div>

@@ -2096,10 +2096,10 @@ select.mu-filter-input.mu-active {
 
             <div class="flex gap-1 bg-gray-100 p-0.5 rounded-xl flex-shrink-0">
                 @foreach([
-                    ['director','Directors','fa-user-tie'],
-                    ['coordinator','Coordinators','fa-users-gear'],
-                    ['registrar','Registrar','fa-user-clock'],
-                ] as [$tab,$lbl,$ico])
+                    ['director','Directors','fa-user-tie','#2563eb'],
+                    ['coordinator','Coordinators','fa-users-gear','#d97706'],
+                    ['registrar','Registrar','fa-user-clock','#059669'],
+                ] as [$tab,$lbl,$ico,$icoClr])
                 @if($loop->first)
                 {{-- Alumni tab merged with its All / Complete / Pending / Newly Registered
                      filter into ONE styled dropdown (custom menu instead of a native
@@ -2147,7 +2147,7 @@ select.mu-filter-input.mu-active {
                     <button type="button" x-ref="btn" @click="toggle()"
                             :aria-expanded="open"
                             class="mu-tab-pill {{ $aOnAlumni ? 'mu-tab-active' : 'mu-tab-inactive' }}">
-                        <i class="fas fa-graduation-cap text-xs"></i>
+                        <i class="fas fa-graduation-cap text-xs" style="color:#7a3f91;"></i>
                         <span>{{ $aCur ? $aCur[0] : 'Alumni' }}</span>
                         @if($aCurKey && $aCurKey !== 'all')
                             <span class="w-2 h-2 rounded-full shrink-0" style="background:{{ $aCur[2] }};"></span>
@@ -2182,7 +2182,7 @@ select.mu-filter-input.mu-active {
                         wire:loading.attr="disabled" wire:target="switchTab('{{ $tab }}')"
                         class="mu-tab-pill {{ $activeRole===$tab ? 'mu-tab-active' : 'mu-tab-inactive' }}">
                     <span wire:loading wire:target="switchTab('{{ $tab }}')"><i class="fas fa-spinner animate-spin text-xs"></i></span>
-                    <span wire:loading.remove wire:target="switchTab('{{ $tab }}')"><i class="fas {{ $ico }} text-xs"></i></span>
+                    <span wire:loading.remove wire:target="switchTab('{{ $tab }}')"><i class="fas {{ $ico }} text-xs" style="color:{{ $icoClr }};"></i></span>
                     <span class="hidden sm:inline">{{ $lbl }}</span>
                 </button>
                 @endforeach
@@ -2225,7 +2225,7 @@ select.mu-filter-input.mu-active {
                 <table class="w-full bg-white border-collapse mu-users-table">
                     <thead class="sticky top-0 z-10 bg-white" style="box-shadow:0 1px 0 #E8E0F0;">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest whitespace-nowrap" style="color:#000000;">User</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest whitespace-nowrap" style="color:#000000;"></th>
                             <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-widest hidden md:table-cell whitespace-nowrap" style="color:#000000;">Identifier</th>
                             <th class="px-2 sm:px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest hidden sm:table-cell whitespace-nowrap" style="color:#000000;">Role</th>
                             <th class="px-2 sm:px-4 py-3 text-center text-xs font-semibold uppercase tracking-widest whitespace-nowrap" style="color:#000000;">Status</th>
