@@ -2123,8 +2123,21 @@ select.mu-filter-input.mu-active {
                         toggle() {
                             if (this.open) { this.open = false; return; }
                             const r = this.$refs.btn.getBoundingClientRect();
-                            this.top  = r.bottom + 6;
+                            // Panel is 296px wide, 8px safety margin on both
+                            // sides — clamp against the ACTUAL viewport width
+                            // (296 + 8 + 8 = 312) instead of an assumed 304,
+                            // so it can never get pushed/cut past the right
+                            // edge on narrow phones.
                             this.left = Math.max(8, Math.min(r.left, window.innerWidth - 304));
+                            // Clamp vertically too: if there isn't enough room
+                            // below the button for the panel's rendered
+                            // height, open it ABOVE the button instead of
+                            // letting it run off the bottom of the screen.
+                            const panelH = this.$refs.panel ? this.$refs.panel.offsetHeight : 320;
+                            const spaceBelow = window.innerHeight - r.bottom - 8;
+                            this.top = (spaceBelow < panelH)
+                                ? Math.max(8, r.top - panelH - 6)
+                                : r.bottom + 6;
                             this.open = true;
                         },
                         pick(v) { this.open = false; $wire.setStatusFilter(v); }
@@ -2143,7 +2156,7 @@ select.mu-filter-input.mu-active {
                            :class="open ? 'rotate-180' : ''" style="opacity:.7;"></i>
                     </button>
 
-                    <div x-show="open" x-cloak
+                    <div x-ref="panel" x-show="open" x-cloak
                          @click.outside="open = false"
                          x-transition:enter="transition ease-out duration-100"
                          x-transition:enter-start="opacity-0 -translate-y-1"
@@ -2156,16 +2169,10 @@ select.mu-filter-input.mu-active {
                         </div>
                         @foreach($aOpts as $aKey => [$aLbl, $aDesc, $aClr, $aBg, $aCnt])
                         <button type="button" @click="pick('{{ $aKey }}')"
-                                class="w-full flex items-start gap-3 px-3.5 py-2.5 text-left transition hover:bg-[#F5F0FA] {{ $aCurKey === $aKey ? 'bg-[#F9F5FC]' : '' }}">
-                            <span class="mt-1.5 w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $aClr }};"></span>
-                            <span class="flex-1 min-w-0">
-                                <span class="flex items-center justify-between gap-2">
-                                    <span class="text-sm font-bold" style="color:#000000;">{{ $aLbl }}</span>
-                                    <span class="text-xs font-bold px-2 py-0.5 rounded-full" style="background:{{ $aBg }};color:{{ $aClr }};">{{ number_format($aCnt) }}</span>
-                                </span>
-                                <span class="block text-xs font-medium mt-0.5 leading-snug" style="color:#555555;">{{ $aDesc }}</span>
-                            </span>
-                            <i class="fas fa-check text-xs mt-1 shrink-0 {{ $aCurKey === $aKey ? '' : 'invisible' }}" style="color:#7a3f91;"></i>
+                                class="w-full flex items-center gap-3 px-3.5 py-2.5 text-left transition hover:bg-[#F5F0FA] {{ $aCurKey === $aKey ? 'bg-[#F9F5FC]' : '' }}">
+                            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:{{ $aClr }};"></span>
+                            <span class="flex-1 min-w-0 text-sm font-bold" style="color:#000000;">{{ $aLbl }}</span>
+                            <i class="fas fa-check text-xs shrink-0 {{ $aCurKey === $aKey ? '' : 'invisible' }}" style="color:#7a3f91;"></i>
                         </button>
                         @endforeach
                     </div>

@@ -448,6 +448,50 @@
             }
         }
 
+        /* ════════════════════════════════════════════════════════
+           MOBILE — icon-only sidebar (same treatment as the Alumni
+           sidebar). Labels, section title and the active dot are
+           hidden via CSS only; icon colors/backgrounds are untouched.
+        ════════════════════════════════════════════════════════ */
+        @media (max-width: 1023px) {
+            #admin-sidebar-aside {
+                width: 5.5rem;
+                min-width: 5.5rem;
+            }
+
+            /* Hide the purple header block (shield icon + AdminPortal / System Administration) on mobile */
+            #admin-sidebar-aside .admin-sidebar-header {
+                display: none !important;
+            }
+
+            /* Icon-only nav on mobile: hide labels + section title + active dot */
+            #admin-sidebar-aside .admin-section-label,
+            #admin-sidebar-aside .admin-nav-section-row,
+            #admin-sidebar-aside .admin-nav-active-dot {
+                display: none !important;
+            }
+            #admin-sidebar-aside nav a {
+                justify-content: center;
+                padding: 0.85rem;
+            }
+            #admin-sidebar-aside nav a > div:first-child {
+                margin-right: 0 !important;
+            }
+            #admin-sidebar-aside .admin-collapsible-text {
+                display: none !important;
+            }
+
+            /* Icon-only logout button on mobile */
+            #admin-sidebar-aside .admin-logout-btn {
+                gap: 0;
+                padding: 1rem;
+            }
+            #admin-sidebar-aside .admin-logout-btn i.fa-right-from-bracket,
+            #admin-sidebar-aside .admin-logout-spinner {
+                margin-right: 0 !important;
+            }
+        }
+
         /* ── Lock other nav links while one is navigating (same pattern as
            registrar sidebar) — everything except the clicked link is dimmed
            and inert so double-clicks / stray clicks are harmless. ── */
@@ -1314,6 +1358,15 @@
     x-data="{
         open: false,
         sidebarCollapsed: localStorage.getItem('admin_sidebar_collapsed') === '1',
+        // FIX (glitch: sidebar visibly jumping/flashing on refresh and on
+        // livewire:navigate): a double requestAnimationFrame is NOT a
+        // reliable the-browser-has-painted signal — on a busy page two rAF
+        // ticks can fire before the FIRST paint ever happens, so
+        // no-transition was being removed too early and the width/translate
+        // transition animated the initial state instead of snapping to it
+        // instantly. Fix: wait for requestAnimationFrame + a short setTimeout
+        // fallback, which reliably lands after first paint regardless of
+        // page weight — same fix as the Alumni sidebar.
         sidebarSettled: false,
         navClickedRoute: null,
         loggingOut: false,
@@ -1325,14 +1378,20 @@
         },
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
+        },
+        settleSidebar() {
+            this.sidebarSettled = false;
+            requestAnimationFrame(() => {
+                setTimeout(() => { this.sidebarSettled = true; }, 50);
+            });
         }
     }"
     x-init="
         $watch('sidebarCollapsed', function (val) { localStorage.setItem('admin_sidebar_collapsed', val ? '1' : '0'); });
-        requestAnimationFrame(function () { requestAnimationFrame(function () { sidebarSettled = true; }); });
+        settleSidebar();
     "
     @click="$store.adminNotifs && $store.adminNotifs.open && $store.adminNotifs.close()"
-    @@livewire:navigated.window="navClickedRoute = null; open = false; sidebarSettled = false; requestAnimationFrame(function () { requestAnimationFrame(function () { sidebarSettled = true; }); });">
+    @@livewire:navigated.window="navClickedRoute = null; open = false; settleSidebar();">
 
 @php
     $authAdmin = auth()->user();
@@ -1375,6 +1434,29 @@
                shadow-2xl lg:!translate-x-0 lg:static lg:inset-0
                flex flex-col h-full text-[#333333] overflow-hidden shrink-0"
         style="z-index: 9991;">
+
+    <script>
+        // FIX (glitch: sidebar visibly opening/closing on hard refresh while
+        // collapsed): Alpine's x-bind:class (is-collapsed, no-transition
+        // above) only applies once Alpine has parsed and evaluated x-data on
+        // <body> — the <aside> itself paints in its plain default state for
+        // however many frames that takes on a heavier page. Fix: read the
+        // SAME localStorage key Alpine will read a moment later, and —
+        // synchronously, before this <script> tag even finishes executing
+        // (which blocks the browser from painting anything below it) —
+        // apply 'is-collapsed' and 'no-transition' directly to the raw DOM
+        // node right now. By the time Alpine's x-data initializes and takes
+        // over the class binding, the node already matches, so there is
+        // nothing left to visibly snap into place. Same fix as the Alumni
+        // sidebar.
+        (function () {
+            var aside = document.getElementById('admin-sidebar-aside');
+            if (!aside) return;
+            var collapsed = localStorage.getItem('admin_sidebar_collapsed') === '1';
+            aside.classList.add('no-transition');
+            if (collapsed) aside.classList.add('is-collapsed');
+        })();
+    </script>
 
         {{-- Sidebar header --}}
         <div class="admin-sidebar-header h-24 px-5 shrink-0">

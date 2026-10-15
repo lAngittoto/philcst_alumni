@@ -1309,12 +1309,14 @@ select.filter-input option {
                                 <h3 class="font-bold text-[16px] leading-snug line-clamp-1 text-[#7a3f91]">{!! $this->highlight($job->job_title, $search) !!}</h3>
                                 <p class="text-[14px] font-medium text-gray-600 mt-0.5 line-clamp-1">{!! $this->highlight($job->company_name, $search) !!}</p>
 
+                                @if($job->location)
+                                <div class="flex items-start gap-1 mt-1.5 text-[13px] text-gray-500">
+                                    <i class="fas fa-location-dot text-[12px] text-[#7a3f91]/60 mt-[3px] shrink-0"></i>
+                                    <span class="min-w-0 leading-snug line-clamp-2 sm:line-clamp-1">{{ $job->location }}</span>
+                                </div>
+                                @endif
+
                                 <div class="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-1.5">
-                                    @if($job->location)
-                                    <span class="text-[13px] text-gray-500 flex items-center gap-1">
-                                        <i class="fas fa-location-dot text-[12px] text-[#7a3f91]/60"></i>{{ \Illuminate\Support\Str::limit($job->location, 30) }}
-                                    </span>
-                                    @endif
                                     @if($job->employment_type)
                                     <span class="text-[13px] text-gray-500 flex items-center gap-1">
                                         <i class="fas fa-briefcase text-[12px] text-[#7a3f91]/60"></i>{{ $rEmpType }}

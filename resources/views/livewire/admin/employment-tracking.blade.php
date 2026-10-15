@@ -1270,6 +1270,7 @@ new class extends Component {
         <div class="relative shrink-0"
              x-data="{
                 open: false,
+                top: 0, left: 0,
                 selected: @js($filterCourses),
                 allCodes: @js(collect($courses)->pluck('code')->values()),
                 // Snapshot of what's actually applied server-side right
@@ -1307,11 +1308,29 @@ new class extends Component {
                 },
                 label() {
                     return window.__admEmpCoursesLabel(this.selected);
+                },
+                // Panel is position:fixed (340px wide) so the table/filter
+                // bar's own overflow can never clip it — top/left are
+                // computed off the trigger button's real position and
+                // clamped against the actual viewport, so it can never run
+                // past the right edge or bottom of the screen on mobile.
+                toggleOpen() {
+                    if (this.open) { this.open = false; return; }
+                    const r = this.$refs.courseBtn.getBoundingClientRect();
+                    const panelW = 340;
+                    this.left = Math.max(8, Math.min(r.left, window.innerWidth - panelW - 8));
+                    const panelH = this.$refs.coursePanel ? this.$refs.coursePanel.offsetHeight : 360;
+                    const spaceBelow = window.innerHeight - r.bottom - 8;
+                    this.top = (spaceBelow < panelH)
+                        ? Math.max(8, r.top - panelH - 6)
+                        : r.bottom + 6;
+                    this.open = true;
                 }
              }"
-             @click.outside="open = false">
+             @click.outside="open = false"
+             @resize.window="open = false">
 
-            <button type="button" @click="open = !open"
+            <button type="button" x-ref="courseBtn" @click="toggleOpen()"
                     class="yb-adm-dd-btn flex items-center gap-2"
                     :class="open ? 'active' : ''"
                     style="min-width:200px; max-width:260px;">
@@ -1320,11 +1339,12 @@ new class extends Component {
                 <i class="fa-solid fa-chevron-down text-[0.65rem] ml-auto transition-transform duration-150" :class="open ? 'rotate-180' : ''"></i>
             </button>
 
-            <div x-show="open" x-cloak
+            <div x-ref="coursePanel" x-show="open" x-cloak
                  x-transition:enter="transition ease-out duration-100"
                  x-transition:enter-start="opacity-0 scale-95"
                  x-transition:enter-end="opacity-100 scale-100"
-                 class="absolute left-0 top-[calc(100%+6px)] z-30 w-[340px] max-w-[calc(100vw-2.5rem)] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
+                 :style="`top:${top}px; left:${left}px;`"
+                 class="fixed z-[9999] w-[340px] max-w-[calc(100vw-1rem)] bg-white rounded-xl border border-[#E8E0F0] shadow-[0_10px_30px_rgba(122,63,145,0.18)] overflow-hidden">
 
                 <label class="flex items-center gap-2.5 px-3.5 py-2 text-[0.82rem] font-semibold text-[#333333] hover:bg-[#faf7fc] cursor-pointer border-b border-[#F0EAF5]">
                     <span class="adm-chk shrink-0" :class="isAllSelected() ? 'adm-chk-on' : ''" @click.prevent="toggleAll()">

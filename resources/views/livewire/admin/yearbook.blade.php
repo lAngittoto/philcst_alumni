@@ -561,7 +561,14 @@ mark.yb-adm-hl {
    panel wider. */
 .yb-adm-dd-panel {
     position: fixed;
-    width: max-content;
+    /* FIX: `width: max-content` let the panel grow to fit its longest
+       unwrapped line (e.g. "Bachelor of Science in Business
+       Administration"), ignoring the clamped `left` position computed
+       in place() — so on mobile the box itself ran past the right edge
+       of the screen no matter how carefully left/top were clamped.
+       A real width forces .yb-adm-dd-item's word-break/white-space:normal
+       to actually wrap text INSIDE the already-clamped box instead. */
+    width: 260px;
     max-width: calc(100vw - 16px);
     max-height: 224px; overflow-y: auto; overflow-x: hidden;
     background: #fff; border: 1.5px solid #E8E0F0;
@@ -570,7 +577,7 @@ mark.yb-adm-hl {
     scrollbar-width: thin; scrollbar-color: #d4b8e8 transparent;
 }
 @media (min-width: 640px) {
-    .yb-adm-dd-panel { max-width: 280px; }
+    .yb-adm-dd-panel { width: 280px; max-width: 280px; }
 }
 .yb-adm-dd-panel::-webkit-scrollbar       { width: 4px; }
 .yb-adm-dd-panel::-webkit-scrollbar-thumb { background: #d4b8e8; border-radius: 9999px; }
