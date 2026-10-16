@@ -225,8 +225,12 @@ new class extends Component {
             $collegeCourseCodes = Cache::remember(
                 'admin_event_college_codes_' . md5($this->filterCollege),
                 300,
+                // Same lookup used in Manage Coordinators (Course::college ->
+                // code): the courses table stores each course's code in the
+                // "code" column, not "course_code", so pluck('code') is what
+                // actually resolves "College of Studies" -> ["BSIT","BSCS"].
                 fn () => Course::where('college', $this->filterCollege)
-                    ->distinct()->pluck('course_code')->filter()->values()->all()
+                    ->distinct()->pluck('code')->filter()->values()->all()
             );
 
             $q->where(function ($sub) use ($collegeCourseCodes) {

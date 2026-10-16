@@ -35,7 +35,6 @@ new class extends Component {
     public string $chartCollegeData       = '{}';
     public string $chartCourseData        = '{}';
     public string $chartEmpTypeData       = '{}';
-    public string $chartCareerPathData    = '{}';
     public string $chartEduStatusData     = '{}';
     public string $chartUnemployedData    = '{}';
 
@@ -595,19 +594,6 @@ new class extends Component {
                 $empTypeRows->get('part_time')->cnt   ?? 0,
             ],
             'colors' => ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe'],
-        ]);
-
-        $cpRows = (clone $this->empQ())->whereNotNull('et.career_path')->select('et.career_path')->get();
-        $cpCounts = ['ofw' => 0, 'freelancer' => 0, 'entrepreneur' => 0, 'career_shifter' => 0, 'industry_professional' => 0];
-        foreach ($cpRows as $r) {
-            $arr = json_decode($r->career_path, true) ?? [];
-            foreach ($arr as $v) { if (isset($cpCounts[$v])) $cpCounts[$v]++; }
-        }
-
-        $this->chartCareerPathData = json_encode([
-            'labels' => ['OFW', 'Freelancer', 'Entrepreneur', 'Career Shifter', 'Industry Pro'],
-            'data'   => array_values($cpCounts),
-            'colors' => ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#7a3f91'],
         ]);
 
         $eduRows = (clone $this->empQ())
@@ -1651,8 +1637,8 @@ new class extends Component {
 
     </div>
 
-    {{-- ── ROW 2 — Emp Type / Career Path / Top Courses ── --}}
-    <div class="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-3 gap-4 flex-shrink-0">
+    {{-- ── ROW 2 — Emp Type / Top Courses ── --}}
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-2 gap-4 flex-shrink-0">
 
         <div class="{{ $chartCard }}">
             <div class="{{ $chartHead }}">
@@ -1665,22 +1651,6 @@ new class extends Component {
                 <canvas id="admChartEmpType"></canvas>
                 <div id="admChartEmpTypeNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
                     <i class="fa-solid fa-briefcase text-[1.8rem] adm-nodata-icon" style="color:#a855f7; opacity:.35;"></i>
-                    <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
-                </div>
-            </div>
-        </div>
-
-        <div class="{{ $chartCard }}">
-            <div class="{{ $chartHead }}">
-                <div class="flex items-center gap-2">
-                    <div class="w-2 h-2 rounded-full bg-teal-500 flex-shrink-0"></div>
-                    <span class="{{ $chartTtl }}">Career Path Labels</span>
-                </div>
-            </div>
-            <div class="p-4 relative" style="height:220px;" wire:ignore>
-                <canvas id="admChartCareerPath"></canvas>
-                <div id="admChartCareerPathNoData" class="flex flex-col items-center justify-center h-full gap-2 text-[#666666] absolute inset-0" style="display:none;">
-                    <i class="fa-solid fa-route text-[1.8rem] adm-nodata-icon" style="color:#14b8a6; opacity:.35;"></i>
                     <p class="text-[0.8rem] font-semibold opacity-60">No Data</p>
                 </div>
             </div>
@@ -2106,7 +2076,6 @@ new class extends Component {
      data-college="{{ $chartCollegeData }}"
      data-course="{{ $chartCourseData }}"
      data-emptype="{{ $chartEmpTypeData }}"
-     data-career="{{ $chartCareerPathData }}"
      data-edu="{{ $chartEduStatusData }}"
      data-unemployed="{{ $chartUnemployedData }}">
 </div>
@@ -2141,7 +2110,6 @@ new class extends Component {
                 college:    JSON.parse(el.getAttribute('data-college')    || 'null'),
                 course:     JSON.parse(el.getAttribute('data-course')     || 'null'),
                 emptype:    JSON.parse(el.getAttribute('data-emptype')    || 'null'),
-                career:     JSON.parse(el.getAttribute('data-career')     || 'null'),
                 edu:        JSON.parse(el.getAttribute('data-edu')        || 'null'),
                 unemployed: JSON.parse(el.getAttribute('data-unemployed') || 'null'),
             };
@@ -2435,7 +2403,6 @@ new class extends Component {
         safe(function(){ donut('admChartEmpType',    d.emptype); });
         safe(function(){ donut('admChartUnemployed', d.unemployed); });
         safe(function(){ hbar( 'admChartCourse',     d.course); });
-        safe(function(){ polar('admChartCareerPath', d.career); });
 
         safe(function(){
             if(d.college && d.college.labels){

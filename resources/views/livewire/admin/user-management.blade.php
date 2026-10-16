@@ -1887,7 +1887,7 @@ select.mu-filter-input.mu-active {
 /* ── Coordinator View Details: single full-screen layout (no scrolling on desktop) ── */
 .mu-org-grid   { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; align-items: start; }
 .mu-org-right  { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
-.mu-org-bottom { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+.mu-org-bottom { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; align-items: start; }
 @media (min-width: 1024px) {
     .mu-org-grid   { grid-template-columns: 16.5rem minmax(0, 1fr); }
     .mu-org-bottom { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
@@ -1896,7 +1896,7 @@ select.mu-filter-input.mu-active {
 /* ── Director / Registrar View Details: 2-column layout so the whole profile
    fits on one screen on desktop (stacks + scrolls only on small screens) ── */
 @media (min-width: 1024px) {
-    .mu-pro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; align-items: stretch; }
+    .mu-pro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; align-items: start; }
     .mu-pro-grid > * { margin-top: 0 !important; }
     .mu-pro-grid > .mu-pro-span { grid-column: 1 / -1; }
 }
@@ -2477,9 +2477,13 @@ select.mu-filter-input.mu-active {
     {{-- Mobile: always full-screen (h-full, no radius, no max-width) so it
          fits every screen edge-to-edge with no clipped corners or dead
          margin. Desktop (sm+): the original centered card look. --}}
-    <div class="w-full h-full flex flex-col {{ $isAlumni ? '' : 'sm:h-auto sm:max-w-5xl sm:rounded-2xl sm:shadow-2xl sm:border sm:border-[#E8E0F0]' }}"
-         style="background:#F2F2F2;overflow:hidden;{{ $isAlumni ? '' : 'max-height:100vh;' }}"
-         x-bind:style="window.innerWidth >= 640 ? 'background:#F2F2F2;overflow:hidden;max-height:90vh;' : 'background:#F2F2F2;overflow:hidden;max-height:100vh;'">
+    <div class="w-full h-full flex flex-col {{ $isAlumni ? '' : ($isOrg ? 'sm:h-auto sm:max-w-3xl sm:rounded-2xl sm:shadow-2xl sm:border sm:border-[#E8E0F0]' : 'sm:h-auto sm:max-w-2xl sm:rounded-2xl sm:shadow-2xl sm:border sm:border-[#E8E0F0]') }}"
+         @if($isAlumni)
+         style="background:#F2F2F2;overflow:hidden;height:100%;"
+         @else
+         style="background:#F2F2F2;overflow:hidden;max-height:100vh;{{ $isOrg ? 'max-width:48rem;' : 'max-width:42rem;' }}"
+         x-bind:style="window.innerWidth >= 640 ? 'background:#F2F2F2;overflow:hidden;max-height:90vh;{{ $isOrg ? 'max-width:48rem;' : 'max-width:42rem;' }}' : 'background:#F2F2F2;overflow:hidden;max-height:100vh;'"
+         @endif>
 
         <div class="flex items-center justify-between px-5 sm:px-6 py-3 shrink-0"
              style="background:linear-gradient(135deg,#7A3F91,#9b59b6);padding-top:max(0.75rem, env(safe-area-inset-top));">
@@ -2495,7 +2499,11 @@ select.mu-filter-input.mu-active {
             </div>
             @else
             <div class="flex items-center gap-3 min-w-0">
-                @if($vPhoto)
+                @if($isReg)
+                    <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
+                        <i class="fas fa-user-tie text-white text-xs"></i>
+                    </div>
+                @elseif($vPhoto)
                     <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
                          class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
                 @else
@@ -2515,7 +2523,7 @@ select.mu-filter-input.mu-active {
             </button>
         </div>
 
-        <div class="flex-1 min-h-0 overflow-y-auto {{ $isOrg ? 'p-3 sm:p-4 space-y-2.5 max-w-6xl' : ($isAlumni ? 'p-3 sm:p-4' : 'p-3 sm:p-4 space-y-3 max-w-6xl mu-pro-grid') }} mu-vp-scroll mx-auto w-full relative">
+        <div class="flex-1 min-h-0 overflow-y-auto {{ $isOrg ? 'p-3 sm:p-4 space-y-2.5 max-w-3xl' : ($isAlumni ? 'p-3 sm:p-4' : 'p-3 sm:p-4 space-y-3 max-w-2xl mu-pro-grid') }} mu-vp-scroll mx-auto w-full relative">
 
             {{-- Saving overlay: appears instantly when any modal action fires,
                  before the Livewire round-trip completes. Prevents double-clicks

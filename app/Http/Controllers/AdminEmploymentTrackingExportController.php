@@ -354,28 +354,25 @@ class AdminEmploymentTrackingExportController extends Controller
             ->groupBy('et.employment_type')->get()->keyBy('employment_type');
 
         $empTypeChart = [
-            'labels' => ['Full-Time', 'Part-Time', 'Contractual', 'Project-Based', 'Internship'],
+            // Kept 1:1 with the Livewire component's chartEmpTypeData
+            // (employment-tracking.blade.php) — 4 categories only, same
+            // order/columns. The old version queried 'project_based' and
+            // 'internship', which aren't real employment_type values
+            // (hence always 0), and it dropped 'freelance' entirely.
+            'labels' => ['Contractual', 'Freelance', 'Full-Time', 'Part-Time'],
             'data'   => [
-                $empTypeRows->get('full_time')->cnt     ?? 0,
-                $empTypeRows->get('part_time')->cnt     ?? 0,
-                $empTypeRows->get('contractual')->cnt   ?? 0,
-                $empTypeRows->get('project_based')->cnt ?? 0,
-                $empTypeRows->get('internship')->cnt    ?? 0,
+                $empTypeRows->get('contractual')->cnt ?? 0,
+                $empTypeRows->get('freelance')->cnt   ?? 0,
+                $empTypeRows->get('full_time')->cnt   ?? 0,
+                $empTypeRows->get('part_time')->cnt   ?? 0,
             ],
         ];
 
         // ── Career Path Labels ──────────────────────────────────────────
-        $cpRows   = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))->whereNotNull('et.career_path')->select('et.career_path')->get();
-        $cpCounts = ['ofw' => 0, 'freelancer' => 0, 'entrepreneur' => 0, 'career_shifter' => 0, 'industry_professional' => 0];
-        foreach ($cpRows as $r) {
-            $arr = json_decode($r->career_path, true) ?? [];
-            foreach ($arr as $v) { if (isset($cpCounts[$v])) $cpCounts[$v]++; }
-        }
-
-        $careerPathChart = [
-            'labels' => ['OFW', 'Freelancer', 'Entrepreneur', 'Career Shifter', 'Industry Pro'],
-            'data'   => array_values($cpCounts),
-        ];
+        // Removed from export (PDF/Excel/Print) by request — this chart
+        // stays web-only now. The Livewire component on screen still
+        // computes/shows chartCareerPathData on its own; nothing there
+        // was touched, only this export copy was dropped.
 
         // ── Further Education ───────────────────────────────────────────
         $eduRows = (clone $this->empQ($batchFrom, $batchTo, $college, $courses, $status))
@@ -416,7 +413,6 @@ class AdminEmploymentTrackingExportController extends Controller
             'college'    => $collegeChart,
             'course'     => $courseChart,
             'empType'    => $empTypeChart,
-            'careerPath' => $careerPathChart,
             'edu'        => $eduChart,
             'unemployed' => $unemployedChart,
         ];
@@ -481,7 +477,6 @@ class AdminEmploymentTrackingExportController extends Controller
         $html .= $section('Work Location', $data['location']['labels'], $data['location']['data']);
         $html .= $section('Job-Course Relevance', $data['relevance']['labels'], $data['relevance']['data']);
         $html .= $section('Employment Type', $data['empType']['labels'], $data['empType']['data']);
-        $html .= $section('Career Path Labels', $data['careerPath']['labels'], $data['careerPath']['data']);
         $html .= $section('Further Education', $data['edu']['labels'], $data['edu']['data']);
         $html .= $section('Unemployed Breakdown', $data['unemployed']['labels'], $data['unemployed']['data']);
         $html .= $section('Top Courses (Employed)', $data['course']['labels'], $data['course']['data']);
