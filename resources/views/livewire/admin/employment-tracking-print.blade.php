@@ -322,7 +322,7 @@
 </div>
 
 {{-- ── Employment Type ── --}}
-{!! $simpleSection('Employment Type', $data['empType'], ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe', '#ede9fe']) !!}
+{!! $simpleSection('Employment Type', $data['empType'], ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe']) !!}
 
 {{-- ── Career Path Labels ── --}}
 {!! $simpleSection('Career Path Labels', $data['careerPath'], ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#7a3f91']) !!}

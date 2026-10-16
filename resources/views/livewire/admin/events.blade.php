@@ -13,6 +13,7 @@ use App\Http\Controllers\AdminEventController;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\RateLimiter;
 use App\Models\Alumni;
+use App\Models\Course;
 
 new class extends Component {
     use WithPagination, WithoutUrlPagination;
@@ -211,7 +212,30 @@ new class extends Component {
         }
 
         if ($this->filterStatus !== '')  $q->where('status', $this->filterStatus);
-        if ($this->filterCollege !== '') $q->where('target_participants', 'like', "%{$this->filterCollege}%");
+
+        if ($this->filterCollege !== '') {
+            // target_participants is free text the organizer fills in when
+            // creating the event, and it's almost always written as course
+            // codes (e.g. "BSN", "BSIT") rather than the full college name
+            // ("College of Nursing") — so matching the college name alone
+            // against that column matched nothing. Resolve the picked
+            // college to every course code under it and match on those
+            // too, in addition to the college name itself in case an
+            // organizer did type the full name out.
+            $collegeCourseCodes = Cache::remember(
+                'admin_event_college_codes_' . md5($this->filterCollege),
+                300,
+                fn () => Course::where('college', $this->filterCollege)
+                    ->distinct()->pluck('course_code')->filter()->values()->all()
+            );
+
+            $q->where(function ($sub) use ($collegeCourseCodes) {
+                $sub->where('target_participants', 'like', "%{$this->filterCollege}%");
+                foreach ($collegeCourseCodes as $code) {
+                    $sub->orWhere('target_participants', 'like', "%{$code}%");
+                }
+            });
+        }
 
         $q->orderBy('created_at', $this->filterSort === 'oldest' ? 'asc' : 'desc');
         return $q->paginate(20);

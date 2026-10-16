@@ -332,8 +332,8 @@ new class extends Component {
         )->orderBy('a.last_name')->orderBy('a.first_name')->limit(100)->get();
 
         $sLabel = ['employed' => 'Employed', 'self_employed' => 'Self-Employed', 'unemployed' => 'Unemployed'];
-        $tLabel = ['full_time' => 'Full-Time', 'part_time' => 'Part-Time', 'contractual' => 'Contractual',
-                   'project_based' => 'Project-Based', 'internship' => 'Internship'];
+        $tLabel = ['contractual' => 'Contractual', 'freelance' => 'Freelance',
+                   'full_time' => 'Full-Time', 'part_time' => 'Part-Time'];
 
         $this->modalAlumni = $rows->map(function ($r) use ($sLabel, $tLabel) {
             return [
@@ -587,15 +587,14 @@ new class extends Component {
             ->groupBy('et.employment_type')->get()->keyBy('employment_type');
 
         $this->chartEmpTypeData = json_encode([
-            'labels' => ['Full-Time', 'Part-Time', 'Contractual', 'Project-Based', 'Internship'],
+            'labels' => ['Contractual', 'Freelance', 'Full-Time', 'Part-Time'],
             'data'   => [
-                $empTypeRows->get('full_time')->cnt     ?? 0,
-                $empTypeRows->get('part_time')->cnt     ?? 0,
-                $empTypeRows->get('contractual')->cnt   ?? 0,
-                $empTypeRows->get('project_based')->cnt ?? 0,
-                $empTypeRows->get('internship')->cnt    ?? 0,
+                $empTypeRows->get('contractual')->cnt ?? 0,
+                $empTypeRows->get('freelance')->cnt   ?? 0,
+                $empTypeRows->get('full_time')->cnt   ?? 0,
+                $empTypeRows->get('part_time')->cnt   ?? 0,
             ],
-            'colors' => ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe', '#ede9fe'],
+            'colors' => ['#7a3f91', '#a855f7', '#c084fc', '#ddd6fe'],
         ]);
 
         $cpRows = (clone $this->empQ())->whereNotNull('et.career_path')->select('et.career_path')->get();

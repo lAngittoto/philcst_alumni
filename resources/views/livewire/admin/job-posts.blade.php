@@ -1243,7 +1243,16 @@ select.filter-input option {
                                     class="filter-input w-full min-w-0 truncate h-10 sm:h-9 px-2.5 text-[16px] sm:text-[13px] font-medium text-gray-900 bg-white border border-gray-200 rounded-lg
                                            hover:border-gray-300 focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 transition cursor-pointer">
                                 <option value="">All Types</option>
+                                @php
+                                    // Only these 4 are real employment types (same set used
+                                    // by Employment Tracking). The job_options table has had
+                                    // stray/legacy rows (e.g. "Internship") that were never a
+                                    // valid type here — filtered out so the dropdown can't show
+                                    // an option that doesn't actually match any job posting.
+                                    $validJobTypes = ['Contractual', 'Freelance', 'Full-Time', 'Part-Time'];
+                                @endphp
                                 @foreach($this->jobOptions->get('employment_type', collect()) as $opt)
+                                    @continue(!in_array($opt->label, $validJobTypes, true))
                                     <option value="{{ $opt->label }}">{{ $opt->label }}</option>
                                 @endforeach
                             </select>
