@@ -4492,7 +4492,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 <div id="jm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 jm-share-backdrop"
      x-data="{
          copied:false,
-         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
          downloading:false,
          downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
@@ -4552,17 +4551,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                  this.downloading = false;
                  return false;
              }
-         },
-
-         async nativeShare() {
-             try {
-                 const shareData = { title: this.jobTitle, text: this.shareText };
-                 const file = await this.buildImageFile();
-                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-                     shareData.files = [file];
-                 }
-                 await navigator.share(shareData);
-             } catch (e) { /* cancelled by user — nothing to do */ }
          },
 
          // Pre-download the job photo as soon as the modal opens, so that when
@@ -4688,35 +4676,67 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
          },
 
          // ── Messenger ────────────────────────────────────────────────────
-         // Mobile: hand off to the Messenger app via its share link (Android
-         // intent / iOS scheme) with a web fallback.
-         // Desktop: Messenger has no public share-link web endpoint (the
-         // old messenger.com/share URL just opens a blank page), so the link +
-         // caption are copied and messenger.com is opened — paste into any chat.
+         // Mobile strategy (two-tier):
+         //   Android → intent:// URI so the OS either launches Messenger or
+         //             offers to install it from the Play Store.
+         //   iOS     → fb-messenger:// custom scheme via a hidden <a> click;
+         //             1.5-second fallback to messenger.com/share if app is
+         //             not installed and the system didn't navigate away.
+         // Desktop  → messenger.com/share popup (proper share URL, not /new).
+         // In all cases the caption is auto-copied to the clipboard.
          async openMessenger() {
              const copyPromise = this.copyCaptionNow();
              const jobUrl  = encodeURIComponent(this.baseUrl);
-             const webFallback = 'https://www.messenger.com/';
+             const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
 
              if (this.isMobile) {
                  const isAndroid = /Android/i.test(navigator.userAgent);
+                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
                  if (isAndroid) {
-                     window.location.href = 'intent://share/?link=' + jobUrl
-                         + '#Intent;package=com.facebook.orca;scheme=fb-messenger;'
-                         + 'S.browser_fallback_url=' + encodeURIComponent(webFallback) + ';end';
+                     // Android intent URI — opens Messenger directly if installed;
+                     // otherwise Android asks to find it in the Play Store.
+                     window.open(
+                         'intent://share/?link=' + jobUrl +
+                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+                         '_blank'
+                     );
+                 } else if (isIOS) {
+                     // iOS: trigger the fb-messenger:// URL scheme via a
+                     // temporary <a> so we don't navigate the current page away.
+                     const a  = document.createElement('a');
+                     a.href   = 'fb-messenger://share/?link=' + jobUrl;
+                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     // If Messenger wasn't installed the URL scheme silently
+                     // fails — open the web share page as a backup.
+                     setTimeout(() => {
+                         if (!document.hidden) {
+                             window.open(webLink, '_blank', 'noopener,noreferrer');
+                         }
+                     }, 1500);
                  } else {
-                     window.location.href = 'fb-messenger://share/?link=' + jobUrl;
-                     setTimeout(() => { if (!document.hidden) window.open(webFallback, '_blank', 'noopener,noreferrer'); }, 1500);
+                     // Other mobile (e.g. Windows Phone, KaiOS) → web fallback
+                     window.open(webLink, '_blank', 'noopener,noreferrer');
                  }
              } else {
-                 const win = window.open(webFallback, '_blank', 'noopener,noreferrer');
+                 // Desktop — centred popup pointing at the proper share URL
+                 const w=700,h=580,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(webLink, 'philcst_jm_messenger_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
+                 else { window.open(webLink, '_blank'); }   // popup blocked → plain new tab
              }
              const copyOk = await copyPromise;
              $wire.dispatch('flash-message', {
                  type: copyOk ? 'success' : 'warning',
                  message: copyOk
-                     ? 'Caption & link copied! Paste it (Ctrl+V) into a Messenger chat.'
+                     ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
                      : 'Could not copy the caption automatically — use the Copy Caption button, then paste it into Messenger.'
              });
          },

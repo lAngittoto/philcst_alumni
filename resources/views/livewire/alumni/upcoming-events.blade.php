@@ -1919,9 +1919,6 @@ select.filter-input:hover { cursor: default !important; }
          // ── Detect mobile/tablet to choose how to open FB/Messenger ──
          isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
-         // Native Web Share API — available on mobile Chrome/Safari/Edge
-         nativeShareSupported: (typeof navigator !== 'undefined' && 'share' in navigator),
-
          showDlConfirm: false,
          pendingTarget: null,
 
@@ -1975,58 +1972,26 @@ select.filter-input:hover { cursor: default !important; }
              }
          },
 
-         async nativeShare() {
-             try {
-                 const shareData = { title: this.eventTitle, text: this.shareText };
-                 const file = await this.buildImageFile();
-                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-                     shareData.files = [file];
-                 }
-                 await navigator.share(shareData);
-             } catch (e) { /* cancelled by user — nothing to do */ }
-         },
-
+         // ── askShare: always show the download-confirm modal first.
+         //    NOTE: the native share button has been removed — we always
+         //    route to Facebook/Messenger directly in the browser so the
+         //    caption can be properly copied and pasted. ──
          askShare(target) {
-             // Never intercept with native share here — the generic Share
-             // button at the top calls nativeShare() directly. When the user
-             // taps Facebook or Messenger they want THAT specific app to
-             // open, not the OS share sheet. Always show the download-confirm
-             // modal first, then route to the correct platform.
-             //
-             // IMPORTANT: copy the caption to the clipboard RIGHT HERE, while
-             // still inside the synchronous click handler. Clipboard writes
-             // require an active user-gesture (transient activation). If we
-             // wait until after an await fetch(...) (the image download) or
-             // after window.open() has already blurred/redirected the tab,
-             // that activation window is gone and
-             // navigator.clipboard.writeText() silently rejects in most
-             // mobile browsers (Safari especially) — which is exactly why
-             // the could-not-auto-copy warning was firing every single time.
-             // Copying synchronously here, before any await, fixes it.
-             this.autoCopyCaption().then(ok => {
-                 $wire.dispatch('flash-message', {
-                     type: ok ? 'success' : 'warning',
-                     message: ok
-                         ? 'Caption copied! Long-press → Paste it after the window opens.'
-                         : 'Could not auto-copy caption — use Copy Caption below, then paste manually.'
-                 });
-             });
-
              this.pendingTarget = target;
              this.showDlConfirm = true;
          },
 
          async confirmDownloadThenGo() {
              await this.downloadImage();
-             this.proceedToTarget();
+             await this.proceedToTarget();
          },
 
-         proceedToTarget() {
+         async proceedToTarget() {
              this.showDlConfirm = false;
              const target = this.pendingTarget;
              this.pendingTarget = null;
-             if (target === 'facebook') this.openFacebook();
-             else if (target === 'messenger') this.openMessenger();
+             if (target === 'facebook') await this.openFacebook();
+             else if (target === 'messenger') await this.openMessenger();
          },
 
          cancelDlConfirm() {
@@ -2042,7 +2007,10 @@ select.filter-input:hover { cursor: default !important; }
          // universal/intent links if it is installed; on desktop we get a
          // centred popup.  The caption is also copied to the clipboard so the
          // user can paste it if FB strips the quote.
-         openFacebook() {
+         async openFacebook() {
+             // Copy before opening popup — clipboard requires page focus
+             const ok = await this.autoCopyCaption();
+
              const evUrl    = encodeURIComponent(this.baseUrl);
              const caption  = encodeURIComponent(this.shareText);
              const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
@@ -2062,10 +2030,12 @@ select.filter-input:hover { cursor: default !important; }
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Caption was already copied synchronously in askShare() —
-             // doing it again here (after window.open/await) is exactly
-             // what caused the clipboard write to fail before, so it's
-             // intentionally NOT repeated.
+             $wire.dispatch('flash-message', {
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
+             });
          },
 
          // ── openMessenger ─────────────────────────────────────────────────
@@ -2076,8 +2046,11 @@ select.filter-input:hover { cursor: default !important; }
          //             1.5-second fallback to messenger.com/share if app is
          //             not installed and the system didn't navigate away.
          // Desktop  → messenger.com/share popup (proper share URL, not /new).
-         // In all cases the caption is auto-copied to the clipboard.
-         openMessenger() {
+         // Caption is copied FIRST — same reason as openFacebook above.
+         async openMessenger() {
+             // Copy before opening anything — clipboard requires page focus
+             const ok = await this.autoCopyCaption();
+
              const evUrl   = encodeURIComponent(this.baseUrl);
              const webLink = 'https://www.messenger.com/share?link=' + evUrl;
 
@@ -2123,10 +2096,12 @@ select.filter-input:hover { cursor: default !important; }
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Caption was already copied synchronously in askShare() —
-             // doing it again here (after window.open/await) is exactly
-             // what caused the clipboard write to fail before, so it's
-             // intentionally NOT repeated.
+             $wire.dispatch('flash-message', {
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
+             });
          },
 
          async copyLinkFn() {
@@ -2197,15 +2172,6 @@ select.filter-input:hover { cursor: default !important; }
 
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-thin">
                 <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
-
-                <template x-if="nativeShareSupported">
-                    <button type="button" @click="nativeShare()" class="share-option-btn" style="background:#7a3f91;">
-                        <span class="icon-wrap">
-                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
-                        </span>
-                        <span class="label-text text-xs font-semibold">Share</span>
-                    </button>
-                </template>
 
                 <button type="button" @click="askShare('facebook')" class="share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">

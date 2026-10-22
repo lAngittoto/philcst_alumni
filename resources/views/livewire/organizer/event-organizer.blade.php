@@ -4236,9 +4236,6 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
          // ── Detect mobile/tablet to choose how to open FB/Messenger ──
          isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
-         // Native Web Share API — available on mobile Chrome/Safari/Edge
-         nativeShareSupported: (typeof navigator !== 'undefined' && 'share' in navigator),
-
          showDlConfirm: false,
          pendingTarget: null,
 
@@ -4292,23 +4289,9 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
              }
          },
 
-         async nativeShare() {
-             try {
-                 const shareData = { title: this.eventTitle, text: this.shareText };
-                 const file = await this.buildImageFile();
-                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-                     shareData.files = [file];
-                 }
-                 await navigator.share(shareData);
-             } catch (e) { /* cancelled by user — nothing to do */ }
-         },
-
          askShare(target) {
-             // Never intercept with native share here — the generic Share
-             // button at the top calls nativeShare() directly. When the user
-             // taps Facebook or Messenger they want THAT specific app to
-             // open, not the OS share sheet. Always show the download-confirm
-             // modal first, then route to the correct platform.
+             // Always show the download-confirm modal first, then route to
+             // the correct platform (Facebook or Messenger).
              //
              // IMPORTANT: copy the caption to the clipboard RIGHT HERE, while
              // still inside the synchronous click handler. Clipboard writes
