@@ -42,6 +42,7 @@
         .footer { background-color: #f9f5ff; padding: 25px 30px; text-align: center; border-top: 1px solid #e9d5ff; }
         .footer-text { font-size: 12px; color: #9333ea; line-height: 1.8; }
         .divider { height: 1px; background: linear-gradient(to right, transparent, #e9d5ff, transparent); margin: 20px 0; }
+        .cta-button { display: inline-block; background: linear-gradient(135deg, #7a3f91, #5a2d6f); color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 8px; letter-spacing: 0.3px; }
     </style>
 </head>
 <body>
@@ -159,6 +160,10 @@
                     If you did not expect this account or have any questions, please contact the system administrator immediately.
                 @endif
             </p>
+
+            <div style="text-align: center; margin-top: 28px;">
+                <a href="https://philcstalumni-production.up.railway.app/login" class="cta-button">Visit Our Website →</a>
+            </div>
         </div>
 
         {{-- Footer --}}

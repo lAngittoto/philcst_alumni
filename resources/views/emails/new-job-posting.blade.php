@@ -83,9 +83,21 @@
                             </tr>
                         </table>
 
-                        <p style="margin:0 0 36px;font-size:14px;color:#666;line-height:1.7;">
+                        <p style="margin:0 0 20px;font-size:14px;color:#666;line-height:1.7;">
                             You're receiving this because this posting matches your program. You can review it anytime from the Job Opportunities page.
                         </p>
+
+                        {{-- GO TO WEBSITE --}}
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:32px;">
+                            <tr>
+                                <td align="center">
+                                    <a href="https://philcstalumni-production.up.railway.app/login"
+                                       style="display:inline-block;background:linear-gradient(135deg,#7a3f91,#5a2d6f);color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;padding:14px 32px;border-radius:8px;letter-spacing:0.3px;">
+                                        Visit Our Website →
+                                    </a>
+                                </td>
+                            </tr>
+                        </table>
                     </td>
                 </tr>
 

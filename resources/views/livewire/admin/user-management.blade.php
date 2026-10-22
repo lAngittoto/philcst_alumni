@@ -2465,7 +2465,7 @@ select.mu-filter-input.mu-active {
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
-<div class="fixed inset-0 mu-modal-selectable {{ $isAlumni ? '' : 'sm:flex sm:items-center sm:justify-center sm:p-6' }}"
+<div class="fixed inset-0 mu-modal-selectable {{ $isAlumni ? '' : 'flex items-center justify-center p-3 sm:p-6' }}"
      style="background:rgba(27,6,46,0.55);backdrop-filter:blur(3px);z-index:9995;"
      @if(!$isAlumni) @click.self="if(!saving && !closing && window.innerWidth >= 640){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" @endif
      x-data="{ muClosing: false, saving: false, closing: false }"
@@ -2477,7 +2477,7 @@ select.mu-filter-input.mu-active {
     {{-- Mobile: always full-screen (h-full, no radius, no max-width) so it
          fits every screen edge-to-edge with no clipped corners or dead
          margin. Desktop (sm+): the original centered card look. --}}
-    <div class="w-full h-full flex flex-col {{ $isAlumni ? '' : ($isOrg ? 'sm:h-auto sm:max-w-3xl sm:rounded-2xl sm:shadow-2xl sm:border sm:border-[#E8E0F0]' : 'sm:h-auto sm:max-w-2xl sm:rounded-2xl sm:shadow-2xl sm:border sm:border-[#E8E0F0]') }}"
+    <div class="w-full h-full flex flex-col {{ $isAlumni ? '' : ($isOrg ? 'sm:h-auto sm:max-w-3xl sm:rounded-2xl sm:shadow-2xl' : 'sm:h-auto sm:max-w-2xl sm:rounded-2xl sm:shadow-2xl') }}"
          @if($isAlumni)
          style="background:#F2F2F2;overflow:hidden;height:100%;"
          @else

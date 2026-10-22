@@ -1201,12 +1201,6 @@ select.filter-input:hover { cursor: default !important; }
                         @else No events have been submitted yet. @endif
                     </p>
                 </div>
-                @if($search || $filterStatus || $filterCollege)
-                    <button wire:click="resetFilters" data-ev-reset
-                            class="px-4 py-2 rounded-xl text-sm font-bold text-white transition uppercase tracking-widest cursor-pointer bg-[#7a3f91] hover:bg-[#5e2f72]">
-                        <i class="fas fa-rotate-left mr-1.5 text-xs"></i> Clear Filters
-                    </button>
-                @endif
             </div>
             @endif
         </div>
