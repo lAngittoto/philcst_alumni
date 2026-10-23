@@ -438,13 +438,31 @@ new #[Layout('app')] class extends Component {
                 return;
             }
 
+            // Password correct — check account status before logging in.
+            // Director status lives in the `director` table, not `users`.
+            $directorRecordPreLogin = DB::table('director')->where('user_id', $directorUser->id)->first();
+            if ($directorRecordPreLogin && $directorRecordPreLogin->status !== 'ACTIVE') {
+                AuditLog::logLogin([
+                    'id'    => $directorUser->id,
+                    'name'  => $directorUser->name,
+                    'email' => $directorUser->email,
+                    'role'  => 'director',
+                ], false, 'Account inactive');
+
+                $this->password = '';
+                $this->addError('invalid',
+                    'Your account is ' . strtolower($directorRecordPreLogin->status) . '. Please contact the administrator.'
+                );
+                return;
+            }
+
             // Password correct — log in
             $userModel = \App\Models\User::find($directorUser->id);
             Auth::login($userModel, false);
             $this->clearAttempts();
             session()->regenerate();
 
-            $directorRecord = DB::table('director')->where('user_id', $directorUser->id)->first();
+            $directorRecord = $directorRecordPreLogin;
             if ($directorRecord) {
                 $this->markPresenceOnline('director', (int) $directorRecord->id);
             }
@@ -501,6 +519,17 @@ new #[Layout('app')] class extends Component {
         $user = Auth::user();
 
         if ($user->role === 'registrar') {
+            // Registrar status lives on `users.user_status`.
+            if (($user->user_status ?? 'ACTIVE') !== 'ACTIVE') {
+                Auth::logout();
+                AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'registrar'], false, 'Account inactive');
+                $this->password = '';
+                $this->addError('invalid',
+                    'Your account is ' . strtolower($user->user_status) . '. Please contact the administrator.'
+                );
+                return;
+            }
+
             $this->clearAttempts();
             session()->regenerate();
             AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'registrar'], true);
@@ -510,11 +539,22 @@ new #[Layout('app')] class extends Component {
         }
 
         if ($user->role === 'director') {
+            // Director status lives in the `director` table, not `users`.
+            $directorRecord = DB::table('director')->where('user_id', $user->id)->first();
+            if ($directorRecord && $directorRecord->status !== 'ACTIVE') {
+                Auth::logout();
+                AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'director'], false, 'Account inactive');
+                $this->password = '';
+                $this->addError('invalid',
+                    'Your account is ' . strtolower($directorRecord->status) . '. Please contact the administrator.'
+                );
+                return;
+            }
+
             $this->clearAttempts();
             session()->regenerate();
 
             // ── Online the instant login succeeds ──────────────────────
-            $directorRecord = DB::table('director')->where('user_id', $user->id)->first();
             if ($directorRecord) {
                 $this->markPresenceOnline('director', (int) $directorRecord->id);
             }

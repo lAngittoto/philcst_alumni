@@ -3393,7 +3393,7 @@ select.mu-filter-input.mu-active {
                     ? 'Updating the email will reset this director\'s password. A new temporary password will be generated and emailed to the new address, and the director must change it on next login.'
                     : 'Updating the email will require the account to reset their password on next login.'));
             @endphp
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Email Address</p>
                 </div>
@@ -3495,7 +3495,7 @@ select.mu-filter-input.mu-active {
 
             {{-- ACTIVATE / DEACTIVATE (coordinator has its own compact card above) --}}
             @if($canToggle && !$isOrg)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Account Status</p>
                 </div>
