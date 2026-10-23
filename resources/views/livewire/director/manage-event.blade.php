@@ -2984,6 +2984,7 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
     $seLines[] = $isCompleted
         ? "Relive the moments through PHILCST Alumni Connect 💜"
         : "Join us through PHILCST Alumni Connect 💜";
+    $seLines[] = 'View and apply here: https://philcstalumni-production.up.railway.app/';
     $seLines[] = "#YourFutureStarsHere";
     $sePostText = implode("\n", $seLines);
 @endphp

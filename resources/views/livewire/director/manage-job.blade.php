@@ -4490,6 +4490,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
 
     $sjLines[] = '';
     $sjLines[] = "Apply now through PHILCST Alumni Connect 💜";
+    $sjLines[] = 'View and apply here: https://philcstalumni-production.up.railway.app/';
     $sjLines[] = "#YourFutureStarsHere";
     $sjPostText = implode("\n", $sjLines);
 @endphp
