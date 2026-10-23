@@ -4163,7 +4163,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 
     $fbLines[] = '';
     $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
-    $fbLines[] = 'View details here: ' . $shareBaseUrl;
+    $fbLines[] = 'View details here: https://philcstalumni-production.up.railway.app/';
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp

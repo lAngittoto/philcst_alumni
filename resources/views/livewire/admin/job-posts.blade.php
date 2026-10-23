@@ -2306,7 +2306,7 @@ select.filter-input option {
             </div>
 
             @if($shareJobPhotoUrl)
-            <div class="adm-share-photo-preview">
+            <div class="adm-share-photo-preview" style="aspect-ratio:auto;height:110px;">
                 <img src="{{ $shareJobPhotoUrl }}" alt="{{ $shareJobTitle }}" onerror="this.style.display='none'">
             </div>
             @endif

@@ -4541,7 +4541,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 
     $fbLines[] = '';
     $fbLines[] = "Apply now through PHILCST Alumni Connect 💜";
-    $fbLines[] = 'View and apply here: ' . $shareBaseUrl;
+    $fbLines[] = 'View and apply here: https://philcstalumni-production.up.railway.app/';
     $fbLines[] = "#YourFutureStarsHere";
     $fbPostText = implode("\n", $fbLines);
 @endphp
