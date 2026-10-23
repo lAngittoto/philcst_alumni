@@ -4127,19 +4127,23 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 
 
 
-{{-- ══ SHARE MODAL — mirrors the alumni "Upcoming Events" share modal design:
-     SVG X close button with hover tooltip, simplified icon+label option
-     rows, pre-share "Download the photo?" confirm modal, and clipboard-
-     before-focus caption copy. Adds a "Share to Message Hub" chat
-     option (UI only for now — no backend wiring yet, per request). ══ --}}
+{{-- ══ SHARE MODAL — matches the alumni "Upcoming Events" share modal
+     design and functionality exactly: SVG X close button with hover
+     tooltip, simplified icon+label option rows, pre-share "Download the
+     photo?" confirm modal, clipboard-before-focus caption copy (copied
+     only after Skip/Download is chosen, inside openFacebook/openMessenger
+     — not immediately on tapping Facebook/Messenger), and a "or copy
+     caption" + Copy Caption fallback button. Keeps the organizer-only
+     "Share to Message Hub" chat-room picker in the same slot Upcoming
+     Events uses for "Share to Batch Chat". ══ --}}
 @if($showShareModal)
 @php
     $shTimeStr        = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
     $isCompleted      = $shareEventIsCompleted;
-    // Direct link to this event — mirrors Job Management's $shareBaseUrl,
-    // so Facebook gets a real link-preview card (via the sharer's "u="
-    // param) instead of plain quoted text, and the link is included in
-    // the caption itself for Messenger / manual-paste / copy-link use.
+    // Direct link to this event — Facebook gets a real link-preview card
+    // (via the sharer's "u=" param) instead of plain quoted text, and the
+    // link is included in the caption itself for Messenger / manual-paste
+    // / copy-link use.
     $shareBaseUrl     = $this->eventDetailUrl($shareEventId);
 
     $fbLines   = [];
@@ -4159,6 +4163,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 
     $fbLines[] = '';
     $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
+    $fbLines[] = 'View details here: ' . $shareBaseUrl;
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp
@@ -4251,44 +4256,26 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
              }
          },
 
+         // ── askShare: always show the download-confirm modal first.
+         //    NOTE: the native share button has been removed — we always
+         //    route to Facebook/Messenger directly in the browser so the
+         //    caption can be properly copied and pasted. ──
          askShare(target) {
-             // Always show the download-confirm modal first, then route to
-             // the correct platform (Facebook or Messenger).
-             //
-             // IMPORTANT: copy the caption to the clipboard RIGHT HERE, while
-             // still inside the synchronous click handler. Clipboard writes
-             // require an active user-gesture (transient activation). If we
-             // wait until after an await fetch(...) (the image download) or
-             // after window.open() has already blurred/redirected the tab,
-             // that activation window is gone and
-             // navigator.clipboard.writeText() silently rejects in most
-             // mobile browsers (Safari especially) — which is exactly why
-             // the could-not-auto-copy warning was firing every single time.
-             // Copying synchronously here, before any await, fixes it.
-             this.autoCopyCaption().then(ok => {
-                 $wire.dispatch('flash-message', {
-                     type: ok ? 'success' : 'warning',
-                     message: ok
-                         ? 'Caption copied! Long-press → Paste it after the window opens.'
-                         : 'Could not auto-copy caption — use Copy Caption below, then paste manually.'
-                 });
-             });
-
              this.pendingTarget = target;
              this.showDlConfirm = true;
          },
 
          async confirmDownloadThenGo() {
              await this.downloadImage();
-             this.proceedToTarget();
+             await this.proceedToTarget();
          },
 
-         proceedToTarget() {
+         async proceedToTarget() {
              this.showDlConfirm = false;
              const target = this.pendingTarget;
              this.pendingTarget = null;
-             if (target === 'facebook') this.openFacebook();
-             else if (target === 'messenger') this.openMessenger();
+             if (target === 'facebook') await this.openFacebook();
+             else if (target === 'messenger') await this.openMessenger();
          },
 
          cancelDlConfirm() {
@@ -4302,9 +4289,13 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
          // by the FB web composer and some mobile clients).
          // On mobile the browser hands the URL off to the Facebook app via
          // universal/intent links if it is installed; on desktop we get a
-         // centred popup.  The caption is also copied to the clipboard so the
-         // user can paste it if FB strips the quote.
-         openFacebook() {
+         // centred popup. The caption is copied to the clipboard FIRST — while
+         // the page still has focus and the user-gesture is still active —
+         // since opening the popup shifts focus away and breaks
+         // clipboard.writeText() if we try to copy after.
+         async openFacebook() {
+             const ok = await this.autoCopyCaption();
+
              const evUrl    = encodeURIComponent(this.baseUrl);
              const caption  = encodeURIComponent(this.shareText);
              const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
@@ -4324,10 +4315,12 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Caption was already copied synchronously in askShare() —
-             // doing it again here (after window.open/await) is exactly
-             // what caused the clipboard write to fail before, so it's
-             // intentionally NOT repeated.
+             $wire.dispatch('flash-message', {
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
+             });
          },
 
          // ── openMessenger ─────────────────────────────────────────────────
@@ -4338,8 +4331,10 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
          //             1.5-second fallback to messenger.com/share if app is
          //             not installed and the system didn't navigate away.
          // Desktop  → messenger.com/share popup (proper share URL, not /new).
-         // In all cases the caption is auto-copied to the clipboard.
-         openMessenger() {
+         // Caption is copied FIRST — same reason as openFacebook above.
+         async openMessenger() {
+             const ok = await this.autoCopyCaption();
+
              const evUrl   = encodeURIComponent(this.baseUrl);
              const webLink = 'https://www.messenger.com/share?link=' + evUrl;
 
@@ -4385,10 +4380,12 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-             // Caption was already copied synchronously in askShare() —
-             // doing it again here (after window.open/await) is exactly
-             // what caused the clipboard write to fail before, so it's
-             // intentionally NOT repeated.
+             $wire.dispatch('flash-message', {
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
+             });
          },
 
          async copyLinkFn() {
@@ -4416,17 +4413,11 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Event
             </h2>
-            <button wire:click="closeShareModal" type="button"
-                    wire:loading.attr="disabled" wire:target="closeShareModal"
-                    class="eo-share-close-btn" aria-label="Close">
-                <span wire:loading.remove wire:target="closeShareModal">
-                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M2 2L12 12M12 2L2 12"/>
-                    </svg>
-                </span>
-                <span wire:loading wire:target="closeShareModal">
-                    <i class="fas fa-spinner fa-spin text-xs"></i>
-                </span>
+            <button wire:click="closeShareModal" wire:loading.attr="disabled" wire:target="closeShareModal" type="button" class="eo-share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeShareModal">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeShareModal"></i>
                 <span class="tip">Close</span>
             </button>
         </div>
@@ -4434,7 +4425,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
         <div id="eo-share-body" class="flex flex-col md:flex-row md:flex-1 md:min-h-0 overflow-y-auto md:overflow-hidden">
 
             <div id="eo-share-preview-pane" class="md:flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 md:overflow-y-auto scroll-c">
-                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
+                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($shareEventPhotoUrl)
                 <div class="eo-share-photo-preview">
@@ -4449,8 +4440,8 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 
                 <div id="eo-share-preview-text" class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
                     <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
-                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
-                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
+                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(12px,1vw,14px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
+                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(12px,1vw,14px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
                     <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
                 </div>
@@ -4463,8 +4454,8 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                 </div>
             </div>
 
-            <div id="eo-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
-                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
+            <div id="eo-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 md:overflow-y-auto scroll-c">
+                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 <button type="button" @click="askShare('facebook')" class="eo-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
@@ -4542,13 +4533,13 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                             <div class="px-3 py-2.5 border-t border-gray-100 bg-white">
                                 <button type="button" wire:click="shareToOrganizerUpdates"
                                         wire:loading.attr="disabled" wire:target="shareToOrganizerUpdates"
-                                        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-white text-xs font-semibold cursor-pointer transition-all duration-150 active:scale-[.97] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
+                                        class="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-white text-sm font-semibold cursor-pointer transition-all duration-150 active:scale-[.97] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
                                         style="background:#7a3f91;" onmouseover="this.style.background='#6a3280'" onmouseout="this.style.background='#7a3f91'">
                                     <span wire:loading.remove wire:target="shareToOrganizerUpdates">
-                                        <i class="fas fa-paper-plane text-[11px]"></i> Share ({{ count($shareTargetRoomIds) }})
+                                        <i class="fas fa-paper-plane text-xs"></i> Share ({{ count($shareTargetRoomIds) }})
                                     </span>
                                     <span wire:loading wire:target="shareToOrganizerUpdates">
-                                        <i class="fas fa-spinner fa-spin text-[11px]"></i> Sharing…
+                                        <i class="fas fa-spinner fa-spin text-xs"></i> Sharing…
                                     </span>
                                 </button>
                             </div>
@@ -4556,17 +4547,25 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                     </div>
                 </div>
 
-                <p class="text-xs text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
-            </div>
-        </div>
+                <div class="relative my-0.5">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
+                        <span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
+                    </div>
+                </div>
 
-        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
-            <div class="flex items-start gap-2.5">
-                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
-                <p class="text-xs leading-relaxed" style="color:#333333;">
-                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                    into the Facebook or Messenger window that opens.
-                </p>
+                <button type="button" @click="copyLinkFn()"
+                        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
+                    <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
+                    </span>
+                    <div class="flex-1 min-w-0 text-left">
+                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
+                    </div>
+                </button>
+
+                <p class="text-xs text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
             </div>
         </div>
     </div>

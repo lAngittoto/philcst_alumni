@@ -4486,42 +4486,82 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     $shareBaseUrl     = $this->jobDetailUrl($shareJobId);
     $shareDlFormatted = $shareDeadline ? \Carbon\Carbon::parse($shareDeadline)->setTimezone('Asia/Manila')->format('F d, Y') : '';
 
+    $shareJobModel = \App\Models\JobPosting::find($shareJobId);
+    $hasQual  = $shareJobModel && !empty($shareJobModel->qualifications);
+    $hasInstr = $shareJobModel && !empty($shareJobModel->application_instructions);
+
+    $qualLines = $hasQual
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $shareJobModel->qualifications)), fn($l) => $l !== ''))
+        : [];
+    $instrLines = $hasInstr
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $shareJobModel->application_instructions)), fn($l) => $l !== ''))
+        : [];
+
+    // Same rule used on the alumni detail view: an "official PHILCST post"
+    // is one where company_type was left equal to company_name.
+    $shareIsPhilcst = $shareJobModel && ($shareJobModel->company_type === $shareJobModel->company_name);
+
     $fbLines   = [];
-    $fbLines[] = strtoupper($shareJobTitle);
-    $fbLines[] = '';
-    $fbLines[] = "Company: {$shareCompany}";
-    if ($shareLocation)  $fbLines[] = "Location: {$shareLocation}";
-    if ($shareEmpType)   $fbLines[] = "Employment Type: {$shareEmpType}";
-    if ($shareExpLevel)  $fbLines[] = "Experience Level: {$shareExpLevel}";
-    if ($shareSalary)    $fbLines[] = "Salary: {$shareSalary}";
-    if ($shareDlFormatted) $fbLines[] = "Deadline: {$shareDlFormatted}";
-    if ($shareCollege)   $fbLines[] = "Open For: {$shareCollege}";
+    $fbLines[] = "WE ARE HIRING: " . strtoupper($shareJobTitle);
+
+    if (! $shareIsPhilcst) {
+        $metaBits = [];
+        if ($shareCompany)  $metaBits[] = $shareCompany;
+        if ($shareLocation) $metaBits[] = $shareLocation;
+        if ($shareEmpType)  $metaBits[] = $shareEmpType;
+        if ($shareExpLevel) $metaBits[] = $shareExpLevel;
+        if ($metaBits) {
+            $fbLines[] = implode(' • ', $metaBits);
+        }
+        if ($shareDlFormatted) {
+            $fbLines[] = 'Deadline: ' . $shareDlFormatted;
+        }
+    }
 
     if (trim($shareDescription) !== '') {
         $fbLines[] = '';
-        $fbLines[] = 'About This Job:';
-        $fbLines[] = mb_strlen(trim($shareDescription)) > 300 ? mb_substr(trim($shareDescription), 0, 300) . '…' : trim($shareDescription);
+        $fbLines[] = trim($shareDescription);
+    }
+
+    if ($hasQual) {
+        $fbLines[] = '';
+        $fbLines[] = '📌 Requirements & Qualifications:';
+        foreach ($qualLines as $line) {
+            $fbLines[] = "✅ {$line}";
+        }
+    }
+
+    if ($hasInstr) {
+        $fbLines[] = '';
+        $fbLines[] = 'How to Apply:';
+        foreach ($instrLines as $line) {
+            $fbLines[] = "- {$line}";
+        }
     }
 
     $fbLines[] = '';
+    $fbLines[] = "Apply now through PHILCST Alumni Connect 💜";
     $fbLines[] = 'View and apply here: ' . $shareBaseUrl;
-    $fbLines[] = '#YourFutureStarsHere';
+    $fbLines[] = "#YourFutureStarsHere";
     $fbPostText = implode("\n", $fbLines);
 @endphp
 
-<div id="jm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-0 sm:p-4 bg-black/45 jm-share-backdrop"
+<div class="fixed inset-0 z-[10002] flex items-center justify-center p-0 sm:p-4 bg-black/45"
      x-data="{
          copied:false,
          downloading:false,
          downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
-         jobTitle: {{ json_encode($shareJobTitle) }},
-         baseUrl:  {{ json_encode($shareBaseUrl) }},
+         jobTitle:  {{ json_encode($shareJobTitle) }},
+         baseUrl:   {{ json_encode($shareBaseUrl) }},
          imageUrl:  {{ json_encode($sharePhotoUrl) }},
-         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
+         // Pre-share confirm modal state
          showDlConfirm: false,
          pendingTarget: null,
+
+         // ── Detect mobile / tablet (used to choose how to open FB/Messenger)
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
          async buildImageFile() {
              if (!this.imageUrl) return null;
@@ -4573,65 +4613,26 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              }
          },
 
-         // Pre-download the job photo as soon as the modal opens, so that when
-         // the user taps Facebook/Messenger we can save it + open the target
-         // app IN THE SAME CLICK (no awaiting a network fetch in between —
-         // that delay is what made browsers silently BLOCK the popup/app
-         // hand-off, which is why Share on Facebook/Messenger did nothing).
-         imageBlob: null,
-         async prefetchImage() {
-             if (!this.imageUrl || this.imageBlob) return;
-             try {
-                 const resp = await fetch(this.imageUrl);
-                 this.imageBlob = await resp.blob();
-             } catch (e) { this.imageBlob = null; }
-         },
-         saveBlob(blob) {
-             try {
-                 const ext = (blob.type.split('/')[1] || 'jpg').split('+')[0];
-                 const url = URL.createObjectURL(blob);
-                 const a = document.createElement('a');
-                 a.href = url; a.download = 'job-photo.' + ext;
-                 document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                 setTimeout(() => URL.revokeObjectURL(url), 4000);
-                 this.downloaded = true;
-                 setTimeout(() => this.downloaded = false, 4000);
-                 return true;
-             } catch (e) { return false; }
-         },
-
-         // Facebook / Messenger buttons: ask about the photo first (if the job
-         // has one), otherwise go straight to the target. The native share
-         // sheet has its own dedicated Share button, so these two buttons
-         // always open Facebook / Messenger themselves.
+         // ── askShare: always show the download-confirm modal first.
+         //    NOTE: the native share button is removed — we always route to
+         //    Facebook/Messenger directly in the browser so the caption can
+         //    be properly copied and pasted. ──
          askShare(target) {
-             if (this.imageUrl) {
-                 this.pendingTarget = target;
-                 this.showDlConfirm = true;
-                 return;
-             }
-             this.goTo(target);
+             this.pendingTarget = target;
+             this.showDlConfirm = true;
          },
 
-         // Download tapped: save the (pre-fetched) photo and open the target
-         // immediately — all inside this one click so nothing gets blocked.
-         confirmDownloadThenGo() {
-             const target = this.pendingTarget;
-             this.showDlConfirm = false;
-             this.pendingTarget = null;
-             if (this.imageBlob) {
-                 this.saveBlob(this.imageBlob);
-             } else {
-                 this.downloadImage();   // photo still loading — fetch in background
-             }
-             this.goTo(target);
+         async confirmDownloadThenGo() {
+             await this.downloadImage();
+             await this.proceedToTarget();
          },
 
-         proceedToTarget() {
-             const target = this.pendingTarget;
+         async proceedToTarget() {
              this.showDlConfirm = false;
+             const target = this.pendingTarget;
              this.pendingTarget = null;
-             this.goTo(target);
+             if (target === 'facebook') await this.openFacebook();
+             else if (target === 'messenger') await this.openMessenger();
          },
 
          cancelDlConfirm() {
@@ -4639,73 +4640,51 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              this.pendingTarget = null;
          },
 
-         goTo(target) {
-             if (target === 'facebook') this.openFacebook();
-             else if (target === 'messenger') this.openMessenger();
-         },
-
-         // ── Clipboard copy that starts SYNCHRONOUSLY inside the click ────
-         // (returns a promise; callers must NOT await it before opening the
-         // window/app, or the browser treats the open as a blocked popup).
-         copyCaptionNow() {
-             try {
-                 if (navigator.clipboard && window.isSecureContext) {
-                     return navigator.clipboard.writeText(this.shareText).then(() => true).catch(() => this.legacyCopy());
-                 }
-             } catch (e) {}
-             return Promise.resolve(this.legacyCopy());
-         },
-         legacyCopy() {
-             try {
-                 const ta = document.createElement('textarea');
-                 ta.value = this.shareText; ta.setAttribute('readonly','');
-                 ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
-                 document.body.appendChild(ta); ta.focus(); ta.select();
-                 const ok = document.execCommand('copy');
-                 document.body.removeChild(ta);
-                 return !!ok;
-             } catch (e) { return false; }
-         },
-
-         // ── Facebook ─────────────────────────────────────────────────────
-         // 1) start copying the caption (no await),
-         // 2) open Facebook's share dialog right away with the job's public
-         //    link (Facebook builds the link-preview card from it),
-         // 3) only then wait for the copy result to show the right toast.
-         // Facebook ignores pre-filled text, so the caption is pasted manually.
+         // ── openFacebook ─────────────────────────────────────────────────
+         // Caption is copied FIRST (while the page still has focus and the
+         // user-gesture is still active) — opening window.open() shifts focus
+         // to the popup which causes clipboard.writeText() to fail.
          async openFacebook() {
-             const copyPromise = this.copyCaptionNow();
+             const ok = await this.autoCopyCaption();
+
+             const jobUrl   = encodeURIComponent(this.baseUrl);
+             const caption  = encodeURIComponent(this.shareText);
              const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
-                             + '?u=' + encodeURIComponent(this.baseUrl)
-                             + '&hashtag=' + encodeURIComponent('#YourFutureStarsHere');
+                            + '?u='     + jobUrl
+                            + '&quote=' + caption;
              if (this.isMobile) {
                  window.open(shareUrl, '_blank', 'noopener,noreferrer');
              } else {
-                 const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-                 const win = window.open(shareUrl, 'philcst_jm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-                 if (!win) { window.open(shareUrl, '_blank'); }   // popup blocked → plain new tab
-                 else { try { win.focus(); } catch(e) {} }
+                 const w=680,h=560,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_jm_fb_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+                 else { window.open(shareUrl, '_blank'); }
              }
-             const copyOk = await copyPromise;
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button, then paste it into Facebook.'
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
              });
          },
 
-         // ── Messenger ────────────────────────────────────────────────────
+         // ── openMessenger ────────────────────────────────────────────────
          // Mobile strategy (two-tier):
          //   Android → intent:// URI so the OS either launches Messenger or
          //             offers to install it from the Play Store.
-         //   iOS     → fb-messenger:// custom scheme via a hidden <a> click;
-         //             1.5-second fallback to messenger.com/share if app is
-         //             not installed and the system didn't navigate away.
+         //   iOS     → fb-messenger:// custom scheme; a hidden <a> click
+         //             triggers the app. 1.5-second fallback to
+         //             messenger.com/share if the app isn't installed and
+         //             the system didn't navigate away.
          // Desktop  → messenger.com/share popup (proper share URL, not /new).
-         // In all cases the caption is auto-copied to the clipboard.
+         // Caption is copied FIRST — same reason as openFacebook above.
          async openMessenger() {
-             const copyPromise = this.copyCaptionNow();
+             const ok = await this.autoCopyCaption();
+
              const jobUrl  = encodeURIComponent(this.baseUrl);
              const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
 
@@ -4714,35 +4693,27 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                  const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
                  if (isAndroid) {
-                     // Android intent URI — opens Messenger directly if installed;
-                     // otherwise Android asks to find it in the Play Store.
                      window.open(
                          'intent://share/?link=' + jobUrl +
                          '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
                          '_blank'
                      );
                  } else if (isIOS) {
-                     // iOS: trigger the fb-messenger:// URL scheme via a
-                     // temporary <a> so we don't navigate the current page away.
                      const a  = document.createElement('a');
                      a.href   = 'fb-messenger://share/?link=' + jobUrl;
                      a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
                      document.body.appendChild(a);
                      a.click();
                      document.body.removeChild(a);
-                     // If Messenger wasn't installed the URL scheme silently
-                     // fails — open the web share page as a backup.
                      setTimeout(() => {
                          if (!document.hidden) {
                              window.open(webLink, '_blank', 'noopener,noreferrer');
                          }
                      }, 1500);
                  } else {
-                     // Other mobile (e.g. Windows Phone, KaiOS) → web fallback
                      window.open(webLink, '_blank', 'noopener,noreferrer');
                  }
              } else {
-                 // Desktop — centred popup pointing at the proper share URL
                  const w=700,h=580,
                        l=Math.round((screen.width -w)/2),
                        t=Math.round((screen.height-h)/2);
@@ -4750,14 +4721,13 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                      'width='+w+',height='+h+',left='+l+',top='+t+
                      ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
-                 else { window.open(webLink, '_blank'); }   // popup blocked → plain new tab
+                 else { window.open(webLink, '_blank'); }
              }
-             const copyOk = await copyPromise;
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
+                 type: ok ? 'success' : 'warning',
+                 message: ok
                      ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button, then paste it into Messenger.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
              });
          },
 
@@ -4775,7 +4745,6 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
              } catch(e) { console.warn('Copy failed', e); }
          }
      }"
-     x-init="prefetchImage()"
      x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
@@ -4787,25 +4756,20 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
                 <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Job Posting
             </h2>
-            <button wire:click="closeShareModal" type="button"
-                    wire:loading.attr="disabled" wire:target="closeShareModal"
-                    class="jm-share-close-btn" aria-label="Close">
-                <span wire:loading.remove wire:target="closeShareModal">
-                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M2 2L12 12M12 2L2 12"/>
-                    </svg>
-                </span>
-                <span wire:loading wire:target="closeShareModal">
-                    <i class="fas fa-spinner fa-spin text-xs"></i>
-                </span>
+            <button wire:click="closeShareModal" wire:loading.attr="disabled" wire:target="closeShareModal" type="button" class="jm-share-close-btn" aria-label="Close">
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeShareModal">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeShareModal"></i>
                 <span class="tip">Close</span>
             </button>
         </div>
 
-        <div id="jm-share-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+        <div id="jm-share-body" class="flex flex-col md:flex-row md:flex-1 md:min-h-0 overflow-y-auto md:overflow-hidden">
 
-            <div id="jm-share-preview-pane" class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-y-auto scroll-c">
-                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
+            {{-- LEFT: Preview --}}
+            <div id="jm-share-preview-pane" class="md:flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 md:overflow-y-auto scroll-c">
+                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($sharePhotoUrl)
                 <div class="jm-share-photo-preview">
@@ -4818,18 +4782,25 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                 </div>
                 @endif
 
-                <div class="rounded-xl border border-gray-200 flex-shrink-0 overflow-hidden">
-                    {{-- Caption capped at a fixed height and scrolls inside, so long
-                         descriptions don't stretch the whole modal. --}}
-                    <div id="jm-share-preview-text" class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:220px;">
+                <div id="jm-share-preview-text" class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
+                    <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:220px;">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
+                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
+                </div>
+
+                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                    <p class="text-xs leading-relaxed" style="color:#333333;">
+                        The caption is copied automatically — long-press → Paste it into the Facebook or Messenger window that opens.
+                    </p>
                 </div>
             </div>
 
-            <div id="jm-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
-                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
+            {{-- RIGHT: Share buttons + Share to Alumni Batch Chats --}}
+            <div id="jm-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 md:overflow-y-auto scroll-c">
+                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
                 <button type="button" @click="askShare('facebook')" class="jm-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
@@ -4917,17 +4888,25 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
                     </div>
                 </div>
 
-                <p class="text-xs text-center" style="color:#333333;">Sharing is available until the deadline passes.</p>
-            </div>
-        </div>
+                <div class="relative my-0.5">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
+                        <span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
+                    </div>
+                </div>
 
-        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
-            <div class="flex items-start gap-2.5">
-                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
-                <p class="text-xs leading-relaxed" style="color:#333333;">
-                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                    into the Facebook or Messenger window that opens.
-                </p>
+                <button type="button" @click="copyLinkFn()"
+                        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
+                    <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
+                    </span>
+                    <div class="flex-1 min-w-0 text-left">
+                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
+                    </div>
+                </button>
+
+                <p class="text-xs text-center" style="color:#333333;">Sharing is available until the deadline passes.</p>
             </div>
         </div>
     </div>
@@ -5307,5 +5286,3 @@ document.addEventListener('livewire:init', function () {
     });
 });
 </script>
-
-</div>

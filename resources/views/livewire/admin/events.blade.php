@@ -1703,7 +1703,7 @@ select.filter-input:hover { cursor: default !important; }
         align-items: stretch !important;
         justify-content: stretch !important;
     }
-    .adm-share-backdrop .adm-share-sheet {
+    .adm-share-backdrop .adm-share-modal-wrapper {
         border-radius: 0 !important;
         max-width: 100% !important;
         width: 100% !important;
