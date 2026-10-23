@@ -1665,14 +1665,9 @@ select.filter-input:hover { cursor: default !important; }
 @if($showShareModal)
 @php
     $isCompleted    = $shareEventStatus === 'COMPLETED';
-    $shTimeDisplay  = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
 
     $fbLines = [];
     $fbLines[] = $isCompleted ? "EVENT HIGHLIGHTS: " . strtoupper($shareEventTitle) : strtoupper($shareEventTitle);
-    $fbLines[] = '';
-    $fbLines[] = ($isCompleted ? 'Held on ' : 'Happening on ') . $shareEventDate . ($shTimeDisplay ? " · {$shTimeDisplay}" : '');
-    if ($shareEventVenue)  $fbLines[] = "Venue: {$shareEventVenue}" . ($shareEventVenueAddr ? ", {$shareEventVenueAddr}" : '');
-    if ($shareEventTarget) $fbLines[] = ($isCompleted ? 'Attendees: ' : 'Open for: ') . $shareEventTarget;
 
     if (trim($shareEventDescription) !== '') {
         $fbLines[] = '';
@@ -1682,6 +1677,7 @@ select.filter-input:hover { cursor: default !important; }
 
     $fbLines[] = '';
     $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
+    $fbLines[] = 'View details here: https://philcstalumni-production.up.railway.app/';
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp
@@ -1776,14 +1772,13 @@ select.filter-input:hover { cursor: default !important; }
 
 <div id="adm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 adm-share-backdrop"
      x-data="{
-         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
-         sharingTo: null,
+         copied:false,
          downloading:false,
          downloaded:false,
-         shareText: {{ json_encode($fbPostText) }},
-         eventTitle: {{ json_encode($shareEventTitle) }},
-         baseUrl:   {{ json_encode($shareEventId ? $this->eventDetailUrl($shareEventId) : $this->eventsBaseUrl()) }},
-         imageUrl:  {{ json_encode($shareEventPhotoUrl) }},
+         shareText: {{ json_encode($fbPostText, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         eventTitle: {{ json_encode($shareEventTitle, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         baseUrl:   {{ json_encode($shareEventId ? $this->eventDetailUrl($shareEventId) : $this->eventsBaseUrl(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
+         imageUrl:  {{ json_encode($shareEventPhotoUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_QUOT) }},
 
          // ── Detect mobile / tablet (used to choose how to open FB/Messenger)
          //    — same device-aware routing as job-opportunities.blade.php, so
@@ -1843,36 +1838,22 @@ select.filter-input:hover { cursor: default !important; }
              }
          },
 
-         async nativeShare() {
-             this.sharingTo = 'native';
-             try {
-                 const shareData = { title: this.eventTitle, text: this.shareText };
-                 const file = await this.buildImageFile();
-                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-                     shareData.files = [file];
-                 }
-                 await navigator.share(shareData);
-             } catch (e) { /* cancelled by user — nothing to do */ }
-             this.sharingTo = null;
-         },
-
          askShare(target) {
-             if (this.nativeShareSupported) { this.nativeShare(); return; }
              this.pendingTarget = target;
              this.showDlConfirm = true;
          },
 
          async confirmDownloadThenGo() {
              await this.downloadImage();
-             this.proceedToTarget();
+             await this.proceedToTarget();
          },
 
-         proceedToTarget() {
+         async proceedToTarget() {
              this.showDlConfirm = false;
              const target = this.pendingTarget;
              this.pendingTarget = null;
-             if (target === 'facebook') this.openFacebook();
-             else if (target === 'messenger') this.openMessenger();
+             if (target === 'facebook') await this.openFacebook();
+             else if (target === 'messenger') await this.openMessenger();
          },
 
          cancelDlConfirm() {
@@ -1889,33 +1870,34 @@ select.filter-input:hover { cursor: default !important; }
          // Mirrors job-opportunities.blade.php's openFacebook() exactly, so
          // sharing behaves the same across Jobs, Events, and both admin/alumni.
          async openFacebook() {
-             this.sharingTo = 'facebook';
-             const copyOk = await this.autoCopyCaption();
+             const ok = await this.autoCopyCaption();
 
-             const eventUrl = encodeURIComponent(this.baseUrl);
+             const evUrl    = encodeURIComponent(this.baseUrl);
              const caption  = encodeURIComponent(this.shareText);
              const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
-                            + '?u='     + eventUrl
+                            + '?u='     + evUrl
                             + '&quote=' + caption;
 
              if (this.isMobile) {
                  // _blank in mobile browser → system opens FB app (if installed)
-                 // via Android intent / iOS universal link; otherwise falls
-                 // back to mobile web FB.
+                 // via Android intent / iOS universal link; falls back to mobile
+                 // web FB otherwise.
                  window.open(shareUrl, '_blank', 'noopener,noreferrer');
              } else {
-                 const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-                 const win = window.open(shareUrl, 'philcst_adm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 const w=680,h=560,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_adm_fb_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (long-press/Ctrl+V → Paste) into the Facebook post box that just opened.'
-                     : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Facebook.'
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
              });
-             this.sharingTo = null;
          },
 
          // ── openMessenger ────────────────────────────────────────────────
@@ -1929,50 +1911,73 @@ select.filter-input:hover { cursor: default !important; }
          // Caption is copied FIRST — same reason as openFacebook above.
          // Mirrors job-opportunities.blade.php's openMessenger() exactly.
          async openMessenger() {
-             this.sharingTo = 'messenger';
-             const copyOk = await this.autoCopyCaption();
+             const ok = await this.autoCopyCaption();
 
-             const eventUrl = encodeURIComponent(this.baseUrl);
-             const webLink  = 'https://www.messenger.com/share?link=' + eventUrl;
+             const evUrl   = encodeURIComponent(this.baseUrl);
+             const webLink = 'https://www.messenger.com/share?link=' + evUrl;
 
              if (this.isMobile) {
                  const isAndroid = /Android/i.test(navigator.userAgent);
                  const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
                  if (isAndroid) {
+                     // Android intent URI — opens Messenger directly if installed;
+                     // otherwise Android asks to find it in the Play Store.
                      window.open(
-                         'intent://share/?link=' + eventUrl +
+                         'intent://share/?link=' + evUrl +
                          '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
                          '_blank'
                      );
                  } else if (isIOS) {
+                     // iOS: trigger the fb-messenger:// URL scheme via a
+                     // temporary <a> so we don't navigate the current page away.
                      const a  = document.createElement('a');
-                     a.href   = 'fb-messenger://share/?link=' + eventUrl;
+                     a.href   = 'fb-messenger://share/?link=' + evUrl;
                      a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
                      document.body.appendChild(a);
                      a.click();
                      document.body.removeChild(a);
+                     // If Messenger wasn't installed the URL scheme silently
+                     // fails — open the web share page as a backup.
                      setTimeout(() => {
                          if (!document.hidden) {
                              window.open(webLink, '_blank', 'noopener,noreferrer');
                          }
                      }, 1500);
                  } else {
+                     // Other mobile → web fallback
                      window.open(webLink, '_blank', 'noopener,noreferrer');
                  }
              } else {
-                 const w=700,h=580,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-                 const win = window.open(webLink, 'philcst_adm_messenger_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 // Desktop — centred popup pointing at the proper share URL
+                 const w=700,h=580,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(webLink, 'philcst_adm_messenger_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
                  if (win) { try { win.focus(); } catch(e) {} }
              }
-
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Long-press/Ctrl+V → Paste in Messenger to add your message.'
-                     : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Messenger.'
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
              });
-             this.sharingTo = null;
+         },
+
+         async copyLinkFn() {
+             try {
+                 if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(this.shareText); }
+                 else {
+                     const ta = document.createElement('textarea');
+                     ta.value = this.shareText; ta.setAttribute('readonly','');
+                     ta.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(ta); ta.focus(); ta.select();
+                     document.execCommand('copy'); document.body.removeChild(ta);
+                 }
+                 this.copied = true; setTimeout(() => this.copied = false, 2500);
+             } catch(e) { console.warn('Copy failed', e); }
          }
      }"
      x-transition:enter="transition ease-out duration-150"
@@ -2025,31 +2030,38 @@ select.filter-input:hover { cursor: default !important; }
             <div class="w-full md:w-[260px] flex-shrink-0 px-5 py-3 flex flex-col gap-2 overflow-y-auto adm-scroll">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-[#111111]">Share via</p>
 
-                <template x-if="nativeShareSupported">
-                    <button type="button" @click="nativeShare()" class="adm-share-option-btn" style="background:#7a3f91;">
-                        <span class="icon-wrap">
-                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm"></i>
-                        </span>
-                        <span class="label-text text-xs font-semibold">Share</span>
-                    </button>
-                </template>
-
-                <button type="button" @click="askShare('facebook')" :disabled="sharingTo==='facebook'" class="adm-share-option-btn" style="background:#1877F2;">
+                <button type="button" @click="askShare('facebook')" class="adm-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
-                        <i class="fas fa-spinner fa-spin text-[#1877F2] text-sm" x-show="sharingTo==='facebook'" x-cloak></i>
-                        <svg x-show="sharingTo!=='facebook'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <span class="label-text text-xs font-semibold" x-text="sharingTo==='facebook' ? 'Opening…' : 'Share on Facebook'"></span>
+                    <span class="label-text text-xs font-semibold">Share on Facebook</span>
                 </button>
 
-                <button type="button" @click="askShare('messenger')" :disabled="sharingTo==='messenger'" class="adm-share-option-btn" style="background:#0084FF;">
+                <button type="button" @click="askShare('messenger')" class="adm-share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
-                        <i class="fas fa-spinner fa-spin text-[#0084FF] text-sm" x-show="sharingTo==='messenger'" x-cloak></i>
-                        <svg x-show="sharingTo!=='messenger'" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
                             <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
                         </svg>
                     </span>
-                    <span class="label-text text-xs font-semibold" x-text="sharingTo==='messenger' ? 'Opening…' : 'Send via Messenger'"></span>
+                    <span class="label-text text-xs font-semibold">Send via Messenger</span>
+                </button>
+
+                <div class="relative my-0.5">
+                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
+                    <div class="relative flex justify-center">
+                        <span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white text-[#111111]">or copy caption</span>
+                    </div>
+                </div>
+
+                <button type="button" @click="copyLinkFn()"
+                        class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white text-[#111111]">
+                    <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                        <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#111111;'"></i>
+                    </span>
+                    <div class="flex-1 text-left min-w-0">
+                        <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#111111;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
+                    </div>
                 </button>
 
                 <p class="text-xs text-center text-[#666666]">Sharing highlights is available even after the event.</p>
@@ -2060,8 +2072,7 @@ select.filter-input:hover { cursor: default !important; }
             <div class="flex items-start gap-2.5">
                 <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5 text-[#666666]"></i>
                 <p class="text-xs leading-relaxed text-[#666666]">
-                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                    into the Facebook or Messenger window that opens.
+                    The caption is copied automatically — long-press → Paste it into the Facebook or Messenger window that opens.
                 </p>
             </div>
         </div>

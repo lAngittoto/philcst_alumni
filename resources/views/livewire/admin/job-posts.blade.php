@@ -1950,7 +1950,6 @@ select.filter-input option {
 
 <div id="admjob-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 adm-share-backdrop"
      x-data="{
-         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
          sharingTo: null,
          shareText: {{ json_encode($sjPostText) }},
          jobTitle:  {{ json_encode($shareJobTitle) }},
@@ -1983,16 +1982,6 @@ select.filter-input option {
              } catch (e) { return false; }
          },
 
-         async buildImageFile() {
-             if (!this.imageUrl) return null;
-             try {
-                 const resp = await fetch(this.imageUrl);
-                 const blob = await resp.blob();
-                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
-                 return new File([blob], 'job-photo.' + ext, { type: blob.type });
-             } catch (e) { return null; }
-         },
-
          async downloadImage() {
              if (!this.imageUrl) return false;
              this.downloading = true;
@@ -2016,19 +2005,6 @@ select.filter-input option {
                  this.downloading = false;
                  return false;
              }
-         },
-
-         async nativeShare() {
-             this.sharingTo = 'native';
-             try {
-                 const shareData = { title: this.jobTitle, text: this.shareText };
-                 const file = await this.buildImageFile();
-                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-                     shareData.files = [file];
-                 }
-                 await navigator.share(shareData);
-             } catch (e) { /* cancelled by user — nothing to do */ }
-             this.sharingTo = null;
          },
 
          // Facebook/Messenger don't accept a file via window.open, so —
@@ -2203,16 +2179,6 @@ select.filter-input option {
 
             <div class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto adm-scroll">
                 <p class="text-[10px] font-bold uppercase tracking-widest text-[#111111]">Share via</p>
-
-                <template x-if="nativeShareSupported">
-                    <button type="button" @click="nativeShare()" :disabled="sharingTo==='native'" class="adm-share-option-btn" style="background:#7a3f91;">
-                        <span class="icon-wrap">
-                            <i class="fas fa-spinner fa-spin text-[#7a3f91] text-sm" x-show="sharingTo==='native'" x-cloak></i>
-                            <i class="fas fa-arrow-up-from-bracket text-[#7a3f91] text-sm" x-show="sharingTo!=='native'"></i>
-                        </span>
-                        <span class="label-text text-xs font-semibold">Share</span>
-                    </button>
-                </template>
 
                 <button type="button" @click="askShare('facebook')" :disabled="sharingTo==='facebook'" class="adm-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">

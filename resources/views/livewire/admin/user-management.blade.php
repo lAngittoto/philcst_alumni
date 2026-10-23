@@ -1912,9 +1912,17 @@ select.mu-filter-input.mu-active {
 /* ── Director / Registrar View Details: 2-column layout so the whole profile
    fits on one screen on desktop (stacks + scrolls only on small screens) ── */
 @media (min-width: 1024px) {
-    .mu-pro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; align-items: start; }
+    .mu-pro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; align-items: stretch; }
     .mu-pro-grid > * { margin-top: 0 !important; }
     .mu-pro-grid > .mu-pro-span { grid-column: 1 / -1; }
+    /* First row: profile summary card (left) + Director/Registrar
+       Information card (right) — stretched to equal height so the
+       4 info tiles on the right grow to fill the same vertical space
+       as the taller summary card on the left, instead of sitting
+       short and cramped at the top. */
+    .mu-pro-grid > .mu-pro-summary,
+    .mu-pro-grid > .mu-pro-infocard { height: 100%; display: flex; flex-direction: column; }
+    .mu-pro-grid > .mu-pro-infocard .mu-pro-infogrid { flex: 1; }
 }
 
 /* ── Role badge — status style ── */
@@ -2575,7 +2583,7 @@ select.mu-filter-input.mu-active {
             {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
+            <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
                 @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0"
                      x-data="{ dragging: false }"
@@ -2667,7 +2675,7 @@ select.mu-filter-input.mu-active {
                         </div>
                     @endif
 
-                    <p class="text-lg mt-1 font-medium" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
+                    <p class="text-lg mt-1 font-medium break-all leading-snug" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
 
                     <p class="text-base font-semibold mt-1" style="color:#333333;">
                         <i class="fa-regular fa-calendar mr-1"></i>
@@ -3052,11 +3060,11 @@ select.mu-filter-input.mu-active {
 
             {{-- DIRECTOR INFO --}}
             @if($isDir)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+            <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Director Information</p>
                 </div>
-                <div class="p-3 grid grid-cols-2 gap-2">
+                <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
                     @foreach([
                         ['First Name',  $vd['first_name']  ?? '—'],
                         ['Middle Name', $vd['middle_name'] ?? '—'],
@@ -3064,7 +3072,7 @@ select.mu-filter-input.mu-active {
                         ['Suffix',      $vd['suffix']      ?? '—'],
                         ['Username',  $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
                     ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0] {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
@@ -3075,11 +3083,11 @@ select.mu-filter-input.mu-active {
 
             {{-- REGISTRAR INFO — same card as Director Information; "—" when a part was never saved --}}
             @if($isReg)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+            <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Registrar Information</p>
                 </div>
-                <div class="p-3 grid grid-cols-2 gap-2">
+                <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
                     @foreach([
                         ['First Name',  $vd['reg_first_name']  ?? ''],
                         ['Middle Name', $vd['reg_middle_name'] ?? ''],
@@ -3087,7 +3095,7 @@ select.mu-filter-input.mu-active {
                         ['Suffix',      $vd['reg_suffix']      ?? ''],
                         ['Username',    $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
                     ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0] {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
@@ -3653,9 +3661,10 @@ select.mu-filter-input.mu-active {
             <div class="space-y-4" :class="submitting ? 'pointer-events-none select-none' : ''" style="transition: opacity .2s ease;" :style="submitting ? 'opacity:0.4' : 'opacity:1'"
                  wire:loading.class="opacity-60 pointer-events-none" wire:target="createDirector">
 
-                <div class="rounded-xl border overflow-visible" style="border-color:#E5E5E5;">
-                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
-                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Personal Information</p>
+                <div class="rounded-2xl border overflow-visible bg-white" style="border-color:#E8E0F0;box-shadow:0 1px 3px rgba(122,63,145,.06);">
+                    <div class="px-5 py-3.5 border-b flex items-center gap-2" style="background:#FAF7FC;border-color:#F0ECF5;">
+                        <i class="fas fa-id-card text-xs" style="color:#7A3F91;"></i>
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Personal Information</p>
                     </div>
                     <div class="p-5 flex flex-col sm:flex-row gap-5">
                         <div class="flex flex-col items-center gap-2 shrink-0 mx-auto sm:mx-0"
@@ -3664,14 +3673,14 @@ select.mu-filter-input.mu-active {
                              @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
                             <div class="relative w-32 h-32 group">
                                 <label for="dPhotoInput"
-                                       :class="dragging ? 'border-[#7A3F91] bg-[#7A3F91]/5' : 'border-[#E8E0F0] bg-[#FAFAFA] hover:border-[#c4b5d4]'"
-                                       class="w-32 h-32 rounded-xl border-2 cursor-pointer transition-all flex flex-col items-center justify-center gap-1 text-center px-2 overflow-hidden">
+                                       :class="dragging ? 'border-[#7A3F91] ring-4 ring-[#7A3F91]/10' : 'border-[#E8E0F0] hover:border-[#c4b5d4]'"
+                                       class="block w-full h-full rounded-2xl border-2 cursor-pointer transition-all overflow-hidden bg-[#FAFAFA] shadow-sm">
                                     @if($vPhoto)
-                                        <img src="{{ $vPhoto->temporaryUrl() }}" class="w-full h-full object-cover" alt="Preview">
+                                        <img src="{{ $vPhoto->temporaryUrl() }}" class="block w-full h-full object-cover" alt="Preview">
                                     @else
-                                        <img src="{{ asset('storage/alumni-photos/default.png') }}" class="w-full h-full object-cover" alt="Default profile photo">
+                                        <img src="{{ asset('storage/alumni-photos/default.png') }}" class="block w-full h-full object-cover" alt="Default profile photo">
                                     @endif
-                                    <div class="absolute inset-0 rounded-xl bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 pointer-events-none">
+                                    <div class="absolute inset-0 rounded-2xl bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 pointer-events-none">
                                         <i class="fas fa-camera text-white text-base"></i>
                                         <span class="text-white text-xs font-semibold">Click to upload</span>
                                     </div>
@@ -3679,7 +3688,7 @@ select.mu-filter-input.mu-active {
                                 </label>
                                 @if($vPhoto)
                                 <button type="button" @click.prevent="dPhotoFull = true"
-                                        class="absolute bottom-1 right-1 w-7 h-7 rounded-lg bg-black/60 hover:bg-black/80 flex items-center justify-center transition text-white">
+                                        class="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-lg bg-black/60 hover:bg-black/80 flex items-center justify-center transition text-white shadow">
                                     <i class="fas fa-expand text-xs"></i>
                                 </button>
                                 @endif
@@ -3687,7 +3696,7 @@ select.mu-filter-input.mu-active {
                             <div wire:loading wire:target="vPhoto" class="flex items-center gap-1.5 text-xs font-semibold" style="color:#000000;">
                                 <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
                             </div>
-                            <span class="text-xs font-medium text-center" style="color:#6b6b6b;">JPG, PNG, WebP · 5 MB<br>Optional — leave blank for default</span>
+                            <span class="text-xs font-medium text-center leading-relaxed" style="color:#8a8a8a;">JPG, PNG, WebP · 5 MB<br>Leave blank for default</span>
                         </div>
 
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3714,7 +3723,7 @@ select.mu-filter-input.mu-active {
                                 @endif
                             </div>
                             <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name</p>
                                 <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
@@ -3733,7 +3742,7 @@ select.mu-filter-input.mu-active {
                                     { v: 'V',     l: 'V — the Fifth' },
                                     { v: 'VI',    l: 'VI — the Sixth' },
                                 ] }" @click.away="open = false">
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix</p>
                                 <div class="mu-sfx-field">
                                     <button type="button" @click="open = !open"
                                             class="mu-sfx-trigger w-full mu-smooth-input text-base flex items-center justify-between"
@@ -3773,9 +3782,10 @@ select.mu-filter-input.mu-active {
                 </div>
 
                 {{-- ACCOUNT CREDENTIALS card --}}
-                <div class="rounded-xl border overflow-hidden" style="border-color:#E5E5E5;">
-                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
-                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Account Credentials</p>
+                <div class="rounded-2xl border overflow-hidden bg-white" style="border-color:#E8E0F0;box-shadow:0 1px 3px rgba(122,63,145,.06);">
+                    <div class="px-5 py-3.5 border-b flex items-center gap-2" style="background:#FAF7FC;border-color:#F0ECF5;">
+                        <i class="fas fa-key text-xs" style="color:#7A3F91;"></i>
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Account Credentials</p>
                     </div>
                     <div class="p-5">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3821,9 +3831,9 @@ select.mu-filter-input.mu-active {
                     <button type="button"
                             @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }"
                             :disabled="submitting || closing"
-                            :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
-                            style="color:#000000;border-color:#E5E5E5;">
+                            :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-[#FAF7FC] hover:border-[#c4b5d4]'"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border-2 transition flex items-center justify-center gap-2"
+                            style="color:#333333;border-color:#E8E0F0;">
                         <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-xs"></i>
 <span>Cancel</span>
                     </button>
@@ -3839,7 +3849,7 @@ select.mu-filter-input.mu-active {
                             title="{{ $lockDirector ? 'There is already an active Director. Deactivate them first.' : '' }}"
                             :disabled="submitting || {{ $lockDirector ? 'true' : 'false' }}"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn {{ $lockDirector ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90' }}"
-                            style="background:{{ $lockDirector ? '#9ca3af' : '#7A3F91' }};">
+                            style="background:{{ $lockDirector ? '#9ca3af' : 'linear-gradient(135deg,#7A3F91,#8f4ba6)' }};box-shadow:{{ $lockDirector ? 'none' : '0 2px 8px rgba(122,63,145,.25)' }};">
                         <span class="flex items-center gap-2">
                             <i class="fas {{ $lockDirector ? 'fa-lock' : 'fa-user-tie' }} text-sm"></i> Create Director
                         </span>
@@ -3958,9 +3968,10 @@ select.mu-filter-input.mu-active {
             <div class="space-y-4" :class="submitting ? 'pointer-events-none select-none' : ''" style="transition: opacity .2s ease;" :style="submitting ? 'opacity:0.4' : 'opacity:1'"
                  wire:loading.class="opacity-60 pointer-events-none" wire:target="createRegistrar">
 
-                <div class="rounded-xl border overflow-visible" style="border-color:#E5E5E5;">
-                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
-                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Personal Information</p>
+                <div class="rounded-2xl border overflow-visible bg-white" style="border-color:#E8E0F0;box-shadow:0 1px 3px rgba(122,63,145,.06);">
+                    <div class="px-5 py-3.5 border-b flex items-center gap-2" style="background:#FAF7FC;border-color:#F0ECF5;">
+                        <i class="fas fa-id-card text-xs" style="color:#7A3F91;"></i>
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Personal Information</p>
                     </div>
                     <div class="p-5 flex flex-col sm:flex-row gap-5">
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3987,7 +3998,7 @@ select.mu-filter-input.mu-active {
                                 @endif
                             </div>
                             <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name</p>
                                 <input wire:model.defer="rMn" type="text" placeholder="e.g. Santos"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
@@ -4006,7 +4017,7 @@ select.mu-filter-input.mu-active {
                                     { v: 'V',     l: 'V — the Fifth' },
                                     { v: 'VI',    l: 'VI — the Sixth' },
                                 ] }" @click.away="open = false">
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix <span class="font-normal" style="color:#6b6b6b;">(optional)</span></p>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix</p>
                                 <div class="mu-sfx-field">
                                     <button type="button" @click="open = !open"
                                             class="mu-sfx-trigger w-full mu-smooth-input text-base flex items-center justify-between"
@@ -4046,9 +4057,10 @@ select.mu-filter-input.mu-active {
                 </div>
 
                 {{-- ACCOUNT CREDENTIALS card --}}
-                <div class="rounded-xl border overflow-hidden" style="border-color:#E5E5E5;">
-                    <div class="px-5 py-3 border-b" style="background:#FAFAFA;border-color:#E5E5E5;">
-                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#000000;">Account Credentials</p>
+                <div class="rounded-2xl border overflow-hidden bg-white" style="border-color:#E8E0F0;box-shadow:0 1px 3px rgba(122,63,145,.06);">
+                    <div class="px-5 py-3.5 border-b flex items-center gap-2" style="background:#FAF7FC;border-color:#F0ECF5;">
+                        <i class="fas fa-key text-xs" style="color:#7A3F91;"></i>
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Account Credentials</p>
                     </div>
                     <div class="p-5">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -4094,9 +4106,9 @@ select.mu-filter-input.mu-active {
                     <button type="button"
                             @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }"
                             :disabled="submitting || closing"
-                            :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-black/5'"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border transition flex items-center justify-center gap-2"
-                            style="color:#000000;border-color:#E5E5E5;">
+                            :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-[#FAF7FC] hover:border-[#c4b5d4]'"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border-2 transition flex items-center justify-center gap-2"
+                            style="color:#333333;border-color:#E8E0F0;">
                         <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-xs"></i>
 <span>Cancel</span>
                     </button>
@@ -4112,7 +4124,7 @@ select.mu-filter-input.mu-active {
                             title="{{ $lockRegistrar ? 'There is already an active Registrar. Deactivate them first.' : '' }}"
                             :disabled="submitting || {{ $lockRegistrar ? 'true' : 'false' }}"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn {{ $lockRegistrar ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90' }}"
-                            style="background:{{ $lockRegistrar ? '#9ca3af' : '#7A3F91' }};">
+                            style="background:{{ $lockRegistrar ? '#9ca3af' : 'linear-gradient(135deg,#7A3F91,#8f4ba6)' }};box-shadow:{{ $lockRegistrar ? 'none' : '0 2px 8px rgba(122,63,145,.25)' }};">
                         <span class="flex items-center gap-2">
                             <i class="fas {{ $lockRegistrar ? 'fa-lock' : 'fa-user-clock' }} text-sm"></i> Create Registrar
                         </span>

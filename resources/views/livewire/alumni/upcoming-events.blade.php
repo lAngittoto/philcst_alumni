@@ -483,7 +483,27 @@ new class extends Component {
 
     public function eventsBaseUrl(): string
     {
-        $base = rtrim(config('app.url'), '/');
+        // Build from the real incoming request and always force https for
+        // any non-local host — config('app.url') can still report plain
+        // "http" for a real production host (Railway terminates TLS at the
+        // proxy, so the app itself never sees the "https" the visitor's
+        // browser actually used). This link is now printed directly inside
+        // the shared Facebook/Messenger caption, so it must always come out
+        // as a real, clickable https:// link.
+        $req     = request();
+        $host    = $req->getHost();
+        $isLocal = in_array($host, ['localhost', '127.0.0.1', '0.0.0.0'], true)
+            || str_ends_with($host, '.test') || str_ends_with($host, '.local');
+
+        if ($isLocal) {
+            $base = rtrim((string) config('app.url'), '/');
+            if ($base === '') {
+                $base = $req->getScheme() . '://' . $req->getHttpHost();
+            }
+        } else {
+            $base = 'https://' . $req->getHttpHost();
+        }
+
         try { $path = route('upcoming.events', [], false); } catch (\Throwable) { $path = '/upcoming/events'; }
         return $base . $path;
     }
@@ -1902,6 +1922,7 @@ select.filter-input:hover { cursor: default !important; }
 
     $fbLines[] = '';
     $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
+    $fbLines[] = 'View details here: https://philcstalumni-production.up.railway.app/';
     $fbLines[] = '#YourFutureStarsHere';
     $fbPostText = implode("\n", $fbLines);
 @endphp
