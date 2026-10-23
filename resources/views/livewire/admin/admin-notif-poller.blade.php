@@ -86,10 +86,17 @@ new class extends Component {
     // ─────────────────────────────────────────────────────────────────────
     // poll() — lightweight backup tick via wire:poll. Does not write
     // anything; just tells the client-side store to refresh. This exists
-    // as a second layer on top of the 1.5s JS setInterval poll already in
-    // the sidebar, in case the tab was backgrounded/throttled and the JS
-    // timer got delayed by the browser — Livewire's own poll mechanism
-    // tends to be more reliable across tab-visibility changes.
+    // as a second layer on top of the JS setInterval poll already in the
+    // sidebar, in case the tab was backgrounded/throttled and the JS
+    // timer got delayed by the browser.
+    //
+    // This must stay slower than the sidebar's own JS poll interval and
+    // must skip firing while that JS timer is already running — otherwise
+    // both polls race each other, doubling the /admin/notifications
+    // requests and causing the lag/jank. The _pollTimer flag (set by the
+    // store's own setInterval, same flag _fetch's caller checks in
+    // mount() above) is how we detect "the JS poll is already alive," so
+    // this backup only ever fires when that primary timer isn't running.
     // ─────────────────────────────────────────────────────────────────────
     public function poll(): void
     {
@@ -99,7 +106,7 @@ new class extends Component {
             (function () {
                 if (window.__safeAdminNotifsStore) {
                     var s = window.__safeAdminNotifsStore();
-                    if (s) s._fetch();
+                    if (s && !s._pollTimer) s._fetch();
                 }
             })();
         ");
@@ -109,5 +116,11 @@ new class extends Component {
 
 {{-- Invisible — pure background poller, no UI. wire:poll here is a
      backup nudge only; the real notification data flow is the JS
-     _fetch() calls against /admin/notifications. --}}
-<div wire:poll.3000ms="poll" class="hidden" aria-hidden="true"></div>
+     _fetch() calls against /admin/notifications.
+
+     Interval intentionally slower (15s) than the sidebar's own JS
+     setInterval poll — this is a fallback for when that JS timer stalls
+     (backgrounded tab, etc.), not a second primary poller. Running it
+     faster than the JS timer made both fire near-simultaneously and
+     double up every notif request, which is what was causing the lag. --}}
+<div wire:poll.15000ms="poll" class="hidden" aria-hidden="true"></div>
