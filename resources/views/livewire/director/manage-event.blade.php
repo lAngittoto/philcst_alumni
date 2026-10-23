@@ -1328,6 +1328,13 @@ new class extends Component {
         return $base . $path;
     }
 
+    // Direct link to a specific event — used by the Facebook/Messenger
+    // share targets so the link opens straight into that event.
+    public function eventDetailUrl(int $id): string
+    {
+        return $this->eventsBaseUrl() . '?event=' . $id;
+    }
+
     public function postToBatchChat(): void
     {
         abort_unless(auth()->user()->role === 'director', 403);
@@ -2941,27 +2948,44 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
 {{-- ══ SHARE MODAL ══ --}}
 @if($showShareModal)
 @php
+    // ── Same caption + link logic as Job Opportunities (alumni side) ──
+    $seBaseUrl   = $this->eventDetailUrl($shareEventId);
     $isCompleted = $shareEventStatus === 'COMPLETED';
 
-    $fbLines   = [];
-    $fbLines[] = $isCompleted ? "EVENT HIGHLIGHTS: " . strtoupper($shareEventTitle) : strtoupper($shareEventTitle);
+    $seLines   = [];
+    $seLines[] = $isCompleted ? "EVENT HIGHLIGHTS: " . strtoupper($shareEventTitle) : "JOIN US: " . strtoupper($shareEventTitle);
+
+    $seMetaBits = [];
+    if ($shareEventDate) {
+        $seMetaBits[] = $shareEventDate;
+    }
+    if ($shareEventTime) {
+        $seMetaBits[] = $shareEventTime . ($shareEventEndTime ? ' – ' . $shareEventEndTime : '');
+    }
+    if ($shareEventVenue) {
+        $seMetaBits[] = $shareEventVenue . ($shareEventVenueAddr ? ', ' . $shareEventVenueAddr : '');
+    }
+    if ($seMetaBits) {
+        $seLines[] = implode(' • ', $seMetaBits);
+    }
 
     if (trim($shareEventDescription) !== '') {
-        $fbLines[] = '';
-        $fbLines[] = 'About This Event:';
-        $fbLines[] = trim($shareEventDescription);
+        $seLines[] = '';
+        $seLines[] = trim($shareEventDescription);
     }
 
     if (trim($shareEventNotes) !== '') {
-        $fbLines[] = '';
-        $fbLines[] = 'Additional Notes:';
-        $fbLines[] = trim($shareEventNotes);
+        $seLines[] = '';
+        $seLines[] = 'Additional Notes:';
+        $seLines[] = trim($shareEventNotes);
     }
 
-    $fbLines[] = '';
-    $fbLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
-    $fbLines[] = '#YourFutureStarsHere';
-    $fbPostText = implode("\n", $fbLines);
+    $seLines[] = '';
+    $seLines[] = $isCompleted
+        ? "Relive the moments through PHILCST Alumni Connect 💜"
+        : "Join us through PHILCST Alumni Connect 💜";
+    $seLines[] = "#YourFutureStarsHere";
+    $sePostText = implode("\n", $seLines);
 @endphp
 
 <style>
@@ -2972,15 +2996,14 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
 .dir-share-sheet { animation: dirPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
 .dir-share-modal-wrapper {
-    height: 88vh;
-    max-height: 700px;
-    min-height: 420px;
+    max-height: 90vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
 }
 
-/* ── Share modal: full screen on mobile, centered card on desktop ── */
+/* Mobile = full-screen sheet, ONE column that scrolls top-to-bottom as a
+   whole (Post Preview first, then Share Via) — same as Job Opportunities. */
 @media (max-width: 767px) {
     .dir-share-backdrop {
         padding: 0 !important;
@@ -2989,18 +3012,12 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
     }
     .dir-share-backdrop .dir-share-sheet {
         border-radius: 0 !important;
+        border-width: 0 !important;
         max-width: 100% !important;
         width: 100% !important;
         height: 100vh !important;
         max-height: 100vh !important;
     }
-
-    /* The desktop layout splits Post Preview and Share Via into two
-       independently-scrolling flex panes fighting over the same fixed
-       modal height — on a short mobile viewport that squashes the
-       preview to almost nothing. Mobile instead becomes ONE column that
-       scrolls top-to-bottom as a whole: Post Preview first (sized by its
-       own content, not forced to flex:1), then Share Via below it. */
     #dir-share-body {
         flex-direction: column !important;
         overflow-y: auto !important;
@@ -3022,6 +3039,8 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
         overflow: visible !important;
         width: 100% !important;
     }
+    /* touch screens: no hover tooltips */
+    .dir-share-close-btn .tip { display: none !important; }
 }
 
 .dir-share-close-btn {
@@ -3053,11 +3072,11 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
     width: 100%; display: flex; align-items: center; gap: 0.75rem;
     padding: 0.75rem 1rem; border-radius: 0.75rem;
     font-weight: 600; font-size: 0.8125rem; color: #fff;
-    cursor: pointer; transition: filter .12s ease-out, transform .1s ease-out; border: none;
-    will-change: transform;
+    cursor: pointer; transition: filter .15s, transform .1s; border: none;
 }
 .dir-share-option-btn:hover  { filter: brightness(0.94); }
-.dir-share-option-btn:active { transform: scale(.97); transition-duration: .05s; }
+.dir-share-option-btn:active { transform: scale(.98); }
+.dir-share-option-btn:disabled { opacity: .6; cursor: not-allowed; }
 .dir-share-option-btn .icon-wrap {
     width: 2rem; height: 2rem; border-radius: 0.5rem;
     background: rgba(255,255,255,.92);
@@ -3090,6 +3109,7 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
     pointer-events: none;
 }
 
+/* PRE-SHARE "Download the event photo?" confirm modal */
 .dir-dl-confirm-icon {
     width: 3rem; height: 3rem; border-radius: 0.9rem;
     background: #f5eef9; color: #7a3f91;
@@ -3102,6 +3122,7 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
     transition: filter .15s, transform .1s; border: none;
 }
 .dir-dl-confirm-btn:active { transform: scale(.97); }
+.dir-dl-confirm-btn:disabled { opacity: .6; cursor: wait; }
 .dir-dl-confirm-btn.primary { background: #7a3f91; color: #fff; }
 .dir-dl-confirm-btn.primary:hover { filter: brightness(0.95); }
 .dir-dl-confirm-btn.secondary { background: #f3f4f6; color: #333333; border: 1px solid #e5e7eb; }
@@ -3111,25 +3132,19 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
 <div id="dir-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 dir-share-backdrop"
      x-data="{
          copied:false,
-         nativeShareSupported: (typeof navigator !== 'undefined' && !!navigator.share),
          downloading:false,
          downloaded:false,
-         shareText: {{ json_encode($fbPostText) }},
-         eventTitle: {{ json_encode($shareEventTitle) }},
+         shareText: {{ json_encode($sePostText) }},
+         eventTitle:  {{ json_encode($shareEventTitle) }},
+         baseUrl:   {{ json_encode($seBaseUrl) }},
          imageUrl:  {{ json_encode($shareEventPhotoUrl) }},
 
+         // Pre-share confirm modal state
          showDlConfirm: false,
          pendingTarget: null,
 
-         async buildImageFile() {
-             if (!this.imageUrl) return null;
-             try {
-                 const resp = await fetch(this.imageUrl);
-                 const blob = await resp.blob();
-                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
-                 return new File([blob], 'event-photo.' + ext, { type: blob.type });
-             } catch (e) { return null; }
-         },
+         // ── Detect mobile / tablet (used to choose how to open FB/Messenger)
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
          async autoCopyCaption() {
              try {
@@ -3171,34 +3186,23 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
              }
          },
 
-         async nativeShare() {
-             try {
-                 const shareData = { title: this.eventTitle, text: this.shareText };
-                 const file = await this.buildImageFile();
-                 if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-                     shareData.files = [file];
-                 }
-                 await navigator.share(shareData);
-             } catch (e) { /* cancelled by user — nothing to do */ }
-         },
-
+         // ── askShare: always show the download-confirm modal first. ──
          askShare(target) {
-             if (this.nativeShareSupported) { this.nativeShare(); return; }
              this.pendingTarget = target;
              this.showDlConfirm = true;
          },
 
          async confirmDownloadThenGo() {
              await this.downloadImage();
-             this.proceedToTarget();
+             await this.proceedToTarget();
          },
 
-         proceedToTarget() {
+         async proceedToTarget() {
              this.showDlConfirm = false;
              const target = this.pendingTarget;
              this.pendingTarget = null;
-             if (target === 'facebook') this.openFacebook();
-             else if (target === 'messenger') this.openMessenger();
+             if (target === 'facebook') await this.openFacebook();
+             else if (target === 'messenger') await this.openMessenger();
          },
 
          cancelDlConfirm() {
@@ -3206,33 +3210,92 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
              this.pendingTarget = null;
          },
 
-         // Copy the caption FIRST while this page still has focus, then
-         // open/focus the target window. Copying after focus has already
-         // moved elsewhere can silently fail in some browsers, leaving
-         // stale clipboard content behind instead of the caption.
+         // ── openFacebook ─────────────────────────────────────────────────
+         // Caption is copied FIRST (while the page still has focus and the
+         // user-gesture is still active) — opening window.open() shifts focus
+         // to the popup which causes clipboard.writeText() to fail.
          async openFacebook() {
-             const copyOk = await this.autoCopyCaption();
-             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             const win = window.open(url, 'philcst_dir_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             if (win) { try { win.focus(); } catch(e) {} }
+             const ok = await this.autoCopyCaption();
+
+             const jobUrl   = encodeURIComponent(this.baseUrl);
+             const caption  = encodeURIComponent(this.shareText);
+             const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
+                            + '?u='     + jobUrl
+                            + '&quote=' + caption;
+             if (this.isMobile) {
+                 // _blank in mobile browser → system opens FB app (if installed)
+                 // via Android intent / iOS universal link; otherwise falls
+                 // back to mobile web FB.
+                 window.open(shareUrl, '_blank', 'noopener,noreferrer');
+             } else {
+                 const w=680,h=560,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_dir_fb_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
              });
          },
 
+         // ── openMessenger ────────────────────────────────────────────────
+         //   Android → intent:// URI so the OS either launches Messenger or
+         //             offers to install it from the Play Store.
+         //   iOS     → fb-messenger:// custom scheme; falls back to
+         //             messenger.com/share after 1.5s if the app didn't open.
+         //   Desktop → messenger.com/share popup.
+         // Caption is copied FIRST — same reason as openFacebook above.
          async openMessenger() {
-             const copyOk = await this.autoCopyCaption();
-             const win = window.open('https://www.messenger.com/new', 'philcst_dir_messenger_share', 'noopener,noreferrer');
-             if (win) { try { win.focus(); } catch(e) {} }
+             const ok = await this.autoCopyCaption();
+
+             const jobUrl  = encodeURIComponent(this.baseUrl);
+             const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
+
+             if (this.isMobile) {
+                 const isAndroid = /Android/i.test(navigator.userAgent);
+                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                 if (isAndroid) {
+                     window.open(
+                         'intent://share/?link=' + jobUrl +
+                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+                         '_blank'
+                     );
+                 } else if (isIOS) {
+                     const a  = document.createElement('a');
+                     a.href   = 'fb-messenger://share/?link=' + jobUrl;
+                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     setTimeout(() => {
+                         if (!document.hidden) {
+                             window.open(webLink, '_blank', 'noopener,noreferrer');
+                         }
+                     }, 1500);
+                 } else {
+                     window.open(webLink, '_blank', 'noopener,noreferrer');
+                 }
+             } else {
+                 const w=700,h=580,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(webLink, 'philcst_dir_messenger_share',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
              });
          },
 
@@ -3264,25 +3327,23 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
             <button wire:click="closeShareModal" type="button"
                     wire:loading.attr="disabled" wire:target="closeShareModal"
                     class="dir-share-close-btn" aria-label="Close">
-                <span wire:loading.remove wire:target="closeShareModal">
-                    <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M2 2L12 12M12 2L2 12"/>
-                    </svg>
-                </span>
-                <span wire:loading wire:target="closeShareModal">
-                    <i class="fas fa-spinner fa-spin text-xs"></i>
-                </span>
+                <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"
+                     wire:loading.remove wire:target="closeShareModal">
+                    <path d="M2 2L12 12M12 2L2 12"/>
+                </svg>
+                <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeShareModal"></i>
                 <span class="tip">Close</span>
             </button>
         </div>
 
         <div id="dir-share-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
-            <div id="dir-share-preview-pane" class="flex-1 min-w-0 min-h-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-hidden">
-                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
+            {{-- LEFT: Preview --}}
+            <div id="dir-share-preview-pane" class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 min-h-0">
+                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($shareEventPhotoUrl)
-                <div class="dir-share-photo-preview">
+                <div class="dir-share-photo-preview flex-shrink-0">
                     <img src="{{ $shareEventPhotoUrl }}" alt="{{ $shareEventTitle }}"
                          onerror="this.style.display='none'">
                     <span class="dl-badge" x-show="downloading || downloaded" x-cloak>
@@ -3292,93 +3353,78 @@ body:has(.dir-page-root)::-webkit-scrollbar { display: none; }
                 </div>
                 @endif
 
-                <div id="dir-share-preview-text" class="rounded-xl border border-gray-200 flex-1 min-h-0 overflow-y-auto scroll-c">
-                    <div class="px-4 py-3">
-                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
-                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
+                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
+                    <div id="dir-share-preview-text" class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
+                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(12px,1vw,14px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $sePostText)) }}</p>
+                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(12px,1vw,14px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
+                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
+                </div>
+
+                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                    <p class="text-xs leading-relaxed" style="color:#333333;">
+                        The caption is copied automatically — long-press → Paste it into the Facebook or Messenger window that opens.
+                    </p>
                 </div>
             </div>
 
-            <div id="dir-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 min-h-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
-                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
+            {{-- RIGHT: Share buttons --}}
+            <div id="dir-share-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
+                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                <button type="button"
-                        wire:click="postToBatchChat"
-                        wire:loading.attr="disabled"
-                        wire:target="postToBatchChat"
-                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-200 hover:border-purple-400 hover:bg-purple-50 disabled:opacity-60 disabled:cursor-not-allowed bg-purple-50 text-purple-700">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-[#7a3f91]">
-                        <i class="fas fa-users text-white text-sm"></i>
-                    </span>
-                    <span class="flex-1 text-left">
-                        <span wire:loading.remove wire:target="postToBatchChat" class="block font-semibold text-sm">
-                            Post to Chat Room
-                        </span>
-                        <span wire:loading wire:target="postToBatchChat" class="block font-semibold text-sm">
-                            <i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…
-                        </span>
-                        <span class="flex items-center gap-1.5 text-xs mt-0.5 text-purple-600">
-                            Directors &amp; Coordinators
-                            · <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#7a3f91] text-white text-[9px] font-semibold">
-                                <i class="fas fa-at text-[8px]"></i>everyone
-                            </span>
-                        </span>
-                    </span>
-                    <i class="fas fa-paper-plane text-sm text-[#7a3f91]"></i>
-                </button>
-
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or share via</span>
-                    </div>
-                </div>
-
+                {{-- ── Facebook — opens browser tab on mobile, popup on desktop ── --}}
                 <button type="button" @click="askShare('facebook')" class="dir-share-option-btn" style="background:#1877F2;">
                     <span class="icon-wrap">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#1877F2"><path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.91h2.54V9.84c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.23.2 2.23.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56v1.88h2.78l-.44 2.91h-2.34V22c4.78-.76 8.44-4.92 8.44-9.94Z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <span class="label-text">Facebook</span>
+                    <span class="label-text text-xs font-semibold">Share on Facebook</span>
                 </button>
 
-                <button type="button" @click="askShare('messenger')" class="dir-share-option-btn" style="background:linear-gradient(135deg,#00B2FF,#006AFF);">
+                {{-- ── Messenger — opens app on mobile, popup on desktop ── --}}
+                <button type="button" @click="askShare('messenger')" class="dir-share-option-btn" style="background:#0084FF;">
                     <span class="icon-wrap">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#006AFF"><path d="M12 2C6.48 2 2 6.15 2 11.25c0 2.9 1.44 5.49 3.69 7.18V22l3.37-1.85c.9.25 1.86.38 2.94.38 5.52 0 10-4.15 10-9.28C22 6.15 17.52 2 12 2Zm.99 12.49-2.55-2.72-4.98 2.72 5.48-5.82 2.61 2.72 4.91-2.72-5.47 5.82Z"/></svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
                     </span>
-                    <span class="label-text">Messenger</span>
+                    <span class="label-text text-xs font-semibold">Send via Messenger</span>
+                </button>
+
+                {{-- ── Post to Chat Room (internal — Directors & Coordinators, @everyone) ── --}}
+                <button type="button" wire:click="postToBatchChat"
+                        wire:loading.attr="disabled" wire:target="postToBatchChat"
+                        class="dir-share-option-btn" style="background:#7a3f91;">
+                    <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
+                        <i class="fas fa-comments text-white text-sm" wire:loading.remove wire:target="postToBatchChat"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="postToBatchChat"></i>
+                    </span>
+                    <span class="label-text text-xs font-semibold">
+                        <span wire:loading.remove wire:target="postToBatchChat">Post to Chat Room</span>
+                        <span wire:loading wire:target="postToBatchChat">Posting…</span>
+                    </span>
+                    <i class="fas fa-arrow-right text-[10px] opacity-70" wire:loading.remove wire:target="postToBatchChat"></i>
                 </button>
 
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
+                        <span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
                     </div>
                 </div>
 
                 <button type="button" @click="copyLinkFn()"
                         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
-                               hover:bg-gray-50 active:scale-[.98] text-sm transition-all duration-150 cursor-pointer bg-white" style="color:#333333;">
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
                     <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
                         <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
                     </span>
-                    <div class="flex-1 text-left min-w-0">
+                    <div class="flex-1 min-w-0 text-left">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-[10px]" style="color:#333333;">Copies the post text only, no photo</p>
                     </div>
                 </button>
 
-                <p class="text-sm text-center font-medium" style="color:#333333;">Sharing highlights is available even after the event.</p>
-            </div>
-        </div>
-
-        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
-            <div class="flex items-start gap-2.5">
-                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
-                <p class="text-xs leading-relaxed" style="color:#333333;">
-                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                    into the Facebook or Messenger window that opens.
-                </p>
+                <p class="text-xs text-center" style="color:#333333;">Sharing highlights is available even after the event.</p>
             </div>
         </div>
     </div>

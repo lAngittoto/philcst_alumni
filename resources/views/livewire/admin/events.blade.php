@@ -403,6 +403,14 @@ new class extends Component {
         try { $path = route('upcoming.events', [], false); } catch (\Throwable) { $path = '/upcoming/events'; }
         return $base . $path;
     }
+
+    // Direct link back to a specific event — mirrors job-opportunities.blade.php's
+    // jobDetailUrl(), used as the `u` param in the Facebook share so the FB
+    // card links straight to the event instead of just the events list.
+    public function eventDetailUrl(int $id): string
+    {
+        return $this->eventsBaseUrl() . '?event=' . $id;
+    }
 };
 ?>
 
@@ -1774,7 +1782,13 @@ select.filter-input:hover { cursor: default !important; }
          downloaded:false,
          shareText: {{ json_encode($fbPostText) }},
          eventTitle: {{ json_encode($shareEventTitle) }},
+         baseUrl:   {{ json_encode($shareEventId ? $this->eventDetailUrl($shareEventId) : $this->eventsBaseUrl()) }},
          imageUrl:  {{ json_encode($shareEventPhotoUrl) }},
+
+         // ── Detect mobile / tablet (used to choose how to open FB/Messenger)
+         //    — same device-aware routing as job-opportunities.blade.php, so
+         //    sharing behaves identically on desktop and on a phone.
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
          showDlConfirm: false,
          pendingTarget: null,
@@ -1866,31 +1880,96 @@ select.filter-input:hover { cursor: default !important; }
              this.pendingTarget = null;
          },
 
+         // ── openFacebook ─────────────────────────────────────────────────
+         // Caption is copied FIRST (while the page still has focus and the
+         // user-gesture is still active) — opening window.open() shifts focus
+         // to the popup/tab which causes clipboard.writeText() to fail.
+         // Mobile opens a plain browser tab (which the OS hands off to the
+         // Facebook app if installed); desktop opens the usual centred popup.
+         // Mirrors job-opportunities.blade.php's openFacebook() exactly, so
+         // sharing behaves the same across Jobs, Events, and both admin/alumni.
          async openFacebook() {
              this.sharingTo = 'facebook';
              const copyOk = await this.autoCopyCaption();
-             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             const win = window.open(url, 'philcst_adm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             if (win) { try { win.focus(); } catch(e) {} }
+
+             const eventUrl = encodeURIComponent(this.baseUrl);
+             const caption  = encodeURIComponent(this.shareText);
+             const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
+                            + '?u='     + eventUrl
+                            + '&quote=' + caption;
+
+             if (this.isMobile) {
+                 // _blank in mobile browser → system opens FB app (if installed)
+                 // via Android intent / iOS universal link; otherwise falls
+                 // back to mobile web FB.
+                 window.open(shareUrl, '_blank', 'noopener,noreferrer');
+             } else {
+                 const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_adm_fb_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
+
              $wire.dispatch('flash-message', {
                  type: copyOk ? 'success' : 'warning',
                  message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
+                     ? 'Caption copied! Paste it (long-press/Ctrl+V → Paste) into the Facebook post box that just opened.'
                      : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Facebook.'
              });
              this.sharingTo = null;
          },
 
+         // ── openMessenger ────────────────────────────────────────────────
+         // Mobile strategy (two-tier):
+         //   Android → intent:// URI so the OS either launches Messenger or
+         //             offers to install it from the Play Store.
+         //   iOS     → fb-messenger:// custom scheme; a hidden <a> click
+         //             triggers the app. A 1.5-second fallback to the web
+         //             share page fires in case Messenger isn't installed.
+         // Desktop  → messenger.com/share popup.
+         // Caption is copied FIRST — same reason as openFacebook above.
+         // Mirrors job-opportunities.blade.php's openMessenger() exactly.
          async openMessenger() {
              this.sharingTo = 'messenger';
              const copyOk = await this.autoCopyCaption();
-             const win = window.open('https://www.messenger.com/new', 'philcst_adm_messenger_share', 'noopener,noreferrer');
-             if (win) { try { win.focus(); } catch(e) {} }
+
+             const eventUrl = encodeURIComponent(this.baseUrl);
+             const webLink  = 'https://www.messenger.com/share?link=' + eventUrl;
+
+             if (this.isMobile) {
+                 const isAndroid = /Android/i.test(navigator.userAgent);
+                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                 if (isAndroid) {
+                     window.open(
+                         'intent://share/?link=' + eventUrl +
+                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+                         '_blank'
+                     );
+                 } else if (isIOS) {
+                     const a  = document.createElement('a');
+                     a.href   = 'fb-messenger://share/?link=' + eventUrl;
+                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     setTimeout(() => {
+                         if (!document.hidden) {
+                             window.open(webLink, '_blank', 'noopener,noreferrer');
+                         }
+                     }, 1500);
+                 } else {
+                     window.open(webLink, '_blank', 'noopener,noreferrer');
+                 }
+             } else {
+                 const w=700,h=580,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
+                 const win = window.open(webLink, 'philcst_adm_messenger_share', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
+
              $wire.dispatch('flash-message', {
                  type: copyOk ? 'success' : 'warning',
                  message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
+                     ? 'Caption copied! Long-press/Ctrl+V → Paste in Messenger to add your message.'
                      : 'Could not copy the caption automatically — please copy it manually from the preview, then paste it into Messenger.'
              });
              this.sharingTo = null;

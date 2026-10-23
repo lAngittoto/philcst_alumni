@@ -139,6 +139,11 @@ new class extends Component {
     public string $shareJobDescription = '';
     public string $shareJobTarget      = '';
     public string $shareJobPhotoUrl    = '';
+    // Added so the share caption matches Job Opportunities exactly
+    // (Requirements & Qualifications / How to Apply / official-PHILCST rule).
+    public string $shareJobQualifications = '';
+    public string $shareJobInstructions   = '';
+    public bool   $shareJobIsPhilcst      = false;
 
     private array $expLevelOrder = [
         'No Experience Required',
@@ -1880,20 +1885,35 @@ new class extends Component {
             return;
         }
 
+        // Same rule as Job Opportunities: an expired posting can't be shared.
+        $deadlinePassed = $job->deadline && \Carbon\Carbon::parse($job->deadline)
+            ->setTimezone('Asia/Manila')->startOfDay()
+            ->lt(now('Asia/Manila')->startOfDay());
+
+        if ($deadlinePassed) {
+            $this->dispatch('flash-message', type: 'warning', message: 'This job posting can no longer be shared — the deadline has already passed.');
+            return;
+        }
+
         $this->shareJobId          = $id;
         $this->shareJobTitle       = $job->job_title;
         $this->shareJobCompany     = $job->company_name;
         $this->shareJobCompanyType = $job->company_type;
         $this->shareJobLocation    = $job->location ?? '';
         $this->shareJobEmpType     = $job->employment_type;
-        $this->shareJobExpLevel    = $job->experience_level;
+        $this->shareJobExpLevel    = $job->experience_level ?? '';
         $this->shareJobSalary      = $job->salary ?? '';
         $this->shareJobDeadline    = $job->deadline
             ? \Carbon\Carbon::parse($job->deadline)->setTimezone('Asia/Manila')->format('F d, Y')
-            : 'No deadline';
+            : '';
         $this->shareJobDescription = $job->description ?? '';
         $this->shareJobTarget      = $job->target_college ?? '';
         $this->shareJobPhotoUrl    = $this::jobImageUrl($job->job_image ?? null);
+        $this->shareJobQualifications = $job->qualifications ?? '';
+        $this->shareJobInstructions   = $job->application_instructions ?? '';
+        // Same rule used on Job Opportunities: it's an "official PHILCST
+        // post" when company_type was left equal to company_name.
+        $this->shareJobIsPhilcst   = ($job->company_type === $job->company_name);
 
         $this->showShareJobModal = true;
     }
@@ -1913,13 +1933,26 @@ new class extends Component {
         $this->shareJobDescription = '';
         $this->shareJobTarget      = '';
         $this->shareJobPhotoUrl    = '';
+        $this->shareJobQualifications = '';
+        $this->shareJobInstructions   = '';
+        $this->shareJobIsPhilcst   = false;
     }
 
+    // Points to the ALUMNI Job Opportunities page (same as the share on
+    // that page), because the people opening a Facebook/Messenger link are
+    // alumni — this admin/director page would 403 for them.
     public function jobsBaseUrl(): string
     {
         $base = rtrim(config('app.url'), '/');
-        try { $path = route('upcoming.jobs', [], false); } catch (\Throwable) { $path = '/jobs'; }
+        try { $path = route('job.opportunities', [], false); } catch (\Throwable) { $path = '/job/opportunities'; }
         return $base . $path;
+    }
+
+    // Direct link to a specific job's detail view — opens straight into
+    // that job on the alumni Job Opportunities page.
+    public function jobDetailUrl(int $id): string
+    {
+        return $this->jobsBaseUrl() . '?job=' . $id;
     }
 
     public function postJobToBatchChat(): void
@@ -1934,6 +1967,15 @@ new class extends Component {
         $job = JobPosting::find($this->shareJobId);
         if (!$job) {
             $this->dispatch('flash-message', type: 'error', message: 'Job not found.');
+            return;
+        }
+
+        $deadlinePassed = $job->deadline && \Carbon\Carbon::parse($job->deadline)
+            ->setTimezone('Asia/Manila')->startOfDay()
+            ->lt(now('Asia/Manila')->startOfDay());
+
+        if ($deadlinePassed) {
+            $this->dispatch('flash-message', type: 'warning', message: 'This job posting can no longer be shared — the deadline has already passed.');
             return;
         }
 
@@ -4398,28 +4440,57 @@ window.eoCompressToBase64 = eoCompressToBase64;
 ════════════════════════════════════════════════════════════════════════ --}}
 @if($showShareJobModal)
 @php
-    $sjBaseUrl  = $this->jobsBaseUrl();
-    $sjTargets  = $shareJobTarget ? str_replace(',', ', ', $shareJobTarget) : 'All Alumni';
+    // ── Same caption + link logic as Job Opportunities (alumni side) ──
+    $sjBaseUrl = $this->jobDetailUrl($shareJobId);
+
+    $sjQualLines = trim($shareJobQualifications) !== ''
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $shareJobQualifications)), fn($l) => $l !== ''))
+        : [];
+    $sjInstrLines = trim($shareJobInstructions) !== ''
+        ? array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $shareJobInstructions)), fn($l) => $l !== ''))
+        : [];
 
     $sjLines   = [];
-    $sjLines[] = strtoupper($shareJobTitle);
-    $sjLines[] = '';
-    $sjLines[] = 'About This Job:';
-    $sjLines[] = "🏢 {$shareJobCompany}" . ($shareJobLocation ? " · {$shareJobLocation}" : '');
-    $sjLines[] = "⏰ {$shareJobEmpType}" . ($shareJobExpLevel ? " · {$shareJobExpLevel}" : '');
-    if ($shareJobSalary) $sjLines[] = "💰 {$shareJobSalary}";
-    if ($shareJobTarget) $sjLines[] = "🎓 For: {$sjTargets}";
-    $sjLines[] = "📅 Apply by: {$shareJobDeadline}";
+    $sjLines[] = "WE ARE HIRING: " . strtoupper($shareJobTitle);
+
+    if (! $shareJobIsPhilcst) {
+        $sjMetaBits = [];
+        if ($shareJobCompany)  $sjMetaBits[] = $shareJobCompany;
+        if ($shareJobLocation) $sjMetaBits[] = $shareJobLocation;
+        if ($shareJobEmpType)  $sjMetaBits[] = $shareJobEmpType;
+        if ($shareJobExpLevel) $sjMetaBits[] = $shareJobExpLevel;
+        if ($sjMetaBits) {
+            $sjLines[] = implode(' • ', $sjMetaBits);
+        }
+        if ($shareJobDeadline) {
+            $sjLines[] = 'Deadline: ' . $shareJobDeadline;
+        }
+    }
 
     if (trim($shareJobDescription) !== '') {
         $sjLines[] = '';
-        $sjLines[] = 'Job Description:';
         $sjLines[] = trim($shareJobDescription);
     }
 
+    if ($sjQualLines) {
+        $sjLines[] = '';
+        $sjLines[] = '📌 Requirements & Qualifications:';
+        foreach ($sjQualLines as $line) {
+            $sjLines[] = "✅ {$line}";
+        }
+    }
+
+    if ($sjInstrLines) {
+        $sjLines[] = '';
+        $sjLines[] = 'How to Apply:';
+        foreach ($sjInstrLines as $line) {
+            $sjLines[] = "- {$line}";
+        }
+    }
+
     $sjLines[] = '';
-    $sjLines[] = 'For more information, visit our PHILCST Alumni Connect and login.';
-    $sjLines[] = '#YourFutureStarsHere';
+    $sjLines[] = "Apply now through PHILCST Alumni Connect 💜";
+    $sjLines[] = "#YourFutureStarsHere";
     $sjPostText = implode("\n", $sjLines);
 @endphp
 
@@ -4437,6 +4508,8 @@ window.eoCompressToBase64 = eoCompressToBase64;
     overflow: hidden;
 }
 
+/* Mobile = full-screen sheet, ONE column that scrolls top-to-bottom as a
+   whole (Post Preview first, then Share Via) — same as Job Opportunities. */
 @media (max-width: 767px) {
     .dir-share-backdrop {
         padding: 0 !important;
@@ -4445,18 +4518,12 @@ window.eoCompressToBase64 = eoCompressToBase64;
     }
     .dir-share-backdrop .dir-share-sheet {
         border-radius: 0 !important;
+        border-width: 0 !important;
         max-width: 100% !important;
         width: 100% !important;
         height: 100vh !important;
         max-height: 100vh !important;
     }
-
-    /* The desktop layout splits Post Preview and Share Via into two
-       independently-scrolling flex panes fighting over the same fixed
-       modal height — on a short mobile viewport that squashes the
-       preview to almost nothing. Mobile instead becomes ONE column that
-       scrolls top-to-bottom as a whole: Post Preview first (sized by its
-       own content, not forced to flex:1), then Share Via below it. */
     #dir-share-job-body {
         flex-direction: column !important;
         overflow-y: auto !important;
@@ -4478,6 +4545,8 @@ window.eoCompressToBase64 = eoCompressToBase64;
         overflow: visible !important;
         width: 100% !important;
     }
+    /* touch screens: no hover tooltips */
+    .dir-share-close-btn .tip { display: none !important; }
 }
 
 .dir-share-close-btn {
@@ -4509,11 +4578,11 @@ window.eoCompressToBase64 = eoCompressToBase64;
     width: 100%; display: flex; align-items: center; gap: 0.75rem;
     padding: 0.75rem 1rem; border-radius: 0.75rem;
     font-weight: 600; font-size: 0.8125rem; color: #fff;
-    cursor: pointer; transition: filter .12s ease-out, transform .1s ease-out; border: none;
-    will-change: transform;
+    cursor: pointer; transition: filter .15s, transform .1s; border: none;
 }
 .dir-share-option-btn:hover  { filter: brightness(0.94); }
-.dir-share-option-btn:active { transform: scale(.97); transition-duration: .05s; }
+.dir-share-option-btn:active { transform: scale(.98); }
+.dir-share-option-btn:disabled { opacity: .6; cursor: not-allowed; }
 .dir-share-option-btn .icon-wrap {
     width: 2rem; height: 2rem; border-radius: 0.5rem;
     background: rgba(255,255,255,.92);
@@ -4537,12 +4606,51 @@ window.eoCompressToBase64 = eoCompressToBase64;
 .dir-share-photo-preview img {
     width: 100%; height: 100%; object-fit: contain;
 }
+.dir-share-photo-preview .dl-badge {
+    position: absolute; bottom: 6px; right: 6px;
+    background: rgba(17,24,39,.75); color: #fff;
+    font-size: 10px; font-weight: 700; letter-spacing: .03em;
+    padding: 3px 8px; border-radius: 999px;
+    display: flex; align-items: center; gap: 4px;
+    pointer-events: none;
+}
+
+/* PRE-SHARE "Download the job photo?" confirm modal */
+.dir-dl-confirm-icon {
+    width: 3rem; height: 3rem; border-radius: 0.9rem;
+    background: #f5eef9; color: #7a3f91;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; flex-shrink: 0;
+}
+.dir-dl-confirm-btn {
+    flex: 1; padding: 0.65rem 1rem; border-radius: 0.75rem;
+    font-size: 0.8125rem; font-weight: 700; cursor: pointer;
+    transition: filter .15s, transform .1s; border: none;
+}
+.dir-dl-confirm-btn:active { transform: scale(.97); }
+.dir-dl-confirm-btn:disabled { opacity: .6; cursor: wait; }
+.dir-dl-confirm-btn.primary { background: #7a3f91; color: #fff; }
+.dir-dl-confirm-btn.primary:hover { filter: brightness(0.95); }
+.dir-dl-confirm-btn.secondary { background: #f3f4f6; color: #333333; border: 1px solid #e5e7eb; }
+.dir-dl-confirm-btn.secondary:hover { background: #e5e7eb; }
 </style>
 
 <div id="dir-share-job-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 dir-share-backdrop"
      x-data="{
          copied:false,
+         downloading:false,
+         downloaded:false,
          shareText: {{ json_encode($sjPostText) }},
+         jobTitle:  {{ json_encode($shareJobTitle) }},
+         baseUrl:   {{ json_encode($sjBaseUrl) }},
+         imageUrl:  {{ json_encode($shareJobPhotoUrl) }},
+
+         // Pre-share confirm modal state
+         showDlConfirm: false,
+         pendingTarget: null,
+
+         // ── Detect mobile / tablet (used to choose how to open FB/Messenger)
+         isMobile: /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent),
 
          async autoCopyCaption() {
              try {
@@ -4559,29 +4667,141 @@ window.eoCompressToBase64 = eoCompressToBase64;
              } catch (e) { return false; }
          },
 
+         async downloadImage() {
+             if (!this.imageUrl) return false;
+             this.downloading = true;
+             try {
+                 const resp = await fetch(this.imageUrl);
+                 const blob = await resp.blob();
+                 const ext  = (blob.type.split('/')[1] || 'jpg').split('+')[0];
+                 const url  = URL.createObjectURL(blob);
+                 const a = document.createElement('a');
+                 a.href = url;
+                 a.download = 'job-photo.' + ext;
+                 document.body.appendChild(a);
+                 a.click();
+                 document.body.removeChild(a);
+                 setTimeout(() => URL.revokeObjectURL(url), 4000);
+                 this.downloading = false;
+                 this.downloaded  = true;
+                 setTimeout(() => this.downloaded = false, 4000);
+                 return true;
+             } catch (e) {
+                 this.downloading = false;
+                 return false;
+             }
+         },
+
+         // ── askShare: always show the download-confirm modal first. ──
+         askShare(target) {
+             this.pendingTarget = target;
+             this.showDlConfirm = true;
+         },
+
+         async confirmDownloadThenGo() {
+             await this.downloadImage();
+             await this.proceedToTarget();
+         },
+
+         async proceedToTarget() {
+             this.showDlConfirm = false;
+             const target = this.pendingTarget;
+             this.pendingTarget = null;
+             if (target === 'facebook') await this.openFacebook();
+             else if (target === 'messenger') await this.openMessenger();
+         },
+
+         cancelDlConfirm() {
+             this.showDlConfirm = false;
+             this.pendingTarget = null;
+         },
+
+         // ── openFacebook ─────────────────────────────────────────────────
+         // Caption is copied FIRST (while the page still has focus and the
+         // user-gesture is still active) — opening window.open() shifts focus
+         // to the popup which causes clipboard.writeText() to fail.
          async openFacebook() {
-             const copyOk = await this.autoCopyCaption();
-             const w=680,h=560,l=Math.round((screen.width-w)/2),t=Math.round((screen.height-h)/2);
-             const url = 'https://www.facebook.com/sharer/sharer.php?quote=' + encodeURIComponent(this.shareText);
-             const win = window.open(url, 'philcst_dir_fb_share_job', 'width='+w+',height='+h+',left='+l+',top='+t+',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
-             if (win) { try { win.focus(); } catch(e) {} }
+             const ok = await this.autoCopyCaption();
+
+             const jobUrl   = encodeURIComponent(this.baseUrl);
+             const caption  = encodeURIComponent(this.shareText);
+             const shareUrl = 'https://www.facebook.com/sharer/sharer.php'
+                            + '?u='     + jobUrl
+                            + '&quote=' + caption;
+             if (this.isMobile) {
+                 // _blank in mobile browser → system opens FB app (if installed)
+                 // via Android intent / iOS universal link; otherwise falls
+                 // back to mobile web FB.
+                 window.open(shareUrl, '_blank', 'noopener,noreferrer');
+             } else {
+                 const w=680,h=560,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(shareUrl, 'philcst_dir_fb_share_job',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into the Facebook post box that just opened.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Facebook.'
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Paste it (long-press → Paste) into the Facebook post box.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Facebook.'
              });
          },
 
+         // ── openMessenger ────────────────────────────────────────────────
+         //   Android → intent:// URI so the OS either launches Messenger or
+         //             offers to install it from the Play Store.
+         //   iOS     → fb-messenger:// custom scheme; falls back to
+         //             messenger.com/share after 1.5s if the app didn't open.
+         //   Desktop → messenger.com/share popup.
+         // Caption is copied FIRST — same reason as openFacebook above.
          async openMessenger() {
-             const copyOk = await this.autoCopyCaption();
-             const win = window.open('https://www.messenger.com/new', 'philcst_dir_messenger_share_job', 'noopener,noreferrer');
-             if (win) { try { win.focus(); } catch(e) {} }
+             const ok = await this.autoCopyCaption();
+
+             const jobUrl  = encodeURIComponent(this.baseUrl);
+             const webLink = 'https://www.messenger.com/share?link=' + jobUrl;
+
+             if (this.isMobile) {
+                 const isAndroid = /Android/i.test(navigator.userAgent);
+                 const isIOS     = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+                 if (isAndroid) {
+                     window.open(
+                         'intent://share/?link=' + jobUrl +
+                         '#Intent;package=com.facebook.orca;scheme=fb-messenger;end',
+                         '_blank'
+                     );
+                 } else if (isIOS) {
+                     const a  = document.createElement('a');
+                     a.href   = 'fb-messenger://share/?link=' + jobUrl;
+                     a.style.cssText = 'position:fixed;top:-9999px;opacity:0;';
+                     document.body.appendChild(a);
+                     a.click();
+                     document.body.removeChild(a);
+                     setTimeout(() => {
+                         if (!document.hidden) {
+                             window.open(webLink, '_blank', 'noopener,noreferrer');
+                         }
+                     }, 1500);
+                 } else {
+                     window.open(webLink, '_blank', 'noopener,noreferrer');
+                 }
+             } else {
+                 const w=700,h=580,
+                       l=Math.round((screen.width -w)/2),
+                       t=Math.round((screen.height-h)/2);
+                 const win = window.open(webLink, 'philcst_dir_messenger_share_job',
+                     'width='+w+',height='+h+',left='+l+',top='+t+
+                     ',toolbar=0,menubar=0,location=0,status=0,scrollbars=1,resizable=1');
+                 if (win) { try { win.focus(); } catch(e) {} }
+             }
              $wire.dispatch('flash-message', {
-                 type: copyOk ? 'success' : 'warning',
-                 message: copyOk
-                     ? 'Caption copied! Paste it (Ctrl+V) into Messenger.'
-                     : 'Could not copy the caption automatically — use the Copy Caption button below, then paste it into Messenger.'
+                 type: ok ? 'success' : 'warning',
+                 message: ok
+                     ? 'Caption copied! Long-press → Paste in Messenger to add your message.'
+                     : 'Could not auto-copy caption — use Copy Caption below, then paste into Messenger.'
              });
          },
 
@@ -4602,13 +4822,13 @@ window.eoCompressToBase64 = eoCompressToBase64;
      x-transition:enter="transition ease-out duration-150"
      x-transition:enter-start="opacity-0"
      x-transition:enter-end="opacity-100"
-     @keydown.escape.window="$wire.closeShareJobModal()">
+     @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareJobModal()}">
 
     <div class="dir-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 dir-share-modal-wrapper">
 
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
-                <i class="fas fa-share-alt text-[#7a3f91] text-xs"></i> Share Job
+                <i class="fas fa-share-nodes text-[#7a3f91] text-xs"></i> Share Job Posting
             </h2>
             <button wire:click="closeShareJobModal" type="button"
                     wire:loading.attr="disabled" wire:target="closeShareJobModal"
@@ -4617,108 +4837,133 @@ window.eoCompressToBase64 = eoCompressToBase64;
                      wire:loading.remove wire:target="closeShareJobModal">
                     <path d="M2 2L12 12M12 2L2 12"/>
                 </svg>
-                <i class="fas fa-spinner fa-spin" wire:loading wire:target="closeShareJobModal"></i>
+                <i class="fas fa-spinner fa-spin text-xs" style="color:#4b5563;" wire:loading wire:target="closeShareJobModal"></i>
                 <span class="tip">Close</span>
             </button>
         </div>
 
         <div id="dir-share-job-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
 
+            {{-- LEFT: Preview --}}
             <div id="dir-share-job-preview-pane" class="flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 min-h-0">
-                <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
+                <p class="text-xs font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 <div class="dir-share-photo-preview flex-shrink-0">
                     <img src="{{ $shareJobPhotoUrl }}" alt="{{ $shareJobTitle }}"
                          onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+                    <span class="dl-badge" x-show="downloading || downloaded" x-cloak>
+                        <i class="fas" :class="downloading ? 'fa-spinner fa-spin' : 'fa-check'"></i>
+                        <span x-text="downloading ? 'Downloading…' : 'Downloaded'"></span>
+                    </span>
                 </div>
 
-                <div id="dir-share-job-preview-text" class="rounded-xl border border-gray-200 flex-shrink-0 overflow-y-auto scroll-c" style="max-height:180px;">
-                    <div class="px-4 py-3">
-                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $sjPostText)) }}</p>
-                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
+                <div class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
+                    <div id="dir-share-job-preview-text" class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
+                        <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(12px,1vw,14px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $sjPostText)) }}</p>
+                        <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(12px,1vw,14px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
+                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
+                </div>
+
+                <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">
+                    <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
+                    <p class="text-xs leading-relaxed" style="color:#333333;">
+                        The caption is copied automatically — long-press → Paste it into the Facebook or Messenger window that opens.
+                    </p>
                 </div>
             </div>
 
+            {{-- RIGHT: Share buttons --}}
             <div id="dir-share-job-via-pane" class="w-full md:w-[280px] flex-shrink-0 px-5 py-4 flex flex-col gap-2.5 overflow-y-auto scroll-c">
-                <p class="text-[10px] font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
+                <p class="text-xs font-bold uppercase tracking-widest" style="color:#333333;">Share via</p>
 
-                <button type="button"
-                        wire:click="postJobToBatchChat"
-                        wire:loading.attr="disabled"
-                        wire:target="postJobToBatchChat"
-                        class="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl font-semibold text-sm shadow hover:shadow-md transition-all cursor-pointer group border-2 border-purple-200 hover:border-purple-400 hover:bg-purple-50 disabled:opacity-60 disabled:cursor-not-allowed bg-purple-50 text-purple-700">
-                    <span class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm group-hover:scale-105 transition-transform bg-[#7a3f91]">
-                        <i class="fas fa-users text-white text-sm"></i>
+                {{-- ── Facebook — opens browser tab on mobile, popup on desktop ── --}}
+                <button type="button" @click="askShare('facebook')" class="dir-share-option-btn" style="background:#1877F2;">
+                    <span class="icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#1877F2"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.791-4.697 4.532-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.514c-1.491 0-1.956.93-1.956 1.886v2.268h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>
                     </span>
-                    <span class="flex-1 text-left">
-                        <span wire:loading.remove wire:target="postJobToBatchChat" class="block font-semibold text-sm">
-                            Post to Chat Room
-                        </span>
-                        <span wire:loading wire:target="postJobToBatchChat" class="block font-semibold text-sm">
-                            <i class="fas fa-spinner fa-spin mr-1 text-xs"></i> Posting…
-                        </span>
-                        <span class="flex items-center gap-1.5 text-xs mt-0.5 text-purple-600">
-                            Directors &amp; Coordinators
-                            · <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-[#7a3f91] text-white text-[9px] font-semibold">
-                                <i class="fas fa-at text-[8px]"></i>everyone
-                            </span>
-                        </span>
+                    <span class="label-text text-xs font-semibold">Share on Facebook</span>
+                </button>
+
+                {{-- ── Messenger — opens app on mobile, popup on desktop ── --}}
+                <button type="button" @click="askShare('messenger')" class="dir-share-option-btn" style="background:#0084FF;">
+                    <span class="icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" class="w-4 h-4" fill="#0084FF">
+                            <path d="M12 0C5.373 0 0 4.974 0 11.111c0 3.498 1.744 6.614 4.469 8.652V24l4.088-2.242c1.092.3 2.246.464 3.443.464 6.627 0 12-4.974 12-11.111S18.627 0 12 0zm1.191 14.963l-3.055-3.26-5.963 3.26 6.559-6.963 3.13 3.26 5.889-3.26-6.56 6.963z"/>
+                        </svg>
                     </span>
-                    <i class="fas fa-paper-plane text-sm text-[#7a3f91]"></i>
+                    <span class="label-text text-xs font-semibold">Send via Messenger</span>
+                </button>
+
+                {{-- ── Post to Chat Room (internal — Directors & Coordinators, @everyone) ── --}}
+                <button type="button" wire:click="postJobToBatchChat"
+                        wire:loading.attr="disabled" wire:target="postJobToBatchChat"
+                        class="dir-share-option-btn" style="background:#7a3f91;">
+                    <span class="icon-wrap" style="background:rgba(255,255,255,.20);">
+                        <i class="fas fa-comments text-white text-sm" wire:loading.remove wire:target="postJobToBatchChat"></i>
+                        <i class="fas fa-spinner fa-spin text-white text-sm" wire:loading wire:target="postJobToBatchChat"></i>
+                    </span>
+                    <span class="label-text text-xs font-semibold">
+                        <span wire:loading.remove wire:target="postJobToBatchChat">Post to Chat Room</span>
+                        <span wire:loading wire:target="postJobToBatchChat">Posting…</span>
+                    </span>
+                    <i class="fas fa-arrow-right text-[10px] opacity-70" wire:loading.remove wire:target="postJobToBatchChat"></i>
                 </button>
 
                 <div class="relative my-0.5">
                     <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
                     <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or share via</span>
-                    </div>
-                </div>
-
-                <button type="button" @click="openFacebook()" class="dir-share-option-btn" style="background:#1877F2;">
-                    <span class="icon-wrap">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#1877F2"><path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.91h2.54V9.84c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.23.2 2.23.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56v1.88h2.78l-.44 2.91h-2.34V22c4.78-.76 8.44-4.92 8.44-9.94Z"/></svg>
-                    </span>
-                    <span class="label-text">Facebook</span>
-                </button>
-
-                <button type="button" @click="openMessenger()" class="dir-share-option-btn" style="background:linear-gradient(135deg,#00B2FF,#006AFF);">
-                    <span class="icon-wrap">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="#006AFF"><path d="M12 2C6.48 2 2 6.15 2 11.25c0 2.9 1.44 5.49 3.69 7.18V22l3.37-1.85c.9.25 1.86.38 2.94.38 5.52 0 10-4.15 10-9.28C22 6.15 17.52 2 12 2Zm.99 12.49-2.55-2.72-4.98 2.72 5.48-5.82 2.61 2.72 4.91-2.72-5.47 5.82Z"/></svg>
-                    </span>
-                    <span class="label-text">Messenger</span>
-                </button>
-
-                <div class="relative my-0.5">
-                    <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-gray-200"></div></div>
-                    <div class="relative flex justify-center">
-                        <span class="px-3 text-[10px] font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
+                        <span class="px-3 text-xs font-semibold uppercase tracking-widest bg-white" style="color:#333333;">or copy caption</span>
                     </div>
                 </div>
 
                 <button type="button" @click="copyLinkFn()"
                         class="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl border border-gray-200 hover:border-gray-300
-                               hover:bg-gray-50 active:scale-[.98] text-sm transition-all duration-150 cursor-pointer bg-white" style="color:#333333;">
+                               hover:bg-gray-50 text-sm transition cursor-pointer bg-white" style="color:#333333;">
                     <span class="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
                         <i :class="copied ? 'fas fa-check text-emerald-500' : 'fas fa-copy'" class="text-sm" :style="copied ? '' : 'color:#333333;'"></i>
                     </span>
-                    <div class="flex-1 text-left min-w-0">
+                    <div class="flex-1 min-w-0 text-left">
                         <p class="text-xs font-semibold" :class="copied ? 'text-emerald-600' : ''" :style="copied ? '' : 'color:#333333;'" x-text="copied ? 'Caption copied!' : 'Copy Caption'"></p>
-                        <p class="text-[10px]" style="color:#333333;">Copies the post text only, no photo</p>
                     </div>
                 </button>
 
-                <p class="text-sm text-center font-medium" style="color:#333333;">Sharing is available while the job posting is active.</p>
+                <p class="text-xs text-center" style="color:#333333;">Sharing is disabled for expired postings.</p>
             </div>
         </div>
+    </div>
 
-        <div class="px-5 py-3 border-t border-gray-100 bg-gray-50 flex-shrink-0">
-            <div class="flex items-start gap-2.5">
-                <i class="fas fa-circle-info text-xs flex-shrink-0 mt-0.5" style="color:#333333;"></i>
-                <p class="text-xs leading-relaxed" style="color:#333333;">
-                    The caption is copied to your clipboard automatically — just paste it (Ctrl+V)
-                    into the Facebook or Messenger window that opens.
-                </p>
+    {{-- ── PRE-SHARE "Download the photo?" CONFIRM MODAL ── --}}
+    <div x-show="showDlConfirm" x-cloak
+         x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
+         @click.self="cancelDlConfirm()">
+        <div class="dir-share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+            <div class="flex items-start gap-3">
+                <span class="dir-dl-confirm-icon"><i class="fas fa-image"></i></span>
+                <div class="min-w-0 pt-0.5">
+                    <p class="text-sm font-semibold" style="color:#333333;">Download the job photo?</p>
+                    <p class="text-xs mt-1 leading-relaxed" style="color:#333333;">
+                        You'll need to attach a photo to your post. Download it now, or skip if you already have it saved.
+                    </p>
+                </div>
+            </div>
+
+            <div class="dir-share-photo-preview" style="height:110px;">
+                <img src="{{ $shareJobPhotoUrl }}" alt="{{ $shareJobTitle }}"
+                     onerror="this.src='{{ asset('storage/job/default-photo-job.jpg') }}'">
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button type="button" @click="proceedToTarget()" class="dir-dl-confirm-btn secondary">
+                    Skip
+                </button>
+                <button type="button" @click="confirmDownloadThenGo()" class="dir-dl-confirm-btn primary" :disabled="downloading">
+                    <span x-show="!downloading"><i class="fas fa-download mr-1"></i>Download</span>
+                    <span x-show="downloading" x-cloak><i class="fas fa-spinner fa-spin mr-1"></i>Downloading…</span>
+                </button>
             </div>
         </div>
     </div>
