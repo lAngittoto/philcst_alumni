@@ -1952,7 +1952,15 @@ select.filter-input option {
     .adm-share-photo-preview { aspect-ratio: 4 / 3; }
 }
 
-/* ── Pre-share "download the photo?" confirm dialog ── */
+/* ── Pre-share "download the photo?" confirm dialog ──
+   Deliberately NOT using .adm-share-sheet here — that class is targeted
+   by the @media(max-width:767px) rule above which forces full-screen
+   (width:100%, height:100vh, border-radius:0). This card must always
+   stay a small centered floating card, even on mobile. ── */
+.adm-dl-confirm-card {
+    max-height: 90vh;
+    overflow-y: auto;
+}
 .adm-dl-confirm-icon {
     width: 2.25rem; height: 2.25rem; border-radius: 0.65rem; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -2294,7 +2302,7 @@ select.filter-input option {
          x-transition:enter-end="opacity-100"
          class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
          @click.self="cancelDlConfirm()">
-        <div class="adm-share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+        <div class="adm-dl-confirm-card bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
             <div class="flex items-start gap-3">
                 <span class="adm-dl-confirm-icon"><i class="fas fa-image"></i></span>
                 <div class="min-w-0 pt-0.5">

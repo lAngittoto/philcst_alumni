@@ -4616,6 +4616,15 @@ window.eoCompressToBase64 = eoCompressToBase64;
 }
 
 /* PRE-SHARE "Download the job photo?" confirm modal */
+/* Deliberately NOT using .dir-share-sheet on the confirm card below —
+   that class is targeted by the @media(max-width:767px) rule above which
+   forces full-screen (width:100%, height:100vh, border-radius:0). This
+   card must always stay a small centered floating card, even on mobile —
+   same fix as Job Opportunities / Manage Event. ── */
+.dir-dl-confirm-card {
+    max-height: 90vh;
+    overflow-y: auto;
+}
 .dir-dl-confirm-icon {
     width: 3rem; height: 3rem; border-radius: 0.9rem;
     background: #f5eef9; color: #7a3f91;
@@ -4940,7 +4949,7 @@ window.eoCompressToBase64 = eoCompressToBase64;
          x-transition:enter-end="opacity-100"
          class="fixed inset-0 z-[10010] flex items-center justify-center p-4 bg-black/55"
          @click.self="cancelDlConfirm()">
-        <div class="dir-share-sheet bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
+        <div class="dir-dl-confirm-card bg-white w-full max-w-[360px] rounded-2xl shadow-xl border border-gray-200 p-5 flex flex-col gap-4">
             <div class="flex items-start gap-3">
                 <span class="dir-dl-confirm-icon"><i class="fas fa-image"></i></span>
                 <div class="min-w-0 pt-0.5">
