@@ -1990,20 +1990,34 @@ public function openEditModal(int $id): void
 
     public function jobsBaseUrl(): string
     {
-        $base = rtrim((string) config('app.url'), '/');
+        // FIX (Share on Facebook/Messenger — "no https" bug): the previous
+        // version only overrode config('app.url') when it was EMPTY or
+        // pointed at localhost. That misses the actual failure case on
+        // Railway: APP_URL (or the scheme Laravel reads off the request)
+        // can report plain "http" for a real, non-local host because the
+        // proxy terminates TLS in front of the app — the app itself never
+        // sees the "https" the visitor's browser actually used. The old
+        // check let that bad "http://<real-host>" value pass straight
+        // through, which is why the shared link sometimes had no https
+        // and Facebook/Messenger wouldn't render it as a link.
+        //
+        // Now: always build the link from the real incoming request host,
+        // and always force https for any non-local host — never trust
+        // config('app.url')'s scheme for that. Only a genuine local dev
+        // host (localhost/127.0.0.1/0.0.0.0/*.test/*.local) is allowed to
+        // keep whatever scheme the request actually came in on.
+        $req     = request();
+        $host    = $req->getHost();
+        $isLocal = in_array($host, ['localhost', '127.0.0.1', '0.0.0.0'], true)
+            || str_ends_with($host, '.test') || str_ends_with($host, '.local');
 
-        // FIX (Share on Facebook/Messenger): if APP_URL isn't set on the
-        // server it defaults to http://localhost, so the shared job link
-        // pointed at localhost and Facebook/Messenger rejected it. Fall back
-        // to the real host the app is actually being served from (https on
-        // any non-local host, since the proxy often reports plain http).
-        if ($base === '' || preg_match('#//(localhost|127\.0\.0\.1|0\.0\.0\.0)#i', $base)) {
-            $req     = request();
-            $host    = $req->getHost();
-            $isLocal = in_array($host, ['localhost', '127.0.0.1'], true)
-                || str_ends_with($host, '.test') || str_ends_with($host, '.local');
-            $scheme  = $isLocal ? $req->getScheme() : 'https';
-            $base    = $scheme . '://' . $req->getHttpHost();
+        if ($isLocal) {
+            $base = rtrim((string) config('app.url'), '/');
+            if ($base === '') {
+                $base = $req->getScheme() . '://' . $req->getHttpHost();
+            }
+        } else {
+            $base = 'https://' . $req->getHttpHost();
         }
 
         try {
@@ -2396,10 +2410,16 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
 }
 .jm-share-sheet { animation: jmPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 .jm-share-modal-wrapper {
-    max-height: 90vh;
+    /* Full-height edge-to-edge on mobile (same treatment as the alumni-facing
+       Job Opportunities share sheet) — a fixed 90vh + padded backdrop made
+       this feel like a cramped, different component on small screens. */
+    max-height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+}
+@media (min-width: 640px) {
+    .jm-share-modal-wrapper { max-height: 90vh; }
 }
 
 /* ══ FIX 1: table rows white (not gray), and no inner horizontal scrollbar ══ */
@@ -4489,7 +4509,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
     $fbPostText = implode("\n", $fbLines);
 @endphp
 
-<div id="jm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 jm-share-backdrop"
+<div id="jm-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-0 sm:p-4 bg-black/45 jm-share-backdrop"
      x-data="{
          copied:false,
          downloading:false,
@@ -4761,7 +4781,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper {
      x-transition:enter-end="opacity-100"
      @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareModal()}">
 
-    <div class="jm-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 jm-share-modal-wrapper">
+    <div class="jm-share-sheet bg-white w-full h-full sm:h-auto max-w-full sm:max-w-[920px] rounded-none sm:rounded-2xl shadow-xl border-0 sm:border border-gray-200 jm-share-modal-wrapper">
 
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">

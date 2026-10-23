@@ -1941,49 +1941,15 @@ select.tw-select-arrow {
     [class*="group-hover:opacity-100"] { display: none !important; }
 }
 
-/* ── Share modal: full screen on mobile, centered card on desktop ── */
-@media (max-width: 767px) {
-    .eo-share-backdrop {
-        padding: 0 !important;
-        align-items: stretch !important;
-        justify-content: stretch !important;
-    }
-    .eo-share-backdrop .eo-share-sheet {
-        border-radius: 0 !important;
-        max-width: 100% !important;
-        width: 100% !important;
-        height: 100vh !important;
-        max-height: 100vh !important;
-    }
-
-    /* The desktop layout splits Post Preview and Share Via into two
-       independently-scrolling flex panes fighting over the same fixed
-       modal height — on a short mobile viewport that squashes the
-       preview to almost nothing. Mobile instead becomes ONE column that
-       scrolls top-to-bottom as a whole: Post Preview first (sized by its
-       own content, not forced to flex:1), then Share Via below it. */
-    #eo-share-body {
-        flex-direction: column !important;
-        overflow-y: auto !important;
-        overflow-x: hidden !important;
-        -webkit-overflow-scrolling: touch;
-    }
-    #eo-share-preview-pane {
-        flex: 0 0 auto !important;
-        overflow: visible !important;
-        min-height: 0 !important;
-    }
-    #eo-share-preview-text {
-        flex: 0 0 auto !important;
-        max-height: 180px !important;
-        overflow-y: auto !important;
-    }
-    #eo-share-via-pane {
-        flex: 0 0 auto !important;
-        overflow: visible !important;
-        width: 100% !important;
-    }
-}
+/* ── Share modal: full screen on mobile, centered card on desktop.
+   Mirrors Upcoming Events' share-modal-wrapper exactly — sized with
+   plain responsive utility classes on the elements themselves
+   (w-full h-full sm:h-auto, rounded-none sm:rounded-2xl, border-0
+   sm:border, p-0 sm:p-4 on the backdrop) instead of a separate
+   !important media-query block, so the two pages behave identically
+   at every breakpoint instead of switching layouts at different
+   widths (this used to flip at 767px here vs Tailwind's 640px "sm:"
+   breakpoint on Upcoming Events). ── */
 
 /* ── Share modal close button (mirrors upcoming-events share-close-btn,
      with the SVG X + hover tooltip instead of a plain "X" text glyph) ── */
@@ -4204,26 +4170,22 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
 }
 .eo-share-sheet { animation: eoPanelIn .2s cubic-bezier(.25,.8,.25,1) both; }
 
+/* Matches Upcoming Events' .share-modal-wrapper exactly: full height on
+   mobile (the w-full h-full utility class on the panel handles the
+   edge-to-edge sizing), capped to 90vh once the sm: breakpoint kicks in
+   on tablet/desktop so it never grows taller than the viewport. */
 .eo-share-modal-wrapper {
-    height: min(86vh, 560px) !important;
-    max-height: 86vh;
+    max-height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
 }
-
-/* Share sheet full-screen mobile override takes priority over the
-   86vh/560px cap above — the !important height rule for mobile lives
-   in the global stylesheet (.eo-share-backdrop .eo-share-sheet, max-width:767px). */
-@media (max-width: 767px) {
-    .eo-share-modal-wrapper {
-        height: 100vh !important;
-        max-height: 100vh !important;
-    }
+@media (min-width: 640px) {
+    .eo-share-modal-wrapper { max-height: 90vh; }
 }
 </style>
 
-<div id="eo-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-4 bg-black/45 eo-share-backdrop"
+<div id="eo-share-modal-backdrop" class="fixed inset-0 z-[10002] flex items-center justify-center p-0 sm:p-4 bg-black/45 eo-share-backdrop"
      x-data="{
          copied:false,
          downloading:false,
@@ -4448,7 +4410,7 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
      x-transition:enter-end="opacity-100"
      @keydown.escape.window="if(showDlConfirm){cancelDlConfirm()}else{$wire.closeShareModal()}">
 
-    <div class="eo-share-sheet bg-white rounded-2xl w-full max-w-[920px] shadow-xl border border-gray-200 eo-share-modal-wrapper">
+    <div class="eo-share-sheet bg-white w-full h-full sm:h-auto max-w-full sm:max-w-[920px] rounded-none sm:rounded-2xl shadow-xl border-0 sm:border border-gray-200 eo-share-modal-wrapper">
 
         <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 flex-shrink-0">
             <h2 class="text-sm font-semibold flex items-center gap-2" style="color:#333333;">
@@ -4469,9 +4431,9 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
             </button>
         </div>
 
-        <div id="eo-share-body" class="flex flex-col md:flex-row flex-1 min-h-0 overflow-hidden">
+        <div id="eo-share-body" class="flex flex-col md:flex-row md:flex-1 md:min-h-0 overflow-y-auto md:overflow-hidden">
 
-            <div id="eo-share-preview-pane" class="flex-1 min-w-0 min-h-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 overflow-hidden">
+            <div id="eo-share-preview-pane" class="md:flex-1 min-w-0 px-5 py-4 border-b md:border-b-0 md:border-r border-gray-100 flex flex-col gap-3 md:overflow-y-auto scroll-c">
                 <p class="text-[10px] font-bold uppercase tracking-widest flex-shrink-0" style="color:#333333;">Post Preview</p>
 
                 @if($shareEventPhotoUrl)
@@ -4485,11 +4447,12 @@ tr.eo-row-loading > td > *:not(.eo-row-dots) { filter: blur(4px); opacity:.6; tr
                 </div>
                 @endif
 
-                <div id="eo-share-preview-text" class="rounded-xl border border-gray-200 scroll-c" style="flex:1 1 0; min-height:0; overflow-y:auto;">
-                    <div class="px-4 py-3">
+                <div id="eo-share-preview-text" class="rounded-xl border border-gray-200 overflow-hidden flex-shrink-0 relative">
+                    <div class="px-4 py-3 overflow-y-auto scroll-c" style="max-height:140px;">
                         <p class="whitespace-pre-wrap leading-relaxed" style="font-size:clamp(11px,1vw,13px);color:#333333;">{{ rtrim(preg_replace('/#YourFutureStarsHere\s*$/', '', $fbPostText)) }}</p>
                         <p class="whitespace-pre-wrap leading-relaxed font-semibold mt-1" style="font-size:clamp(11px,1vw,13px);color:#1877F2;">#YourFutureStarsHere</p>
                     </div>
+                    <div class="pointer-events-none absolute bottom-0 left-0 right-0 h-6" style="background:linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.95));"></div>
                 </div>
 
                 <div class="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 flex items-start gap-2.5 flex-shrink-0">

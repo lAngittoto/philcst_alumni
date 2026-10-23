@@ -1487,6 +1487,22 @@ new class extends Component {
 </div>
 
 <style>
+/* Every clickable control in this component should show a pointer
+   cursor — browsers default <button>/<summary>/role="button"/label-for
+   elements to "default", which read as unclickable/dead to users even
+   though they work fine. Disabled controls fall back to not-allowed so
+   it's clear why nothing happens on click. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary,
+label[for] {
+    cursor: pointer;
+}
+button:disabled,
+[role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+}
+
 .mu-filter-input {
     border: 1px solid #E8E0F0;
     transition: border-color .15s, box-shadow .15s;
@@ -2444,6 +2460,23 @@ select.mu-filter-input.mu-active {
     $canPhoto = in_array($vRole, ['director', 'organizer']);
     $canToggle= in_array($vRole, ['director', 'organizer', 'registrar']);
 
+    // Only ONE active Director / Registrar system-wide (same rule enforced
+    // server-side in executeToggle()). If this account is inactive and
+    // another account of the same role is already active, the Activate
+    // button is disabled here instead of letting the admin click it and
+    // then hit a flashed error — the modal should tell them why up front.
+    $blockActivate = false;
+    $blockActivateReason = '';
+    if ($vStatus !== 'ACTIVE') {
+        if ($isDir && $this->activeDirectorExists($vd['id'])) {
+            $blockActivate = true;
+            $blockActivateReason = 'Another Director is already active. Deactivate them first before activating this one.';
+        } elseif ($isReg && $this->activeRegistrarExists($vd['id'])) {
+            $blockActivate = true;
+            $blockActivateReason = 'Another Registrar is already active. Deactivate them first before activating this one.';
+        }
+    }
+
     if ($isDir)
         $headerName = implode(' ', array_filter([$vd['first_name']??'', $vd['middle_name']??'', $vd['last_name']??'', $vd['suffix']??''])) ?: $vd['name'];
     elseif ($isAlumni)
@@ -3033,7 +3066,7 @@ select.mu-filter-input.mu-active {
                     ] as [$lbl,$val])
                     <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0] {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
-                        <p class="text-base font-semibold truncate" style="color:#333333;">{{ $val ?: '—' }}</p>
+                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
@@ -3056,7 +3089,7 @@ select.mu-filter-input.mu-active {
                     ] as [$lbl,$val])
                     <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0] {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
-                        <p class="text-base font-semibold truncate" style="color:#333333;">{{ $val ?: '—' }}</p>
+                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
                 </div>
@@ -3199,7 +3232,7 @@ select.mu-filter-input.mu-active {
                             @foreach([['First Name',$orgFirst],['Middle Name',$orgMiddle],['Last Name',$orgLast],['Suffix',$orgSuffix]] as [$lbl,$val])
                             <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0]">
                                 <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
-                                <p class="text-base font-semibold truncate" style="color:#333333;">{{ $val }}</p>
+                                <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val }}</p>
                             </div>
                             @endforeach
                         </div>
@@ -3217,7 +3250,7 @@ select.mu-filter-input.mu-active {
                             </div>
                             <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0]">
                                 <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">College Assignment</p>
-                                <p class="text-base font-semibold truncate" style="color:#333333;">{{ $vd['department'] ?: '—' }}</p>
+                                <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $vd['department'] ?: '—' }}</p>
                             </div>
                         </div>
                     </div>
@@ -3468,6 +3501,17 @@ select.mu-filter-input.mu-active {
                         <span wire:loading.remove wire:target="confirmToggle({{ $vd['id'] }}, 'deactivate')"><i class="fas fa-ban text-sm"></i></span>
                         Deactivate Account
                     </button>
+                    @elseif($blockActivate)
+                    <button type="button" disabled aria-disabled="true" title="{{ $blockActivateReason }}"
+                            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold opacity-60"
+                            style="background:#f3f4f6;color:#6b7280;border:1px solid #e5e7eb;">
+                        <i class="fas fa-lock text-sm"></i>
+                        Activate Account
+                    </button>
+                    <p class="mt-2 text-xs font-semibold leading-snug flex items-start gap-1.5" style="color:#92400e;">
+                        <i class="fas fa-circle-info mt-0.5 shrink-0"></i>
+                        <span>{{ $blockActivateReason }}</span>
+                    </p>
                     @else
                     <button wire:click="confirmToggle({{ $vd['id'] }}, 'activate')"
                             wire:loading.attr="disabled" wire:target="confirmToggle({{ $vd['id'] }}, 'activate')"
