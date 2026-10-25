@@ -559,10 +559,13 @@ new class extends Component {
 
             // Only one active Registrar at a time (NULL user_status counts as
             // ACTIVE, same as the COALESCE used everywhere else on this page).
-            if ($this->activeRegistrarExists()) {
-                $this->rErrs = ['general' => ['There is already an active Registrar. Please deactivate the current Registrar first.']];
-                return;
-            }
+            // Registering a new Registrar while one is active is now allowed —
+            // the currently active one is automatically deactivated instead of
+            // blocking the admin.
+            DB::table('users')
+                ->where('role', 'registrar')
+                ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
+                ->update(['user_status' => 'INACTIVE', 'updated_at' => now()]);
 
             $uname      = trim($this->rUsername);
             $loginEmail = $uname.'@registrar.internal';
@@ -649,10 +652,13 @@ new class extends Component {
             }
             if (!empty($fieldErrors)) { $this->dErrs = $fieldErrors; return; }
 
-            if ($this->activeDirectorExists()) {
-                $this->dErrs = ['general' => ['There is already an active Director. Please deactivate the current Director first.']];
-                return;
-            }
+            // Only one active Director at a time. Registering a new Director
+            // while one is active is now allowed — the currently active one
+            // is automatically deactivated instead of blocking the admin.
+            DB::table('director')
+                ->where('status', 'ACTIVE')
+                ->whereNull('deleted_at')
+                ->update(['status' => 'INACTIVE', 'updated_at' => now()]);
 
             $loginEmail = trim($this->dUsername).'@director.internal';
             if (DB::table('users')->where('email', $loginEmail)->exists()) {
@@ -685,22 +691,8 @@ new class extends Component {
                 'updated_at'  => now(),
             ]);
 
-            // Optional profile photo picked in the Create Director form → Cloudinary.
-            // A failed upload never blocks creation; the director just keeps the default photo.
-            if ($this->vPhoto) {
-                try {
-                    $this->validate(['vPhoto' => 'image|mimes:jpg,jpeg,png,gif,webp|max:5120']);
-                    $up  = $this->uploadCloudPhoto($this->vPhoto, 'director');
-                    $upd = ['profile_photo' => $up['url']];
-                    if (\Illuminate\Support\Facades\Schema::hasColumn('director', 'profile_photo_public_id')) {
-                        $upd['profile_photo_public_id'] = $up['public_id'];
-                    }
-                    DB::table('director')->where('user_id', $uid)->update($upd);
-                } catch (\Throwable $photoEx) {
-                    \Illuminate\Support\Facades\Log::warning('Director photo upload failed: ' . $photoEx->getMessage());
-                }
-                $this->vPhoto = null;
-            }
+            // Photo upload removed from Create Director — the account always
+            // starts with the default photo (no admin upload at creation time).
 
             // Send credential email synchronously (->send) so it fires immediately
             // without needing a queue worker running. Wrapped in try/catch so a
@@ -2981,8 +2973,8 @@ select.mu-filter-input.mu-active {
                                 @endforeach
                             </div>
                             @endif
-                            <div class="flex gap-2">
-                                <div class="relative flex-1">
+                            <div class="flex flex-col gap-2">
+                                <div class="relative w-full">
                                     <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                                     <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
                                            class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
@@ -2990,7 +2982,7 @@ select.mu-filter-input.mu-active {
                                 <button wire:click="saveUpdateEmail"
                                         @click="saving = true"
                                         wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                        class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                        class="w-full px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5 flex-shrink-0"
                                         style="background:#7A3F91;">
                                     <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
                                     <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
@@ -3294,8 +3286,8 @@ select.mu-filter-input.mu-active {
                                     @endforeach
                                 </div>
                                 @endif
-                                <div class="flex gap-2">
-                                    <div class="relative flex-1">
+                                <div class="flex flex-col gap-2">
+                                    <div class="relative w-full">
                                         <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                                         <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
                                                class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
@@ -3303,7 +3295,7 @@ select.mu-filter-input.mu-active {
                                     <button wire:click="saveUpdateEmail"
                                             @click="saving = true"
                                             wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                            class="px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                            class="w-full px-4 py-2 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5 flex-shrink-0"
                                             style="background:#7A3F91;">
                                         <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
                                         <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
@@ -3425,8 +3417,8 @@ select.mu-filter-input.mu-active {
                         @endforeach
                     </div>
                     @endif
-                    <div class="flex gap-2">
-                        <div class="relative flex-1">
+                    <div class="flex flex-col gap-2">
+                        <div class="relative w-full">
                             <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
                             <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
                                    class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
@@ -3434,7 +3426,7 @@ select.mu-filter-input.mu-active {
                         <button wire:click="saveUpdateEmail"
                                 @click="saving = true"
                                 wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                class="w-full px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5 flex-shrink-0"
                                 style="background:#7A3F91;">
                             <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
                             <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
@@ -3546,10 +3538,10 @@ select.mu-filter-input.mu-active {
 @if($activeModal === 'createDirector')
 <div class="fixed inset-0 mu-modal-selectable"
      style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
-     x-data="{ muClosing: false, dPhotoFull: false, submitting: false, closing: false }"
+     x-data="{ muClosing: false, submitting: false, closing: false }"
      x-show="!muClosing"
      x-init="muClosing = false; submitting = false; closing = false"
-     @keydown.escape.window="dPhotoFull ? (dPhotoFull = false) : (!submitting && !closing && (closing = true, $wire.closeModal().then(() => muClosing = true).catch(() => closing = false)))">
+     @keydown.escape.window="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }">
     <div class="w-full h-full flex flex-col" style="background:#FFFFFF;overflow:hidden;">
 
         <div class="flex items-center justify-between px-6 sm:px-8 py-4 shrink-0" style="background:linear-gradient(135deg,#7A3F91,#9b59b6);">
@@ -3568,23 +3560,6 @@ select.mu-filter-input.mu-active {
                 <i x-show="!closing" class="fa-solid fa-xmark text-lg"></i>
                 <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-base"></i>
             </button>
-        </div>
-
-        {{-- Fullscreen profile photo preview --}}
-        <div x-show="dPhotoFull" x-cloak
-             class="fixed inset-0 flex items-center justify-center bg-black/90"
-             style="z-index:9999;"
-             x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
-             x-transition:leave="transition ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-             @click="dPhotoFull = false">
-            <button @click.stop="dPhotoFull = false"
-                    class="absolute top-4 right-4 w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center transition text-white">
-                <i class="fa-solid fa-xmark text-lg"></i>
-            </button>
-            @if($vPhoto)
-            <img src="{{ $vPhoto->temporaryUrl() }}" alt="Profile photo preview"
-                 class="max-w-[92vw] max-h-[88vh] object-contain rounded-lg" @click.stop>
-            @endif
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 mu-vp-scroll max-w-4xl mx-auto w-full relative" style="scrollbar-width:thin;scrollbar-color:#cccccc #F5F5F5;">
@@ -3634,13 +3609,17 @@ select.mu-filter-input.mu-active {
             @endif
 
             @if(!$dOk)
-            {{-- Only ONE active Director allowed: warn up front and lock the Create button below. --}}
+            {{-- Only ONE active Director allowed. The admin can still register a
+                 new Director while one is active — this is just a heads-up that
+                 doing so will automatically set the current active Director to
+                 Inactive, since only one can be active at a time. The Create
+                 button is no longer locked. --}}
             @if($this->hasActiveDirector)
             <div class="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-3">
                 <i class="fas fa-triangle-exclamation text-amber-600 text-base mt-0.5 shrink-0"></i>
                 <div>
                     <p class="text-base font-bold text-amber-800 leading-snug">There is already an active Director.</p>
-                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Director can be active at a time. Deactivate the current Director first, then you can create a new account.</p>
+                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Director can be active at a time. If you register a new one now, the current active Director will automatically be set to <strong>Inactive</strong>.</p>
                 </div>
             </div>
             @endif
@@ -3667,36 +3646,15 @@ select.mu-filter-input.mu-active {
                         <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Personal Information</p>
                     </div>
                     <div class="p-5 flex flex-col sm:flex-row gap-5">
-                        <div class="flex flex-col items-center gap-2 shrink-0 mx-auto sm:mx-0"
-                             x-data="{ dragging: false }"
-                             @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false"
-                             @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
-                            <div class="relative w-32 h-32 group">
-                                <label for="dPhotoInput"
-                                       :class="dragging ? 'border-[#7A3F91] ring-4 ring-[#7A3F91]/10' : 'border-[#E8E0F0] hover:border-[#c4b5d4]'"
-                                       class="block w-full h-full rounded-2xl border-2 cursor-pointer transition-all overflow-hidden bg-[#FAFAFA] shadow-sm">
-                                    @if($vPhoto)
-                                        <img src="{{ $vPhoto->temporaryUrl() }}" class="block w-full h-full object-cover" alt="Preview">
-                                    @else
-                                        <img src="{{ asset('storage/alumni-photos/default.png') }}" class="block w-full h-full object-cover" alt="Default profile photo">
-                                    @endif
-                                    <div class="absolute inset-0 rounded-2xl bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 pointer-events-none">
-                                        <i class="fas fa-camera text-white text-base"></i>
-                                        <span class="text-white text-xs font-semibold">Click to upload</span>
-                                    </div>
-                                    <input id="dPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
-                                </label>
-                                @if($vPhoto)
-                                <button type="button" @click.prevent="dPhotoFull = true"
-                                        class="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-lg bg-black/60 hover:bg-black/80 flex items-center justify-center transition text-white shadow">
-                                    <i class="fas fa-expand text-xs"></i>
-                                </button>
-                                @endif
+                        {{-- Photo upload removed: Director accounts always start with the
+                             default profile photo. Admin cannot set a custom photo on
+                             create; the director can change it later from their own
+                             profile (subject to the normal photo rules). --}}
+                        <div class="flex flex-col items-center gap-2 shrink-0 mx-auto sm:mx-0">
+                            <div class="w-32 h-32 rounded-2xl overflow-hidden bg-[#FAFAFA] border-2 border-[#E8E0F0] shadow-sm">
+                                <img src="{{ asset('storage/alumni-photos/default.png') }}" class="block w-full h-full object-cover" alt="Default profile photo">
                             </div>
-                            <div wire:loading wire:target="vPhoto" class="flex items-center gap-1.5 text-xs font-semibold" style="color:#000000;">
-                                <i class="fas fa-spinner animate-spin text-xs"></i> Uploading…
-                            </div>
-                            <span class="text-xs font-medium text-center leading-relaxed" style="color:#8a8a8a;">JPG, PNG, WebP · 5 MB<br>Leave blank for default</span>
+                            <span class="text-xs font-medium text-center leading-relaxed" style="color:#8a8a8a;">Default photo<br>used on create</span>
                         </div>
 
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3788,8 +3746,8 @@ select.mu-filter-input.mu-active {
                         <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Account Credentials</p>
                     </div>
                     <div class="p-5">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
+                        <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                            <div class="sm:col-span-2">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Username <span class="text-red-500">*</span></p>
                                 <input wire:model.defer="dUsername" type="text"
                                        placeholder="e.g. jdelacruz"
@@ -3803,7 +3761,7 @@ select.mu-filter-input.mu-active {
                                 <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Letters, numbers, dots, dashes, underscores only</p>
                                 @endif
                             </div>
-                            <div>
+                            <div class="sm:col-span-3">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
                                 <input wire:model.defer="dEmail" type="email" placeholder="director@example.com"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['email']) ? 'border-red-400 bg-red-50' : '' }}"
@@ -3841,17 +3799,13 @@ select.mu-filter-input.mu-active {
                          disabled states fire before the Livewire round-trip begins —
                          especially important because Mail::send() is synchronous and
                          can take 1-3 s before the server responds. --}}
-                    @php $lockDirector = $this->hasActiveDirector; @endphp
-                    <button @if(!$lockDirector) wire:click="createDirector" @click="submitting = true" @endif
+                    <button wire:click="createDirector" @click="submitting = true"
                             wire:loading.attr="disabled" wire:target="createDirector"
-                            @disabled($lockDirector)
-                            aria-disabled="{{ $lockDirector ? 'true' : 'false' }}"
-                            title="{{ $lockDirector ? 'There is already an active Director. Deactivate them first.' : '' }}"
-                            :disabled="submitting || {{ $lockDirector ? 'true' : 'false' }}"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn {{ $lockDirector ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90' }}"
-                            style="background:{{ $lockDirector ? '#9ca3af' : 'linear-gradient(135deg,#7A3F91,#8f4ba6)' }};box-shadow:{{ $lockDirector ? 'none' : '0 2px 8px rgba(122,63,145,.25)' }};">
+                            :disabled="submitting"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
+                            style="background:linear-gradient(135deg,#7A3F91,#8f4ba6);box-shadow:0 2px 8px rgba(122,63,145,.25);">
                         <span class="flex items-center gap-2">
-                            <i class="fas {{ $lockDirector ? 'fa-lock' : 'fa-user-tie' }} text-sm"></i> Create Director
+                            <i class="fas fa-user-tie text-sm"></i> Create Director
                         </span>
                     </button>
                 </div>
@@ -3941,13 +3895,17 @@ select.mu-filter-input.mu-active {
             @endif
 
             @if(!$rOk)
-            {{-- Only ONE active Registrar allowed: warn up front and lock the Create button below. --}}
+            {{-- Only ONE active Registrar allowed. The admin can still register a
+                 new Registrar while one is active — this is just a heads-up that
+                 doing so will automatically set the current active Registrar to
+                 Inactive, since only one can be active at a time. The Create
+                 button is no longer locked. --}}
             @if($this->hasActiveRegistrar)
             <div class="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-3">
                 <i class="fas fa-triangle-exclamation text-amber-600 text-base mt-0.5 shrink-0"></i>
                 <div>
                     <p class="text-base font-bold text-amber-800 leading-snug">There is already an active Registrar.</p>
-                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Registrar can be active at a time. Deactivate the current Registrar first, then you can create a new account.</p>
+                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Registrar can be active at a time. If you register a new one now, the current active Registrar will automatically be set to <strong>Inactive</strong>.</p>
                 </div>
             </div>
             @endif
@@ -4063,8 +4021,8 @@ select.mu-filter-input.mu-active {
                         <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Account Credentials</p>
                     </div>
                     <div class="p-5">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
+                        <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                            <div class="sm:col-span-2">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Username <span class="text-red-500">*</span></p>
                                 <input wire:model.defer="rUsername" type="text"
                                        placeholder="e.g. jdelacruz"
@@ -4078,7 +4036,7 @@ select.mu-filter-input.mu-active {
                                 <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Letters, numbers, dots, dashes, underscores only</p>
                                 @endif
                             </div>
-                            <div>
+                            <div class="sm:col-span-3">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
                                 <input wire:model.defer="rEmail" type="email" placeholder="registrar@example.com"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['email']) ? 'border-red-400 bg-red-50' : '' }}"
@@ -4116,17 +4074,13 @@ select.mu-filter-input.mu-active {
                          disabled states fire before the Livewire round-trip begins —
                          especially important because Mail::send() is synchronous and
                          can take 1-3 s before the server responds. --}}
-                    @php $lockRegistrar = $this->hasActiveRegistrar; @endphp
-                    <button @if(!$lockRegistrar) wire:click="createRegistrar" @click="submitting = true" @endif
+                    <button wire:click="createRegistrar" @click="submitting = true"
                             wire:loading.attr="disabled" wire:target="createRegistrar"
-                            @disabled($lockRegistrar)
-                            aria-disabled="{{ $lockRegistrar ? 'true' : 'false' }}"
-                            title="{{ $lockRegistrar ? 'There is already an active Registrar. Deactivate them first.' : '' }}"
-                            :disabled="submitting || {{ $lockRegistrar ? 'true' : 'false' }}"
-                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn {{ $lockRegistrar ? 'cursor-not-allowed opacity-60' : 'hover:opacity-90' }}"
-                            style="background:{{ $lockRegistrar ? '#9ca3af' : 'linear-gradient(135deg,#7A3F91,#8f4ba6)' }};box-shadow:{{ $lockRegistrar ? 'none' : '0 2px 8px rgba(122,63,145,.25)' }};">
+                            :disabled="submitting"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
+                            style="background:linear-gradient(135deg,#7A3F91,#8f4ba6);box-shadow:0 2px 8px rgba(122,63,145,.25);">
                         <span class="flex items-center gap-2">
-                            <i class="fas {{ $lockRegistrar ? 'fa-lock' : 'fa-user-clock' }} text-sm"></i> Create Registrar
+                            <i class="fas fa-user-clock text-sm"></i> Create Registrar
                         </span>
                     </button>
                 </div>

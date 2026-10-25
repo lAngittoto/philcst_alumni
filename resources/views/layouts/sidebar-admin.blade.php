@@ -892,6 +892,11 @@
             async openNotif(item) {
                 this.navigating = true;
                 this.loadingId  = item.id;
+                // Close the panel immediately so it can't still be open (or
+                // mid re-sort) while the page navigates away — fixes the
+                // "modal still showing during navigate" / "already read"
+                // flash. livewire:navigated no longer needs to do this.
+                this.open = false;
                 var clearedByNav = false;
                 try {
                     await this.markRead(item);
@@ -1064,9 +1069,11 @@
         if (s && !s._pollTimer) s.init();
     });
 
-    // livewire:navigated
+    // livewire:navigated — run on the next microtask instead of a 150ms
+    // timeout so the panel/list state settles right after the new page
+    // lands, not visibly mid-transition.
     document.addEventListener('livewire:navigated', function () {
-        setTimeout(function () {
+        Promise.resolve().then(function () {
             if (!window.Alpine || typeof Alpine.store !== 'function') return;
 
             var onAdminPage = !!(document.getElementById('admin-bell-btn') || document.getElementById('admin-bell-btn-mobile'));
@@ -1095,7 +1102,7 @@
                 var ns = Alpine.store('adminNotifs');
                 if (ns) ns.init();
             }
-        }, 150);
+        });
     });
 
     // Re-fetch on tab focus
@@ -1535,23 +1542,15 @@
                     [
                         'route'   => 'employment.tracking',
                         'icon'    => 'chart-line',
-                        'label'   => 'Employment Tracking',
+                        'label'   => 'Employment Analytics',
                         'pattern' => 'employment/tracking*',
                         'color'   => '#D97706',
                         'bg'      => '#FEF3C7',
                     ],
                     [
-                        'route'   => 'admin.yearbook',
-                        'icon'    => 'book-open',
-                        'label'   => 'Alumni Yearbook',
-                        'pattern' => 'yearbook*',
-                        'color'   => '#0284C7',
-                        'bg'      => '#DBEAFE',
-                    ],
-                    [
                         'route'   => 'job.posts',
                         'icon'    => 'briefcase',
-                        'label'   => 'Job Postings',
+                        'label'   => 'View Job Postings',
                         'pattern' => 'job/posts*',
                         'color'   => '#059669',
                         'bg'      => '#DCFCE7',
@@ -1559,7 +1558,7 @@
                     [
                         'route'   => 'events',
                         'icon'    => 'calendar-check',
-                        'label'   => 'Events & Activities',
+                        'label'   => 'View Alumni Events',
                         'pattern' => 'events*',
                         'color'   => '#059669',
                         'bg'      => '#DCFCE7',
@@ -1572,17 +1571,25 @@
                         'color'   => '#7A3F91',
                         'bg'      => '#EDE9F8',
                     ],
+                    [
+                        'route'   => 'admin.yearbook',
+                        'icon'    => 'book-open',
+                        'label'   => 'Alumni Yearbook',
+                        'pattern' => 'yearbook*',
+                        'color'   => '#0284C7',
+                        'bg'      => '#DBEAFE',
+                    ],
                 ];
             @endphp
 
             @foreach($sidebarLinks as $link)
                 @php $isActive = request()->is($link['pattern']); @endphp
                 <a href="{{ route($link['route']) }}"
-                   wire:navigate
+                   wire:navigate.hover
                    title="{{ $link['label'] }}"
                    @click="if (navClickedRoute !== null || loggingOut) { $event.preventDefault(); return; } navClickedRoute = '{{ $link['route'] }}'; setTimeout(() => { if (navClickedRoute === '{{ $link['route'] }}') navClickedRoute = null; }, 10000);"
                    :class="{ 'is-navigating': navClickedRoute === '{{ $link['route'] }}' }"
-                   class="admin-nav-link flex items-center px-4 py-3 transition-all duration-200 rounded-xl group
+                   class="admin-nav-link flex items-center px-4 py-3 transition-colors duration-150 rounded-xl group
                           {{ $isActive ? 'is-active' : '' }}">
 
                     <div class="admin-nav-icon-wrap w-10 h-10 flex items-center justify-center rounded-lg
@@ -1597,7 +1604,7 @@
 
                     <span class="admin-collapsible-text font-medium tracking-wide flex-1
                                  {{ $isActive ? 'font-semibold' : 'text-[#333333]' }}"
-                          style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}{{ in_array($link['route'], ['employment.tracking','events']) ? 'font-size:13.5px;' : '' }}">
+                          style="{{ $isActive ? 'color:'.$link['color'].';' : '' }}{{ in_array($link['route'], ['employment.tracking','job.posts','events']) ? 'font-size:13px;' : '' }}">
                         {{ $link['label'] }}
                     </span>
 
