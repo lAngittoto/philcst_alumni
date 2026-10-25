@@ -2532,11 +2532,7 @@ select.mu-filter-input.mu-active {
             </div>
             @else
             <div class="flex items-center gap-3 min-w-0">
-                @if($isReg)
-                    <div class="w-7 h-7 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-                        <i class="fas fa-user-tie text-white text-xs"></i>
-                    </div>
-                @elseif($vPhoto)
+                @if($vPhoto)
                     <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
                          class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
                 @else
@@ -2576,7 +2572,6 @@ select.mu-filter-input.mu-active {
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
             <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
-                @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0"
                      x-data="{ dragging: false }"
                      @if($canPhoto)
@@ -2602,8 +2597,8 @@ select.mu-filter-input.mu-active {
                         <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
                         @endif
                     </label>
-                    @if($canPhoto)
-                    <p class="text-xs font-semibold uppercase tracking-wide text-center leading-tight" style="color:#000000;">Hover to<br>change</p>
+                    @if($isReg)
+                    <p class="text-xs font-semibold uppercase tracking-wide text-center leading-tight" style="color:#000000;">Default photo</p>
                     @endif
                     @if($vPhoto)
                     <div class="flex flex-col items-center gap-1 w-14">
@@ -2640,7 +2635,6 @@ select.mu-filter-input.mu-active {
                     </div>
                     @error('vPhoto')<p class="text-xs text-red-600 text-center flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
                 </div>
-                @endunless
 
                 <div class="min-w-0 flex-1">
                     <p class="text-xl font-bold uppercase leading-tight" style="color:#333333;">{{ $headerName }}</p>
@@ -2856,11 +2850,6 @@ select.mu-filter-input.mu-active {
                                     </div>
                                 </div>
                             </div>
-
-                            <p x-show="!hasFile && !saving" class="text-center font-semibold leading-tight select-none"
-                               style="font-size:.62rem;color:#666666;max-width:84px;display:block;">
-                                Hover photo to change
-                            </p>
                         </div>
 
                         <div class="mua-info-col">
@@ -3142,9 +3131,7 @@ select.mu-filter-input.mu-active {
                                          {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
                             <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
                         </label>
-                        @if(!$vPhoto && !$vPhotoReset)
-                        <p class="text-xs font-semibold uppercase tracking-wide text-center" style="color:#7A3F91;">Click to change photo</p>
-                        @elseif($vPhotoReset)
+                        @if($vPhotoReset)
                         <p class="text-xs font-semibold uppercase tracking-wide text-center" style="color:#7A3F91;">Use default photo?</p>
                         @endif
                         @if($vPhoto)
