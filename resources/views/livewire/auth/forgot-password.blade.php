@@ -631,28 +631,43 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // ── Generic, non-enumerating failure message ─────────────────────
+        // Deliberately the SAME wording whether the identifier doesn't
+        // exist, the account has no usable email on file, or the email
+        // just doesn't match what's on record. Revealing *which* field was
+        // wrong (old behavior) lets an attacker enumerate valid Student
+        // IDs / usernames one probe at a time. Real-world auth flows
+        // (Google, Microsoft, GitHub, etc.) never say "that account
+        // doesn't exist" vs "wrong email" separately for this reason.
+        $genericError = 'We couldn\'t verify those details. Please check your Student ID / ID Number / Username and registered email, then try again.';
+
         $subject = $this->resolveSubject($identifier, $email);
 
         if (!$subject) {
             RateLimiter::hit($this->rateLimitKey(), 300);
-            $this->identifierError = 'No account found with that Student ID / ID Number / Username. Please check and try again.';
+            $this->errorMessage = $genericError;
             return;
         }
 
+        // Setup-incomplete accounts ARE allowed to see a distinct message —
+        // it isn't secret information (it doesn't confirm or deny a
+        // specific identifier/email pairing by itself) and the user needs
+        // to know to log in with their temporary password instead.
         if (!empty($subject['blockedMessage'])) {
-            $this->identifierError = $subject['blockedMessage'];
+            $this->errorMessage = $subject['blockedMessage'];
             return;
         }
 
         $dbEmail = trim($subject['email'] ?? '');
         if (empty($dbEmail) || str_ends_with($dbEmail, '@pending.local')) {
-            $this->identifierError = 'No valid email on file for this account. Please contact the administrator.';
+            RateLimiter::hit($this->rateLimitKey(), 300);
+            $this->errorMessage = $genericError;
             return;
         }
 
         if (strtolower($dbEmail) !== strtolower($email)) {
             RateLimiter::hit($this->rateLimitKey(), 300);
-            $this->emailError = 'This email does not match the one registered to your account. Please check and try again.';
+            $this->errorMessage = $genericError;
             return;
         }
 
@@ -1050,6 +1065,19 @@ new #[Layout('app')] class extends Component {
     {{-- Dark overlay --}}
     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm z-0"></div>
 
+    {{-- Back to Login — Step 1 only, same pattern as change-password.blade.php --}}
+    @if ($step === 1)
+        <div class="relative z-10 w-full max-w-2xl mb-4">
+            <a href="{{ route('login') }}" wire:navigate
+               class="inline-flex items-center gap-2 text-white hover:text-white/80 transition-colors font-semibold text-sm group">
+                <div class="w-8 h-8 flex items-center justify-center rounded-lg border border-white/30 bg-white/10 group-hover:border-white/60 group-hover:bg-white/20 transition-all shadow-sm">
+                    <i class="fa-solid fa-arrow-left text-sm"></i>
+                </div>
+                <span>Back to Login</span>
+            </a>
+        </div>
+    @endif
+
     {{-- ══ Success Modal ══ --}}
     @if ($showSuccessModal)
         <div class="fixed inset-0 z-[100] flex items-center justify-center p-4"
@@ -1157,157 +1185,409 @@ new #[Layout('app')] class extends Component {
         </div>
     @endif
 
-    <div class="relative z-10 w-full max-w-md">
-        <div class="bg-white rounded-2xl shadow-2xl p-7 sm:p-8"
-             x-data="{}">
+    {{-- ══ Main Card — same shell as change-password.blade.php ══ --}}
+    <div class="relative z-10 w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden">
 
-            <div class="text-center mb-6">
-                <h1 class="text-xl sm:text-2xl font-bold" style="color: #333333;">Forgot Password</h1>
-                <p class="text-sm mt-1" style="color: #666666;">
-                    @if ($step === 1) Enter your account details to receive a verification code.
-                    @elseif ($step === 2) Enter the 6-digit code sent to your email.
-                    @else Set your new password.
-                    @endif
-                </p>
+        {{-- Header --}}
+        <div class="px-6 sm:px-10 pt-7 pb-6 border-b" style="border-color: #E8E8E8;">
+            <div class="flex items-center gap-3 mb-7">
+                <div class="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style="background: #7A3F91;">
+                    <i class="fa-solid fa-key text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-bold" style="color: #333333;">Forgot Password</h1>
+                    <p class="text-xs sm:text-sm mt-0.5" style="color: #555555;">PhilCST Alumni Connect</p>
+                </div>
             </div>
 
-            {{-- Error / Success banners --}}
+            {{-- Step Indicator --}}
+            @php
+                $fpSteps = ['Identity', 'Verify Code', 'New Password'];
+            @endphp
+            <div class="flex items-center gap-1 sm:gap-0">
+                @foreach ($fpSteps as $idx => $label)
+                    @php $pos = $idx + 1; $total = count($fpSteps); @endphp
+                    <div class="flex items-center {{ $pos < $total ? 'flex-1' : '' }}">
+                        <div class="flex flex-col items-center gap-1.5 flex-shrink-0">
+                            <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold border-2 transition-all"
+                                style="{{ $pos == $step ? 'background:#7A3F91; border-color:#7A3F91; color:#ffffff;' : ($pos < $step ? 'background:#059669; border-color:#059669; color:#ffffff;' : 'background:#ffffff; border-color:#E8E8E8; color:#999999;') }}">
+                                @if ($pos < $step)
+                                    <i class="fa-solid fa-check text-xs"></i>
+                                @else
+                                    {{ $pos }}
+                                @endif
+                            </div>
+                            <span class="text-xs font-semibold whitespace-nowrap"
+                                style="{{ $pos == $step ? 'color:#7A3F91;' : ($pos < $step ? 'color:#059669;' : 'color:#999999;') }}">
+                                {{ $label }}
+                            </span>
+                        </div>
+                        @if ($pos < $total)
+                            <div class="flex-1 h-0.5 mx-2 sm:mx-3 mb-5 rounded-full transition-all {{ $pos < $step ? 'bg-emerald-400' : 'bg-[#E8E8E8]' }}"></div>
+                        @endif
+                    </div>
+                @endforeach
+            </div>
+        </div>
+
+        {{-- Body --}}
+        <div class="px-6 sm:px-10 py-7">
+
+            {{-- Alerts — same style as change-password.blade.php.
+                 NOTE: $errorMessage is intentionally worded generically
+                 whenever it concerns account lookup (see verifyAndSend()):
+                 it never confirms or denies whether a specific Student ID
+                 / username exists, or which of the two fields was wrong.
+                 That's what keeps this screen from being an account
+                 enumeration tool. --}}
             @if ($errorMessage)
-                <div class="mb-4 px-4 py-3 rounded-lg text-sm" style="background:#FEF2F2; color:#B91C1C; border:1px solid #FCA5A5;">
-                    {{ $errorMessage }}
+                <div class="mb-5 px-4 py-3 rounded-lg border flex items-start gap-3" style="background:#FEF2F2; border-color:#FECACA;">
+                    <i class="fa-solid fa-circle-exclamation text-red-500 mt-0.5 flex-shrink-0 text-lg"></i>
+                    <p class="text-sm font-medium text-red-700">{{ $errorMessage }}</p>
                 </div>
             @endif
+
             @if ($successMessage)
-                <div class="mb-4 px-4 py-3 rounded-lg text-sm" style="background:#ECFDF5; color:#047857; border:1px solid #6EE7B7;">
-                    {{ $successMessage }}
+                <div class="mb-5 px-4 py-3 rounded-lg border flex items-start gap-3" style="background:#ECFDF5; border-color:#A7F3D0;">
+                    <i class="fa-solid fa-circle-check text-emerald-500 mt-0.5 flex-shrink-0 text-lg"></i>
+                    <p class="text-sm font-medium text-emerald-700">{{ $successMessage }}</p>
                 </div>
             @endif
 
             {{-- ══ STEP 1 — Identity ══ --}}
             @if ($step === 1)
-                <form wire:submit.prevent="verifyAndSend" class="space-y-4">
+                <div class="space-y-5" x-data="sendLockTimer($wire.entangle('sendLockedUntilMs'))">
                     <div>
-                        <label class="block text-sm font-medium mb-1.5" style="color:#333333;">
-                            Student ID / ID Number / Username
-                        </label>
-                        <input type="text" wire:model="identifier"
-                               class="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2"
-                               style="border-color:#E5E7EB; --tw-ring-color:#7A3F91;"
-                               placeholder="Enter your Student ID, ID Number, or Username">
-                        @if ($identifierError)
-                            <p class="mt-1 text-xs" style="color:#DC2626;">{{ $identifierError }}</p>
-                        @endif
+                        <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Verify Your Identity</h2>
+                        <p class="text-sm mt-1" style="color: #555555;">Enter your account details and we'll send a verification code to your registered email.</p>
                     </div>
 
-                    <div>
-                        <label class="block text-sm font-medium mb-1.5" style="color:#333333;">
-                            Registered Email Address
-                        </label>
-                        <input type="email" wire:model="email"
-                               class="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2"
-                               style="border-color:#E5E7EB; --tw-ring-color:#7A3F91;"
-                               placeholder="you@example.com">
-                        @if ($emailError)
-                            <p class="mt-1 text-xs" style="color:#DC2626;">{{ $emailError }}</p>
-                        @endif
-                    </div>
-
-                    <button type="submit"
-                            wire:loading.attr="disabled"
-                            wire:target="verifyAndSend"
-                            @if($sendLocked) disabled @endif
-                            class="w-full text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
-                            style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-                        <span wire:loading.remove wire:target="verifyAndSend">Send Verification Code</span>
-                        <span wire:loading wire:target="verifyAndSend">Sending...</span>
-                    </button>
-                </form>
-            @endif
-
-            {{-- ══ STEP 2 — OTP ══ --}}
-            @if ($step === 2)
-                <div x-data="otpTimer({{ $otpExpiresAtMs }}, {{ $resendAvailableAtMs }}, @js($otpLocked))" class="space-y-4">
-                    <p class="text-sm text-center" style="color:#666666;">
-                        Code sent to <strong>{{ $maskedEmail }}</strong>
-                    </p>
-
-                    <form wire:submit.prevent="verifyOtp" class="space-y-4">
-                        <input type="text" wire:model="otp" maxlength="6" inputmode="numeric"
-                               class="w-full px-4 py-3 rounded-lg border text-center text-2xl tracking-[0.5em] font-mono focus:outline-none focus:ring-2"
-                               style="border-color:#E5E7EB; --tw-ring-color:#7A3F91;"
-                               placeholder="------">
-
-                        <p class="text-xs text-center" style="color:#9CA3AF;">
-                            <span x-show="!expired">Code expires in <strong x-text="formattedTime"></strong></span>
-                            <span x-show="expired" style="color:#DC2626;">Code expired</span>
+                    {{-- Locked-out notice, same pattern as change-password.blade.php --}}
+                    <div wire:ignore x-show="locked" x-cloak
+                         class="rounded-lg border px-4 py-3 flex items-start gap-3" style="background:#FEF2F2; border-color:#FECACA;">
+                        <i class="fa-solid fa-lock text-red-500 mt-0.5 flex-shrink-0 text-sm"></i>
+                        <p class="text-xs sm:text-sm font-medium text-red-700">
+                            Too many attempts. Please wait
+                            <span class="font-mono font-bold" x-text="formattedTime"></span>
+                            before trying again.
                         </p>
+                    </div>
+
+                    <form wire:submit.prevent="verifyAndSend" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold mb-1.5" style="color: #333333;">
+                                Student ID / ID Number / Username
+                            </label>
+                            <input type="text" wire:model="identifier"
+                                   {{ $sendLocked ? 'disabled' : '' }}
+                                   class="w-full px-4 py-3 text-sm border rounded-lg focus:outline-none transition-all"
+                                   style="{{ $sendLocked ? 'background:#F5F5F5; border-color:#E8E8E8; color:#999999;' : 'border-color: #E8E8E8; color: #333333; background: #FFFFFF;' }}"
+                                   onfocus="if(!this.disabled)this.style.borderColor='#7A3F91'; if(!this.disabled)this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
+                                   onblur="if(!this.disabled)this.style.borderColor='#E8E8E8'; if(!this.disabled)this.style.boxShadow='none';"
+                                   placeholder="Enter your Student ID, ID Number, or Username">
+                            {{-- Only shown for a genuinely empty field — never
+                                 confirms whether the value itself is valid. --}}
+                            @if ($identifierError)
+                                <p class="mt-1.5 text-xs font-medium" style="color:#DC2626;">{{ $identifierError }}</p>
+                            @endif
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-semibold mb-1.5" style="color: #333333;">
+                                Registered Email Address
+                            </label>
+                            <input type="email" wire:model="email"
+                                   {{ $sendLocked ? 'disabled' : '' }}
+                                   class="w-full px-4 py-3 text-sm border rounded-lg focus:outline-none transition-all"
+                                   style="{{ $sendLocked ? 'background:#F5F5F5; border-color:#E8E8E8; color:#999999;' : 'border-color: #E8E8E8; color: #333333; background: #FFFFFF;' }}"
+                                   onfocus="if(!this.disabled)this.style.borderColor='#7A3F91'; if(!this.disabled)this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
+                                   onblur="if(!this.disabled)this.style.borderColor='#E8E8E8'; if(!this.disabled)this.style.boxShadow='none';"
+                                   placeholder="you@example.com">
+                            {{-- Only shown for empty / malformed email —
+                                 never for "doesn't match our records". --}}
+                            @if ($emailError)
+                                <p class="mt-1.5 text-xs font-medium" style="color:#DC2626;">{{ $emailError }}</p>
+                            @endif
+                        </div>
 
                         <button type="submit"
                                 wire:loading.attr="disabled"
-                                wire:target="verifyOtp"
-                                class="w-full text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:opacity-90 active:scale-[0.98] transition-all">
-                            <span wire:loading.remove wire:target="verifyOtp">Verify Code</span>
-                            <span wire:loading wire:target="verifyOtp">Verifying...</span>
+                                wire:target="verifyAndSend"
+                                x-bind:disabled="locked"
+                                :class="locked ? 'opacity-50 cursor-not-allowed' : ''"
+                                class="fp-submit-btn">
+                            <span wire:loading.remove wire:target="verifyAndSend" x-show="!locked" class="flex items-center justify-center gap-2">
+                                Send Verification Code
+                                <i class="fa-solid fa-paper-plane" style="font-size:0.72rem;"></i>
+                            </span>
+                            <span x-show="locked" x-cloak class="flex items-center justify-center gap-2">
+                                Try again in <span class="font-mono" x-text="formattedTime"></span>
+                            </span>
+                            <span wire:loading wire:target="verifyAndSend" x-cloak class="flex items-center justify-center gap-2">
+                                <span class="flex gap-0.5">
+                                    <span class="dot1 inline-block w-1.5 h-1.5 bg-white rounded-full"></span>
+                                    <span class="dot2 inline-block w-1.5 h-1.5 bg-white rounded-full"></span>
+                                    <span class="dot3 inline-block w-1.5 h-1.5 bg-white rounded-full"></span>
+                                </span>
+                                <span style="font-size:0.78rem; letter-spacing:0.16em;">Sending</span>
+                            </span>
                         </button>
                     </form>
+                </div>
+            @endif
+
+            {{-- ══ STEP 2 — Verify OTP ══ --}}
+            @if ($step === 2)
+                <div class="space-y-5" x-data="otpTimer($wire.entangle('otpExpiresAtMs'), $wire.entangle('resendAvailableAtMs'), $wire.entangle('otpLocked'))">
+                    <div>
+                        <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Enter Verification Code</h2>
+                        <p class="text-sm mt-1" style="color: #555555;">A 6-digit code was sent to <strong style="color: #7A3F91;">{{ $maskedEmail }}</strong></p>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div wire:ignore class="rounded-lg border p-4 text-center flex flex-col items-center justify-center" style="background: #F8F4FC; border-color: #E8E8E8;">
+                            <p class="text-xs font-semibold uppercase mb-1.5" style="color: #555555; letter-spacing: 0.08em;">Code Expires In</p>
+                            <div class="text-3xl sm:text-4xl font-bold font-mono tabular-nums transition-colors duration-300"
+                                 style="color: #7A3F91;"
+                                 :style="seconds <= 60 ? 'color: #dc2626;' : 'color: #7A3F91;'"
+                                 x-text="formattedTime">10:00</div>
+                            <p x-show="expired" x-cloak class="text-red-600 text-xs mt-1.5 font-semibold">Code expired.</p>
+                            @if (!$otpLocked)
+                                <p class="text-xs mt-1.5" style="color: #999999;" x-show="!expired">
+                                    <i class="fa-solid fa-shield-halved mr-1" style="color: #7A3F91;"></i>Max 5 attempts
+                                </p>
+                            @endif
+                        </div>
+
+                        <div class="flex flex-col justify-center">
+                            <label class="block text-sm font-semibold mb-2" style="color: #333333;">6-Digit Code</label>
+                            <input wire:model="otp"
+                                   wire:keydown.enter="verifyOtp"
+                                   x-on:input="$event.target.value = $event.target.value.replace(/[^0-9]/g, ''); otpLen = $event.target.value.length"
+                                   type="text" maxlength="6" inputmode="numeric" pattern="[0-9]{6}"
+                                   autocomplete="one-time-code"
+                                   {{ $otpLocked ? 'disabled' : '' }}
+                                   placeholder="000000"
+                                   class="w-full px-3 py-3.5 text-center text-2xl font-bold tracking-[0.25em] border rounded-lg focus:outline-none transition-all"
+                                   style="{{ $otpLocked ? 'background:#F5F5F5; border-color:#E8E8E8; color:#999999; cursor:not-allowed;' : 'background:#FFFFFF; border-color:#E8E8E8; color:#333333;' }}"
+                                   onfocus="if(!this.disabled)this.style.borderColor='#7A3F91'; if(!this.disabled)this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
+                                   onblur="if(!this.disabled)this.style.borderColor='#E8E8E8'; if(!this.disabled)this.style.boxShadow='none';">
+                            <p class="text-xs mt-1.5" :style="otpLen === 6 ? 'color:#059669;' : 'color:#999999;'">
+                                <span x-text="otpLen"></span>/6 digits entered
+                            </p>
+                        </div>
+                    </div>
+
+                    @if ($otpLocked)
+                        <div class="rounded-lg border px-4 py-3 flex items-start gap-3" style="background:#FEF2F2; border-color:#FECACA;">
+                            <i class="fa-solid fa-lock text-red-500 text-base flex-shrink-0 mt-0.5"></i>
+                            <div>
+                                <p class="text-sm font-bold text-red-700">Verification Locked</p>
+                                <p class="text-xs text-red-600">Too many incorrect attempts. Request a new code to continue.</p>
+                            </div>
+                        </div>
+                    @endif
+
+                    @if (!$otpLocked)
+                        <button wire:click="verifyOtp"
+                                wire:loading.attr="disabled"
+                                wire:target="verifyOtp"
+                                x-bind:disabled="expired || otpLen !== 6"
+                                :class="(expired || otpLen !== 6) ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]'"
+                                class="w-full text-white py-3.5 rounded-lg font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+                                style="background: linear-gradient(135deg, #7A3F91, #6a3080); transition: transform 0.08s ease, opacity 0.12s ease;">
+                            <span wire:loading.remove wire:target="verifyOtp">Confirm OTP</span>
+                            <span wire:loading wire:target="verifyOtp" x-cloak class="flex items-center gap-1.5">
+                                <i class="fa-solid fa-circle-notch fp-spin" style="font-size:0.8rem;"></i>
+                                <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Verifying</span>
+                            </span>
+                        </button>
+                    @endif
 
                     <button wire:click="resendOtp"
                             wire:loading.attr="disabled"
                             wire:target="resendOtp"
                             x-bind:disabled="!canResend"
-                            class="w-full text-sm font-medium py-2 disabled:opacity-50"
-                            style="color:#7A3F91;">
-                        <span x-show="canResend">Request New Code</span>
-                        <span x-show="!canResend">Resend in <span x-text="resendFormattedTime"></span></span>
+                            type="button"
+                            :class="canResend ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'"
+                            class="w-full py-3 rounded-lg font-semibold text-sm border transition-all flex items-center justify-center gap-2"
+                            :style="canResend ? 'background:#FFFFFF; border-color:#7A3F91; color:#7A3F91;' : 'background:#F5F5F5; border-color:#E8E8E8; color:#999999;'">
+                        <span wire:loading.remove wire:target="resendOtp">
+                            <span x-show="!canResend" wire:ignore>Resend in <span class="font-bold" x-text="resendFormattedTime"></span></span>
+                            <span x-show="canResend">
+                                @if ($otpLocked) Request New Code @else Resend Code @endif
+                            </span>
+                        </span>
+                        <span wire:loading wire:target="resendOtp" x-cloak class="flex items-center gap-1.5">
+                            <span class="flex gap-0.5">
+                                <span class="dot1 inline-block w-1 h-1 rounded-full" style="background: #7A3F91;"></span>
+                                <span class="dot2 inline-block w-1 h-1 rounded-full" style="background: #7A3F91;"></span>
+                                <span class="dot3 inline-block w-1 h-1 rounded-full" style="background: #7A3F91;"></span>
+                            </span>
+                            <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Sending</span>
+                        </span>
                     </button>
 
-                    <button type="button" wire:click="restartWizard" class="w-full text-xs text-center" style="color:#9CA3AF;">
+                    <button type="button" wire:click="restartWizard" class="w-full text-xs text-center py-1" style="color:#9CA3AF;">
                         Start over
                     </button>
                 </div>
             @endif
 
-            {{-- ══ STEP 3 — New password ══ --}}
+            {{-- ══ STEP 3 — New Password ══ --}}
             @if ($step === 3)
-                <form wire:submit.prevent="savePassword" class="space-y-4">
+                <div class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium mb-1.5" style="color:#333333;">New Password</label>
-                        <input type="password" wire:model.live="password"
-                               class="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2"
-                               style="border-color:#E5E7EB; --tw-ring-color:#7A3F91;">
-                        @php($info = $this->getPasswordStrengthInfo())
-                        <div class="mt-2 h-1.5 rounded-full bg-gray-200 overflow-hidden">
-                            <div class="h-full {{ $info['progressColor'] }} {{ $info['width'] }} transition-all"></div>
+                        <h2 class="text-lg sm:text-xl font-bold" style="color: #333333;">Set Your New Password</h2>
+                        <p class="text-sm mt-0.5" style="color: #555555;">Create a strong password to secure your account.</p>
+                    </div>
+
+                    <div class="grid sm:grid-cols-2 gap-5">
+                        {{-- LEFT: password fields --}}
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold mb-1.5" style="color: #333333;">New Password</label>
+                                <div class="relative">
+                                    <input wire:model.live.debounce.200ms="password"
+                                           type="{{ $showPassword ? 'text' : 'password' }}"
+                                           autocomplete="new-password"
+                                           class="w-full px-4 py-3 text-sm border rounded-lg focus:outline-none transition-all pr-10"
+                                           style="border-color: #E8E8E8; color: #333333; background: #FFFFFF;"
+                                           onfocus="this.style.borderColor='#7A3F91'; this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
+                                           onblur="this.style.borderColor='#E8E8E8'; this.style.boxShadow='none';">
+                                    <button type="button" wire:click="$toggle('showPassword')" class="absolute right-3 top-1/2 -translate-y-1/2" style="color: #999999;">
+                                        <i class="fa-solid {{ $showPassword ? 'fa-eye-slash' : 'fa-eye' }} text-sm"></i>
+                                    </button>
+                                </div>
+                                @if ($password !== '')
+                                    <div class="mt-1.5 space-y-1">
+                                        <div class="flex justify-between items-center">
+                                            <span class="text-xs" style="color: #555555;">Strength</span>
+                                            <span class="text-xs font-bold {{ $this->getPasswordStrengthInfo()['color'] }}">{{ $this->getPasswordStrengthInfo()['label'] }}</span>
+                                        </div>
+                                        <div class="h-1.5 rounded-full overflow-hidden" style="background: #E8E8E8;">
+                                            <div class="h-full rounded-full transition-all duration-300 {{ $this->getPasswordStrengthInfo()['progressColor'] }} {{ $this->getPasswordStrengthInfo()['width'] }}"></div>
+                                        </div>
+                                    </div>
+                                @endif
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-semibold mb-1.5" style="color: #333333;">Confirm Password</label>
+                                <div class="relative">
+                                    <input wire:model.live.debounce.200ms="password_confirmation"
+                                           type="{{ $showConfirmPassword ? 'text' : 'password' }}"
+                                           autocomplete="new-password"
+                                           class="w-full px-4 py-3 text-sm border rounded-lg focus:outline-none transition-all pr-10"
+                                           style="border-color: {{ $password_confirmation !== '' && $password !== $password_confirmation ? '#FCA5A5' : ($password_confirmation !== '' && $password === $password_confirmation ? '#6EE7B7' : '#E8E8E8') }}; color: #333333; background: #FFFFFF;"
+                                           onfocus="this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
+                                           onblur="this.style.boxShadow='none';">
+                                    <button type="button" wire:click="$toggle('showConfirmPassword')" class="absolute right-3 top-1/2 -translate-y-1/2" style="color: #999999;">
+                                        <i class="fa-solid {{ $showConfirmPassword ? 'fa-eye-slash' : 'fa-eye' }} text-sm"></i>
+                                    </button>
+                                </div>
+                                @if ($password_confirmation !== '')
+                                    <p class="text-xs mt-1 font-medium" style="color: {{ $password === $password_confirmation ? '#059669' : '#DC2626' }};">
+                                        <i class="fa-solid {{ $password === $password_confirmation ? 'fa-check' : 'fa-xmark' }} mr-1"></i>
+                                        {{ $password === $password_confirmation ? 'Passwords match' : 'Passwords do not match' }}
+                                    </p>
+                                @endif
+                            </div>
                         </div>
-                        <p class="mt-1 text-xs {{ $info['color'] }}">{{ $info['label'] }}</p>
-                    </div>
 
-                    <div>
-                        <label class="block text-sm font-medium mb-1.5" style="color:#333333;">Confirm Password</label>
-                        <input type="password" wire:model.live="password_confirmation"
-                               class="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2"
-                               style="border-color:#E5E7EB; --tw-ring-color:#7A3F91;">
-                    </div>
+                        {{-- RIGHT: requirements + button --}}
+                        <div class="flex flex-col gap-3">
+                            <div class="rounded-lg border p-3" style="background: #FAFAFA; border-color: #E8E8E8;">
+                                <p class="text-xs font-bold uppercase mb-2" style="color: #777777; letter-spacing: 0.07em;">Requirements</p>
+                                <div class="space-y-1.5">
+                                    @foreach ([
+                                        [strlen($password) >= 8,                 '8+ characters'],
+                                        [preg_match('/[A-Z]/', $password),       'Uppercase (A–Z)'],
+                                        [preg_match('/[a-z]/', $password),       'Lowercase (a–z)'],
+                                        [preg_match('/[0-9]/', $password),       'Number (0–9)'],
+                                        [preg_match('/[!@#$%^&*?]/', $password), 'Special (!@#$%)'],
+                                    ] as [$met, $text])
+                                        <div class="flex items-center gap-2">
+                                            <span class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold {{ $met ? 'bg-emerald-100 text-emerald-700' : 'bg-[#E8E8E8] text-[#999999]' }}">{{ $met ? '✓' : '○' }}</span>
+                                            <span class="text-xs {{ $met ? 'font-semibold text-emerald-700' : '' }}" style="{{ !$met ? 'color:#555555;' : '' }}">{{ $text }}</span>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
 
-                    <button type="submit"
-                            wire:loading.attr="disabled"
-                            wire:target="savePassword"
-                            @if(!$this->canSavePassword()) disabled @endif
-                            class="w-full text-white py-3 rounded-xl font-bold text-sm shadow-lg hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
-                            style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
-                        <span wire:loading.remove wire:target="savePassword">Save New Password</span>
-                        <span wire:loading wire:target="savePassword">Saving...</span>
-                    </button>
-                </form>
+                            <div class="flex-1"></div>
+
+                            <button wire:click="savePassword"
+                                    wire:loading.attr="disabled"
+                                    wire:target="savePassword"
+                                    {{ !$this->canSavePassword() ? 'disabled' : '' }}
+                                    class="w-full text-white py-3.5 rounded-lg font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 {{ !$this->canSavePassword() ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.99]' }}"
+                                    style="background: linear-gradient(135deg, #7A3F91, #6a3080);">
+                                <span wire:loading.remove wire:target="savePassword">{{ $this->canSavePassword() ? 'Reset Password' : 'Password Not Ready' }}</span>
+                                <span wire:loading wire:target="savePassword" x-cloak class="flex items-center gap-1.5">
+                                    <span class="flex gap-0.5">
+                                        <span class="dot1 inline-block w-1 h-1 bg-white rounded-full"></span>
+                                        <span class="dot2 inline-block w-1 h-1 bg-white rounded-full"></span>
+                                        <span class="dot3 inline-block w-1 h-1 bg-white rounded-full"></span>
+                                    </span>
+                                    <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Saving</span>
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             @endif
 
-            <div class="mt-6 text-center">
-                <a href="{{ route('login') }}" wire:navigate class="text-sm font-medium" style="color:#7A3F91;">
-                    &larr; Back to Login
-                </a>
-            </div>
+        </div>
+
+        {{-- Footer --}}
+        <div class="px-6 sm:px-10 py-4 text-center border-t" style="background: #FAFAFA; border-color: #E8E8E8;">
+            <p class="text-xs" style="color: #999999;">&copy; {{ date('Y') }} Philippine College of Science and Technology</p>
         </div>
     </div>
+
+    <style>
+        [x-cloak] { display: none !important; }
+
+        @keyframes dotBounce {
+            0%,80%,100% { transform: translateY(0); opacity: 0.4; }
+            40%          { transform: translateY(-4px); opacity: 1; }
+        }
+        .dot1 { animation: dotBounce 1.1s ease-in-out infinite 0s; }
+        .dot2 { animation: dotBounce 1.1s ease-in-out infinite 0.18s; }
+        .dot3 { animation: dotBounce 1.1s ease-in-out infinite 0.36s; }
+
+        @keyframes fpSpinAnim { to { transform: rotate(360deg); } }
+        .fp-spin { animation: fpSpinAnim 0.75s linear infinite; }
+
+        .fp-submit-btn {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: #ffffff;
+            width: 100%;
+            background: #7A3F91;
+            padding: 1rem;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            transition: background 0.12s ease, transform 0.08s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .fp-submit-btn:hover:not(:disabled) {
+            background: #6B3680;
+            transform: translateY(-1px);
+        }
+        .fp-submit-btn:active:not(:disabled) {
+            transform: scale(0.985);
+            background: #5E2F72;
+        }
+        .fp-submit-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    </style>
 
     @script
     <script>
