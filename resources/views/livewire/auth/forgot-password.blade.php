@@ -541,6 +541,12 @@ new #[Layout('app')] class extends Component {
             }
         } catch (\Throwable $e) {
             $this->safeLog('error', "Forgot-password mount error: " . $e->getMessage());
+            $this->resetToStep1();
+            // TEMP DIAGNOSTIC — remove this line once the real cause is found.
+            // APP_DEBUG is off on Railway so the blank 500 page hides the actual
+            // exception; this surfaces it directly on the Step 1 screen instead.
+            $this->errorMessage = 'DEBUG — mount() failed: ' . get_class($e) . ': ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine();
+            return;
         }
 
         $this->resetToStep1();
@@ -1083,10 +1089,14 @@ new #[Layout('app')] class extends Component {
 
     public function goToLogin(): void
     {
-        $subject = $this->getSubjectFromSession();
-        if ($subject) {
-            $key = $this->subjectKey($subject['role'], $subject['id']);
-            cache()->forget($this->cacheOtpVerifiedKey($key));
+        try {
+            $subject = $this->getSubjectFromSession();
+            if ($subject) {
+                $key = $this->subjectKey($subject['role'], $subject['id']);
+                cache()->forget($this->cacheOtpVerifiedKey($key));
+            }
+        } catch (\Throwable $e) {
+            $this->safeLog('error', "Forgot-password goToLogin error: " . $e->getMessage());
         }
         session()->forget([self::SESSION_STEP_KEY, self::SESSION_SUBJECT_KEY]);
         $this->redirect(route('login'));
@@ -1094,10 +1104,14 @@ new #[Layout('app')] class extends Component {
 
     public function restartWizard(): void
     {
-        $subject = $this->getSubjectFromSession();
-        if ($subject) {
-            $key = $this->subjectKey($subject['role'], $subject['id']);
-            cache()->forget($this->cacheOtpVerifiedKey($key));
+        try {
+            $subject = $this->getSubjectFromSession();
+            if ($subject) {
+                $key = $this->subjectKey($subject['role'], $subject['id']);
+                cache()->forget($this->cacheOtpVerifiedKey($key));
+            }
+        } catch (\Throwable $e) {
+            $this->safeLog('error', "Forgot-password restartWizard error: " . $e->getMessage());
         }
         session()->forget([self::SESSION_STEP_KEY, self::SESSION_SUBJECT_KEY]);
         $this->successMessage = '';

@@ -2158,7 +2158,7 @@ new class extends Component {
 
     {{-- Main scrollable body --}}
     <div class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
-        <div class="max-w-2xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-5">
+        <div class="max-w-2xl mx-auto px-4 sm:px-6 py-5 flex flex-col gap-4">
 
             {{-- ── LEFT SIDEBAR ── --}}
             <div class="w-full flex flex-col gap-4 flex-shrink-0">
@@ -2312,27 +2312,27 @@ new class extends Component {
             {{-- ── RIGHT CONTENT ── --}}
             <div class="flex-1 min-w-0 flex flex-col gap-4">
 
-                {{-- Name breakdown --}}
+                {{-- Name breakdown — compact row grid (matches the admin reference card) --}}
                 <div class="vp-detail-card">
                     <div class="vp-detail-card-header">
                         <p>Name Details</p>
                     </div>
                     <div class="grid grid-cols-2 divide-x divide-y divide-[#f0eaf7]">
-                        <div class="px-5 py-4">
-                            <p class="vp-field-label">First Name</p>
-                            <p class="vp-field-value">{{ $viewingProfile['first_name'] ?? '—' }}</p>
+                        <div class="px-4 py-2.5">
+                            <p class="vp-field-label" style="margin-bottom:1px;">First Name</p>
+                            <p class="vp-field-value" style="font-size:0.95rem;">{{ $viewingProfile['first_name'] ?? '—' }}</p>
                         </div>
-                        <div class="px-5 py-4">
-                            <p class="vp-field-label">Last Name</p>
-                            <p class="vp-field-value">{{ $viewingProfile['last_name'] ?? '—' }}</p>
+                        <div class="px-4 py-2.5">
+                            <p class="vp-field-label" style="margin-bottom:1px;">Last Name</p>
+                            <p class="vp-field-value" style="font-size:0.95rem;">{{ $viewingProfile['last_name'] ?? '—' }}</p>
                         </div>
-                        <div class="px-5 py-4">
-                            <p class="vp-field-label">Middle Name</p>
-                            <p class="vp-field-value">{{ $viewingProfile['middle_initial'] ?? '—' }}</p>
+                        <div class="px-4 py-2.5">
+                            <p class="vp-field-label" style="margin-bottom:1px;">Middle Name</p>
+                            <p class="vp-field-value" style="font-size:0.95rem;">{{ $viewingProfile['middle_initial'] ?? '—' }}</p>
                         </div>
-                        <div class="px-5 py-4">
-                            <p class="vp-field-label">Suffix</p>
-                            <p class="vp-field-value">{{ $viewingProfile['suffix'] ?: '—' }}</p>
+                        <div class="px-4 py-2.5">
+                            <p class="vp-field-label" style="margin-bottom:1px;">Suffix</p>
+                            <p class="vp-field-value" style="font-size:0.95rem;">{{ $viewingProfile['suffix'] ?: '—' }}</p>
                         </div>
                     </div>
                 </div>
@@ -2344,13 +2344,13 @@ new class extends Component {
                     </div>
                     <div class="divide-y divide-[#f0eaf7]">
 
-                        <div class="px-5 py-4">
-                            <p class="vp-field-label">Teacher ID</p>
-                            <p class="vp-field-value font-mono">{{ $viewingProfile['id_number'] ?? '—' }}</p>
+                        <div class="px-4 py-2.5">
+                            <p class="vp-field-label" style="margin-bottom:1px;">Teacher ID</p>
+                            <p class="vp-field-value font-mono" style="font-size:0.95rem;">{{ $viewingProfile['id_number'] ?? '—' }}</p>
                         </div>
 
                         {{-- Editable Email --}}
-                        <div class="px-5 py-4">
+                        <div class="px-4 py-3">
                             <div class="flex items-center justify-between mb-1.5">
                                 <p class="vp-field-label" style="margin-bottom:0;">Email Address</p>
                                 @if(!$editingProfileEmail)
