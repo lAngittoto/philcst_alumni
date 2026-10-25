@@ -2041,7 +2041,7 @@ new class extends Component {
      style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
      wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-<div class="relative w-full h-full sm:h-auto sm:max-w-2xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
+<div class="relative w-full h-full sm:h-auto sm:max-w-3xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
      style="background:#f8f7fb;"
      wire:click.stop @click.stop>
 
@@ -2061,7 +2061,7 @@ new class extends Component {
     overflow: hidden;
 }
 .vp-detail-card-header {
-    padding: 0.4rem 1.25rem;
+    padding: 0.35rem 1.1rem;
     border-bottom: 1px solid #f0eaf7;
     background: #faf7fd;
 }
@@ -2135,12 +2135,15 @@ new class extends Component {
         </button>
     </div>
 
-    {{-- Main scrollable body --}}
-    <div class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
-        <div class="max-w-2xl mx-auto px-4 sm:px-6 py-5 flex flex-col gap-4">
+    {{-- Main body — fixed two-column layout, no outer scroll.
+         Sidebar + detail cards both fit in view like the User Management
+         profile card; only truly long inner content (if any) would scroll
+         within its own card, the page itself never does. --}}
+    <div class="flex-1 min-h-0 overflow-hidden">
+        <div class="h-full max-w-3xl mx-auto px-4 sm:px-6 py-4 flex flex-col sm:flex-row gap-4 overflow-y-auto sm:overflow-visible [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
 
             {{-- ── LEFT SIDEBAR ── --}}
-            <div class="w-full flex flex-col gap-4 flex-shrink-0">
+            <div class="w-full sm:w-[220px] flex flex-col gap-4 flex-shrink-0">
 
                 {{-- Profile card --}}
                 <div class="bg-white rounded-2xl border border-[#e8e0f0] overflow-hidden shadow-sm">
@@ -2288,7 +2291,7 @@ new class extends Component {
             </div>
 
             {{-- ── RIGHT CONTENT ── --}}
-            <div class="flex-1 min-w-0 flex flex-col gap-4">
+            <div class="flex-1 min-w-0 flex flex-col gap-3">
 
                 {{-- Name breakdown — compact row grid (matches the admin reference card) --}}
                 <div class="vp-detail-card">

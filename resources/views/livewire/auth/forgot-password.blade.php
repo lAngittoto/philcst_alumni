@@ -1425,11 +1425,6 @@ new #[Layout('app')] class extends Component {
                                  :style="seconds <= 60 ? 'color: #dc2626;' : 'color: #7A3F91;'"
                                  x-text="formattedTime">10:00</div>
                             <p x-show="expired" x-cloak class="text-red-600 text-xs mt-1.5 font-semibold">Code expired.</p>
-                            @if (!$otpLocked)
-                                <p class="text-xs mt-1.5" style="color: #999999;" x-show="!expired">
-                                    <i class="fa-solid fa-shield-halved mr-1" style="color: #7A3F91;"></i>Max 5 attempts
-                                </p>
-                            @endif
                         </div>
 
                         <div class="flex flex-col justify-center">
@@ -1499,10 +1494,6 @@ new #[Layout('app')] class extends Component {
                             </span>
                             <span style="font-size: 0.75rem; letter-spacing: 0.1em;">Sending</span>
                         </span>
-                    </button>
-
-                    <button type="button" wire:click="restartWizard" class="w-full text-xs text-center py-1" style="color:#9CA3AF;">
-                        Start over
                     </button>
                 </div>
             @endif
