@@ -2062,7 +2062,7 @@ new class extends Component {
      style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
      wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-<div class="relative w-full h-full sm:h-auto sm:max-w-[680px] flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
+<div class="relative w-full h-full sm:h-auto sm:max-w-5xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
      style="background:#f8f7fb;"
      wire:click.stop @click.stop>
 
@@ -2158,10 +2158,10 @@ new class extends Component {
 
     {{-- Main scrollable body --}}
     <div class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
-        <div class="px-4 sm:px-5 py-5 flex flex-col sm:flex-row gap-4">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col lg:flex-row gap-5">
 
             {{-- ── LEFT SIDEBAR ── --}}
-            <div class="w-full sm:w-52 flex flex-col gap-3 flex-shrink-0">
+            <div class="w-full lg:w-72 xl:w-80 flex flex-col gap-4 flex-shrink-0">
 
                 {{-- Profile card --}}
                 <div class="bg-white rounded-2xl border border-[#e8e0f0] overflow-hidden shadow-sm">
@@ -2310,7 +2310,7 @@ new class extends Component {
             </div>
 
             {{-- ── RIGHT CONTENT ── --}}
-            <div class="flex-1 min-w-0 flex flex-col gap-3">
+            <div class="flex-1 min-w-0 flex flex-col gap-4">
 
                 {{-- Name breakdown --}}
                 <div class="vp-detail-card">

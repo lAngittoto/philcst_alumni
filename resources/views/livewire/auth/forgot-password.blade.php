@@ -501,18 +501,25 @@ new #[Layout('app')] class extends Component {
 
     public function mount(): void
     {
-        $subject = $this->getSubjectFromSession();
-        $step    = (int) session(self::SESSION_STEP_KEY, 1);
+        // Wrapped for the same reason as verifyAndSend()/resendOtp() below —
+        // a stale/corrupt session subject should fall back to Step 1, not
+        // crash the whole page.
+        try {
+            $subject = $this->getSubjectFromSession();
+            $step    = (int) session(self::SESSION_STEP_KEY, 1);
 
-        $this->checkAndSyncSendLock();
+            $this->checkAndSyncSendLock();
 
-        if ($subject) {
-            if ($step === 3 && $this->tryRestoreStep3($subject)) {
-                return;
+            if ($subject) {
+                if ($step === 3 && $this->tryRestoreStep3($subject)) {
+                    return;
+                }
+                if ($step >= 2 && $this->tryRestoreStep2($subject)) {
+                    return;
+                }
             }
-            if ($step >= 2 && $this->tryRestoreStep2($subject)) {
-                return;
-            }
+        } catch (\Throwable $e) {
+            Log::error("Forgot-password mount error: " . $e->getMessage());
         }
 
         $this->resetToStep1();
@@ -581,15 +588,19 @@ new #[Layout('app')] class extends Component {
         $targetStep = max(1, min(3, $targetStep));
         $this->clearAllErrors();
 
-        $subject = $this->getSubjectFromSession();
+        try {
+            $subject = $this->getSubjectFromSession();
 
-        if ($subject) {
-            if ($targetStep === 3 && $this->tryRestoreStep3($subject)) {
-                return;
+            if ($subject) {
+                if ($targetStep === 3 && $this->tryRestoreStep3($subject)) {
+                    return;
+                }
+                if ($targetStep >= 2 && $this->tryRestoreStep2($subject)) {
+                    return;
+                }
             }
-            if ($targetStep >= 2 && $this->tryRestoreStep2($subject)) {
-                return;
-            }
+        } catch (\Throwable $e) {
+            Log::error("Forgot-password goToWizardStep error: " . $e->getMessage());
         }
 
         $this->resetToStep1();
@@ -641,50 +652,75 @@ new #[Layout('app')] class extends Component {
         // doesn't exist" vs "wrong email" separately for this reason.
         $genericError = 'We couldn\'t verify those details. Please check your username and registered email, then try again.';
 
-        $subject = $this->resolveSubject($identifier, $email);
+        // Everything below touches the DB, cache, and session — any hiccup
+        // there (a null field inside getFullName(), a cache driver blip,
+        // etc.) used to bubble up as a raw 500 error page even though the
+        // OTP step itself kept working underneath. Wrapping the whole
+        // lookup-and-send flow the same way _sendOtp() already does keeps
+        // the person on a friendly message instead.
+        try {
+            $subject = $this->resolveSubject($identifier, $email);
 
-        if (!$subject) {
-            RateLimiter::hit($this->rateLimitKey(), 300);
-            $this->errorMessage = $genericError;
-            return;
-        }
+            if (!$subject) {
+                RateLimiter::hit($this->rateLimitKey(), 300);
+                $this->errorMessage = $genericError;
+                return;
+            }
 
-        // Setup-incomplete accounts ARE allowed to see a distinct message —
-        // it isn't secret information (it doesn't confirm or deny a
-        // specific identifier/email pairing by itself) and the user needs
-        // to know to log in with their temporary password instead.
-        if (!empty($subject['blockedMessage'])) {
-            $this->errorMessage = $subject['blockedMessage'];
-            return;
-        }
+            // Setup-incomplete accounts ARE allowed to see a distinct message —
+            // it isn't secret information (it doesn't confirm or deny a
+            // specific identifier/email pairing by itself) and the user needs
+            // to know to log in with their temporary password instead.
+            if (!empty($subject['blockedMessage'])) {
+                $this->errorMessage = $subject['blockedMessage'];
+                return;
+            }
 
-        $dbEmail = trim($subject['email'] ?? '');
-        if (empty($dbEmail) || str_ends_with($dbEmail, '@pending.local')) {
-            RateLimiter::hit($this->rateLimitKey(), 300);
-            $this->errorMessage = $genericError;
-            return;
-        }
+            $dbEmail = trim($subject['email'] ?? '');
+            if (empty($dbEmail) || str_ends_with($dbEmail, '@pending.local')) {
+                RateLimiter::hit($this->rateLimitKey(), 300);
+                $this->errorMessage = $genericError;
+                return;
+            }
 
-        if (strtolower($dbEmail) !== strtolower($email)) {
-            RateLimiter::hit($this->rateLimitKey(), 300);
-            $this->errorMessage = $genericError;
-            return;
-        }
+            if (strtolower($dbEmail) !== strtolower($email)) {
+                RateLimiter::hit($this->rateLimitKey(), 300);
+                $this->errorMessage = $genericError;
+                return;
+            }
 
-        $key = $this->subjectKey($subject['role'], $subject['id']);
+            $key = $this->subjectKey($subject['role'], $subject['id']);
 
-        // Already verified, mid password-reset — skip straight to Step 3.
-        if ($this->tryRestoreStep3($subject)) {
-            RateLimiter::clear($this->rateLimitKey());
-            session([
-                self::SESSION_SUBJECT_KEY => $key,
-                self::SESSION_STEP_KEY    => 3,
-            ]);
-            return;
-        }
+            // Already verified, mid password-reset — skip straight to Step 3.
+            if ($this->tryRestoreStep3($subject)) {
+                RateLimiter::clear($this->rateLimitKey());
+                session([
+                    self::SESSION_SUBJECT_KEY => $key,
+                    self::SESSION_STEP_KEY    => 3,
+                ]);
+                return;
+            }
 
-        // Active OTP already exists — restore timer.
-        if ($this->isOtpStillActive($subject)) {
+            // Active OTP already exists — restore timer.
+            if ($this->isOtpStillActive($subject)) {
+                RateLimiter::clear($this->rateLimitKey());
+                session([
+                    self::SESSION_SUBJECT_KEY => $key,
+                    self::SESSION_STEP_KEY    => 2,
+                ]);
+                $this->maskedEmail = $this->maskEmail($dbEmail);
+                cache()->put($this->cacheEmailKey($key), $dbEmail, now()->addMinutes(30));
+
+                $this->step           = 2;
+                $this->otpSent        = true;
+                $this->otpLocked      = cache()->has($this->cacheOtpLockKey($key));
+                $this->otp            = '';
+                $this->syncOtpExpiry($subject);
+                $this->successMessage = "A verification code was already sent to {$this->maskedEmail}. Please check your inbox.";
+                $this->dispatch('otp-sent');
+                return;
+            }
+
             RateLimiter::clear($this->rateLimitKey());
             session([
                 self::SESSION_SUBJECT_KEY => $key,
@@ -693,25 +729,11 @@ new #[Layout('app')] class extends Component {
             $this->maskedEmail = $this->maskEmail($dbEmail);
             cache()->put($this->cacheEmailKey($key), $dbEmail, now()->addMinutes(30));
 
-            $this->step           = 2;
-            $this->otpSent        = true;
-            $this->otpLocked      = cache()->has($this->cacheOtpLockKey($key));
-            $this->otp            = '';
-            $this->syncOtpExpiry($subject);
-            $this->successMessage = "A verification code was already sent to {$this->maskedEmail}. Please check your inbox.";
-            $this->dispatch('otp-sent');
-            return;
+            $this->_sendOtp($subject, $dbEmail);
+        } catch (\Throwable $e) {
+            Log::error("Forgot-password verifyAndSend error: " . $e->getMessage());
+            $this->errorMessage = 'Something went wrong while sending the verification code. Please try again.';
         }
-
-        RateLimiter::clear($this->rateLimitKey());
-        session([
-            self::SESSION_SUBJECT_KEY => $key,
-            self::SESSION_STEP_KEY    => 2,
-        ]);
-        $this->maskedEmail = $this->maskEmail($dbEmail);
-        cache()->put($this->cacheEmailKey($key), $dbEmail, now()->addMinutes(30));
-
-        $this->_sendOtp($subject, $dbEmail);
     }
 
     private function _sendOtp(array $subject, string $targetEmail): void
@@ -881,36 +903,44 @@ new #[Layout('app')] class extends Component {
     {
         $this->errorMessage = $this->successMessage = '';
 
-        $subject = $this->getSubjectFromSession();
-        if (!$subject) {
-            $this->errorMessage = 'Session expired. Please start over.';
-            $this->step = 1;
-            return;
+        // Same reasoning as verifyAndSend() above — wrap the lookup +
+        // resend flow so an unexpected hiccup shows a friendly message
+        // instead of a raw 500 error page.
+        try {
+            $subject = $this->getSubjectFromSession();
+            if (!$subject) {
+                $this->errorMessage = 'Session expired. Please start over.';
+                $this->step = 1;
+                return;
+            }
+
+            $key = $this->subjectKey($subject['role'], $subject['id']);
+
+            if ($this->getActiveSendBlock($key)) {
+                $this->showSendBlock($key);
+                return;
+            }
+
+            $cooldownUntil = cache()->get($this->cacheResendCooldownKey($key));
+            if ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp()) {
+                $wait = (int) $cooldownUntil - now()->getTimestamp();
+                $this->resendAvailableAtMs = (int) $cooldownUntil * 1000;
+                $this->errorMessage = "Please wait {$wait} second(s) before requesting a new code.";
+                return;
+            }
+
+            $targetEmail = cache()->get($this->cacheEmailKey($key)) ?? trim($subject['email'] ?? '');
+            if (empty($targetEmail)) {
+                $this->errorMessage = 'Session expired. Please start over.';
+                $this->step = 1;
+                return;
+            }
+
+            $this->_sendOtp($subject, $targetEmail);
+        } catch (\Throwable $e) {
+            Log::error("Forgot-password resendOtp error: " . $e->getMessage());
+            $this->errorMessage = 'Something went wrong while resending the verification code. Please try again.';
         }
-
-        $key = $this->subjectKey($subject['role'], $subject['id']);
-
-        if ($this->getActiveSendBlock($key)) {
-            $this->showSendBlock($key);
-            return;
-        }
-
-        $cooldownUntil = cache()->get($this->cacheResendCooldownKey($key));
-        if ($cooldownUntil && (int) $cooldownUntil > now()->getTimestamp()) {
-            $wait = (int) $cooldownUntil - now()->getTimestamp();
-            $this->resendAvailableAtMs = (int) $cooldownUntil * 1000;
-            $this->errorMessage = "Please wait {$wait} second(s) before requesting a new code.";
-            return;
-        }
-
-        $targetEmail = cache()->get($this->cacheEmailKey($key)) ?? trim($subject['email'] ?? '');
-        if (empty($targetEmail)) {
-            $this->errorMessage = 'Session expired. Please start over.';
-            $this->step = 1;
-            return;
-        }
-
-        $this->_sendOtp($subject, $targetEmail);
     }
 
     // ─────────────────────────────────────────────────────────────────
