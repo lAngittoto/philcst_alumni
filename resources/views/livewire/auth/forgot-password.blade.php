@@ -201,6 +201,27 @@ new #[Layout('app')] class extends Component {
     private function cacheOtpExpiryKey(string $k): string                 { return "fp_otp_expiry:{$k}"; }     // expiry timestamp (ms-epoch seconds)
     private function rateLimitKey(): string                               { return 'fp_verify_' . request()->ip(); }
 
+    /**
+     * Fix: every catch block in this file called Log::error()/warning()/info()
+     * directly. On hosts where the log path isn't writable (e.g. Railway's
+     * ephemeral filesystem without LOG_CHANNEL=stderr configured), that Log
+     * call itself throws — and an exception thrown INSIDE a catch block is
+     * never caught, so it escapes as a raw 500 Server Error page. This was
+     * the exact "500 every time I send/resend, before the 10-minute block
+     * clears" bug: resend-lock (and other) failures were being caught, then
+     * the logging of that failure was what actually crashed the request.
+     * Wrapping every log call here means a logging failure can never take
+     * the page down — worst case, that one log line is silently skipped.
+     */
+    private function safeLog(string $level, string $message): void
+    {
+        try {
+            Log::{$level}($message);
+        } catch (\Throwable $ignored) {
+            // Logging itself failed — never let that become the user-facing error.
+        }
+    }
+
     private function clearAllErrors(): void
     {
         $this->errorMessage    = '';
@@ -519,7 +540,7 @@ new #[Layout('app')] class extends Component {
                 }
             }
         } catch (\Throwable $e) {
-            Log::error("Forgot-password mount error: " . $e->getMessage());
+            $this->safeLog('error', "Forgot-password mount error: " . $e->getMessage());
         }
 
         $this->resetToStep1();
@@ -600,7 +621,7 @@ new #[Layout('app')] class extends Component {
                 }
             }
         } catch (\Throwable $e) {
-            Log::error("Forgot-password goToWizardStep error: " . $e->getMessage());
+            $this->safeLog('error', "Forgot-password goToWizardStep error: " . $e->getMessage());
         }
 
         $this->resetToStep1();
@@ -731,7 +752,7 @@ new #[Layout('app')] class extends Component {
 
             $this->_sendOtp($subject, $dbEmail);
         } catch (\Throwable $e) {
-            Log::error("Forgot-password verifyAndSend error: " . $e->getMessage());
+            $this->safeLog('error', "Forgot-password verifyAndSend error: " . $e->getMessage());
             $this->errorMessage = 'Something went wrong while sending the verification code. Please try again.';
         }
     }
@@ -778,16 +799,16 @@ new #[Layout('app')] class extends Component {
                         roleLabel: $this->roleLabel($subject['role']),
                     ));
                 } catch (\Throwable $mailException) {
-                    Log::warning("Forgot-password OTP first attempt failed, retrying: " . $mailException->getMessage());
+                    $this->safeLog('warning', "Forgot-password OTP first attempt failed, retrying: " . $mailException->getMessage());
                     Mail::to($targetEmail)->send(new UserPasswordReset(
                         fullName: $subject['fullName'] ?: 'User',
                         otp: $otp,
                         roleLabel: $this->roleLabel($subject['role']),
                     ));
                 }
-                Log::info("Forgot-password OTP sent to: {$targetEmail} ({$subject['role']})");
+                $this->safeLog('info', "Forgot-password OTP sent to: {$targetEmail} ({$subject['role']})");
             } catch (\Throwable $e) {
-                Log::error("Forgot-password OTP mail FAILED to send: " . $e->getMessage());
+                $this->safeLog('error', "Forgot-password OTP mail FAILED to send: " . $e->getMessage());
                 $this->errorMessage = 'We could not send the verification code to your email right now. Please check your mail settings or try again in a moment.';
                 return;
             }
@@ -813,7 +834,7 @@ new #[Layout('app')] class extends Component {
             }
 
         } catch (\Throwable $e) {
-            Log::error("Forgot-password _sendOtp error: " . $e->getMessage());
+            $this->safeLog('error', "Forgot-password _sendOtp error: " . $e->getMessage());
             $this->errorMessage = 'Failed to send verification code. Please try again.';
         }
     }
@@ -840,63 +861,71 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
-        $subject = $this->getSubjectFromSession();
-        if (!$subject) {
-            $this->errorMessage = 'Session expired. Please start over.';
-            $this->step = 1;
-            return;
-        }
+        // Fix: this whole method used to run unguarded — a cache/session
+        // hiccup here (same class of issue as the resend 500) would also
+        // raw-500 instead of showing a friendly message.
+        try {
+            $subject = $this->getSubjectFromSession();
+            if (!$subject) {
+                $this->errorMessage = 'Session expired. Please start over.';
+                $this->step = 1;
+                return;
+            }
 
-        $key         = $this->subjectKey($subject['role'], $subject['id']);
-        $lockKey     = $this->cacheOtpLockKey($key);
-        $attemptsKey = $this->cacheOtpAttemptsKey($key);
-        $attempts    = cache()->get($attemptsKey, 0);
+            $key         = $this->subjectKey($subject['role'], $subject['id']);
+            $lockKey     = $this->cacheOtpLockKey($key);
+            $attemptsKey = $this->cacheOtpAttemptsKey($key);
+            $attempts    = cache()->get($attemptsKey, 0);
 
-        if (cache()->has($lockKey)) {
-            $this->otpLocked    = true;
-            $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
-            return;
-        }
+            if (cache()->has($lockKey)) {
+                $this->otpLocked    = true;
+                $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
+                return;
+            }
 
-        if ($attempts >= self::MAX_OTP_ATTEMPTS) {
-            cache()->put($lockKey, true, now()->addHours(24));
-            $this->otpLocked    = true;
-            $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
-            return;
-        }
-
-        $latestSig    = cache()->get($this->cacheOtpSigKey($key));
-        $isLatestCode = !$latestSig
-            || hash_equals((string) $latestSig, hash_hmac('sha256', $trimmed, (string) config('app.key')));
-
-        if (!$isLatestCode || !$this->verifyOtpValue($subject, $trimmed)) {
-            $new = $attempts + 1;
-            cache()->put($attemptsKey, $new, 700);
-            $rem = self::MAX_OTP_ATTEMPTS - $new;
-            if ($rem <= 0) {
+            if ($attempts >= self::MAX_OTP_ATTEMPTS) {
                 cache()->put($lockKey, true, now()->addHours(24));
                 $this->otpLocked    = true;
                 $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
-            } else {
-                $this->errorMessage = "Invalid or expired code. You have {$rem} attempt(s) remaining.";
+                return;
             }
-            return;
+
+            $latestSig    = cache()->get($this->cacheOtpSigKey($key));
+            $isLatestCode = !$latestSig
+                || hash_equals((string) $latestSig, hash_hmac('sha256', $trimmed, (string) config('app.key')));
+
+            if (!$isLatestCode || !$this->verifyOtpValue($subject, $trimmed)) {
+                $new = $attempts + 1;
+                cache()->put($attemptsKey, $new, 700);
+                $rem = self::MAX_OTP_ATTEMPTS - $new;
+                if ($rem <= 0) {
+                    cache()->put($lockKey, true, now()->addHours(24));
+                    $this->otpLocked    = true;
+                    $this->errorMessage = 'Too many incorrect attempts. Please request a new code to continue.';
+                } else {
+                    $this->errorMessage = "Invalid or expired code. You have {$rem} attempt(s) remaining.";
+                }
+                return;
+            }
+
+            cache()->forget($attemptsKey);
+            cache()->forget($lockKey);
+            cache()->forget($this->cacheOtpSigKey($key));
+            $this->clearOtpValue($subject);
+
+            cache()->put($this->cacheOtpVerifiedKey($key), true, now()->addHours(24));
+
+            session([self::SESSION_STEP_KEY => 3]);
+            $this->step                = 3;
+            $this->otp                 = '';
+            $this->otpExpiresAtMs      = 0;
+            $this->resendAvailableAtMs = 0;
+            $this->successMessage      = 'Email verified! Please set your new password below.';
+            $this->dispatch('otp-verified');
+        } catch (\Throwable $e) {
+            $this->safeLog('error', "Forgot-password verifyOtp error: " . $e->getMessage());
+            $this->errorMessage = 'Something went wrong while verifying your code. Please try again.';
         }
-
-        cache()->forget($attemptsKey);
-        cache()->forget($lockKey);
-        cache()->forget($this->cacheOtpSigKey($key));
-        $this->clearOtpValue($subject);
-
-        cache()->put($this->cacheOtpVerifiedKey($key), true, now()->addHours(24));
-
-        session([self::SESSION_STEP_KEY => 3]);
-        $this->step                = 3;
-        $this->otp                 = '';
-        $this->otpExpiresAtMs      = 0;
-        $this->resendAvailableAtMs = 0;
-        $this->successMessage      = 'Email verified! Please set your new password below.';
-        $this->dispatch('otp-verified');
     }
 
     public function resendOtp(): void
@@ -938,7 +967,7 @@ new #[Layout('app')] class extends Component {
 
             $this->_sendOtp($subject, $targetEmail);
         } catch (\Throwable $e) {
-            Log::error("Forgot-password resendOtp error: " . $e->getMessage());
+            $this->safeLog('error', "Forgot-password resendOtp error: " . $e->getMessage());
             $this->errorMessage = 'Something went wrong while resending the verification code. Please try again.';
         }
     }
@@ -1043,11 +1072,11 @@ new #[Layout('app')] class extends Component {
             cache()->forget($this->cacheResendAttemptsKey($key));
             cache()->forget($this->cacheResendLockKey($key));
 
-            Log::info("Forgot-password reset completed: {$key}");
+            $this->safeLog('info', "Forgot-password reset completed: {$key}");
             $this->showSuccessModal = true;
 
         } catch (\Throwable $e) {
-            Log::error("Forgot-password savePassword error: " . $e->getMessage());
+            $this->safeLog('error', "Forgot-password savePassword error: " . $e->getMessage());
             $this->errorMessage = 'Failed to save password. Please try again.';
         }
     }

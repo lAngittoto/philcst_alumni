@@ -3605,10 +3605,6 @@ select.mu-filter-input.mu-active {
                             <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
                         </button>
                     </div>
-                    <p class="mt-2 text-xs font-medium leading-snug flex items-start gap-1.5" style="color:#8a8a8a;">
-                        <i class="fas fa-circle-info mt-0.5 shrink-0"></i>
-                        <span>Updating the email resets this admin's password. A new temporary password is emailed to the new address, and they must change it on next login.</span>
-                    </p>
                 </div>
             </div>
 
