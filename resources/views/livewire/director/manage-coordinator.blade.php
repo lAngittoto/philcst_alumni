@@ -1338,7 +1338,8 @@ new class extends Component {
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="coordSearch,coordCollege,coordStatus">
 
-            {{-- Row 1: search + filters toggle (always visible) --}}
+            {{-- Single row on sm+: search, filters toggle, pills, selects, reset.
+                 On mobile the selects (Row 2) stay collapsible via coordShowFilters. --}}
             <div class="flex flex-wrap gap-2 items-center">
                 <div class="relative flex-1 min-w-[160px] max-w-xs"
                      wire:ignore
@@ -1350,11 +1351,11 @@ new class extends Component {
                            autocomplete="off" maxlength="100" spellcheck="false">
                 </div>
 
-                {{-- Filters toggle — shown on all sizes; on sm+ the selects below also stay
-                     inline, but this button is what drives show/hide on mobile ── --}}
+                {{-- Filters toggle — only drives show/hide on mobile; on sm+ the
+                     selects are already inline in this same row ── --}}
                 @php $coordHasActiveFilters = $coordSearch || $coordCollege || $coordStatus; @endphp
                 <button wire:click="$toggle('coordShowFilters')" type="button"
-                        class="flex items-center gap-1.5 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide transition cursor-pointer
+                        class="sm:hidden flex items-center gap-1.5 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide transition cursor-pointer
                                {{ $coordShowFilters ? 'bg-[#7a3f91] text-white' : 'bg-white text-[#7a3f91] border border-[#E8E0F0] hover:bg-[#f5f0fa]' }}"
                         style="user-select:none;">
                     <i class="fas fa-sliders text-xs"></i>
@@ -1366,6 +1367,27 @@ new class extends Component {
                     @endif
                     <i class="fas fa-chevron-down text-[10px] transition-transform {{ $coordShowFilters ? 'rotate-180' : '' }}"></i>
                 </button>
+
+                {{-- Selects — collapsible on mobile via coordShowFilters, always
+                     inline in this same row on sm+ screens ── --}}
+                <div class="flex-wrap gap-2 items-center {{ $coordShowFilters ? 'flex' : 'hidden' }} sm:flex w-full sm:w-auto sm:contents">
+                    <select wire:model.live="coordCollege"
+                            wire:loading.attr="disabled"
+                            class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                        <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
+                        @foreach($this->orgColleges as $col)
+                            <option value="{{ $col }}">{{ $col }}</option>
+                        @endforeach
+                    </select>
+
+                    <select wire:model.live="coordStatus"
+                            wire:loading.attr="disabled"
+                            class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
+                        <option value="" {{ $coordStatus ? 'disabled' : '' }}>All Statuses</option>
+                        <option value="ACTIVE">Active</option>
+                        <option value="INACTIVE">Inactive</option>
+                    </select>
+                </div>
 
                 {{-- Active-filter pills stay visible on the top row even when the
                      filter controls themselves are collapsed ── --}}
@@ -1413,28 +1435,6 @@ new class extends Component {
                     </span>
                     <span class="hidden sm:inline text-[#333333]" style="user-select:none;">Reset</span>
                 </button>
-            </div>
-
-            {{-- Row 2: the actual filter selects — collapsible on mobile via
-                 coordShowFilters, always shown on sm+ screens regardless of the toggle ── --}}
-            <div class="flex-wrap gap-2 items-center mt-2 {{ $coordShowFilters ? 'flex' : 'hidden' }} sm:flex">
-
-                <select wire:model.live="coordCollege"
-                        wire:loading.attr="disabled"
-                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
-                    <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
-                    @foreach($this->orgColleges as $col)
-                        <option value="{{ $col }}">{{ $col }}</option>
-                    @endforeach
-                </select>
-
-                <select wire:model.live="coordStatus"
-                        wire:loading.attr="disabled"
-                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
-                    <option value="" {{ $coordStatus ? 'disabled' : '' }}>All Statuses</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="INACTIVE">Inactive</option>
-                </select>
             </div>
         </div>
 
@@ -2062,7 +2062,7 @@ new class extends Component {
      style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
      wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-<div class="relative w-full h-full sm:h-auto sm:max-w-2xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
+<div class="relative w-full h-full sm:h-auto sm:max-w-3xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
      style="background:#f8f7fb;"
      wire:click.stop @click.stop>
 
@@ -2120,7 +2120,7 @@ new class extends Component {
 </style>
 
     {{-- Top bar — purple gradient, glassmorphism X --}}
-    <div class="flex items-center justify-between px-5 sm:px-6 h-[56px] shrink-0 gap-4"
+    <div class="flex items-center justify-between px-6 lg:px-10 h-[56px] shrink-0 gap-4"
          style="background: linear-gradient(to right, #7a3f91, #9b59b6); box-shadow: 0 2px 12px rgba(122,63,145,0.25);">
 
         {{-- Left: photo + name --}}
@@ -2158,10 +2158,10 @@ new class extends Component {
 
     {{-- Main scrollable body --}}
     <div class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
-        <div class="max-w-2xl mx-auto px-4 sm:px-5 py-6 flex flex-col lg:flex-row gap-4">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-6 py-6 flex flex-col lg:flex-row gap-5">
 
             {{-- ── LEFT SIDEBAR ── --}}
-            <div class="w-full lg:w-52 flex flex-col gap-4 flex-shrink-0">
+            <div class="w-full lg:w-56 flex flex-col gap-4 flex-shrink-0">
 
                 {{-- Profile card --}}
                 <div class="bg-white rounded-2xl border border-[#e8e0f0] overflow-hidden shadow-sm">
