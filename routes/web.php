@@ -39,9 +39,14 @@ Route::get('/jobs/{id}', function ($id) {
 Volt::route('/login', 'auth/login')->name('login');
 
 // ===================================
-// Alumni — Forgot Password (PUBLIC — no auth required)
+// Forgot Password (PUBLIC — no auth required, works for every role)
 // ===================================
-Volt::route('/alumni/forgot-password', 'alumni/forgot-password')
+Volt::route('/forgot-password', 'auth.forgot-password')
+    ->name('forgot-password');
+
+// Kept so any existing links using the old alumni-only route name
+// (e.g. route('alumni.forgot-password') in login.blade.php) still work.
+Volt::route('/alumni/forgot-password', 'auth.forgot-password')
     ->name('alumni.forgot-password');
 
 // ===================================

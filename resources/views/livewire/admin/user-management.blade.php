@@ -2532,13 +2532,15 @@ select.mu-filter-input.mu-active {
             </div>
             @else
             <div class="flex items-center gap-3 min-w-0">
-                @if($vPhoto)
-                    <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
-                         class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
-                @else
-                    <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
-                         class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
-                @endif
+                @unless($isReg)
+                    @if($vPhoto)
+                        <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
+                             class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
+                    @else
+                        <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
+                             class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
+                    @endif
+                @endunless
                 <div class="min-w-0">
                     <p class="font-semibold text-white text-sm leading-snug uppercase truncate">{{ $headerName }}</p>
                     <p class="text-xs text-white/70 mt-0.5 truncate">{{ $headerSub ?: $this->roleLabel($vRole) }}</p>
@@ -2572,6 +2574,7 @@ select.mu-filter-input.mu-active {
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
             <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
+                @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0">
                     <div class="relative">
                         @if($vPhotoReset)
@@ -2617,6 +2620,7 @@ select.mu-filter-input.mu-active {
                     </div>
                     @error('vPhoto')<p class="text-xs text-red-600 text-center flex items-center gap-1"><i class="fas fa-circle-exclamation text-xs"></i>{{ $message }}</p>@enderror
                 </div>
+                @endunless
 
                 <div class="min-w-0 flex-1">
                     <p class="text-xl font-bold uppercase leading-tight" style="color:#333333;">{{ $headerName }}</p>
@@ -3882,15 +3886,8 @@ select.mu-filter-input.mu-active {
                         <i class="fas fa-id-card text-xs" style="color:#7A3F91;"></i>
                         <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Personal Information</p>
                     </div>
-                    <div class="p-5 flex flex-col sm:flex-row gap-5">
-                        <div class="flex flex-col items-center gap-2 shrink-0 mx-auto sm:mx-0">
-                            <div class="w-32 h-32 rounded-2xl overflow-hidden bg-[#FAFAFA] border-2 border-[#E8E0F0] shadow-sm">
-                                <img src="{{ asset('storage/alumni-photos/default.png') }}" class="block w-full h-full object-cover" alt="Default profile photo">
-                            </div>
-                            <span class="text-xs font-medium text-center leading-relaxed" style="color:#8a8a8a;">Default photo</span>
-                        </div>
-
-                        <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="p-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
                                 <input wire:model.defer="rFn" type="text" placeholder="e.g. Juan"

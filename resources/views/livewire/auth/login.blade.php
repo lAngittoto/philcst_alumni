@@ -1332,10 +1332,10 @@ new #[Layout('app')] class extends Component {
                 </div>
 
                 <div class="text-center">
-                    <a href="{{ route('alumni.forgot-password') }}"
-                       wire:navigate
-                       @click="forgotLoading = true"
-                       class="lg-link">
+  <a href="{{ route('forgot-password') }}"
+   wire:navigate
+   @click="forgotLoading = true"
+   class="lg-link">
                         <span x-show="!forgotLoading">Forgot your password?</span>
                         <span x-show="forgotLoading" x-cloak class="inline-flex items-center gap-1.5">
                             <i class="fa-solid fa-circle-notch lg-spin" style="font-size:0.75rem;"></i>

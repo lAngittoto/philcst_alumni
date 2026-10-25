@@ -2165,7 +2165,7 @@ new class extends Component {
 
                 {{-- Profile card --}}
                 <div class="bg-white rounded-2xl border border-[#e8e0f0] overflow-hidden shadow-sm">
-                    {{-- Photo + identity — "Upload Photo" always visible BELOW the photo --}}
+                    {{-- Photo + identity — only "Back to default photo" below the photo --}}
                     <div class="px-6 pt-7 pb-5 flex flex-col items-center text-center gap-3"
                          style="background: linear-gradient(180deg, #faf7fd 0%, #ffffff 100%);"
                          x-data="{
@@ -2192,52 +2192,6 @@ new class extends Component {
                                  });
                                  $wire.$on('coord-photo-failed', () => { this.failCleanup(); });
                              },
-                             async onFileChange(event) {
-                                 const file = event.target.files[0];
-                                 if (!file) return;
-                                 this.isDefaultPending = false;
-                                 try {
-                                     const compressed = await this.compressImage(file, 500, 500, 0.75);
-                                     this.pendingFile = compressed;
-                                     this.hasFile = true;
-                                     const reader = new FileReader();
-                                     reader.onload = (e) => { this.previewSrc = e.target.result; };
-                                     reader.readAsDataURL(compressed);
-                                 } catch (err) {
-                                     this.pendingFile = file;
-                                     this.hasFile = true;
-                                     const reader = new FileReader();
-                                     reader.onload = (e) => { this.previewSrc = e.target.result; };
-                                     reader.readAsDataURL(file);
-                                 }
-                             },
-                             compressImage(file, maxW, maxH, quality) {
-                                 return new Promise((resolve, reject) => {
-                                     const img = new Image();
-                                     const reader = new FileReader();
-                                     reader.onload = (e) => {
-                                         img.onload = () => {
-                                             let w = img.width, h = img.height;
-                                             if (w > maxW || h > maxH) {
-                                                 const ratio = Math.min(maxW / w, maxH / h);
-                                                 w = Math.round(w * ratio);
-                                                 h = Math.round(h * ratio);
-                                             }
-                                             const canvas = document.createElement('canvas');
-                                             canvas.width = w; canvas.height = h;
-                                             canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                                             canvas.toBlob((blob) => {
-                                                 if (!blob) return reject(new Error('compress failed'));
-                                                 resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
-                                             }, 'image/jpeg', quality);
-                                         };
-                                         img.onerror = reject;
-                                         img.src = e.target.result;
-                                     };
-                                     reader.onerror = reject;
-                                     reader.readAsDataURL(file);
-                                 });
-                             },
                              setDefault() {
                                  this.pendingFile = null; this.hasFile = true;
                                  this.isDefaultPending = true; this.previewSrc = this.defaultSrc;
@@ -2251,21 +2205,10 @@ new class extends Component {
                              },
                              savePhoto() {
                                  if (this.saving) return;
+                                 if (!this.isDefaultPending) return;
                                  this.saving = true;
-                                 if (this.isDefaultPending) {
-                                     // success handled by the coord-photo-saved event
-                                     $wire.resetCoordPhoto().catch(() => this.failCleanup());
-                                 } else if (this.pendingFile) {
-                                     // base64 → Cloudinary (same as Alumni Records)
-                                     const file = this.pendingFile;
-                                     const reader = new FileReader();
-                                     reader.onload = (e) => {
-                                         const base64 = e.target.result.split(',')[1];
-                                         $wire.receiveCoordPhoto(file.name, base64).catch(() => this.failCleanup());
-                                     };
-                                     reader.onerror = () => this.failCleanup();
-                                     reader.readAsDataURL(file);
-                                 } else { this.saving = false; }
+                                 // success handled by the coord-photo-saved event
+                                 $wire.resetCoordPhoto().catch(() => this.failCleanup());
                              },
                              cancelPhoto() {
                                  this.pendingFile = null; this.hasFile = false;
@@ -2287,25 +2230,21 @@ new class extends Component {
                             <span x-show="!hasFile" class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white shadow {{ $isProfileActive ? 'bg-emerald-400' : 'bg-amber-400' }}"></span>
                         </div>
 
-                        {{-- FIX #3: "Upload Photo" — static label always visible BELOW the photo,
-                             not an overlay on top of it. Clicking it opens the file picker. --}}
-                        <label x-show="!saving && !hasFile" class="cp-upload-label" style="display:flex;">
-                            <i class="fas fa-camera"></i>
-                            <span>Upload Photo</span>
-                            <input type="file" x-ref="coordPhotoInput" class="hidden"
-                                   accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
-                        </label>
+                        {{-- Upload removed — the only photo action left is "Back to default photo".
+                             It stages the default (preview + Save / Cancel), same as User Management. --}}
+                        <button type="button" x-show="!saving && !hasFile && !isShowingDefault" x-cloak
+                                @click="setDefault()" class="cp-upload-label" style="display:flex;">
+                            <i class="fas fa-rotate-left"></i>
+                            <span>Back to default photo</span>
+                        </button>
 
                         {{-- Photo action buttons — shown only while a change is pending --}}
-                        <div class="flex items-center gap-1.5 w-full" x-show="hasFile && !saving" style="display:none;">
+                        <div class="flex items-center justify-center gap-1.5 w-full" x-show="hasFile && !saving" style="display:none;">
                             <button type="button" class="cp-photo-action-btn cp-photo-save-btn" @click="savePhoto()" title="Save photo">
                                 <i class="fas fa-check"></i>
                             </button>
                             <button type="button" class="cp-photo-action-btn cp-photo-cancel-btn" @click="cancelPhoto()" title="Cancel">
                                 <i class="fas fa-xmark"></i>
-                            </button>
-                            <button type="button" class="cp-photo-action-btn cp-photo-default-btn ml-auto" @click="setDefault()" title="Reset to default photo" x-show="!isShowingDefault">
-                                <i class="fas fa-rotate-left"></i>
                             </button>
                         </div>
                         <span x-show="saving" class="inline-flex items-center gap-1.5 text-xs font-semibold" style="color:#7A3F91;display:none;">
