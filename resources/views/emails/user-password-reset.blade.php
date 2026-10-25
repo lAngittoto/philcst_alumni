@@ -1,42 +1,102 @@
-<?php
+{{-- resources/views/emails/user-password-reset.blade.php --}}
+{{-- Generic password-reset OTP email used for ALL roles (alumni, organizer, registrar, director, admin). --}}
+{{-- Variables provided by App\Mail\UserPasswordReset: $fullName, $otp, $roleLabel --}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Password Reset Verification - PhilCST Portal</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f3f0f7;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;">
 
-namespace App\Mail;
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f0f7;padding:30px 16px;">
+    <tr>
+        <td align="center">
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:580px;background-color:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 8px 32px rgba(122,63,145,0.13);">
 
-use Illuminate\Bus\Queueable;
-use Illuminate\Mail\Mailable;
-use Illuminate\Mail\Mailables\Content;
-use Illuminate\Mail\Mailables\Envelope;
-use Illuminate\Queue\SerializesModels;
+                {{-- HEADER --}}
+                <tr>
+                    <td style="background:linear-gradient(135deg,#7a3f91 0%,#5a2d6f 100%);padding:40px 32px 36px;text-align:center;">
+                        <h1 style="margin:0 0 6px;font-size:22px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">Password Reset Request</h1>
+                        <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.82);font-weight:400;">Philippine College of Science and Technology</p>
+                    </td>
+                </tr>
 
-/**
- * Generic password-reset OTP mailable used for ALL roles
- * (alumni, organizer, registrar, director, admin).
- *
- * Replaces the alumni-only App\Mail\AlumniPasswordReset for the unified
- * forgot-password flow. AlumniPasswordReset is left untouched/unused so
- * nothing else that may still reference it breaks.
- */
-class UserPasswordReset extends Mailable
-{
-    use Queueable, SerializesModels;
+                {{-- BODY --}}
+                <tr>
+                    <td style="padding:36px 32px 0;">
+                        <p style="margin:0 0 8px;font-size:15px;color:#333;line-height:1.6;">
+                            Hello <strong style="color:#7a3f91;">{{ $fullName }}</strong>,
+                        </p>
+                        <p style="margin:0 0 4px;font-size:12px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px;">
+                            {{ $roleLabel }} Account
+                        </p>
+                        <p style="margin:0 0 28px;font-size:13px;color:#666;line-height:1.75;">
+                            We received a request to reset the password for your PhilCST Portal account. Enter the verification code below to confirm your identity and continue with the password reset process.
+                        </p>
 
-    public function __construct(
-        public readonly string $fullName,
-        public readonly string $otp,
-        public readonly string $roleLabel, // e.g. "Alumni", "Organizer", "Registrar", "Director", "Admin"
-    ) {}
+                        {{-- OTP BOX --}}
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f9f5ff;border:2px dashed #c4b5fd;border-radius:12px;margin-bottom:24px;">
+                            <tr>
+                                <td style="padding:28px 24px;text-align:center;">
+                                    <span style="display:block;font-size:10px;font-weight:700;color:#7a3f91;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px;">Your Verification Code</span>
+                                    <div style="display:inline-block;background:#ffffff;border:1.5px solid #e5e7eb;border-radius:10px;padding:16px 28px;margin-bottom:14px;">
+                                        <span style="font-size:40px;font-weight:700;letter-spacing:10px;color:#1f2937;font-family:'Courier New',monospace;">{{ $otp }}</span>
+                                    </div>
+                                    <p style="margin:0;font-size:12px;color:#9ca3af;">
+                                        This code will expire in <strong style="color:#7a3f91;">10 minutes</strong>.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
 
-    public function envelope(): Envelope
-    {
-        return new Envelope(
-            subject: 'Your Password Reset Verification Code — PhilCST Portal',
-        );
-    }
+                        {{-- HOW TO USE --}}
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5f3ff;border-left:3px solid #7a3f91;border-radius:0 8px 8px 0;margin-bottom:16px;">
+                            <tr>
+                                <td style="padding:14px 16px;">
+                                    <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#7a3f91;">How to use this code</p>
+                                    <p style="margin:0;font-size:12px;color:#555;line-height:1.65;">
+                                        Enter this 6-digit code on the password reset page to verify your identity and proceed to create a new password.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
 
-    public function content(): Content
-    {
-        return new Content(
-            view: 'emails.user-password-reset',
-        );
-    }
-}
+                        {{-- WARNING --}}
+                        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#fffbeb;border-left:3px solid #f59e0b;border-radius:0 8px 8px 0;margin-bottom:24px;">
+                            <tr>
+                                <td style="padding:14px 16px;">
+                                    <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:#b45309;">Security Notice</p>
+                                    <p style="margin:0;font-size:12px;color:#78350f;line-height:1.65;">
+                                        Never share this verification code with anyone. PhilCST staff will never ask for your verification code by email, phone call, or text message.
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+
+                        <p style="margin:0 0 36px;font-size:13px;color:#666;line-height:1.7;">
+                            If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.
+                        </p>
+                    </td>
+                </tr>
+
+                {{-- FOOTER --}}
+                <tr>
+                    <td style="background-color:#f9f5ff;border-top:1px solid #ede9fe;padding:24px 32px;text-align:center;">
+                        <p style="margin:0 0 4px;font-size:12px;color:#7c3aed;font-weight:600;">PhilCST Portal</p>
+                        <p style="margin:0 0 4px;font-size:11px;color:#a78bda;">Philippine College of Science and Technology</p>
+                        <p style="margin:14px 0 0;font-size:10.5px;color:#c4b5fd;">
+                            © {{ date('Y') }} PhilCST Portal. All rights reserved.<br>
+                            This is an automated message. Please do not reply.
+                        </p>
+                    </td>
+                </tr>
+
+            </table>
+        </td>
+    </tr>
+</table>
+
+</body>
+</html>

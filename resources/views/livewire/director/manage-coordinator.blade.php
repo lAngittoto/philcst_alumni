@@ -24,7 +24,6 @@ new class extends Component {
     public string $coordSearch  = '';
     public string $coordCollege = '';
     public string $coordStatus  = '';
-    public bool   $coordShowFilters = false;
     public string $coordFirstName         = '';
     public string $coordMiddleInitial     = '';
     public string $coordLastName          = '';
@@ -1079,7 +1078,7 @@ new class extends Component {
     .cfs-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #f8f7fb; }
 
     /* ══ View Profile — hover-to-upload photo (mirrors alumni-records) ══ */
-    .cp-photo-wrap { position: relative; width: 108px; height: 108px; flex-shrink: 0; }
+    .cp-photo-wrap { position: relative; width: 76px; height: 76px; flex-shrink: 0; }
     .cp-photo-wrap img {
         width: 100%; height: 100%; object-fit: cover; border-radius: 14px;
         box-shadow: 0 2px 10px rgba(0,0,0,.12); transition: all .1s;
@@ -1338,9 +1337,12 @@ new class extends Component {
         <div class="bg-transparent border-b border-[#E8E0F0] px-3.5 py-2.5 flex-shrink-0 transition-opacity duration-200"
              wire:loading.class="opacity-60" wire:target="coordSearch,coordCollege,coordStatus">
 
-            {{-- Row 1: search + filters toggle (always visible) --}}
-            <div class="flex flex-wrap gap-2 items-center">
-                <div class="relative flex-1 min-w-[160px] max-w-xs"
+            {{-- Single row: search, college select, status select, active pills, Reset —
+                 all inline together (matches the reference layout), no more wrapping
+                 to a second line and no more mobile collapse/toggle behavior. --}}
+            @php $coordHasActiveFilters = $coordSearch || $coordCollege || $coordStatus; @endphp
+            <div class="flex flex-nowrap gap-2 items-center overflow-x-auto">
+                <div class="relative flex-1 min-w-[160px] max-w-xs shrink-0"
                      wire:ignore
                      x-data="{q:'',init(){this.q=$wire.coordSearch??'';$wire.$watch('coordSearch',v=>{if(v!==this.q)this.q=v;});}}">
                     <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-xs pointer-events-none text-[#333333] z-[1]"></i>
@@ -1350,25 +1352,24 @@ new class extends Component {
                            autocomplete="off" maxlength="100" spellcheck="false">
                 </div>
 
-                {{-- Filters toggle — shown on all sizes; on sm+ the selects below also stay
-                     inline, but this button is what drives show/hide on mobile ── --}}
-                @php $coordHasActiveFilters = $coordSearch || $coordCollege || $coordStatus; @endphp
-                <button wire:click="$toggle('coordShowFilters')" type="button"
-                        class="flex items-center gap-1.5 px-3 h-[38px] rounded-xl shrink-0 font-semibold text-sm uppercase tracking-wide transition cursor-pointer
-                               {{ $coordShowFilters ? 'bg-[#7a3f91] text-white' : 'bg-white text-[#7a3f91] border border-[#E8E0F0] hover:bg-[#f5f0fa]' }}"
-                        style="user-select:none;">
-                    <i class="fas fa-sliders text-xs"></i>
-                    Filters
-                    @if($coordHasActiveFilters)
-                        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold {{ $coordShowFilters ? 'bg-white text-[#7a3f91]' : 'bg-[#7a3f91] text-white' }}">
-                            {{ ($coordCollege ? 1 : 0) + ($coordStatus ? 1 : 0) }}
-                        </span>
-                    @endif
-                    <i class="fas fa-chevron-down text-[10px] transition-transform {{ $coordShowFilters ? 'rotate-180' : '' }}"></i>
-                </button>
+                <select wire:model.live="coordCollege"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] shrink-0 min-w-[140px]">
+                    <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
+                    @foreach($this->orgColleges as $col)
+                        <option value="{{ $col }}">{{ $col }}</option>
+                    @endforeach
+                </select>
 
-                {{-- Active-filter pills stay visible on the top row even when the
-                     filter controls themselves are collapsed ── --}}
+                <select wire:model.live="coordStatus"
+                        wire:loading.attr="disabled"
+                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] shrink-0 min-w-[140px]">
+                    <option value="" {{ $coordStatus ? 'disabled' : '' }}>All Statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="INACTIVE">Inactive</option>
+                </select>
+
+                {{-- Active-filter pills --}}
                 @if($coordStatus)
                 @php
                     $coordStatusPillMap = [
@@ -1378,7 +1379,7 @@ new class extends Component {
                     $cSPill = $coordStatusPillMap[$coordStatus] ?? null;
                 @endphp
                 @if($cSPill)
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border {{ $cSPill['cls'] }}">
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border shrink-0 {{ $cSPill['cls'] }}">
                     <i class="fas fa-filter text-[9px]"></i>{{ $cSPill['label'] }}
                     <button wire:click="$set('coordStatus', '')" type="button"
                             class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
@@ -1389,7 +1390,7 @@ new class extends Component {
                 @endif
 
                 @if($coordCollege)
-                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border bg-purple-50 border-purple-300 text-purple-800">
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border shrink-0 bg-purple-50 border-purple-300 text-purple-800">
                     <i class="fas fa-building-columns text-[9px]"></i>{{ $coordCollege }}
                     <button wire:click="$set('coordCollege', '')" type="button"
                             class="ml-0.5 hover:opacity-70 transition leading-none cursor-pointer">
@@ -1404,7 +1405,7 @@ new class extends Component {
                         wire:target="resetCoordFilters"
                         {{ !$coordHasActiveFilters ? 'disabled' : '' }}
                         title="{{ $coordHasActiveFilters ? 'Clear filters' : 'No filters applied' }}"
-                        class="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                        class="ml-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-normal text-[#333333] bg-white border border-[#E8E0F0] hover:bg-gray-50 transition active:scale-95 cursor-pointer disabled:pointer-events-none disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
                     <span wire:loading.remove wire:target="resetCoordFilters">
                         <i class="fas fa-rotate-left text-sm text-[#333333]"></i>
                     </span>
@@ -1413,28 +1414,6 @@ new class extends Component {
                     </span>
                     <span class="hidden sm:inline text-[#333333]" style="user-select:none;">Reset</span>
                 </button>
-            </div>
-
-            {{-- Row 2: the actual filter selects — collapsible on mobile via
-                 coordShowFilters, always shown on sm+ screens regardless of the toggle ── --}}
-            <div class="flex-wrap gap-2 items-center mt-2 {{ $coordShowFilters ? 'flex' : 'hidden' }} sm:flex">
-
-                <select wire:model.live="coordCollege"
-                        wire:loading.attr="disabled"
-                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
-                    <option value="" {{ $coordCollege ? 'disabled' : '' }}>All Colleges</option>
-                    @foreach($this->orgColleges as $col)
-                        <option value="{{ $col }}">{{ $col }}</option>
-                    @endforeach
-                </select>
-
-                <select wire:model.live="coordStatus"
-                        wire:loading.attr="disabled"
-                        class="border border-[#E8E0F0] bg-white text-[#333333] text-sm px-3 py-2 rounded-lg tw-select-arrow transition focus:outline-none focus:border-[#7a3f91] focus:ring-2 focus:ring-[#7a3f91]/10 hover:border-[#c4b5d4] flex-1 min-w-[140px] sm:flex-none">
-                    <option value="" {{ $coordStatus ? 'disabled' : '' }}>All Statuses</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="INACTIVE">Inactive</option>
-                </select>
             </div>
         </div>
 
@@ -2082,7 +2061,7 @@ new class extends Component {
     overflow: hidden;
 }
 .vp-detail-card-header {
-    padding: 0.625rem 1.25rem;
+    padding: 0.4rem 1.25rem;
     border-bottom: 1px solid #f0eaf7;
     background: #faf7fd;
 }
@@ -2166,7 +2145,7 @@ new class extends Component {
                 {{-- Profile card --}}
                 <div class="bg-white rounded-2xl border border-[#e8e0f0] overflow-hidden shadow-sm">
                     {{-- Photo + identity — only "Back to default photo" below the photo --}}
-                    <div class="px-6 pt-7 pb-5 flex flex-col items-center text-center gap-3"
+                    <div class="px-6 pt-4 pb-3 flex flex-col items-center text-center gap-2"
                          style="background: linear-gradient(180deg, #faf7fd 0%, #ffffff 100%);"
                          x-data="{
                              previewSrc: '{{ $this->getPhotoUrl($viewingProfile['profile_photo'] ?? null) }}',
@@ -2262,16 +2241,15 @@ new class extends Component {
                         </p>
                     </div>
 
-                    {{-- College badge --}}
-                    <div class="px-5 py-3 border-t border-[#f0eaf7] bg-[#faf7fd]">
-                        <p class="text-xs font-bold uppercase tracking-widest text-[#333333] mb-1">College</p>
-                        <p class="text-base font-semibold text-gray-800">{{ $collegeName }}</p>
+                    {{-- College badge — compact single row --}}
+                    <div class="px-5 py-2 border-t border-[#f0eaf7] bg-[#faf7fd] flex items-center justify-between gap-2">
+                        <span class="text-xs font-bold uppercase tracking-widest text-[#333333]">College</span>
+                        <span class="text-sm font-semibold text-gray-800 text-right">{{ $collegeName }}</span>
                     </div>
 
-                    {{-- Status action --}}
-                    <div class="px-5 py-4 border-t border-[#f0eaf7]">
-                        <p class="text-xs font-bold uppercase tracking-widest text-[#333333] mb-1.5">Account Access</p>
-                        <p class="text-sm text-gray-500 mb-3 leading-relaxed">
+                    {{-- Status action — compact: inline label + status line, smaller button --}}
+                    <div class="px-5 py-2.5 border-t border-[#f0eaf7]">
+                        <p class="text-xs text-gray-500 mb-2 leading-snug">
                             @if($isProfileActive)
                                 Active · can log in and manage their college.
                             @else
@@ -2282,7 +2260,7 @@ new class extends Component {
                             <button type="button"
                                     wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"
                                     wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"
-                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 transition active:scale-95 disabled:opacity-60 disabled:pointer-events-none">
+                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 transition active:scale-95 disabled:opacity-60 disabled:pointer-events-none">
                                 <i class="fas fa-ban text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"></i>
                                 <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'deactivate')"></i>
                                 Deactivate
@@ -2291,7 +2269,7 @@ new class extends Component {
                             <button type="button"
                                     wire:click="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"
                                     wire:loading.attr="disabled" wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"
-                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95 disabled:opacity-60 disabled:pointer-events-none">
+                                    class="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-300 transition active:scale-95 disabled:opacity-60 disabled:pointer-events-none">
                                 <i class="fas fa-circle-check text-xs" wire:loading.remove wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"></i>
                                 <i class="fas fa-spinner animate-spin text-xs" wire:loading wire:target="confirmToggleCoordinatorStatus({{ $profileId }}, 'activate')"></i>
                                 Activate
@@ -2300,8 +2278,8 @@ new class extends Component {
                     </div>
 
                     {{-- Registered date --}}
-                    <div class="px-5 py-3 border-t border-[#f0eaf7]">
-                        <p class="text-xs text-gray-400 text-center">
+                    <div class="px-5 py-1.5 border-t border-[#f0eaf7]">
+                        <p class="text-[11px] text-gray-400 text-center">
                             Registered {{ isset($viewingProfile['created_at']) ? \Carbon\Carbon::parse($viewingProfile['created_at'])->format('M d, Y \a\t g:i A') : '—' }}
                         </p>
                     </div>
