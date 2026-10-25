@@ -68,6 +68,12 @@ new #[Layout('app')] class extends Component {
             }
 
             if ($user->role === 'registrar') {
+                $regRecord = DB::table('users')->where('id', $user->id)->first();
+                if ($regRecord && $regRecord->password_changed_at === null) {
+                    session()->put('registrar_requires_password_change', true);
+                    $this->redirect(route('registrar.change-password'));
+                    return;
+                }
                 $this->redirect(route('registrar.dashboard'));
                 return;
             }
@@ -483,6 +489,98 @@ new #[Layout('app')] class extends Component {
 
             $this->keepLoadingThroughRedirect();
             $this->redirectRoute('director.dashboard', navigate: true);
+            return;
+        }
+
+        // ── Registrar login ────────────────────────────────────────────────
+        // Registrars are stored in the `users` table with:
+        //   email  = "{username}@registrar.internal"
+        //   name   = full name  (NOT the username they type)
+        //   role   = 'registrar'
+        // Same situation as Director above: Auth::attempt(['name' => ...])
+        // can't find them because `name` is now the full name, so we look
+        // them up by their internal email, verify the password manually,
+        // then use Auth::login(). Older registrars (name == username) have
+        // the same internal email format, so they are found here too.
+        $registrarLoginEmail = trim($this->name) . '@registrar.internal';
+        $registrarUser = DB::table('users')
+            ->where('email', $registrarLoginEmail)
+            ->where('role', 'registrar')
+            ->first();
+
+        if ($registrarUser) {
+            if (!Hash::check($this->password, $registrarUser->password)) {
+                RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
+                $attempts = $this->recordFailedAttempt();
+
+                AuditLog::logLogin([
+                    'id'    => $registrarUser->id,
+                    'name'  => $registrarUser->name,
+                    'email' => $registrarUser->email,
+                    'role'  => 'registrar',
+                ], false, 'Incorrect password');
+
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    AuditLog::logAccountLocked($this->name, $attempts, $registrarUser->id);
+                    $this->password = '';
+                    $this->addError('invalid',
+                        "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
+                        . " after {$attempts} failed attempts."
+                    );
+                    return;
+                }
+
+                $remaining = self::MAX_ATTEMPTS - $attempts;
+                $this->password = '';
+                $this->addError('invalid',
+                    'Username/ID or password is invalid. '
+                    . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+                );
+                return;
+            }
+
+            // Password correct — registrar status lives on `users.user_status`
+            // (NULL counts as ACTIVE, same as everywhere else).
+            if (($registrarUser->user_status ?? 'ACTIVE') !== 'ACTIVE') {
+                AuditLog::logLogin([
+                    'id'    => $registrarUser->id,
+                    'name'  => $registrarUser->name,
+                    'email' => $registrarUser->email,
+                    'role'  => 'registrar',
+                ], false, 'Account inactive');
+
+                $this->password = '';
+                $this->addError('invalid',
+                    'Your account is ' . strtolower($registrarUser->user_status) . '. Please contact the administrator.'
+                );
+                return;
+            }
+
+            $userModel = \App\Models\User::find($registrarUser->id);
+            Auth::login($userModel, false);
+            $this->clearAttempts();
+            session()->regenerate();
+
+            AuditLog::logLogin([
+                'id'    => $registrarUser->id,
+                'name'  => $registrarUser->name,
+                'email' => $registrarUser->email,
+                'role'  => 'registrar',
+            ], true);
+
+            // Force password change when password_changed_at is null — set
+            // on create (temporary password) and whenever the admin updates
+            // the registrar's email (new temporary password). Same flow as
+            // Director.
+            if (($registrarUser->password_changed_at ?? null) === null) {
+                session()->put('registrar_requires_password_change', true);
+                $this->keepLoadingThroughRedirect();
+                $this->redirectRoute('registrar.change-password', navigate: true);
+                return;
+            }
+
+            $this->keepLoadingThroughRedirect();
+            $this->redirectRoute('registrar.dashboard', navigate: true);
             return;
         }
 

@@ -111,6 +111,14 @@ Route::middleware(['auth', 'alumni.onboarded'])->group(function () {
 });
 
 // ===================================
+// Registrar — Password Change Wizard
+// ===================================
+Route::middleware(['auth'])->group(function () {
+    Volt::route('/registrar/change-password', 'registrar/change-password')
+        ->name('registrar.change-password');
+});
+
+// ===================================
 // Registrar Routes
 // ===================================
 Route::middleware(['auth', 'registrar'])->prefix('registrar')->name('registrar.')->group(function () {
