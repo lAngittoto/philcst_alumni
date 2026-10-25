@@ -56,6 +56,12 @@ new class extends Component {
     public string $ueEmail   = '';
     public array  $ueErrors  = [];
     public bool   $ueSave    = false;
+
+    // Admin-specific: update username (login email local part or users.name)
+    public string $aeUsername        = '';
+    public array  $aeUsernameErrors  = [];
+    public string $aeUsernameSuccess = '';
+    public bool   $aeUsernameSave    = false;
     // Inline confirmation shown right inside the modal the moment a
     // save succeeds — the global toast (7s auto-dismiss, top of the
     // page) was easy to miss while looking at the modal itself, which
@@ -564,6 +570,7 @@ new class extends Component {
         $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
         $this->vPhoto=null; $this->vPhotoSave=false; $this->vPhotoReset=false; $this->vEmployment=null;
         $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
+        $this->aeUsername=''; $this->aeUsernameErrors=[]; $this->aeUsernameSuccess='';
     }
 
     /**
@@ -902,8 +909,14 @@ new class extends Component {
             $this->ueEmail = $r->organizer_email ?: (str_ends_with($r->email ?? '', '.internal') ? '' : ($r->email ?? ''));
             $this->ueId    = $id;
             $this->ueName  = trim(implode(' ', array_filter([$r->org_first_name, $r->org_last_name]))) ?: $r->name;
+        } elseif ($r->role === 'admin') {
+            // Admin: ueEmail = login email (real email, not internal), aeUsername = users.name
+            $this->ueEmail = (!empty($r->email) && !str_ends_with($r->email, '.internal')) ? $r->email : '';
+            $this->ueId    = $id;
+            $this->ueName  = $r->name;
+            $this->aeUsername = $r->name ?: explode('@', $r->email ?? '')[0];
         }
-        if (in_array($r->role, ['registrar','admin'])) {
+        if ($r->role === 'registrar') {
             $this->cpId   = $id;
             $this->cpName = $r->name;
         }
@@ -1275,6 +1288,47 @@ new class extends Component {
                     $this->vData['organizer_email'] = $email;
                 }
                 $this->bustUserListCache();
+            } elseif ($role === 'admin') {
+                // Admin uses their real email as login email (stored in users.email).
+                $duplicate = DB::table('users')->where('email', $email)->where('id', '!=', $this->ueId)->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another account."]]; return;
+                }
+
+                $adminUser = DB::table('users')->where('id', $this->ueId)->first();
+                if (!$adminUser) {
+                    $this->ueErrors = ['general' => ['Admin account not found.']]; return;
+                }
+
+                // Generate a fresh temp password; force change on next login.
+                $newTempPassword = Str::upper(Str::random(3)) . rand(100, 999) . Str::random(4) . '!';
+
+                DB::table('users')->where('id', $this->ueId)->update([
+                    'email'               => $email,
+                    'email_updated_at'    => now(),
+                    'password'            => Hash::make($newTempPassword),
+                    'password_changed_at' => null,
+                    'updated_at'          => now(),
+                ]);
+
+                // Send credentials to the new email address.
+                try {
+                    \Mail::to($email)->send(new \App\Mail\DirectorRegistered(
+                        fullName:     $adminUser->name,
+                        username:     $email,
+                        tempPassword: $newTempPassword,
+                        email:        $email,
+                        type:         'email_updated',
+                    ));
+                } catch (\Exception $mailEx) {
+                    \Illuminate\Support\Facades\Log::warning('Admin email-update mail failed: ' . $mailEx->getMessage());
+                }
+
+                if ($this->vData) {
+                    $this->vData['email'] = $email;
+                    $this->vData['email_updated_at'] = now();
+                }
+                $this->bustUserListCache();
             } else {
                 $duplicate = DB::table('alumni')->where('email', $email)->where('user_id', '!=', $this->ueId)->exists();
                 if ($duplicate) {
@@ -1321,7 +1375,7 @@ new class extends Component {
                 'role'  => $role,
             ]);
 
-            $msg = in_array($role, ['director', 'organizer', 'registrar'], true)
+            $msg = in_array($role, ['director', 'organizer', 'registrar', 'admin'], true)
                 ? "Email updated for {$this->ueName}. A new temporary password has been sent to {$email}. They must log in and change it immediately."
                 : "Email updated for {$this->ueName}. Their password has been reset to the temporary password (Student ID + first 2 letters of last name). They must log in using that and change it immediately.";
             $this->ueSuccess = $msg;
@@ -1341,6 +1395,64 @@ new class extends Component {
             $this->ueErrors = ['general' => [$e->getMessage()]];
             $this->dispatch('mu-save-done');
         } finally { $this->ueSave = false; }
+    }
+
+    /**
+     * Update the admin's display name / username.
+     * For admins with a real login email, this just updates users.name.
+     * For admins with an internal email (@admin.internal), this also
+     * changes the local part of users.email (the username).
+     */
+    public function saveUpdateUsername(): void {
+        $this->aeUsernameErrors = []; $this->aeUsernameSuccess = ''; $this->aeUsernameSave = true;
+        try {
+            if (($this->vData['role'] ?? '') !== 'admin') {
+                $this->aeUsernameErrors = ['general' => ['Only admin accounts can use this action.']]; return;
+            }
+            $newUsername = trim($this->aeUsername);
+            if (!$newUsername) {
+                $this->aeUsernameErrors = ['general' => ['Username / display name is required.']]; return;
+            }
+            if (!preg_match('/^[a-zA-Z0-9 ._@-]+$/', $newUsername)) {
+                $this->aeUsernameErrors = ['general' => ['Username may only contain letters, numbers, spaces, dots, underscores, dashes, and @.']]; return;
+            }
+
+            $adminUser = DB::table('users')->where('id', $this->ueId)->first();
+            if (!$adminUser) {
+                $this->aeUsernameErrors = ['general' => ['Admin account not found.']]; return;
+            }
+
+            $upd = ['name' => $newUsername, 'updated_at' => now()];
+
+            // If the admin logs in via an @admin.internal address, also update the
+            // local part of the login email so their username stays in sync.
+            if (!empty($adminUser->email) && str_ends_with($adminUser->email, '@admin.internal')) {
+                $sanitized = preg_replace('/[^a-zA-Z0-9._-]/', '_', $newUsername);
+                $newLoginEmail = $sanitized . '@admin.internal';
+                if ($newLoginEmail !== $adminUser->email) {
+                    $taken = DB::table('users')->where('email', $newLoginEmail)->where('id', '!=', $this->ueId)->exists();
+                    if ($taken) {
+                        $this->aeUsernameErrors = ['general' => ['That username is already taken. Please choose a different one.']]; return;
+                    }
+                    $upd['email'] = $newLoginEmail;
+                    if ($this->vData) { $this->vData['email'] = $newLoginEmail; }
+                }
+            }
+
+            DB::table('users')->where('id', $this->ueId)->update($upd);
+
+            if ($this->vData) {
+                $this->vData['name'] = $newUsername;
+            }
+            $this->ueName = $newUsername;
+            $this->bustUserListCache();
+            $this->aeUsernameSuccess = "Username updated to \"{$newUsername}\" successfully.";
+            $this->flash('success', "Admin username updated to \"{$newUsername}\".");
+            $this->dispatch('mu-save-done');
+        } catch (\Exception $e) {
+            $this->aeUsernameErrors = ['general' => [$e->getMessage()]];
+            $this->dispatch('mu-save-done');
+        } finally { $this->aeUsernameSave = false; }
     }
 
     public function saveChangePassword(): void {
@@ -3440,47 +3552,113 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- CHANGE PASSWORD — Admin only (registrar now resets via Update Email, like Director) --}}
+            {{-- ADMIN: Update Email + Update Username (replaces Change Password) --}}
             @if($isAdmin)
+
+            {{-- Update Email --}}
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Change Password</p>
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Email Address</p>
                 </div>
                 <div class="p-4">
-                    @if(count($cpErrs))
+                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0] mb-3">
+                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Current Email</p>
+                        <p class="text-lg font-semibold break-all" style="color:#333333;">
+                            @if(!empty($vd['email']) && !str_ends_with($vd['email'], '.internal'))
+                                {{ $vd['email'] }}
+                            @else
+                                <span class="italic" style="color:#555555;">Not set</span>
+                            @endif
+                        </p>
+                    </div>
+                    @if($ueSuccess)
+                    <div x-init="saving = false"></div>
+                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
+                    </div>
+                    @endif
+                    @if(count($ueErrors))
+                    <div x-init="saving = false"></div>
                     <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
-                        @foreach($cpErrs as $msgs)
+                        @foreach($ueErrors as $msgs)
                             @foreach($msgs as $msg)
                             <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
                             @endforeach
                         @endforeach
                     </div>
                     @endif
-                    <div class="grid grid-cols-2 gap-1.5 mb-1.5">
-                        <input wire:model.defer="cpNew" type="password" placeholder="New password (min. 8)"
-                               class="mu-filter-input w-full text-base" autocomplete="new-password">
-                        <input wire:model.defer="cpConfirm" type="password" placeholder="Confirm new password"
-                               class="mu-filter-input w-full text-base" autocomplete="new-password">
+                    <div class="flex flex-col gap-2">
+                        <div class="relative w-full">
+                            <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
+                            <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
+                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
+                        </div>
+                        <button wire:click="saveUpdateEmail"
+                                @click="saving = true"
+                                wire:loading.attr="disabled" wire:target="saveUpdateEmail"
+                                class="w-full px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5 flex-shrink-0"
+                                style="background:#7A3F91;">
+                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateEmail">Update Email</span>
+                            <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
+                        </button>
                     </div>
-                    <button wire:click="saveChangePassword"
-                            @click="saving = true"
-                            wire:loading.attr="disabled" wire:target="saveChangePassword"
-                            class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5"
-                            style="background:#7A3F91;">
-                        <i class="fas fa-key text-sm"></i> Update Password
-                    </button>
                     <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-rotate-left text-amber-500 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
-                            @if($isReg)
-                                Password is updated immediately. They can log in right away using their current username and this new password. No email is sent — give it to them directly.
-                            @else
-                                After saving, the user will be required to change their password on next login.
-                            @endif
-                        </p>
+                        <i class="fas fa-key text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold leading-snug" style="color:#92400e;">Updating the email will reset this admin's password. A new temporary password will be generated and emailed to the new address, and they must change it on next login.</p>
                     </div>
                 </div>
             </div>
+
+            {{-- Update Username --}}
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
+                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Update Username</p>
+                </div>
+                <div class="p-4">
+                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0] mb-3">
+                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Current Username / Display Name</p>
+                        <p class="text-lg font-bold font-mono" style="color:#333333;">{{ $vd['name'] ?: '—' }}</p>
+                    </div>
+                    @if($aeUsernameSuccess)
+                    <div x-init="saving = false"></div>
+                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $aeUsernameSuccess }}</p>
+                    </div>
+                    @endif
+                    @if(count($aeUsernameErrors))
+                    <div x-init="saving = false"></div>
+                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                        @foreach($aeUsernameErrors as $msgs)
+                            @foreach($msgs as $msg)
+                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            @endforeach
+                        @endforeach
+                    </div>
+                    @endif
+                    <div class="flex gap-2">
+                        <div class="relative flex-1">
+                            <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
+                            <input wire:model.defer="aeUsername" type="text" placeholder="New username…"
+                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off" maxlength="80">
+                        </div>
+                        <button wire:click="saveUpdateUsername"
+                                @click="saving = true"
+                                wire:loading.attr="disabled" wire:target="saveUpdateUsername"
+                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
+                                style="background:#7A3F91;">
+                            <span wire:loading wire:target="saveUpdateUsername"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateUsername"><i class="fas fa-check text-sm"></i></span>
+                            <span wire:loading.remove wire:target="saveUpdateUsername">Update</span>
+                            <span wire:loading wire:target="saveUpdateUsername">Saving…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             @endif
 
             {{-- ACTIVATE / DEACTIVATE (coordinator has its own compact card above) --}}

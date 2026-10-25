@@ -755,7 +755,7 @@ new #[Layout('app')] class extends Component {
                         otp: $otp,
                         roleLabel: $this->roleLabel($subject['role']),
                     ));
-                } catch (\Exception $mailException) {
+                } catch (\Throwable $mailException) {
                     Log::warning("Forgot-password OTP first attempt failed, retrying: " . $mailException->getMessage());
                     Mail::to($targetEmail)->send(new UserPasswordReset(
                         fullName: $subject['fullName'] ?: 'User',
@@ -764,7 +764,7 @@ new #[Layout('app')] class extends Component {
                     ));
                 }
                 Log::info("Forgot-password OTP sent to: {$targetEmail} ({$subject['role']})");
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 Log::error("Forgot-password OTP mail FAILED to send: " . $e->getMessage());
                 $this->errorMessage = 'We could not send the verification code to your email right now. Please check your mail settings or try again in a moment.';
                 return;
@@ -790,7 +790,7 @@ new #[Layout('app')] class extends Component {
                 $this->showSendBlock($key);
             }
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error("Forgot-password _sendOtp error: " . $e->getMessage());
             $this->errorMessage = 'Failed to send verification code. Please try again.';
         }
@@ -1016,7 +1016,7 @@ new #[Layout('app')] class extends Component {
             Log::info("Forgot-password reset completed: {$key}");
             $this->showSuccessModal = true;
 
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             Log::error("Forgot-password savePassword error: " . $e->getMessage());
             $this->errorMessage = 'Failed to save password. Please try again.';
         }
@@ -1610,7 +1610,7 @@ new #[Layout('app')] class extends Component {
 
         Alpine.data('otpTimer', (expiresAtMs, resendAtMs, otpLocked) => ({
             expiresAtMs, resendAtMs, otpLocked,
-            seconds: 0, resendSeconds: 0, expired: true, canResend: true, _interval: null,
+            seconds: 0, resendSeconds: 0, expired: true, canResend: true, otpLen: 0, _interval: null,
 
             get formattedTime() {
                 const m = String(Math.floor(this.seconds / 60)).padStart(2, '0');

@@ -584,6 +584,84 @@ new #[Layout('app')] class extends Component {
             return;
         }
 
+        // ── Admin login ────────────────────────────────────────────────────
+        // Admins now log in with their real email address (users.email) or
+        // their display name (users.name). Try email first, then name.
+        $adminUser = DB::table('users')
+            ->where('role', 'admin')
+            ->where(function ($q) {
+                $q->where('email', trim($this->name))
+                  ->orWhere('name',  trim($this->name));
+            })
+            ->first();
+
+        if ($adminUser) {
+            if (!Hash::check($this->password, $adminUser->password)) {
+                RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
+                $attempts = $this->recordFailedAttempt();
+
+                AuditLog::logLogin([
+                    'id'    => $adminUser->id,
+                    'name'  => $adminUser->name,
+                    'email' => $adminUser->email,
+                    'role'  => 'admin',
+                ], false, 'Incorrect password');
+
+                if ($attempts >= self::MAX_ATTEMPTS) {
+                    AuditLog::logAccountLocked($this->name, $attempts, $adminUser->id);
+                    $this->password = '';
+                    $this->addError('invalid',
+                        "Account locked for " . $this->formatLockTime(self::LOCKOUT_SECONDS)
+                        . " after {$attempts} failed attempts."
+                    );
+                    return;
+                }
+
+                $remaining = self::MAX_ATTEMPTS - $attempts;
+                $this->password = '';
+                $this->addError('invalid',
+                    'Username/ID or password is invalid. '
+                    . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+                );
+                return;
+            }
+
+            // Password correct — force password change if needed
+            if (($adminUser->password_changed_at ?? null) === null) {
+                // Admin has a temp password; require change on next login.
+                // (Reuse the existing session key pattern for consistency.)
+                $userModel = \App\Models\User::find($adminUser->id);
+                Auth::login($userModel, false);
+                $this->clearAttempts();
+                session()->regenerate();
+                session()->put('admin_requires_password_change', true);
+                AuditLog::logLogin([
+                    'id'    => $adminUser->id,
+                    'name'  => $adminUser->name,
+                    'email' => $adminUser->email,
+                    'role'  => 'admin',
+                ], true);
+                $this->keepLoadingThroughRedirect();
+                $this->redirectRoute('admin.dashboard', navigate: true);
+                return;
+            }
+
+            $userModel = \App\Models\User::find($adminUser->id);
+            Auth::login($userModel, false);
+            $this->clearAttempts();
+            RateLimiter::clear($this->throttleKey());
+            session()->regenerate();
+            AuditLog::logLogin([
+                'id'    => $adminUser->id,
+                'name'  => $adminUser->name,
+                'email' => $adminUser->email,
+                'role'  => 'admin',
+            ], true);
+            $this->keepLoadingThroughRedirect();
+            $this->redirectRoute('admin.dashboard', navigate: true);
+            return;
+        }
+
         if (!Auth::attempt(['name' => $this->name, 'password' => $this->password])) {
             RateLimiter::hit($this->throttleKey(), self::LOCKOUT_SECONDS);
             $attempts = $this->recordFailedAttempt();
@@ -738,52 +816,7 @@ new #[Layout('app')] class extends Component {
 <div class="min-h-screen w-full flex flex-col items-center justify-center p-5 antialiased relative"
      x-data="{ showGuide: false, forgotLoading: false, redirecting: false }"
      x-on:login-redirecting.window="redirecting = true"
-     x-init="
-        window.addEventListener('pageshow', (event) => {
-            if (event.persisted) { redirecting = false; forgotLoading = false; }
-        });
-        document.addEventListener('livewire:navigated', () => {
-            redirecting = false; forgotLoading = false;
-        });
-
-        // ── FIX: 'Session expired' kicking the user off the login page ──
-        // By default, when the CSRF token / session has expired (419),
-        // Livewire's own handler pops a native browser confirm() dialog
-        // ('This page has expired. Would you like to refresh the page?')
-        // and, on OK (or in some browsers automatically), force-reloads
-        // the page — which drops whatever the user had typed and reads
-        // as 'getting kicked out' for a simple wrong-password attempt
-        // that happened to land on a stale token. A wrong login should
-        // only ever show the inline red error banner above and let the
-        // user try again right there, never a reload / redirect.
-        //
-        // Livewire dispatches 'livewire:request' listeners get a
-        // 'failure' event we can inspect; intercepting request-level
-        // (component) failures here handles the login form's own
-        // wire:submit without touching any other page's expired-page
-        // behavior.
-        document.addEventListener('livewire:init', () => {
-            Livewire.hook('request', ({ fail }) => {
-                fail(({ status, preventDefault }) => {
-                    if (status === 419) {
-                        // Stop Livewire's default confirm()+reload entirely.
-                        preventDefault();
-
-                        // Refresh the CSRF token silently (Laravel exposes
-                        // it on the <meta name=\"csrf-token\"> tag, which
-                        // Livewire itself also reads from), then let the
-                        // user resubmit normally — no visible interruption.
-                        $wire.$refresh();
-
-                        $wire.addError(
-                            'invalid',
-                            'Your session timed out. Please try signing in again.'
-                        );
-                    }
-                });
-            });
-        });
-     ">
+     x-init="__lgInit($el, $wire)">
 
     <link rel="preload" as="image" href="{{ asset('images/school-1.jpg') }}">
     <style>
@@ -1209,6 +1242,51 @@ new #[Layout('app')] class extends Component {
             .guide-close-btn { padding: 0.85rem; font-size: 0.75rem; }
         }
     </style>
+
+    <script>
+    // Extracted from x-init to avoid Alpine attribute value being rendered as
+    // visible page text in certain server-render or Livewire morph scenarios.
+    function __lgInit(el, wire) {
+        window.addEventListener('pageshow', function(event) {
+            if (event.persisted) {
+                Alpine.store && Alpine.store; // no-op guard
+                // reach the x-data scope and reset flags
+                var comp = Alpine.$data ? Alpine.$data(el) : null;
+                if (!comp) {
+                    // fallback: find the component via _x_dataStack
+                    var node = el;
+                    if (node._x_dataStack && node._x_dataStack.length) {
+                        comp = node._x_dataStack[node._x_dataStack.length - 1];
+                    }
+                }
+                if (comp) { comp.redirecting = false; comp.forgotLoading = false; }
+            }
+        });
+
+        document.addEventListener('livewire:navigated', function() {
+            var node = el;
+            var comp = (node._x_dataStack && node._x_dataStack.length)
+                ? node._x_dataStack[node._x_dataStack.length - 1]
+                : null;
+            if (comp) { comp.redirecting = false; comp.forgotLoading = false; }
+        });
+
+        // Intercept 419 (CSRF expired) to silently refresh the token instead
+        // of popping Livewire's native confirm()+reload dialog, which drops
+        // whatever the user typed and reads as "getting kicked out".
+        document.addEventListener('livewire:init', function() {
+            Livewire.hook('request', function(ctx) {
+                ctx.fail(function(failCtx) {
+                    if (failCtx.status === 419) {
+                        failCtx.preventDefault();
+                        wire.$refresh();
+                        wire.addError('invalid', 'Your session timed out. Please try signing in again.');
+                    }
+                });
+            });
+        });
+    }
+    </script>
 
     {{-- Back to Home — hidden when guide modal is open --}}
     <a href="/" wire:navigate
