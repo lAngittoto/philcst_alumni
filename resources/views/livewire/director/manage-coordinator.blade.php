@@ -2062,7 +2062,7 @@ new class extends Component {
      style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
      wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-<div class="relative w-full h-full sm:h-auto sm:max-w-3xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
+<div class="relative w-full h-full sm:h-auto sm:max-w-2xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
      style="background:#f8f7fb;"
      wire:click.stop @click.stop>
 
@@ -2120,7 +2120,7 @@ new class extends Component {
 </style>
 
     {{-- Top bar — purple gradient, glassmorphism X --}}
-    <div class="flex items-center justify-between px-6 lg:px-10 h-[56px] shrink-0 gap-4"
+    <div class="flex items-center justify-between px-5 sm:px-6 h-[56px] shrink-0 gap-4"
          style="background: linear-gradient(to right, #7a3f91, #9b59b6); box-shadow: 0 2px 12px rgba(122,63,145,0.25);">
 
         {{-- Left: photo + name --}}
@@ -2158,10 +2158,10 @@ new class extends Component {
 
     {{-- Main scrollable body --}}
     <div class="flex-1 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:bg-purple-200 [&::-webkit-scrollbar-thumb]:rounded-full">
-        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-6 py-6 flex flex-col lg:flex-row gap-5">
+        <div class="max-w-2xl mx-auto px-4 sm:px-5 py-6 flex flex-col lg:flex-row gap-4">
 
             {{-- ── LEFT SIDEBAR ── --}}
-            <div class="w-full lg:w-56 flex flex-col gap-4 flex-shrink-0">
+            <div class="w-full lg:w-52 flex flex-col gap-4 flex-shrink-0">
 
                 {{-- Profile card --}}
                 <div class="bg-white rounded-2xl border border-[#e8e0f0] overflow-hidden shadow-sm">
