@@ -2572,34 +2572,16 @@ select.mu-filter-input.mu-active {
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
             <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
-                <div class="flex flex-col items-center gap-1.5 shrink-0"
-                     x-data="{ dragging: false }"
-                     @if($canPhoto)
-                     @dragover.prevent="dragging=true"
-                     @dragleave.prevent="dragging=false"
-                     @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])"
-                     @endif>
-                    <label @if($canPhoto) for="vPhotoInput" @endif class="relative group {{ $canPhoto ? 'cursor-pointer' : '' }}">
-                        @if($vPhoto)
-                            <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
-                                 class="w-20 h-20 rounded-xl object-cover ring-2 ring-[#7A3F91]/30" :class="dragging ? 'ring-[#7A3F91]' : ''">
-                        @elseif($vPhotoReset)
+                <div class="flex flex-col items-center gap-1.5 shrink-0">
+                    <div class="relative">
+                        @if($vPhotoReset)
                             <img src="{{ asset('storage/alumni-photos/default.png') }}" alt="Default photo"
                                  class="w-20 h-20 rounded-xl object-cover ring-2 ring-[#7A3F91]/30">
                         @else
                             <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $headerName }}"
-                                 class="w-14 h-14 rounded-xl object-cover ring-2 ring-[#E8E0F0]" :class="dragging ? 'ring-[#7A3F91]' : ''">
+                                 class="w-14 h-14 rounded-xl object-cover ring-2 ring-[#E8E0F0]">
                         @endif
-                        @if($canPhoto)
-                        <div class="absolute inset-0 rounded-xl bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                            <i class="fas fa-camera text-white text-xs"></i>
-                        </div>
-                        <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
-                        @endif
-                    </label>
-                    @if($isReg)
-                    <p class="text-xs font-semibold uppercase tracking-wide text-center leading-tight" style="color:#000000;">Default photo</p>
-                    @endif
+                    </div>
                     @if($vPhoto)
                     <div class="flex flex-col items-center gap-1 w-14">
                         <button wire:click="savePhoto" wire:loading.attr="disabled" wire:target="savePhoto"
@@ -2805,13 +2787,6 @@ select.mu-filter-input.mu-active {
                                     <div x-show="saving" x-cloak class="mua-uploading">
                                         <i class="fas fa-spinner fa-spin text-[#7A3F91] text-base"></i>
                                     </div>
-                                    <label x-show="!saving"
-                                           class="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/55 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                                           style="border-radius:12px;">
-                                        <i class="fas fa-camera text-white" style="font-size:13px;"></i>
-                                        <input type="file" x-ref="photoInput" class="hidden"
-                                               accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
-                                    </label>
                                     <span x-show="hasFile && !saving" x-cloak
                                           class="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-[#7A3F91] border-2 border-white shadow"></span>
                                 </div>
@@ -3107,30 +3082,19 @@ select.mu-filter-input.mu-active {
                 <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden flex flex-col items-center p-4 gap-2.5">
 
                     {{-- Avatar --}}
-                    <div class="flex flex-col items-center gap-1.5"
-                         x-data="{ dragging: false }"
-                         @dragover.prevent="dragging=true"
-                         @dragleave.prevent="dragging=false"
-                         @drop.prevent="dragging=false; $wire.upload('vPhoto', $event.dataTransfer.files[0])">
-                        <label for="vPhotoInput" class="relative group cursor-pointer">
-                            @if($vPhoto)
-                                <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
-                                     class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#7A3F91]/40">
-                            @elseif($vPhotoReset)
+                    <div class="flex flex-col items-center gap-1.5">
+                        <div class="relative">
+                            @if($vPhotoReset)
                                 <img src="{{ asset('storage/alumni-photos/default.png') }}" alt="Default photo"
                                      class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#7A3F91]/40">
                             @else
                                 <img src="{{ $this->photoUrl($vd['photo'] ?? '') }}" alt="{{ $orgName }}"
-                                     class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#E8E0F0]" :class="dragging ? 'ring-[#7A3F91]' : ''">
+                                     class="w-24 h-24 rounded-2xl object-cover ring-2 ring-[#E8E0F0]">
                             @endif
-                            <div class="absolute inset-0 rounded-2xl bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                <i class="fas fa-camera text-white text-sm"></i>
-                            </div>
                             {{-- Active/Inactive dot --}}
                             <span class="absolute bottom-1 right-1 w-4 h-4 rounded-full border-2 border-white
                                          {{ $orgStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-amber-400' }}"></span>
-                            <input id="vPhotoInput" type="file" wire:model="vPhoto" accept="image/*" class="hidden">
-                        </label>
+                        </div>
                         @if($vPhotoReset)
                         <p class="text-xs font-semibold uppercase tracking-wide text-center" style="color:#7A3F91;">Use default photo?</p>
                         @endif
@@ -3641,7 +3605,7 @@ select.mu-filter-input.mu-active {
                             <div class="w-32 h-32 rounded-2xl overflow-hidden bg-[#FAFAFA] border-2 border-[#E8E0F0] shadow-sm">
                                 <img src="{{ asset('storage/alumni-photos/default.png') }}" class="block w-full h-full object-cover" alt="Default profile photo">
                             </div>
-                            <span class="text-xs font-medium text-center leading-relaxed" style="color:#8a8a8a;">Default photo<br>used on create</span>
+                            <span class="text-xs font-medium text-center leading-relaxed" style="color:#8a8a8a;">Default photo</span>
                         </div>
 
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3919,6 +3883,13 @@ select.mu-filter-input.mu-active {
                         <p class="text-sm font-bold uppercase tracking-widest" style="color:#5a2f6e;">Personal Information</p>
                     </div>
                     <div class="p-5 flex flex-col sm:flex-row gap-5">
+                        <div class="flex flex-col items-center gap-2 shrink-0 mx-auto sm:mx-0">
+                            <div class="w-32 h-32 rounded-2xl overflow-hidden bg-[#FAFAFA] border-2 border-[#E8E0F0] shadow-sm">
+                                <img src="{{ asset('storage/alumni-photos/default.png') }}" class="block w-full h-full object-cover" alt="Default profile photo">
+                            </div>
+                            <span class="text-xs font-medium text-center leading-relaxed" style="color:#8a8a8a;">Default photo</span>
+                        </div>
+
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
