@@ -745,6 +745,44 @@ new #[Layout('app')] class extends Component {
         document.addEventListener('livewire:navigated', () => {
             redirecting = false; forgotLoading = false;
         });
+
+        // ── FIX: 'Session expired' kicking the user off the login page ──
+        // By default, when the CSRF token / session has expired (419),
+        // Livewire's own handler pops a native browser confirm() dialog
+        // ('This page has expired. Would you like to refresh the page?')
+        // and, on OK (or in some browsers automatically), force-reloads
+        // the page — which drops whatever the user had typed and reads
+        // as 'getting kicked out' for a simple wrong-password attempt
+        // that happened to land on a stale token. A wrong login should
+        // only ever show the inline red error banner above and let the
+        // user try again right there, never a reload / redirect.
+        //
+        // Livewire dispatches 'livewire:request' listeners get a
+        // 'failure' event we can inspect; intercepting request-level
+        // (component) failures here handles the login form's own
+        // wire:submit without touching any other page's expired-page
+        // behavior.
+        document.addEventListener('livewire:init', () => {
+            Livewire.hook('request', ({ fail }) => {
+                fail(({ status, preventDefault }) => {
+                    if (status === 419) {
+                        // Stop Livewire's default confirm()+reload entirely.
+                        preventDefault();
+
+                        // Refresh the CSRF token silently (Laravel exposes
+                        // it on the <meta name=\"csrf-token\"> tag, which
+                        // Livewire itself also reads from), then let the
+                        // user resubmit normally — no visible interruption.
+                        $wire.$refresh();
+
+                        $wire.addError(
+                            'invalid',
+                            'Your session timed out. Please try signing in again.'
+                        );
+                    }
+                });
+            });
+        });
      ">
 
     <link rel="preload" as="image" href="{{ asset('images/school-1.jpg') }}">

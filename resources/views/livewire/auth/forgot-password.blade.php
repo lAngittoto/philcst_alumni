@@ -615,7 +615,7 @@ new #[Layout('app')] class extends Component {
         $hasError   = false;
 
         if ($identifier === '') {
-            $this->identifierError = 'Please enter your Student ID / ID Number / Username.';
+            $this->identifierError = 'Please enter your username.';
             $hasError = true;
         }
 
@@ -639,7 +639,7 @@ new #[Layout('app')] class extends Component {
         // IDs / usernames one probe at a time. Real-world auth flows
         // (Google, Microsoft, GitHub, etc.) never say "that account
         // doesn't exist" vs "wrong email" separately for this reason.
-        $genericError = 'We couldn\'t verify those details. Please check your Student ID / ID Number / Username and registered email, then try again.';
+        $genericError = 'We couldn\'t verify those details. Please check your username and registered email, then try again.';
 
         $subject = $this->resolveSubject($identifier, $email);
 
@@ -1276,7 +1276,7 @@ new #[Layout('app')] class extends Component {
                     <form wire:submit.prevent="verifyAndSend" class="space-y-4">
                         <div>
                             <label class="block text-sm font-semibold mb-1.5" style="color: #333333;">
-                                Student ID / ID Number / Username
+                                Username
                             </label>
                             <input type="text" wire:model="identifier"
                                    {{ $sendLocked ? 'disabled' : '' }}
@@ -1284,7 +1284,7 @@ new #[Layout('app')] class extends Component {
                                    style="{{ $sendLocked ? 'background:#F5F5F5; border-color:#E8E8E8; color:#999999;' : 'border-color: #E8E8E8; color: #333333; background: #FFFFFF;' }}"
                                    onfocus="if(!this.disabled)this.style.borderColor='#7A3F91'; if(!this.disabled)this.style.boxShadow='0 0 0 3px rgba(122,63,145,0.08)';"
                                    onblur="if(!this.disabled)this.style.borderColor='#E8E8E8'; if(!this.disabled)this.style.boxShadow='none';"
-                                   placeholder="Enter your Student ID, ID Number, or Username">
+                                   placeholder="Enter your username">
                             {{-- Only shown for a genuinely empty field — never
                                  confirms whether the value itself is valid. --}}
                             @if ($identifierError)

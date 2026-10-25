@@ -355,11 +355,16 @@ new class extends Component {
                 ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
                 ->leftJoin('director as dir',  fn($j) => $j->on('dir.user_id','=','users.id')->whereNull('dir.deleted_at'));
 
-            $q->where('users.role', '!=', 'admin');
-
-            $map = ['alumni'=>'alumni','director'=>'director','coordinator'=>'organizer','registrar'=>'registrar'];
-            if ($this->activeRole !== 'all' && isset($map[$this->activeRole]))
+            // Admins are hidden from the "All" and other tabs, but visible when the Admin tab is active.
+            $map = ['alumni'=>'alumni','director'=>'director','coordinator'=>'organizer','registrar'=>'registrar','admin'=>'admin'];
+            if ($this->activeRole === 'admin') {
+                $q->where('users.role', 'admin');
+            } elseif ($this->activeRole !== 'all' && isset($map[$this->activeRole])) {
                 $q->where('users.role', $map[$this->activeRole]);
+            } else {
+                // "All" tab — hide admin accounts (they are managed via the Admin tab)
+                $q->where('users.role', '!=', 'admin');
+            }
 
             if ($this->activeRole === 'alumni' && in_array($this->statusFilter, ['complete', 'pending', 'new_this_month'], true)) {
                 // Same required-field list as the CASE expression above
@@ -403,7 +408,38 @@ new class extends Component {
 
             if ($this->search) {
                 $t = '%'.$this->search.'%';
-                $q->where(fn($s) => $s->where('users.name','like',$t)->orWhere('users.email','like',$t));
+                $q->where(function ($s) use ($t) {
+                    $s->where('users.name', 'like', $t)
+                      // Login email (covers @registrar.internal / @director.internal usernames too)
+                      ->orWhere('users.email', 'like', $t)
+                      // Username extracted from internal login emails (e.g. "juan" from "juan@registrar.internal")
+                      ->orWhereRaw("SUBSTRING_INDEX(users.email,'@',1) LIKE ?", [$t])
+                      // Alumni record email (stored on the alumni table, not users)
+                      ->orWhere('al.email', 'like', $t)
+                      // Alumni name parts
+                      ->orWhere('al.first_name', 'like', $t)
+                      ->orWhere('al.last_name', 'like', $t)
+                      // Director contact email (stored on the director table)
+                      ->orWhere('dir.email', 'like', $t)
+                      // Director name parts
+                      ->orWhere('dir.first_name', 'like', $t)
+                      ->orWhere('dir.last_name', 'like', $t)
+                      // Coordinator name parts
+                      ->orWhere('org.first_name', 'like', $t)
+                      ->orWhere('org.last_name', 'like', $t)
+                      ->orWhere('org.email', 'like', $t)
+                      // Registrar separate name columns (if migration has run)
+                      ->orWhereRaw($this->registrarNameColsExist()
+                          ? "users.first_name LIKE ?"
+                          : "0", [$t])
+                      ->orWhereRaw($this->registrarNameColsExist()
+                          ? "users.last_name LIKE ?"
+                          : "0", [$t])
+                      // Registrar contact email
+                      ->orWhereRaw($this->registrarContactColExists()
+                          ? "users.contact_email LIKE ?"
+                          : "0", [$t]);
+                });
             }
             $q->orderBy('users.created_at', 'desc');
 
@@ -2115,6 +2151,7 @@ select.mu-filter-input.mu-active {
                     ['director','Directors','fa-user-tie','#2563eb'],
                     ['coordinator','Coordinators','fa-users-gear','#d97706'],
                     ['registrar','Registrar','fa-user-clock','#059669'],
+                    ['admin','Admin','fa-shield-halved','#7a3f91'],
                 ] as [$tab,$lbl,$ico,$icoClr])
                 @if($loop->first)
                 {{-- Alumni tab merged with its All / Complete / Pending / Newly Registered
@@ -3064,6 +3101,33 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
+            {{-- ADMIN INFO --}}
+            @if($isAdmin)
+            <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+                <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
+                    <p class="text-sm font-bold uppercase tracking-widest" style="color:#7a3f91;">Admin Account</p>
+                </div>
+                <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Username / Display Name</p>
+                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '') ?: '—' }}</p>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Login Email</p>
+                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">
+                            {{ (!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : '—' }}
+                        </p>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Registered</p>
+                        <p class="text-base font-semibold" style="color:#333333;">
+                            {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A') }}
+                        </p>
+                    </div>
+                </div>
+            </div>
+            @endif
+
             {{-- COORDINATOR INFO — compact single-screen layout (left: photo card, right: details + email + status) --}}
             @if($isOrg)
             @php
@@ -3300,27 +3364,6 @@ select.mu-filter-input.mu-active {
                             </div>
                         </div>
                         @endif
-                    </div>
-                </div>
-            </div>
-            @endif
-
-            {{-- ADMIN INFO --}}
-            @if($isAdmin)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
-                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Account Details</p>
-                </div>
-                <div class="p-4 grid grid-cols-2 gap-3">
-                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Username</p>
-                        <p class="text-lg font-bold font-mono" style="color:#333333;">
-                            {{ $this->adminUsername($vd['email'], $vd['name']) }}
-                        </p>
-                    </div>
-                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0]">
-                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Role</p>
-                        <p class="text-lg font-semibold" style="color:#333333;">{{ $this->roleLabel($vRole) }}</p>
                     </div>
                 </div>
             </div>
