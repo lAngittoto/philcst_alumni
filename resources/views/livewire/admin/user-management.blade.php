@@ -3605,10 +3605,10 @@ select.mu-filter-input.mu-active {
                             <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
                         </button>
                     </div>
-                    <div class="mt-2 p-3 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-key text-amber-500 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold leading-snug" style="color:#92400e;">Updating the email will reset this admin's password. A new temporary password will be generated and emailed to the new address, and they must change it on next login.</p>
-                    </div>
+                    <p class="mt-2 text-xs font-medium leading-snug flex items-start gap-1.5" style="color:#8a8a8a;">
+                        <i class="fas fa-circle-info mt-0.5 shrink-0"></i>
+                        <span>Updating the email resets this admin's password. A new temporary password is emailed to the new address, and they must change it on next login.</span>
+                    </p>
                 </div>
             </div>
 
