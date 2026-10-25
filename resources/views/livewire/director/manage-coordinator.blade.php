@@ -2062,7 +2062,7 @@ new class extends Component {
      style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
      wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-<div class="relative w-full h-full sm:h-auto sm:max-w-xl md:max-w-2xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
+<div class="relative flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
      style="background:#f8f7fb;"
      wire:click.stop @click.stop>
 
@@ -2070,9 +2070,18 @@ new class extends Component {
 @keyframes vpFadeIn { from { opacity:0; } to { opacity:1; } }
 
 /* Full-screen on mobile, bounded card on sm+ screens */
-.vp-modal-box { max-height: 100vh; }
+/* Plain CSS (not Tailwind max-w-* utilities, which weren't being generated and let
+   the box stretch edge-to-edge). Width is fitted to the profile content:
+   sidebar 224px + gap + details column, capped at 820px and centered by the overlay. */
+.vp-modal-box { width: 100%; height: 100%; max-height: 100vh; }
 @media (min-width: 640px) {
-    .vp-modal-box { max-height: 92vh; }
+    .vp-modal-box {
+        width: 100% !important;
+        max-width: 820px !important;
+        height: auto !important;
+        max-height: 92vh !important;
+        margin: 0 auto;
+    }
 }
 
 .vp-detail-card {
