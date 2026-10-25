@@ -2062,7 +2062,7 @@ new class extends Component {
      style="background:rgba(26,15,34,.5); backdrop-filter:blur(2px); animation: vpFadeIn .12s ease both;"
      wire:click="closeModal"
      @keydown.escape.window="$wire.closeModal()">
-<div class="relative w-full h-full sm:h-auto sm:max-w-3xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
+<div class="relative w-full h-full sm:h-auto sm:max-w-xl md:max-w-2xl flex flex-col rounded-none sm:rounded-2xl overflow-hidden shadow-2xl vp-modal-box"
      style="background:#f8f7fb;"
      wire:click.stop @click.stop>
 
