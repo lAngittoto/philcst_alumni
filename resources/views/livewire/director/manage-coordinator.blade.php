@@ -1778,75 +1778,16 @@ new class extends Component {
                         <div class="p-6">
                             <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
                                 <div class="lg:col-span-1 flex flex-col items-center gap-3">
-                                    <div class="w-full"
-                                         x-data="{
-                                             preview: null,
-                                             init() { this.$watch('$wire.coordPhotoBase64', v => { if (!v) this.preview = null; }); },
-                                             compress(file, maxW, maxH, quality) {
-                                                 return new Promise((resolve, reject) => {
-                                                     const img = new Image();
-                                                     const reader = new FileReader();
-                                                     reader.onload = (e) => {
-                                                         img.onload = () => {
-                                                             let w = img.width, h = img.height;
-                                                             if (w > maxW || h > maxH) { const r = Math.min(maxW / w, maxH / h); w = Math.round(w * r); h = Math.round(h * r); }
-                                                             const c = document.createElement('canvas');
-                                                             c.width = w; c.height = h;
-                                                             c.getContext('2d').drawImage(img, 0, 0, w, h);
-                                                             resolve(c.toDataURL('image/jpeg', quality));
-                                                         };
-                                                         img.onerror = reject;
-                                                         img.src = e.target.result;
-                                                     };
-                                                     reader.onerror = reject;
-                                                     reader.readAsDataURL(file);
-                                                 });
-                                             },
-                                             async pick(event) {
-                                                 const file = event.target.files[0];
-                                                 if (!file) return;
-                                                 if (file.size > 5 * 1024 * 1024) { alert('Profile photo must not exceed 5 MB.'); event.target.value = ''; return; }
-                                                 try {
-                                                     const dataUrl = await this.compress(file, 500, 500, 0.75);
-                                                     this.preview = dataUrl;
-                                                     $wire.set('coordPhotoName', file.name.replace(/\.\w+$/, '') + '.jpg', false);
-                                                     $wire.set('coordPhotoBase64', dataUrl.split(',')[1], false);
-                                                 } catch (e) {
-                                                     alert('Could not read that image. Please try another file.');
-                                                 }
-                                                 event.target.value = '';
-                                             },
-                                             clear() {
-                                                 this.preview = null;
-                                                 $wire.set('coordPhotoName', '', false);
-                                                 $wire.set('coordPhotoBase64', '', false);
-                                             }
-                                         }">
-                                        <div class="border-2 border-dashed border-purple-400 rounded-2xl p-5 text-center cursor-pointer hover:border-purple-600 hover:bg-purple-50 transition w-full"
-                                             @click="$refs.coordPhotoInput.click()">
-                                            <template x-if="preview">
-                                                <div>
-                                                    <img :src="preview" class="w-20 h-20 rounded-xl mx-auto mb-2 object-cover shadow-md">
-                                                    <p class="text-xs text-emerald-600 font-semibold">Selected</p>
-                                                </div>
-                                            </template>
-                                            <template x-if="!preview">
-                                                <div>
-                                                    <div class="w-24 h-24 rounded-2xl mx-auto mb-3 flex items-center justify-center bg-gray-100 border-2 border-gray-200">
-                                                        <svg class="w-14 h-14 text-gray-400" viewBox="0 0 24 24" fill="currentColor">
-                                                            <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
-                                                        </svg>
-                                                    </div>
-                                                    <p class="text-sm text-[#333333] font-semibold">Profile Photo</p>
-                                                    <p class="text-xs text-[#333333] mt-0.5">JPG, PNG, WebP · 5 MB</p>
-                                                </div>
-                                            </template>
-                                            <input type="file" x-ref="coordPhotoInput" @change="pick($event)" @click.stop accept="image/jpeg,image/png,image/webp" class="hidden">
+                                    {{-- Registration photo is always the default avatar: static label only,
+                                         not clickable, no upload, default mouse cursor. --}}
+                                    <div class="w-full flex flex-col items-center gap-2 select-none" style="cursor: default;">
+                                        <div class="w-full aspect-square max-w-[150px] rounded-2xl flex items-center justify-center bg-gray-100 border-2 border-[#E8E0F0] pointer-events-none">
+                                            <svg class="w-20 h-20 text-gray-500" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+                                            </svg>
                                         </div>
-                                        <button type="button" x-show="preview" @click="clear()" style="display:none;"
-                                                class="mt-2 w-full text-xs font-semibold text-red-500 hover:text-red-700 transition">Remove photo</button>
+                                        <p class="text-sm text-gray-500 text-center" style="cursor: default;">Default photo</p>
                                     </div>
-                                    <p class="text-xs text-[#333333] text-center">Optional — leave blank for default</p>
                                 </div>
 
                                 <div class="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">

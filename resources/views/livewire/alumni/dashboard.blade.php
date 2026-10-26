@@ -456,7 +456,7 @@ new class extends Component {
         display: flex;
         flex-direction: column;
         min-height: 0;
-        overflow: hidden;
+        overflow: visible; /* was hidden — it was clipping the hover tooltip; photo banner now rounds its own top corners */
     }
     /* photo banner: shrinks on shorter viewports */
     .dash-profile-photo {
@@ -488,7 +488,7 @@ new class extends Component {
         flex-direction: column;
         justify-content: center;
         min-height: 0;
-        overflow: hidden;
+        overflow: visible; /* was hidden — it was clipping the hover tooltip that sits above the card */
     }
     @media (max-width: 639px) {
         .dash-stat-grid {
@@ -612,13 +612,13 @@ new class extends Component {
         {{-- ══ LEFT: Profile Card ═══ --}}
         <div class="dash-profile-col">
             <button type="button" wire:click="goToProfile"
-               class="dash-stat-card dash-card-clickable dash-card-nav-btn dash-profile-card rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm bg-white
+               class="dash-stat-card dash-card-clickable dash-card-nav-btn dash-profile-card rounded-xl border border-[#E8E0F0] shadow-sm bg-white
                       hover:shadow-md hover:border-[#7A3F91]/40 transition-all duration-200 active:scale-[.985] text-left cursor-pointer w-full">
                 <div class="dash-card-spinner"><span></span><span></span><span></span></div>
-                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View My Profile</span>
+                <span class="stat-tooltip"><i class="fas fa-eye mr-1.5"></i>View Profile</span>
 
                 {{-- Photo banner --}}
-                <div class="dash-profile-photo relative w-full overflow-hidden shrink-0 bg-[#EDE0F5]">
+                <div class="dash-profile-photo relative w-full overflow-hidden rounded-t-xl shrink-0 bg-[#EDE0F5]">
                     <img src="{{ $photoUrl }}"
                          alt="{{ $alumniFirstName }}"
                          class="w-full h-full object-cover object-[center_25%]"
