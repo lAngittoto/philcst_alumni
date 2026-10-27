@@ -555,6 +555,105 @@ new class extends Component {
         return $this->activeRegistrarExists();
     }
 
+    /**
+     * Shared field validation for Create Director / Create Registrar.
+     * $live = true  -> used while typing: empty fields give no error, and the
+     *                  "too short" / "invalid email format" checks wait for submit.
+     * $live = false -> used on submit: required + all rules enforced.
+     * Returns the error message, or null when the value is fine.
+     */
+    private function fieldError(string $field, string $value, bool $live = false): ?string
+    {
+        $v = trim($value);
+        switch ($field) {
+            case 'first_name':
+            case 'last_name':
+                $label = $field === 'first_name' ? 'First name' : 'Last name';
+                if ($v === '') return $live ? null : "{$label} is required.";
+                if (!preg_match('/^[a-zA-Z\s\-\.\']+$/', $v)) {
+                    return "{$label} may only contain letters, spaces, hyphens, or apostrophes.";
+                }
+                return null;
+
+            case 'middle_name':
+                if ($v === '') return null;
+                if (!preg_match('/^[a-zA-Z]+$/', $v)) return 'Middle name must contain letters only.';
+                if (!$live && strlen($v) < 2) return 'Middle name must be a full word (e.g. Santos, not S).';
+                return null;
+
+            case 'username':
+                if ($v === '') return $live ? null : 'Username is required.';
+                if (!preg_match('/^[a-zA-Z0-9._-]+$/', $v)) return 'Letters, numbers, dots, dashes, and underscores only.';
+                // Usernames are the local part of the internal login email — block
+                // a clash with any Director / Registrar / Admin username.
+                $taken = DB::table('users')->whereIn('email', [
+                    $v . '@director.internal',
+                    $v . '@registrar.internal',
+                    $v . '@admin.internal',
+                ])->exists();
+                return $taken ? 'That username is already taken. Please choose a different one.' : null;
+
+            case 'email':
+                if ($v === '') return $live ? null : 'Email address is required.';
+                if (!filter_var($v, FILTER_VALIDATE_EMAIL)) return $live ? null : 'Please enter a valid email address.';
+                return $this->emailTaken($v) ? 'This email address is already taken.' : null;
+        }
+        return null;
+    }
+
+    /** True if the email is already used by a director, coordinator, or any user account. */
+    private function emailTaken(string $email): bool
+    {
+        if (DB::table('director')->where('email', $email)->whereNull('deleted_at')->exists()) return true;
+        if (DB::table('organizer')->where('email', $email)->whereNull('deleted_at')->exists()) return true;
+        if (DB::table('users')->where('email', $email)->exists()) return true;
+        if ($this->registrarContactColExists() && DB::table('users')->where('contact_email', $email)->exists()) return true;
+        return false;
+    }
+
+    /** True if a Director / Registrar with the exact same full name already exists. */
+    private function fullNameTaken(string $role, string $fn, string $mn, string $ln, string $sfx): bool
+    {
+        $fn = strtolower(trim($fn)); $mn = strtolower(trim($mn));
+        $ln = strtolower(trim($ln)); $sfx = strtolower(trim($sfx));
+
+        if ($role === 'director') {
+            return DB::table('director')->whereNull('deleted_at')
+                ->whereRaw('LOWER(TRIM(first_name)) = ?', [$fn])
+                ->whereRaw('LOWER(TRIM(last_name)) = ?', [$ln])
+                ->whereRaw("LOWER(TRIM(COALESCE(middle_name,''))) = ?", [$mn])
+                ->whereRaw("LOWER(TRIM(COALESCE(suffix,''))) = ?", [$sfx])
+                ->exists();
+        }
+
+        $full = implode(' ', array_filter([$fn, $mn, $ln, $sfx]));
+        return DB::table('users')->where('role', 'registrar')
+            ->whereRaw('LOWER(TRIM(name)) = ?', [$full])
+            ->exists();
+    }
+
+    /** Sets or clears one field's error inside $dErrs / $rErrs without touching the others. */
+    private function setLiveError(string $bag, string $key, ?string $msg): void
+    {
+        $errs = $this->{$bag};
+        if ($msg) { $errs[$key] = $msg; } else { unset($errs[$key]); }
+        $this->{$bag} = $errs;
+    }
+
+    // ── LIVE validation — Create Director ──
+    public function updatedDFn($v): void       { $this->setLiveError('dErrs', 'first_name',  $this->fieldError('first_name',  (string) $v, true)); }
+    public function updatedDLn($v): void       { $this->setLiveError('dErrs', 'last_name',   $this->fieldError('last_name',   (string) $v, true)); }
+    public function updatedDMn($v): void       { $this->setLiveError('dErrs', 'middle_name', $this->fieldError('middle_name', (string) $v, true)); }
+    public function updatedDUsername($v): void { $this->setLiveError('dErrs', 'username',    $this->fieldError('username',    (string) $v, true)); }
+    public function updatedDEmail($v): void    { $this->setLiveError('dErrs', 'email',       $this->fieldError('email',       (string) $v, true)); }
+
+    // ── LIVE validation — Create Registrar ──
+    public function updatedRFn($v): void       { $this->setLiveError('rErrs', 'first_name',  $this->fieldError('first_name',  (string) $v, true)); }
+    public function updatedRLn($v): void       { $this->setLiveError('rErrs', 'last_name',   $this->fieldError('last_name',   (string) $v, true)); }
+    public function updatedRMn($v): void       { $this->setLiveError('rErrs', 'middle_name', $this->fieldError('middle_name', (string) $v, true)); }
+    public function updatedRUsername($v): void { $this->setLiveError('rErrs', 'username',    $this->fieldError('username',    (string) $v, true)); }
+    public function updatedREmail($v): void    { $this->setLiveError('rErrs', 'email',       $this->fieldError('email',       (string) $v, true)); }
+
     public function openModal(string $m): void {
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
@@ -586,36 +685,35 @@ new class extends Component {
         $this->rErrs=[]; $this->rOk=''; $this->rSave=true;
         try {
             $fieldErrors = [];
-            if (!trim($this->rFn))       $fieldErrors['first_name']  = 'First name is required.';
-            if (!trim($this->rLn))       $fieldErrors['last_name']   = 'Last name is required.';
-            if (!trim($this->rUsername)) {
-                $fieldErrors['username'] = 'Username is required.';
-            } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', trim($this->rUsername))) {
-                $fieldErrors['username'] = 'Letters, numbers, dots, dashes, and underscores only.';
+            foreach ([
+                'first_name'  => $this->rFn,
+                'last_name'   => $this->rLn,
+                'middle_name' => $this->rMn,
+                'username'    => $this->rUsername,
+                'email'       => $this->rEmail,
+            ] as $field => $val) {
+                if ($msg = $this->fieldError($field, (string) $val)) $fieldErrors[$field] = $msg;
             }
-            if (!trim($this->rEmail)) {
-                $fieldErrors['email'] = 'Email address is required.';
-            } elseif (!filter_var(trim($this->rEmail), FILTER_VALIDATE_EMAIL)) {
-                $fieldErrors['email'] = 'Please enter a valid email address.';
+            if (!isset($fieldErrors['first_name']) && !isset($fieldErrors['last_name'])
+                && $this->fullNameTaken('registrar', $this->rFn, $this->rMn, $this->rLn, $this->rSfx)) {
+                $fieldErrors['first_name'] = 'A registrar with that full name already exists.';
             }
             if (!empty($fieldErrors)) { $this->rErrs = $fieldErrors; return; }
+
+            $uname      = trim($this->rUsername);
+            $loginEmail = $uname.'@registrar.internal';
 
             // Only one active Registrar at a time (NULL user_status counts as
             // ACTIVE, same as the COALESCE used everywhere else on this page).
             // Registering a new Registrar while one is active is now allowed —
             // the currently active one is automatically deactivated instead of
-            // blocking the admin.
+            // blocking the admin. This runs only AFTER every validation /
+            // duplicate check above passed, so a rejected form never
+            // deactivates the current registrar.
             DB::table('users')
                 ->where('role', 'registrar')
                 ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
                 ->update(['user_status' => 'INACTIVE', 'updated_at' => now()]);
-
-            $uname      = trim($this->rUsername);
-            $loginEmail = $uname.'@registrar.internal';
-            if (DB::table('users')->where('email', $loginEmail)->exists()) {
-                $this->rErrs = ['username' => 'That username is already taken. Please choose a different one.'];
-                return;
-            }
 
             $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
             $full  = implode(' ', array_filter(array_map('trim', [$this->rFn, $this->rMn, $this->rLn, $this->rSfx])));
@@ -681,33 +779,32 @@ new class extends Component {
         $this->dErrs=[]; $this->dOk=''; $this->dSave=true;
         try {
             $fieldErrors = [];
-            if (!trim($this->dFn))       $fieldErrors['first_name']  = 'First name is required.';
-            if (!trim($this->dLn))       $fieldErrors['last_name']   = 'Last name is required.';
-            if (!trim($this->dUsername)) {
-                $fieldErrors['username'] = 'Username is required.';
-            } elseif (!preg_match('/^[a-zA-Z0-9._-]+$/', trim($this->dUsername))) {
-                $fieldErrors['username'] = 'Letters, numbers, dots, dashes, and underscores only.';
+            foreach ([
+                'first_name'  => $this->dFn,
+                'last_name'   => $this->dLn,
+                'middle_name' => $this->dMn,
+                'username'    => $this->dUsername,
+                'email'       => $this->dEmail,
+            ] as $field => $val) {
+                if ($msg = $this->fieldError($field, (string) $val)) $fieldErrors[$field] = $msg;
             }
-            if (!trim($this->dEmail)) {
-                $fieldErrors['email'] = 'Email address is required.';
-            } elseif (!filter_var(trim($this->dEmail), FILTER_VALIDATE_EMAIL)) {
-                $fieldErrors['email'] = 'Please enter a valid email address.';
+            if (!isset($fieldErrors['first_name']) && !isset($fieldErrors['last_name'])
+                && $this->fullNameTaken('director', $this->dFn, $this->dMn, $this->dLn, $this->dSfx)) {
+                $fieldErrors['first_name'] = 'A director with that full name already exists.';
             }
             if (!empty($fieldErrors)) { $this->dErrs = $fieldErrors; return; }
 
+            $loginEmail = trim($this->dUsername).'@director.internal';
+
             // Only one active Director at a time. Registering a new Director
             // while one is active is now allowed — the currently active one
-            // is automatically deactivated instead of blocking the admin.
+            // is automatically deactivated instead of blocking the admin. This
+            // runs only AFTER every validation / duplicate check above passed,
+            // so a rejected form never deactivates the current director.
             DB::table('director')
                 ->where('status', 'ACTIVE')
                 ->whereNull('deleted_at')
                 ->update(['status' => 'INACTIVE', 'updated_at' => now()]);
-
-            $loginEmail = trim($this->dUsername).'@director.internal';
-            if (DB::table('users')->where('email', $loginEmail)->exists()) {
-                $this->dErrs = ['username' => 'That username is already taken. Please choose a different one.'];
-                return;
-            }
 
             $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
             $full  = implode(' ', array_filter(array_map('trim', [$this->dFn, $this->dMn, $this->dLn, $this->dSfx])));
@@ -3832,7 +3929,7 @@ select.mu-filter-input.mu-active {
                         <div class="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dFn" type="text" placeholder="e.g. Juan"
+                                <input wire:model.live.debounce.300ms="dFn" type="text" placeholder="e.g. Juan"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['first_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($dErrs['first_name']))
@@ -3843,7 +3940,7 @@ select.mu-filter-input.mu-active {
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dLn" type="text" placeholder="e.g. dela Cruz"
+                                <input wire:model.live.debounce.300ms="dLn" type="text" placeholder="e.g. dela Cruz"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['last_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($dErrs['last_name']))
@@ -3854,7 +3951,7 @@ select.mu-filter-input.mu-active {
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name</p>
-                                <input wire:model.defer="dMn" type="text" placeholder="e.g. Santos"
+                                <input wire:model.live.debounce.300ms="dMn" type="text" placeholder="e.g. Santos"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($dErrs['middle_name']))
@@ -3921,7 +4018,7 @@ select.mu-filter-input.mu-active {
                         <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
                             <div class="sm:col-span-2">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Username <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dUsername" type="text"
+                                <input wire:model.live.debounce.300ms="dUsername" type="text"
                                        placeholder="e.g. jdelacruz"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['username']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
@@ -3935,7 +4032,7 @@ select.mu-filter-input.mu-active {
                             </div>
                             <div class="sm:col-span-3">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="dEmail" type="email" placeholder="director@example.com"
+                                <input wire:model.live.debounce.300ms="dEmail" type="email" placeholder="director@example.com"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['email']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($dErrs['email']))
@@ -4107,7 +4204,7 @@ select.mu-filter-input.mu-active {
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="rFn" type="text" placeholder="e.g. Juan"
+                                <input wire:model.live.debounce.300ms="rFn" type="text" placeholder="e.g. Juan"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['first_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($rErrs['first_name']))
@@ -4118,7 +4215,7 @@ select.mu-filter-input.mu-active {
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="rLn" type="text" placeholder="e.g. dela Cruz"
+                                <input wire:model.live.debounce.300ms="rLn" type="text" placeholder="e.g. dela Cruz"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['last_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($rErrs['last_name']))
@@ -4129,7 +4226,7 @@ select.mu-filter-input.mu-active {
                             </div>
                             <div>
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name</p>
-                                <input wire:model.defer="rMn" type="text" placeholder="e.g. Santos"
+                                <input wire:model.live.debounce.300ms="rMn" type="text" placeholder="e.g. Santos"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($rErrs['middle_name']))
@@ -4196,7 +4293,7 @@ select.mu-filter-input.mu-active {
                         <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
                             <div class="sm:col-span-2">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Username <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="rUsername" type="text"
+                                <input wire:model.live.debounce.300ms="rUsername" type="text"
                                        placeholder="e.g. jdelacruz"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['username']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
@@ -4210,7 +4307,7 @@ select.mu-filter-input.mu-active {
                             </div>
                             <div class="sm:col-span-3">
                                 <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
-                                <input wire:model.defer="rEmail" type="email" placeholder="registrar@example.com"
+                                <input wire:model.live.debounce.300ms="rEmail" type="email" placeholder="registrar@example.com"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['email']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($rErrs['email']))

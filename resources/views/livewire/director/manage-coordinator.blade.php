@@ -219,6 +219,39 @@ new class extends Component {
 
     private function validateName(string $n): bool { return (bool) preg_match('/^[a-zA-Z\s\-\.\']+$/', $n); }
 
+    /**
+     * REAL-TIME NAME VALIDATION (Register Coordinator form)
+     * Runs on every (debounced) keystroke so the red error appears right away
+     * when a number / symbol is typed, instead of waiting for the submit click.
+     * Clearing the field or fixing the input removes the error immediately.
+     */
+    public function updatedCoordFirstName($value): void
+    {
+        $this->resetErrorBag('coordFirstName');
+        $value = trim((string) $value);
+        if ($value !== '' && !$this->validateName($value)) {
+            $this->addError('coordFirstName', 'First name may only contain letters, spaces, hyphens, or apostrophes.');
+        }
+    }
+
+    public function updatedCoordLastName($value): void
+    {
+        $this->resetErrorBag('coordLastName');
+        $value = trim((string) $value);
+        if ($value !== '' && !$this->validateName($value)) {
+            $this->addError('coordLastName', 'Last name may only contain letters, spaces, hyphens, or apostrophes.');
+        }
+    }
+
+    public function updatedCoordMiddleInitial($value): void
+    {
+        $this->resetErrorBag('coordMiddleInitial');
+        $value = trim((string) $value);
+        if ($value !== '' && !preg_match('/^[a-zA-Z]+$/', $value)) {
+            $this->addError('coordMiddleInitial', 'Middle name must contain letters only.');
+        }
+    }
+
     private function buildFullName(string $f, string $m, string $l, string $s): string
     {
         return implode(' ', array_filter(array_map('trim', [$f, $m, $l, $s])));
@@ -1793,19 +1826,19 @@ new class extends Component {
                                 <div class="lg:col-span-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">First Name <span class="text-red-500">*</span></label>
-                                        <input wire:model.defer="coordFirstName" type="text" placeholder="e.g. Juan"
+                                        <input wire:model.live.debounce.300ms="coordFirstName" type="text" placeholder="e.g. Juan"
                                                class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordFirstName') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
                                         @error('coordFirstName')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Last Name <span class="text-red-500">*</span></label>
-                                        <input wire:model.defer="coordLastName" type="text" placeholder="e.g. dela Cruz"
+                                        <input wire:model.live.debounce.300ms="coordLastName" type="text" placeholder="e.g. dela Cruz"
                                                class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordLastName') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
                                         @error('coordLastName')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
                                         <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Middle Name</label>
-                                        <input wire:model.defer="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
+                                        <input wire:model.live.debounce.300ms="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
                                                class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordMiddleInitial') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
                                         @error('coordMiddleInitial')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
