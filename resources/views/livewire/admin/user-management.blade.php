@@ -4068,7 +4068,7 @@ select.mu-filter-input.mu-active {
                          disabled states fire before the Livewire round-trip begins —
                          especially important because Mail::send() is synchronous and
                          can take 1-3 s before the server responds. --}}
-                    <button wire:click="createDirector" @click="submitting = true"
+                    <button @click="submitting = true; $wire.createDirector().then(() => { submitting = false }).catch(() => { submitting = false })"
                             wire:loading.attr="disabled" wire:target="createDirector"
                             :disabled="submitting"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
@@ -4343,7 +4343,7 @@ select.mu-filter-input.mu-active {
                          disabled states fire before the Livewire round-trip begins —
                          especially important because Mail::send() is synchronous and
                          can take 1-3 s before the server responds. --}}
-                    <button wire:click="createRegistrar" @click="submitting = true"
+                    <button @click="submitting = true; $wire.createRegistrar().then(() => { submitting = false }).catch(() => { submitting = false })"
                             wire:loading.attr="disabled" wire:target="createRegistrar"
                             :disabled="submitting"
                             class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"

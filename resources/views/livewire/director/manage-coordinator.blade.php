@@ -310,8 +310,8 @@ new class extends Component {
             // Base Laravel validation first — this is what makes every
             // @error('coordXxx') directive in the form light up in red.
             $this->validate([
-                'coordFirstName'     => ['required', 'string', 'max:100'],
-                'coordLastName'      => ['required', 'string', 'max:100'],
+                'coordFirstName'     => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z\s\-\.\']+$/'],
+                'coordLastName'      => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z\s\-\.\']+$/'],
                 'coordMiddleInitial' => ['nullable', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
                 'coordSuffix'        => ['nullable', 'string', 'max:10'],
                 'coordTeacherId'     => ['required', 'string', 'regex:/^\d{8}$/', 'unique:organizer,id_number'],
@@ -319,7 +319,9 @@ new class extends Component {
                 'coordCollegeSelect' => ['required', 'string'],
             ], [
                 'coordFirstName.required'     => 'First name is required.',
+                'coordFirstName.regex'        => 'First name may only contain letters, spaces, hyphens, or apostrophes.',
                 'coordLastName.required'      => 'Last name is required.',
+                'coordLastName.regex'         => 'Last name may only contain letters, spaces, hyphens, or apostrophes.',
                 'coordMiddleInitial.regex'    => 'Middle name must contain letters only.',
                 'coordMiddleInitial.min'      => 'Middle name must be a full word (e.g. Santos, not S).',
                 'coordTeacherId.required'     => 'Teacher ID is required.',
