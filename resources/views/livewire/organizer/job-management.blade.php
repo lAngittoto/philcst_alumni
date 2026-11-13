@@ -2068,7 +2068,7 @@ body:has(.jm-page-root)::-webkit-scrollbar { display: none; }
 
 @media (min-width: 1024px) {
     .jm-main-layout { padding-top: 1.25rem !important; padding-bottom: 1.25rem !important; }
-    .jm-table-card  { flex: 0 1 auto !important; margin-top: auto; margin-bottom: auto; max-height: 100%; }
+    .jm-table-card  { flex: 1 1 auto !important; max-height: 100%; }
 }
 /* Same row sizing as Event Management so both tables have the same height. Scales with screen height (clamped) */
 @media (min-width: 1024px) and (min-height: 801px) {

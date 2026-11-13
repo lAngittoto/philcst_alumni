@@ -3090,7 +3090,7 @@ compressImage(file, maxW, maxH, quality) {
                             <p class="ar-field-value">{{ $up($viewingProfile['first_name'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">
-                            <p class="ar-field-label">Middle Name</p>
+                            <p class="ar-field-label">Middle Initial</p>
                             <p class="ar-field-value">{{ $up($viewingProfile['middle_initial'] ?? '') ?: '—' }}</p>
                         </div>
                         <div class="ar-cell">

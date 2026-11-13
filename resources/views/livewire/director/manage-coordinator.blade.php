@@ -247,8 +247,8 @@ new class extends Component {
     {
         $this->resetErrorBag('coordMiddleInitial');
         $value = trim((string) $value);
-        if ($value !== '' && !preg_match('/^[a-zA-Z]+$/', $value)) {
-            $this->addError('coordMiddleInitial', 'Middle name must contain letters only.');
+        if ($value !== '' && !preg_match('/^[a-zA-Z]\.?$/', $value)) {
+            $this->addError('coordMiddleInitial', 'Middle initial must be a single letter (e.g. S or S.).');
         }
     }
 
@@ -312,7 +312,7 @@ new class extends Component {
             $this->validate([
                 'coordFirstName'     => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z\s\-\.\']+$/'],
                 'coordLastName'      => ['required', 'string', 'max:100', 'regex:/^[a-zA-Z\s\-\.\']+$/'],
-                'coordMiddleInitial' => ['nullable', 'string', 'min:2', 'max:50', 'regex:/^[a-zA-Z]+$/'],
+                'coordMiddleInitial' => ['nullable', 'string', 'max:2', 'regex:/^[a-zA-Z]\.?$/'],
                 'coordSuffix'        => ['nullable', 'string', 'max:10'],
                 'coordTeacherId'     => ['required', 'string', 'regex:/^\d{8}$/', 'unique:organizer,id_number'],
                 'coordEmail'         => ['required', 'email', 'max:255', 'unique:organizer,email', 'unique:users,email'],
@@ -322,8 +322,7 @@ new class extends Component {
                 'coordFirstName.regex'        => 'First name may only contain letters, spaces, hyphens, or apostrophes.',
                 'coordLastName.required'      => 'Last name is required.',
                 'coordLastName.regex'         => 'Last name may only contain letters, spaces, hyphens, or apostrophes.',
-                'coordMiddleInitial.regex'    => 'Middle name must contain letters only.',
-                'coordMiddleInitial.min'      => 'Middle name must be a full word (e.g. Santos, not S).',
+                'coordMiddleInitial.regex'    => 'Middle initial must be a single letter (e.g. S or S.).',
                 'coordTeacherId.required'     => 'Teacher ID is required.',
                 'coordTeacherId.unique'       => 'This Teacher ID is already registered.',
                 'coordTeacherId.regex'        => 'Teacher ID must be exactly 8 digits (e.g. 20240001).',
@@ -1839,8 +1838,8 @@ new class extends Component {
                                         @error('coordLastName')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
                                     <div class="sm:col-span-1 xl:col-span-2">
-                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Middle Name</label>
-                                        <input wire:model.live.debounce.300ms="coordMiddleInitial" type="text" placeholder="e.g. Santos" maxlength="50"
+                                        <label class="block text-xs font-semibold text-[#333333] uppercase tracking-wide mb-1.5">Middle Initial</label>
+                                        <input wire:model.live.debounce.300ms="coordMiddleInitial" type="text" placeholder="e.g. S." maxlength="2"
                                                class="w-full px-3.5 py-3 border rounded-xl text-sm focus:outline-none coord-reg-input transition @error('coordMiddleInitial') border-red-300 bg-red-50 text-red-900 placeholder-red-300 @else border-gray-300 bg-white text-gray-900 @enderror">
                                         @error('coordMiddleInitial')<p class="text-xs text-red-600 font-medium mt-1 flex items-center gap-1"><i class="fas fa-circle-exclamation"></i>{{ $message }}</p>@enderror
                                     </div>
@@ -2312,7 +2311,7 @@ new class extends Component {
                             <p class="vp-field-value">{{ $viewingProfile['last_name'] ?? '—' }}</p>
                         </div>
                         <div class="px-5 py-4">
-                            <p class="vp-field-label">Middle Name</p>
+                            <p class="vp-field-label">Middle Initial</p>
                             <p class="vp-field-value">{{ $viewingProfile['middle_initial'] ?? '—' }}</p>
                         </div>
                         <div class="px-5 py-4">

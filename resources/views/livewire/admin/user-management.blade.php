@@ -41,6 +41,13 @@ new class extends Component {
     public string $rOk       = '';
     public bool   $rSave     = false;
 
+    // ── Create Admin (same fields as Create Registrar, minus photo) ──
+    public string $aFn='', $aMn='', $aLn='', $aSfx='';
+    public string $aUsername='', $aEmail='';
+    public array  $aErrs     = [];
+    public string $aOk       = '';
+    public bool   $aSave     = false;
+
     public ?array  $vData = null;
     // Latest employment record of the alumnus being viewed (Alumni Records style card).
     public ?array  $vEmployment = null;
@@ -333,6 +340,7 @@ new class extends Component {
                 WHEN users.role='organizer' THEN COALESCE(org.status,'ACTIVE')
                 WHEN users.role='director'  THEN COALESCE(dir.status,'ACTIVE')
                 WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
+                WHEN users.role='admin'     THEN COALESCE(users.user_status,'ACTIVE')
                 ELSE 'ACTIVE'
             END)";
 
@@ -543,6 +551,19 @@ new class extends Component {
             ->exists();
     }
 
+    /**
+     * Same "only one active account" rule as Director / Registrar, applied
+     * to Admin accounts. NULL user_status counts as ACTIVE.
+     */
+    private function activeAdminExists(?int $exceptUserId = null): bool
+    {
+        return DB::table('users')
+            ->where('role', 'admin')
+            ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
+            ->when($exceptUserId, fn($q) => $q->where('id', '!=', $exceptUserId))
+            ->exists();
+    }
+
     #[Computed]
     public function hasActiveDirector(): bool
     {
@@ -553,6 +574,12 @@ new class extends Component {
     public function hasActiveRegistrar(): bool
     {
         return $this->activeRegistrarExists();
+    }
+
+    #[Computed]
+    public function hasActiveAdmin(): bool
+    {
+        return $this->activeAdminExists();
     }
 
     /**
@@ -577,8 +604,7 @@ new class extends Component {
 
             case 'middle_name':
                 if ($v === '') return null;
-                if (!preg_match('/^[a-zA-Z]+$/', $v)) return 'Middle name must contain letters only.';
-                if (!$live && strlen($v) < 2) return 'Middle name must be a full word (e.g. Santos, not S).';
+                if (!preg_match('/^[a-zA-Z]\.?$/', $v)) return 'Middle initial must be a single letter (e.g. S or S.).';
                 return null;
 
             case 'username':
@@ -627,7 +653,7 @@ new class extends Component {
         }
 
         $full = implode(' ', array_filter([$fn, $mn, $ln, $sfx]));
-        return DB::table('users')->where('role', 'registrar')
+        return DB::table('users')->where('role', $role)
             ->whereRaw('LOWER(TRIM(name)) = ?', [$full])
             ->exists();
     }
@@ -654,11 +680,19 @@ new class extends Component {
     public function updatedRUsername($v): void { $this->setLiveError('rErrs', 'username',    $this->fieldError('username',    (string) $v, true)); }
     public function updatedREmail($v): void    { $this->setLiveError('rErrs', 'email',       $this->fieldError('email',       (string) $v, true)); }
 
+    // ── LIVE validation — Create Admin ──
+    public function updatedAFn($v): void       { $this->setLiveError('aErrs', 'first_name',  $this->fieldError('first_name',  (string) $v, true)); }
+    public function updatedALn($v): void       { $this->setLiveError('aErrs', 'last_name',   $this->fieldError('last_name',   (string) $v, true)); }
+    public function updatedAMn($v): void       { $this->setLiveError('aErrs', 'middle_name', $this->fieldError('middle_name', (string) $v, true)); }
+    public function updatedAUsername($v): void { $this->setLiveError('aErrs', 'username',    $this->fieldError('username',    (string) $v, true)); }
+    public function updatedAEmail($v): void    { $this->setLiveError('aErrs', 'email',       $this->fieldError('email',       (string) $v, true)); }
+
     public function openModal(string $m): void {
         $this->activeModal = $m;
         $this->dFn=$this->dMn=$this->dLn=$this->dSfx=$this->dUsername=$this->dEmail='';
         $this->dErrs=[]; $this->dOk='';
         $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
+        $this->aFn=$this->aMn=$this->aLn=$this->aSfx=$this->aUsername=$this->aEmail=''; $this->aErrs=[]; $this->aOk='';
         $this->vPhoto = null; $this->vPhotoReset = false;
     }
 
@@ -669,6 +703,7 @@ new class extends Component {
         $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
         $this->vPhoto=null; $this->vPhotoSave=false; $this->vPhotoReset=false; $this->vEmployment=null;
         $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
+        $this->aFn=$this->aMn=$this->aLn=$this->aSfx=$this->aUsername=$this->aEmail=''; $this->aErrs=[]; $this->aOk='';
         $this->aeUsername=''; $this->aeUsernameErrors=[]; $this->aeUsernameSuccess='';
     }
 
@@ -773,6 +808,103 @@ new class extends Component {
         } catch (\Exception $e) {
             $this->rErrs = ['general' => [$e->getMessage()]];
         } finally { $this->rSave = false; }
+    }
+
+    /**
+     * Create an Admin account — same fields and flow as Create Registrar,
+     * minus the photo. Admins live in the `users` table (role = 'admin'):
+     * `name` holds the full name and the login email is
+     * "<username>@admin.internal" (the username is the local part, same
+     * convention as Director/Registrar). Only ONE active admin is allowed
+     * at a time — same rule as Director/Registrar. A secure password is
+     * auto-generated and emailed to the address typed in the form.
+     */
+    public function createAdmin(): void {
+        $this->aErrs=[]; $this->aOk=''; $this->aSave=true;
+        try {
+            $fieldErrors = [];
+            foreach ([
+                'first_name'  => $this->aFn,
+                'last_name'   => $this->aLn,
+                'middle_name' => $this->aMn,
+                'username'    => $this->aUsername,
+                'email'       => $this->aEmail,
+            ] as $field => $val) {
+                if ($msg = $this->fieldError($field, (string) $val)) $fieldErrors[$field] = $msg;
+            }
+            if (!isset($fieldErrors['first_name']) && !isset($fieldErrors['last_name'])
+                && $this->fullNameTaken('admin', $this->aFn, $this->aMn, $this->aLn, $this->aSfx)) {
+                $fieldErrors['first_name'] = 'An admin with that full name already exists.';
+            }
+            if (!empty($fieldErrors)) { $this->aErrs = $fieldErrors; return; }
+
+            $uname      = trim($this->aUsername);
+            $loginEmail = $uname.'@admin.internal';
+
+            // Only one active Admin at a time (NULL user_status counts as
+            // ACTIVE, same as the COALESCE used everywhere else on this
+            // page). Registering a new Admin while one is active is
+            // allowed — the currently active one is automatically
+            // deactivated instead of blocking the admin. This runs only
+            // AFTER every validation / duplicate check above passed, so a
+            // rejected form never deactivates the current admin.
+            DB::table('users')
+                ->where('role', 'admin')
+                ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
+                ->update(['user_status' => 'INACTIVE', 'updated_at' => now()]);
+
+            $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
+            $full  = implode(' ', array_filter(array_map('trim', [$this->aFn, $this->aMn, $this->aLn, $this->aSfx])));
+            $email = trim($this->aEmail);
+
+            $admRow = [
+                'name'        => $full,
+                'email'       => $loginEmail,
+                'role'        => 'admin',
+                'password'    => Hash::make($autoPassword),
+                'user_status' => 'ACTIVE',
+                'created_at'  => now(),
+                'updated_at'  => now(),
+            ];
+            // Keep the email the credentials were sent to, same column
+            // Registrar uses (reused here since it's just a users.contact_email check).
+            if ($this->registrarContactColExists()) {
+                $admRow['contact_email'] = $email;
+            }
+            $uid = DB::table('users')->insertGetId($admRow);
+
+            // Send credential email synchronously (->send) so it fires immediately
+            // without needing a queue worker — same as Create Director/Registrar.
+            // Wrapped in try/catch so a mail misconfiguration never blocks the
+            // admin from being created; the account is already saved at this point.
+            try {
+                \Mail::to($email)
+                    ->send(new \App\Mail\AdminRegistered(
+                        fullName:     $full,
+                        username:     $uname,
+                        tempPassword: $autoPassword,
+                        email:        $email,
+                    ));
+            } catch (\Exception $mailEx) {
+                \Illuminate\Support\Facades\Log::warning('AdminRegistered mail failed: ' . $mailEx->getMessage());
+            }
+
+            // Refresh stat cards + table immediately, and jump to the Admin
+            // tab so the new account is visible right away.
+            $this->bustUserListCache();
+            $this->activeRole  = 'admin';
+            $this->search      = '';
+            $this->currentPage = 1;
+
+            // Success message — no credentials shown here; they are in the email.
+            $this->aOk = "Admin <strong>{$full}</strong> registered successfully!"
+                . "|Credentials have been sent to <strong>" . e($email) . "</strong>."
+                . "|The admin can log in using their username once they receive the email.";
+
+            $this->flash('success', "Admin '{$full}' registered successfully!");
+        } catch (\Exception $e) {
+            $this->aErrs = ['general' => [$e->getMessage()]];
+        } finally { $this->aSave = false; }
     }
 
     public function createDirector(): void {
@@ -913,6 +1045,7 @@ new class extends Component {
                     WHEN users.role='organizer' THEN COALESCE(org.status,'ACTIVE')
                     WHEN users.role='director'  THEN COALESCE(dir.status,'ACTIVE')
                     WHEN users.role='registrar' THEN COALESCE(users.user_status,'ACTIVE')
+                    WHEN users.role='admin'     THEN COALESCE(users.user_status,'ACTIVE')
                     ELSE 'ACTIVE'
                 END) as user_status"),
                 DB::raw("al.id                              as alumni_id"),
@@ -1007,8 +1140,13 @@ new class extends Component {
             $this->ueId    = $id;
             $this->ueName  = trim(implode(' ', array_filter([$r->org_first_name, $r->org_last_name]))) ?: $r->name;
         } elseif ($r->role === 'admin') {
-            // Admin: ueEmail = login email (real email, not internal), aeUsername = users.name
-            $this->ueEmail = (!empty($r->email) && !str_ends_with($r->email, '.internal')) ? $r->email : '';
+            // Admin: ueEmail = login email (real email, not internal), falling
+            // back to the contact email saved at creation time (same column
+            // Registrar uses) when the login is still the internal address.
+            // aeUsername = users.name
+            $this->ueEmail = (!empty($r->email) && !str_ends_with($r->email, '.internal'))
+                ? $r->email
+                : ($r->reg_contact_email ?? '');
             $this->ueId    = $id;
             $this->ueName  = $r->name;
             $this->aeUsername = $r->name ?: explode('@', $r->email ?? '')[0];
@@ -1608,9 +1746,15 @@ new class extends Component {
                 $this->flash('error', 'Cannot activate: there is already an active Registrar. Deactivate them first.');
                 return;
             }
+            // Same "only one active" rule as Create Admin.
+            if ($this->tRole==='admin' && $s==='ACTIVE' && $this->activeAdminExists($this->tId)) {
+                $this->flash('error', 'Cannot activate: there is already an active Admin. Deactivate them first.');
+                return;
+            }
             if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='organizer') DB::table('organizer')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
             if ($this->tRole==='registrar') DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
+            if ($this->tRole==='admin')     DB::table('users')->where('id',$this->tId)->update(['user_status'=>$s,'updated_at'=>now()]);
 
             // Status shown in the table/stats cards, so bust the cache
             // right away — otherwise the row keeps showing the old
@@ -2279,6 +2423,28 @@ select.mu-filter-input.mu-active {
             </div>
         </div>
 
+        {{-- New Admin — same "always openable, one-active-account" pattern
+             as New Registrar / New Director above. --}}
+        <div class="relative" x-data="{tip:false}">
+            <button wire:click="openModal('createAdmin')" wire:loading.attr="disabled" wire:target="openModal('createAdmin')"
+                    @mouseenter="tip=true" @mouseleave="tip=false"
+                    class="w-10 h-10 rounded-2xl flex items-center justify-center shadow-md transition hover:opacity-90 active:scale-95"
+                    style="background:linear-gradient(135deg,#b91c1c,#7f1d1d);">
+                <span wire:loading wire:target="openModal('createAdmin')"><i class="fas fa-spinner animate-spin text-white text-base"></i></span>
+                <span wire:loading.remove wire:target="openModal('createAdmin')"><i class="fas fa-user-shield text-white text-base"></i></span>
+            </button>
+            <div x-show="tip" x-cloak
+                 x-transition:enter="transition ease-out duration-100"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 class="absolute right-0 top-full mt-2 z-50 pointer-events-none">
+                <div class="bg-[#1a1a1a] text-white text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                    <i class="fas fa-user-shield mr-1.5"></i>New Admin
+                </div>
+                <div class="absolute right-3 bottom-full w-0 h-0" style="border:5px solid transparent;border-bottom-color:#1a1a1a;"></div>
+            </div>
+        </div>
+
         </div>{{-- /header action buttons --}}
     </div>
 
@@ -2704,7 +2870,7 @@ select.mu-filter-input.mu-active {
     $isReg    = $vRole === 'registrar';
     $isAdmin  = $vRole === 'admin';
     $canPhoto = in_array($vRole, ['director', 'organizer']);
-    $canToggle= in_array($vRole, ['director', 'organizer', 'registrar']);
+    $canToggle= in_array($vRole, ['director', 'organizer', 'registrar', 'admin']);
 
     // Only ONE active Director / Registrar system-wide (same rule enforced
     // server-side in executeToggle()). If this account is inactive and
@@ -2720,6 +2886,9 @@ select.mu-filter-input.mu-active {
         } elseif ($isReg && $this->activeRegistrarExists($vd['id'])) {
             $blockActivate = true;
             $blockActivateReason = 'Another Registrar is already active. Deactivate them first before activating this one.';
+        } elseif ($isAdmin && $this->activeAdminExists($vd['id'])) {
+            $blockActivate = true;
+            $blockActivateReason = 'Another Admin is already active. Deactivate them first before activating this one.';
         }
     }
 
@@ -3110,7 +3279,7 @@ select.mu-filter-input.mu-active {
                         <div class="p-2 grid grid-cols-2 gap-1.5">
                             <div class="mua-cell"><p class="mua-field-label">Last Name</p><p class="mua-field-value">{{ $up($vd['alumni_last_name'] ?? '') ?: '—' }}</p></div>
                             <div class="mua-cell"><p class="mua-field-label">Given Name</p><p class="mua-field-value">{{ $up($vd['alumni_first_name'] ?? '') ?: '—' }}</p></div>
-                            <div class="mua-cell"><p class="mua-field-label">Middle Name</p><p class="mua-field-value">{{ $up($vd['alumni_middle_name'] ?? '') ?: '—' }}</p></div>
+                            <div class="mua-cell"><p class="mua-field-label">Middle Initial</p><p class="mua-field-value">{{ $up($vd['alumni_middle_name'] ?? '') ?: '—' }}</p></div>
                             <div class="mua-cell"><p class="mua-field-label">Suffix</p><p class="mua-field-value">{{ $up($vd['alumni_suffix'] ?? '') ?: '—' }}</p></div>
                         </div>
                     </div>
@@ -3273,7 +3442,7 @@ select.mu-filter-input.mu-active {
                 <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
                     @foreach([
                         ['First Name',  $vd['first_name']  ?? '—'],
-                        ['Middle Name', $vd['middle_name'] ?? '—'],
+                        ['Middle Initial', $vd['middle_name'] ?? '—'],
                         ['Last Name',   $vd['last_name']   ?? '—'],
                         ['Suffix',      $vd['suffix']      ?? '—'],
                         ['Username',  $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
@@ -3296,7 +3465,7 @@ select.mu-filter-input.mu-active {
                 <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
                     @foreach([
                         ['First Name',  $vd['reg_first_name']  ?? ''],
-                        ['Middle Name', $vd['reg_middle_name'] ?? ''],
+                        ['Middle Initial', $vd['reg_middle_name'] ?? ''],
                         ['Last Name',   $vd['reg_last_name']   ?? ''],
                         ['Suffix',      $vd['reg_suffix']      ?? ''],
                         ['Username',    $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
@@ -3457,7 +3626,7 @@ select.mu-filter-input.mu-active {
                             <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Name Details</p>
                         </div>
                         <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-2">
-                            @foreach([['First Name',$orgFirst],['Middle Name',$orgMiddle],['Last Name',$orgLast],['Suffix',$orgSuffix]] as [$lbl,$val])
+                            @foreach([['First Name',$orgFirst],['Middle Initial',$orgMiddle],['Last Name',$orgLast],['Suffix',$orgSuffix]] as [$lbl,$val])
                             <div class="bg-gray-50 rounded-lg px-3 py-2 border border-[#E8E0F0]">
                                 <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
                                 <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val }}</p>
@@ -3950,8 +4119,8 @@ select.mu-filter-input.mu-active {
                                 @endif
                             </div>
                             <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name</p>
-                                <input wire:model.live.debounce.300ms="dMn" type="text" placeholder="e.g. Santos"
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Initial</p>
+                                <input wire:model.live.debounce.300ms="dMn" type="text" placeholder="e.g. S." maxlength="2"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($dErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($dErrs['middle_name']))
@@ -4225,8 +4394,8 @@ select.mu-filter-input.mu-active {
                                 @endif
                             </div>
                             <div>
-                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Name</p>
-                                <input wire:model.live.debounce.300ms="rMn" type="text" placeholder="e.g. Santos"
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Initial</p>
+                                <input wire:model.live.debounce.300ms="rMn" type="text" placeholder="e.g. S." maxlength="2"
                                        class="mu-filter-input w-full mu-smooth-input text-base {{ isset($rErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
                                        autocomplete="off">
                                 @if(isset($rErrs['middle_name']))
@@ -4350,6 +4519,281 @@ select.mu-filter-input.mu-active {
                             style="background:linear-gradient(135deg,#7A3F91,#8f4ba6);box-shadow:0 2px 8px rgba(122,63,145,.25);">
                         <span class="flex items-center gap-2">
                             <i class="fas fa-user-clock text-sm"></i> Create Registrar
+                        </span>
+                    </button>
+                </div>
+            </div>
+            @endif
+
+        </div>
+    </div>
+</div>
+@endif
+
+
+{{-- ═══════════════════════════════════════════════════════════
+     CREATE ADMIN MODAL (same layout as Create Registrar, no photo)
+     ═══════════════════════════════════════════════════════════ --}}
+@if($activeModal === 'createAdmin')
+<div class="fixed inset-0 mu-modal-selectable"
+     style="background:rgba(0,0,0,0.55);backdrop-filter:blur(3px);z-index:9995;"
+     x-data="{ muClosing: false, submitting: false, closing: false }"
+     x-show="!muClosing"
+     x-init="muClosing = false; submitting = false; closing = false"
+     @keydown.escape.window="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }">
+    <div class="w-full h-full flex flex-col" style="background:#FFFFFF;overflow:hidden;">
+
+        <div class="flex items-center justify-between px-6 sm:px-8 py-4 shrink-0" style="background:linear-gradient(135deg,#b91c1c,#7f1d1d);">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0 ring-2 ring-white/30">
+                    <i class="fas fa-user-shield text-white text-base"></i>
+                </div>
+                <div class="min-w-0">
+                    <p class="font-bold text-lg text-white leading-snug truncate">Create New Admin</p>
+                    <p class="text-sm text-white/70 mt-0.5 truncate">Fill in the details below</p>
+                </div>
+            </div>
+            <button @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="submitting || closing"
+                    :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-white/30'"
+                    class="mu-close-tooltip w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center transition text-white shrink-0">
+                <i x-show="!closing" class="fa-solid fa-xmark text-lg"></i>
+                <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-base"></i>
+            </button>
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto p-5 sm:p-6 mu-vp-scroll max-w-4xl mx-auto w-full relative" style="scrollbar-width:thin;scrollbar-color:#cccccc #F5F5F5;">
+
+            @if($aOk)
+            {{-- Success: reset the Alpine submitting flag so the overlay clears
+                 immediately — same pattern as Create Director/Registrar.
+                 Auto-close the modal after a short delay so the admin can see
+                 the confirmation briefly, then the table is already refreshed. --}}
+            <div x-init="
+                submitting = false;
+                setTimeout(() => { $wire.closeModal(); muClosing = true; }, 1800);
+            "></div>
+            @php $parts = explode('|', $aOk); @endphp
+            <div class="p-5 rounded-xl border bg-emerald-50 border-emerald-200 mb-5 space-y-3">
+                <div class="flex items-start gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-emerald-500 flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <i class="fas fa-circle-check text-white text-base"></i>
+                    </div>
+                    <div class="space-y-1.5 flex-1">
+                        @foreach($parts as $part)
+                        <p class="text-base text-emerald-800 leading-snug">{!! $part !!}</p>
+                        @endforeach
+                    </div>
+                </div>
+            </div>
+            <button @click="if(!closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }" :disabled="closing"
+                    class="w-full py-3 rounded-xl text-base font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-2" style="background:#b91c1c;">
+                <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-sm"></i>
+                <span>Done</span>
+            </button>
+            @endif
+
+            @if($aErrs)
+            {{-- Errors came back → reset submitting so the overlay clears --}}
+            <div x-init="submitting = false"></div>
+            @endif
+
+            @if(isset($aErrs['general']))
+            <div class="mb-5 p-4 rounded-xl bg-red-50 border border-red-200 space-y-1.5">
+                @foreach($aErrs['general'] as $msg)
+                <p class="text-base text-red-700 flex items-start gap-2">
+                    <i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-sm"></i><span>{{ $msg }}</span>
+                </p>
+                @endforeach
+            </div>
+            @endif
+
+            @if(!$aOk)
+            {{-- Only ONE active Admin allowed. The admin can still register a
+                 new Admin while one is active — this is just a heads-up that
+                 doing so will automatically set the current active Admin to
+                 Inactive, since only one can be active at a time. The Create
+                 button is no longer locked. --}}
+            @if($this->hasActiveAdmin)
+            <div class="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-3">
+                <i class="fas fa-triangle-exclamation text-amber-600 text-base mt-0.5 shrink-0"></i>
+                <div>
+                    <p class="text-base font-bold text-amber-800 leading-snug">There is already an active Admin.</p>
+                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Admin can be active at a time. If you register a new one now, the current active Admin will automatically be set to <strong>Inactive</strong>.</p>
+                </div>
+            </div>
+            @endif
+            {{-- Full-form loading overlay — appears the instant the button is clicked,
+                 before Livewire's round-trip even starts. Covers the whole scroll area
+                 so the user gets immediate visual feedback while Mail::send() runs. --}}
+            <div x-show="submitting" x-cloak
+                 class="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10"
+                 style="background:rgba(255,255,255,0.88);backdrop-filter:blur(2px);">
+                <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md" style="background:linear-gradient(135deg,#b91c1c,#7f1d1d);">
+                    <i class="fas fa-spinner animate-spin text-white text-xl"></i>
+                </div>
+                <div class="text-center">
+                    <p class="text-lg font-bold" style="color:#333333;">Creating Admin Account…</p>
+                    <p class="text-sm font-medium mt-1" style="color:#6b6b6b;">Sending login credentials via email</p>
+                </div>
+            </div>
+            <div class="space-y-4" :class="submitting ? 'pointer-events-none select-none' : ''" style="transition: opacity .2s ease;" :style="submitting ? 'opacity:0.4' : 'opacity:1'"
+                 wire:loading.class="opacity-60 pointer-events-none" wire:target="createAdmin">
+
+                <div class="rounded-2xl border overflow-visible bg-white" style="border-color:#E8E0F0;box-shadow:0 1px 3px rgba(122,63,145,.06);">
+                    <div class="px-5 py-3.5 border-b flex items-center gap-2" style="background:#FDF2F2;border-color:#FCE8E8;">
+                        <i class="fas fa-id-card text-xs" style="color:#b91c1c;"></i>
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#7f1d1d;">Personal Information</p>
+                    </div>
+                    <div class="p-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">First Name <span class="text-red-500">*</span></p>
+                                <input wire:model.live.debounce.300ms="aFn" type="text" placeholder="e.g. Juan"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($aErrs['first_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($aErrs['first_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $aErrs['first_name'] }}
+                                </p>
+                                @endif
+                            </div>
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Last Name <span class="text-red-500">*</span></p>
+                                <input wire:model.live.debounce.300ms="aLn" type="text" placeholder="e.g. dela Cruz"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($aErrs['last_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($aErrs['last_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $aErrs['last_name'] }}
+                                </p>
+                                @endif
+                            </div>
+                            <div>
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Middle Initial</p>
+                                <input wire:model.live.debounce.300ms="aMn" type="text" placeholder="e.g. S." maxlength="2"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($aErrs['middle_name']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($aErrs['middle_name']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $aErrs['middle_name'] }}
+                                </p>
+                                @endif
+                            </div>
+                            <div class="relative" x-data="{ open: false, sfxOptions: [
+                                    { v: 'Jr.',   l: 'Junior' },
+                                    { v: 'Sr.',   l: 'Senior' },
+                                    { v: 'II',    l: 'II — the Second' },
+                                    { v: 'III',   l: 'III — the Third' },
+                                    { v: 'IV',    l: 'IV — the Fourth' },
+                                    { v: 'V',     l: 'V — the Fifth' },
+                                    { v: 'VI',    l: 'VI — the Sixth' },
+                                ] }" @click.away="open = false">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Suffix</p>
+                                <div class="mu-sfx-field">
+                                    <button type="button" @click="open = !open"
+                                            class="mu-sfx-trigger w-full mu-smooth-input text-base flex items-center justify-between"
+                                            :class="open ? 'mu-sfx-trigger--open' : ''">
+                                        <span class="flex items-center gap-2 truncate">
+                                            <i class="fas fa-tag text-xs shrink-0" style="color:#b91c1c;"></i>
+                                            <span style="{{ $aSfx === '' ? 'color:#595959;font-weight:400;' : '' }}">{{ $aSfx !== '' ? $aSfx : 'None' }}</span>
+                                        </span>
+                                        <i class="fas fa-chevron-down text-xs transition-transform shrink-0" style="color:#b91c1c;" :class="open ? 'rotate-180' : ''"></i>
+                                    </button>
+                                    <div x-show="open" x-cloak
+                                         x-transition:enter="transition ease-out duration-100"
+                                         x-transition:enter-start="opacity-0 scale-95"
+                                         x-transition:enter-end="opacity-100 scale-100"
+                                         class="mu-sfx-panel">
+                                        <p class="mu-sfx-panel-title">Select Suffix</p>
+                                        <div class="mu-sfx-list">
+                                            <template x-for="opt in sfxOptions" :key="opt.v">
+                                                <button type="button"
+                                                        @click="$wire.set('aSfx', opt.v); open = false"
+                                                        class="mu-sfx-item"
+                                                        :class="'{{ $aSfx }}' === opt.v ? 'mu-sfx-item--sel' : ''">
+                                                    <span class="mu-sfx-item-code" x-text="opt.v"></span>
+                                                    <span class="mu-sfx-item-label" x-text="opt.l"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                        <button type="button" @click="$wire.set('aSfx', ''); open = false"
+                                                class="mu-sfx-panel-footer">
+                                            Optional — leave blank if none
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- ACCOUNT CREDENTIALS card --}}
+                <div class="rounded-2xl border overflow-hidden bg-white" style="border-color:#E8E0F0;box-shadow:0 1px 3px rgba(122,63,145,.06);">
+                    <div class="px-5 py-3.5 border-b flex items-center gap-2" style="background:#FDF2F2;border-color:#FCE8E8;">
+                        <i class="fas fa-key text-xs" style="color:#b91c1c;"></i>
+                        <p class="text-sm font-bold uppercase tracking-widest" style="color:#7f1d1d;">Account Credentials</p>
+                    </div>
+                    <div class="p-5">
+                        <div class="grid grid-cols-1 sm:grid-cols-5 gap-4">
+                            <div class="sm:col-span-2">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Username <span class="text-red-500">*</span></p>
+                                <input wire:model.live.debounce.300ms="aUsername" type="text"
+                                       placeholder="e.g. jdelacruz"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($aErrs['username']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($aErrs['username']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $aErrs['username'] }}
+                                </p>
+                                @else
+                                <p class="text-xs font-medium mt-1.5" style="color:#8a8a8a;">Letters, numbers, dots, dashes, underscores only</p>
+                                @endif
+                            </div>
+                            <div class="sm:col-span-3">
+                                <p class="text-sm font-bold mb-2" style="color:#000000;">Email Address <span class="text-red-500">*</span></p>
+                                <input wire:model.live.debounce.300ms="aEmail" type="email" placeholder="admin@example.com"
+                                       class="mu-filter-input w-full mu-smooth-input text-base {{ isset($aErrs['email']) ? 'border-red-400 bg-red-50' : '' }}"
+                                       autocomplete="off">
+                                @if(isset($aErrs['email']))
+                                <p class="flex items-center gap-1 mt-1.5 text-sm font-semibold text-red-600">
+                                    <i class="fas fa-circle-exclamation text-xs shrink-0"></i>{{ $aErrs['email'] }}
+                                </p>
+                                @else
+                                <p class="text-xs font-medium mt-1.5" style="color:#6b6b6b;">Login credentials will be sent here</p>
+                                @endif
+                            </div>
+                        </div>
+                        <div class="mt-4 p-4 rounded-xl flex items-start gap-2.5" style="background:#fffbeb;border:1px solid #fde68a;">
+                            <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                            <p class="text-sm font-semibold leading-snug" style="color:#92400e;">
+                                A secure password will be <strong>auto-generated</strong> and sent to this email.
+                                The admin logs in using their <strong>Username</strong>.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex gap-3 pt-1">
+                    <button type="button"
+                            @click="if(!submitting && !closing){ closing = true; $wire.closeModal().then(() => muClosing = true).catch(() => closing = false) }"
+                            :disabled="submitting || closing"
+                            :class="submitting ? 'opacity-40 cursor-not-allowed' : 'hover:bg-[#FDF2F2] hover:border-[#f3b4b4]'"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold border-2 transition flex items-center justify-center gap-2"
+                            style="color:#333333;border-color:#E8E0F0;">
+                        <i x-show="closing" x-cloak class="fas fa-spinner animate-spin text-xs"></i>
+<span>Cancel</span>
+                    </button>
+                    {{-- Set submitting=true immediately on click so the overlay and
+                         disabled states fire before the Livewire round-trip begins —
+                         especially important because Mail::send() is synchronous and
+                         can take 1-3 s before the server responds. --}}
+                    <button @click="submitting = true; $wire.createAdmin().then(() => { submitting = false }).catch(() => { submitting = false })"
+                            wire:loading.attr="disabled" wire:target="createAdmin"
+                            :disabled="submitting"
+                            class="flex-1 px-4 py-3 rounded-xl text-base font-bold text-white transition flex items-center justify-center gap-2 mu-smooth-btn hover:opacity-90"
+                            style="background:linear-gradient(135deg,#b91c1c,#991b1b);box-shadow:0 2px 8px rgba(185,28,28,.25);">
+                        <span class="flex items-center gap-2">
+                            <i class="fas fa-user-shield text-sm"></i> Create Admin
                         </span>
                     </button>
                 </div>

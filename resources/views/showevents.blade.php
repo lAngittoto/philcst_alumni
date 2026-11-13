@@ -52,78 +52,9 @@
     .bg-primary     { background-color: var(--primary-purple); }
     .border-primary { border-color: var(--primary-purple); }
 
-    @keyframes evModalIn {
-        from { opacity: 0; transform: translateY(8px); }
-        to   { opacity: 1; transform: translateY(0); }
-    }
-    .ev-modal-enter { animation: evModalIn .2s cubic-bezier(.4,0,.2,1) both; }
-
-    .ev-info-row {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding: 14px 0;
-        border-bottom: 1px solid #F3F0F8;
-    }
-    .ev-info-row:last-child { border-bottom: none; }
-
-    .ev-card { cursor: pointer; }
-
-    #ev-global-tooltip {
-        position: fixed;
-        background: #111111;
-        color: #ffffff;
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: .06em;
-        text-transform: uppercase;
-        padding: 5px 10px;
-        border-radius: 8px;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity .15s ease;
-        white-space: nowrap;
-        z-index: 99999;
-        transform: translate(14px, 14px);
-        display: flex;
-        align-items: center;
-    }
-    #ev-global-tooltip.visible { opacity: 1; }
-
-    .ev-close-btn-wrap {
-        position: relative;
-        display: inline-flex;
-        align-items: center;
-    }
-    .ev-close-btn-wrap .ev-close-tip {
-        position: absolute;
-        right: 0;
-        top: calc(100% + 8px);
-        background: #111111;
-        color: #ffffff;
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: .06em;
-        text-transform: uppercase;
-        padding: 4px 9px;
-        border-radius: 6px;
-        white-space: nowrap;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity .15s ease;
-        z-index: 99999;
-    }
-    .ev-close-btn-wrap:hover .ev-close-tip { opacity: 1; }
-
     /* Card hover lift */
     .ev-card:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(122,63,145,.10); }
     .ev-card { transition: transform .25s ease, box-shadow .25s ease; }
-
-    /* ── MOBILE / TOUCH: icon-only, no tooltip text ── */
-    @media (hover: none), (max-width: 768px) {
-        #ev-global-tooltip { display: none !important; }
-        .ev-close-btn-wrap .ev-close-tip { display: none !important; }
-    }
 
     /* ── Bounce reveal — same as home/about pages ── */
     .reveal-bounce {
@@ -204,35 +135,36 @@
             </div>
 
             {{-- ── 3 CARDS MAX ── --}}
-            <div class="mb-10 grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3" id="ev-grid-main">
+            <div class="mb-10 grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3 items-stretch" id="ev-grid-main">
                 @foreach($events as $i => $event)
                 @php $d = $i * 80; @endphp
-                <div class="ev-card glass-card group relative flex flex-col overflow-hidden rounded-2xl reveal-bounce"
+                <div class="ev-card glass-card relative flex flex-col overflow-hidden rounded-2xl reveal-bounce h-full"
                      style="transition-delay: {{ $d / 1000 }}s"
-                     data-reveal
-                     onclick="evOpenModal({{ $event->id }})">
+                     data-reveal>
 
                     @if(!empty($event->photo_url))
                         <img src="{{ $event->photo_url }}" alt="{{ $event->title }}"
-                             class="h-60 w-full object-cover">
+                             class="h-44 w-full object-cover shrink-0">
                     @else
-                        <div class="flex h-60 w-full items-center justify-center bg-gradient-to-br from-purple-50 to-purple-100">
-                            <i class="fa-solid fa-calendar-star text-5xl text-purple-300"></i>
+                        <div class="flex h-44 w-full shrink-0 items-center justify-center bg-gradient-to-br from-purple-50 to-purple-100">
+                            <i class="fa-solid fa-calendar-star text-4xl text-purple-300"></i>
                         </div>
                     @endif
 
-                    <div class="flex flex-1 flex-col gap-4 p-6">
-                        <div class="inline-flex w-fit items-center gap-1.5 rounded-lg bg-purple-100 px-3 py-2 text-sm font-semibold text-primary">
+                    <div class="flex flex-1 flex-col gap-3 p-5">
+                        <div class="inline-flex w-fit items-center gap-1.5 rounded-lg bg-purple-100 px-3 py-1.5 text-xs font-semibold text-primary">
                             {{ $event->event_date->setTimezone('Asia/Manila')->format('F d, Y') }}
                         </div>
-                        <h3 class="font-sans text-lg font-bold uppercase tracking-tight leading-snug" style="color: var(--text-dark);">
+                        <h3 class="font-sans text-base font-bold uppercase tracking-tight leading-snug line-clamp-2" style="color: var(--text-dark);">
                             {{ $event->title }}
                         </h3>
                         @if($event->target_participants)
-                        <p class="text-sm font-semibold" style="color: var(--text-dark);">{{ $event->target_participants }}</p>
+                        <p class="text-xs font-semibold line-clamp-1" style="color: var(--text-dark);">
+                            <i class="fa-solid fa-users text-primary mr-1"></i>{{ $event->target_participants }}
+                        </p>
                         @endif
                         @if($event->description)
-                        <p class="line-clamp-2 text-sm leading-relaxed" style="color: var(--text-dark);">{{ $event->description }}</p>
+                        <p class="line-clamp-3 text-xs leading-relaxed" style="color: var(--text-dark);">{{ $event->description }}</p>
                         @endif
                     </div>
                 </div>
@@ -267,14 +199,10 @@
 
 </main>
 
-{{-- Global cursor-follow tooltip (desktop only) --}}
-<div id="ev-global-tooltip"><i class="fa-solid fa-eye" style="margin-right:5px;"></i>View Details</div>
-
-
 {{-- ══════════════════════════════════════════════════════════════
-     FULL-SCREEN EVENT DETAIL MODAL
+     FULL-SCREEN EVENT DETAIL MODAL (unused — kept out of DOM flow)
 ══════════════════════════════════════════════════════════════ --}}
-<div id="ev-modal"
+<div id="ev-modal" style="display:none !important;" hidden
      class="fixed inset-0 z-[9999] flex flex-col"
      style="display:none !important;"
      role="dialog" aria-modal="true">
@@ -382,102 +310,7 @@
 const EV_DATA = {!! json_encode($eventsJson, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) !!};
 </script>
 
-<script>
-// ── CURSOR-FOLLOW TOOLTIP (desktop only — no-ops harmlessly on touch) ────
-var evTooltip = document.getElementById('ev-global-tooltip');
 
-document.querySelectorAll('.ev-card').forEach(function (card) {
-    card.addEventListener('mousemove', function (e) {
-        evTooltip.style.left = e.clientX + 'px';
-        evTooltip.style.top  = e.clientY + 'px';
-        evTooltip.classList.add('visible');
-    });
-    card.addEventListener('mouseleave', function () {
-        evTooltip.classList.remove('visible');
-    });
-});
-
-// ── FULL-SCREEN MODAL ─────────────────────────────────────────────
-function evOpenModal(id) {
-    var ev = null;
-    for (var i = 0; i < EV_DATA.length; i++) {
-        if (EV_DATA[i].id === id) { ev = EV_DATA[i]; break; }
-    }
-    if (!ev) return;
-
-    // Header
-    document.getElementById('ev-modal-heading').textContent = ev.title;
-
-    // Date chip — date only, no time
-    document.getElementById('ev-modal-datechip').textContent = ev.event_date;
-
-    // Title
-    document.getElementById('ev-modal-title').textContent = ev.title;
-
-    // Photo
-    document.getElementById('ev-modal-photo-wrap').innerHTML = ev.photo_url
-        ? '<img src="' + ev.photo_url + '" alt="" style="max-width:100%;max-height:100%;width:100%;height:100%;object-fit:contain;display:block;border-radius:14px;">'
-        : '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:280px;">' +
-          '<span style="font-size:1.1rem;color:#333333;font-weight:600;letter-spacing:.05em;">No Photo Available</span></div>';
-
-    // Info rows — Date + Participants only
-    var infoRows = [
-        { label: 'Date', val: ev.event_date },
-    ];
-    if (ev.target_participants)
-        infoRows.push({ label: 'Participants', val: ev.target_participants });
-
-    var infoHtml = '';
-    infoRows.forEach(function (r) {
-        infoHtml +=
-            '<div class="ev-info-row">' +
-                '<p style="font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;color:#333333;line-height:1.3;">' + r.label + '</p>' +
-                '<p style="font-size:14px;font-weight:500;color:#333333;line-height:1.5;word-break:break-word;">' + r.val + '</p>' +
-            '</div>';
-    });
-    document.getElementById('ev-modal-info').innerHTML = infoHtml;
-
-    // Description
-    var descSection = document.getElementById('ev-modal-desc-section');
-    if (ev.description) {
-        document.getElementById('ev-modal-desc').textContent = ev.description;
-        descSection.style.display = '';
-    } else {
-        descSection.style.display = 'none';
-    }
-
-    // Notes
-    var notesSection = document.getElementById('ev-modal-notes-section');
-    if (ev.notes) {
-        document.getElementById('ev-modal-notes').textContent = ev.notes;
-        notesSection.style.display = '';
-    } else {
-        notesSection.style.display = 'none';
-    }
-
-    // Footer meta
-    document.getElementById('ev-modal-footer-meta').textContent = 'Posted ' + ev.created_at;
-
-    // Hide tooltip
-    evTooltip.classList.remove('visible');
-
-    // Show modal
-    var modal = document.getElementById('ev-modal');
-    modal.style.removeProperty('display');
-    modal.classList.add('ev-modal-enter');
-    document.body.style.overflow = 'hidden';
-    setTimeout(function () { modal.classList.remove('ev-modal-enter'); }, 250);
-}
-
-function evCloseModal() {
-    document.getElementById('ev-modal').style.display = 'none';
-    document.body.style.overflow = '';
-}
-
-document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') evCloseModal();
-});
-</script>
 
 <script>
     function initRevealBounce() {

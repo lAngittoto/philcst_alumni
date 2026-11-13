@@ -1862,7 +1862,7 @@ function phAddress(initial, startEditing) {
                                 @if($first_name)<p class="field-value">{{ strtoupper($first_name) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
                             <div class="ai-cell">
-                                <p class="field-label">Middle Name</p>
+                                <p class="field-label">Middle Initial</p>
                                 @if($middle_initial)<p class="field-value">{{ strtoupper($middle_initial) }}</p>@else<p class="field-value-empty">Not provided</p>@endif
                             </div>
                             <div class="ai-cell">

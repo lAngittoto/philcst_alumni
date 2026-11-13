@@ -787,6 +787,27 @@ new class extends Component {
                                accept="image/jpeg,image/png,image/webp" @change="onFileChange($event)">
                     </label>
 
+                    {{-- Persistent "back to default" trigger — reachable even
+                         before a new photo is picked. The Save/Cancel/Default
+                         bar below only appears once hasFile is true, and
+                         useDefault() is what sets hasFile=true, so without
+                         this always-visible button there was no way to reach
+                         it (same "change to default photo" entry point User
+                         Management gives the admin for this account). Hidden
+                         once the photo already IS the default. --}}
+                    <div class="absolute top-3 right-3 z-20 group"
+                         x-show="!hasFile && !saving && !aligning && !previewSrc.includes('default.png')"
+                         x-cloak>
+                        <button type="button" @click.stop="useDefault()"
+                                class="w-8 h-8 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center transition-colors active:scale-90">
+                            <i class="fas fa-rotate-left text-[11px]"></i>
+                        </button>
+                        <span class="absolute top-full right-0 mt-1.5 hidden group-hover:block whitespace-nowrap
+                                     bg-black text-white text-[10px] font-bold px-2.5 py-1 rounded-md shadow-lg">
+                            Back to default photo
+                        </span>
+                    </div>
+
                     {{-- Detecting the face / aligning the photo to the card --}}
                     <div x-show="aligning" x-cloak
                          class="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-black/50">

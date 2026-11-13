@@ -126,14 +126,10 @@ new class extends Component {
         if ($mid === '') {
             // Optional — not everyone has a middle name on record.
         } else {
-            if (!preg_match('/^[\pL\pM]+$/u', $mid)) {
-                $errors[]               = 'Middle name must contain letters only.';
+            if (!preg_match('/^[\pL\pM]\.?$/u', $mid)) {
+                $errors[]               = 'Middle initial must be a single letter (e.g. S or S.).';
                 $fieldErrors[]          = 'middleName';
-                $fieldMsgs['middleName'] = 'Letters only, no numbers or symbols.';
-            } elseif (mb_strlen($mid, 'UTF-8') < 2) {
-                $errors[]               = 'Middle name must be a full word (e.g. Santos, not S).';
-                $fieldErrors[]          = 'middleName';
-                $fieldMsgs['middleName'] = 'Must be a full word (e.g. Santos, not S).';
+                $fieldMsgs['middleName'] = 'Single letter only (e.g. S or S.).';
             }
         }
 
@@ -569,24 +565,17 @@ public function closeImportModal(): void
                 if (!$lastName)  { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Last name is empty."); continue; }
                 if (!$this->validateName($lastName)) { $this->appendImportError($validationErrors, $maxErrors, "{$label}: Last name has invalid characters."); continue; }
 
-                // ── Middle name ────────────────────────────────────────
+                // ── Middle initial ────────────────────────────────────
                 // Optional for both Recent and Old — a blank cell is fine
-                // since not every alumni has a middle name on record.
-                // Format (letters only, each word >=2 chars) is still
-                // checked whenever a value is actually provided.
+                // since not every alumni has a middle initial on record.
+                // Must be a single letter (optionally with a period)
+                // whenever a value is actually provided.
                 if ($mid === '') {
                     // no-op — allowed blank
                 } else {
-                    if (!preg_match('/^[\pL\pM][\pL\pM ]*[\pL\pM]$|^[\pL\pM]$/u', $mid)) {
-                        $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle name must contain letters only."); continue;
+                    if (!preg_match('/^[\pL\pM]\.?$/u', $mid)) {
+                        $this->appendImportError($validationErrors, $maxErrors, "{$label}: Middle initial must be a single letter."); continue;
                     }
-                    $midError = false;
-                    foreach (explode(' ', $mid) as $part) {
-                        if (mb_strlen($part, 'UTF-8') < 2) {
-                            $this->appendImportError($validationErrors, $maxErrors, "{$label}: Each word in middle name must be >=2 chars."); $midError = true; break;
-                        }
-                    }
-                    if ($midError) continue;
                 }
 
                 $rawId = trim((string)($row['student_id'] ?? ''));
@@ -1680,8 +1669,8 @@ public function closeImportModal(): void
                                         <input wire:model="regMiddleInitial" type="text" placeholder=" "
                                                :class="{ 'field-error': fieldHasError('middleName') }"
                                                class="fl-input"
-                                               maxlength="50">
-                                        <label class="fl-label">Middle Name</label>
+                                               maxlength="2">
+                                        <label class="fl-label">Middle Initial</label>
                                     </div>
                                     <p x-show="fieldMessage('middleName') !== ''" style="display:none;" class="mt-1.5 text-xs font-medium text-red-600 flex items-start gap-1">
                                     <i class="fas fa-circle-exclamation mt-0.5 shrink-0"></i>
