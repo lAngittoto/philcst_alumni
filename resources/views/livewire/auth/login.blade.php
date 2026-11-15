@@ -597,12 +597,21 @@ new #[Layout('app')] class extends Component {
         // (or just retypes from memory) can easily differ in case from
         // what was typed at Create Admin time; a case-sensitive match
         // would reject perfectly correct credentials.
-        $adminLoginInput = trim($this->name);
+        $adminLoginInput    = trim($this->name);
+        $adminUsernameEmail = $adminLoginInput . '@admin.internal';
         $adminUser = DB::table('users')
             ->where('role', 'admin')
-            ->where(function ($q) use ($adminLoginInput) {
+            ->where(function ($q) use ($adminLoginInput, $adminUsernameEmail) {
                 $q->whereRaw('LOWER(email) = ?', [Str::lower($adminLoginInput)])
-                  ->orWhereRaw('LOWER(name) = ?', [Str::lower($adminLoginInput)]);
+                  ->orWhereRaw('LOWER(name) = ?', [Str::lower($adminLoginInput)])
+                  // FIX: admins are created with login email
+                  // "<username>@admin.internal" and `name` set to the full
+                  // name — but the admin is told (and types) just the plain
+                  // username, same as Director/Registrar. That bare username
+                  // matched neither `email` nor `name` above, so a brand-new
+                  // admin could never log in. Also try
+                  // "<typed input>@admin.internal".
+                  ->orWhereRaw('LOWER(email) = ?', [Str::lower($adminUsernameEmail)]);
             })
             ->first();
 

@@ -3348,8 +3348,8 @@ select.mu-filter-input.mu-active {
                             <div class="flex flex-col gap-2">
                                 <div class="relative w-full">
                                     <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                                    <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                                           class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
+                                    <input wire:model.defer="ueEmail" type="email" name="ue_email_field" id="ue_email_field" autocomplete="off" data-lpignore="true" data-form-type="other" placeholder="New email address…"
+                                           class="mu-filter-input w-full text-base" style="padding-left:2.25rem;">
                                 </div>
                                 <button wire:click="saveUpdateEmail"
                                         @click="saving = true"
@@ -3675,8 +3675,8 @@ select.mu-filter-input.mu-active {
                                 <div class="flex flex-col gap-2">
                                     <div class="relative w-full">
                                         <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                                        <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                                               class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
+                                        <input wire:model.defer="ueEmail" type="email" name="ue_email_field" id="ue_email_field" autocomplete="off" data-lpignore="true" data-form-type="other" placeholder="New email address…"
+                                               class="mu-filter-input w-full text-base" style="padding-left:2.25rem;">
                                     </div>
                                     <button wire:click="saveUpdateEmail"
                                             @click="saving = true"
@@ -3785,8 +3785,8 @@ select.mu-filter-input.mu-active {
                     <div class="flex flex-col gap-2">
                         <div class="relative w-full">
                             <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                            <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
+                            <input wire:model.defer="ueEmail" type="email" name="ue_email_field" id="ue_email_field" autocomplete="off" data-lpignore="true" data-form-type="other" placeholder="New email address…"
+                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;">
                         </div>
                         <button wire:click="saveUpdateEmail"
                                 @click="saving = true"
@@ -3846,8 +3846,8 @@ select.mu-filter-input.mu-active {
                     <div class="flex flex-col gap-2">
                         <div class="relative w-full">
                             <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                            <input wire:model.defer="ueEmail" type="email" placeholder="New email address…"
-                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off">
+                            <input wire:model.defer="ueEmail" type="email" name="ue_email_field" id="ue_email_field" autocomplete="off" data-lpignore="true" data-form-type="other" placeholder="New email address…"
+                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;">
                         </div>
                         <button wire:click="saveUpdateEmail"
                                 @click="saving = true"
