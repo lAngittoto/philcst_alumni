@@ -1197,7 +1197,7 @@ new class extends Component {
             $this->ueName  = $r->name;
             $this->aeUsername = $r->name ?: explode('@', $r->email ?? '')[0];
         }
-        if (in_array($r->role, ['registrar', 'admin'], true)) {
+        if ($r->role === 'registrar') {
             $this->cpId   = $id;
             $this->cpName = $r->name;
         }
@@ -3983,84 +3983,6 @@ select.mu-filter-input.mu-active {
                             <span wire:loading wire:target="saveUpdateUsername">Saving…</span>
                         </button>
                     </div>
-                </div>
-            </div>
-
-            @endif
-
-            {{-- ADMIN: Change Password — kept as its own standalone card,
-                 separate from Update Email / Update Username above (same
-                 pattern as Director/Registrar's separate Account Status
-                 card below), instead of being grouped inside one block. --}}
-            @if($isAdmin)
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
-                <div class="px-5 py-3 border-b border-[#E8E0F0] flex items-center gap-2" style="background:#F9F7FC;">
-                    <i class="fa-solid fa-lock text-sm" style="color:#7A3F91;"></i>
-                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Change Password</p>
-                </div>
-                <div class="p-4">
-                    @if($cpOk)
-                    <div x-init="saving = false"></div>
-                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
-                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $cpOk }}</p>
-                    </div>
-                    @endif
-                    @if(count($cpErrs))
-                    <div x-init="saving = false"></div>
-                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
-                        @foreach($cpErrs as $msgs)
-                            @foreach((array) $msgs as $msg)
-                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
-                            @endforeach
-                        @endforeach
-                    </div>
-                    @endif
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                            <label class="block text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">New Password</label>
-                            <div class="relative">
-                                <i class="fas fa-key absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                                <input wire:model.defer="cpNew" type="{{ $cpShowNew ? 'text' : 'password' }}"
-                                       placeholder="Enter new password…" autocomplete="new-password"
-                                       class="mu-filter-input w-full text-base" style="padding-left:2.25rem;padding-right:2.5rem;">
-                                <button type="button" wire:click="$toggle('cpShowNew')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
-                                    <i class="fa-solid {{ $cpShowNew ? 'fa-eye-slash' : 'fa-eye' }} text-xs"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Confirm Password</label>
-                            <div class="relative">
-                                <i class="fas fa-key absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                                <input wire:model.defer="cpConfirm" type="{{ $cpShowConfirm ? 'text' : 'password' }}"
-                                       placeholder="Re-enter new password…" autocomplete="new-password"
-                                       class="mu-filter-input w-full text-base" style="padding-left:2.25rem;padding-right:2.5rem;">
-                                <button type="button" wire:click="$toggle('cpShowConfirm')"
-                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
-                                    <i class="fa-solid {{ $cpShowConfirm ? 'fa-eye-slash' : 'fa-eye' }} text-xs"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="mt-3 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
-                        <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">Must be at least 8 characters. This admin will be required to change it again on next login.</p>
-                    </div>
-
-                    <button wire:click="saveChangePassword"
-                            @click="saving = true"
-                            wire:loading.attr="disabled" wire:target="saveChangePassword"
-                            class="w-full mt-3 px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5"
-                            style="background:#7A3F91;">
-                        <span wire:loading wire:target="saveChangePassword"><i class="fas fa-spinner animate-spin text-sm"></i></span>
-                        <span wire:loading.remove wire:target="saveChangePassword"><i class="fas fa-lock text-sm"></i></span>
-                        <span wire:loading.remove wire:target="saveChangePassword">Update Password</span>
-                        <span wire:loading wire:target="saveChangePassword">Saving…</span>
-                    </button>
                 </div>
             </div>
 
