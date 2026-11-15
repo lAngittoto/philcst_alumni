@@ -176,6 +176,18 @@ Route::middleware(['auth', 'director', 'director.password.ensure'])->prefix('dir
 });
 
 // ===================================
+// Admin — Password Change Wizard
+// ===================================
+// Mirrors Registrar's pattern: plain `auth` middleware only (no
+// dedicated "admin.password.ensure" middleware exists yet), so this
+// page is reachable right after login before the Admin Routes group
+// below (which requires the 'admin' role middleware) takes over.
+Route::middleware(['auth'])->group(function () {
+    Volt::route('/admin/change-password', 'admin/change-password')
+        ->name('admin.change-password');
+});
+
+// ===================================
 // Admin Routes
 // ===================================
 Route::middleware(['auth', 'admin'])->group(function () {
