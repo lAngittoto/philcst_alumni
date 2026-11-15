@@ -551,19 +551,6 @@ new class extends Component {
             ->exists();
     }
 
-    /**
-     * Same "only one active account" rule as Director / Registrar, applied
-     * to Admin accounts. NULL user_status counts as ACTIVE.
-     */
-    private function activeAdminExists(?int $exceptUserId = null): bool
-    {
-        return DB::table('users')
-            ->where('role', 'admin')
-            ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
-            ->when($exceptUserId, fn($q) => $q->where('id', '!=', $exceptUserId))
-            ->exists();
-    }
-
     #[Computed]
     public function hasActiveDirector(): bool
     {
@@ -576,10 +563,19 @@ new class extends Component {
         return $this->activeRegistrarExists();
     }
 
-    #[Computed]
-    public function hasActiveAdmin(): bool
+    /**
+     * Is the given user row the Admin account that is currently logged
+     * into this panel? Used to hide the Activate/Deactivate button on
+     * the viewer's own Admin row — several Admins can be active at the
+     * same time now (no more "only one active Admin" rule), but an
+     * Admin should never be able to deactivate the very account they
+     * are using right now (that would lock them out). Admin accounts
+     * that were created through "Create Admin" are unaffected and keep
+     * their button as usual.
+     */
+    private function isSelfAdmin(int $userId): bool
     {
-        return $this->activeAdminExists();
+        return auth()->check() && (int) auth()->id() === $userId;
     }
 
     /**
@@ -815,8 +811,8 @@ new class extends Component {
      * minus the photo. Admins live in the `users` table (role = 'admin'):
      * `name` holds the full name and the login email is
      * "<username>@admin.internal" (the username is the local part, same
-     * convention as Director/Registrar). Only ONE active admin is allowed
-     * at a time — same rule as Director/Registrar. A secure password is
+     * convention as Director/Registrar). Unlike Director/Registrar, any
+     * number of Admins can be active at once. A secure password is
      * auto-generated and emailed to the address typed in the form.
      */
     public function createAdmin(): void {
@@ -841,18 +837,10 @@ new class extends Component {
             $uname      = trim($this->aUsername);
             $loginEmail = $uname.'@admin.internal';
 
-            // Only one active Admin at a time (NULL user_status counts as
-            // ACTIVE, same as the COALESCE used everywhere else on this
-            // page). Registering a new Admin while one is active is
-            // allowed — the currently active one is automatically
-            // deactivated instead of blocking the admin. This runs only
-            // AFTER every validation / duplicate check above passed, so a
-            // rejected form never deactivates the current admin.
-            DB::table('users')
-                ->where('role', 'admin')
-                ->where(fn($q) => $q->where('user_status', 'ACTIVE')->orWhereNull('user_status'))
-                ->update(['user_status' => 'INACTIVE', 'updated_at' => now()]);
-
+            // Admin is NOT a "one active account" role like Director /
+            // Registrar — any number of Admins can be ACTIVE at the same
+            // time, so registering a new one no longer touches the
+            // status of any existing Admin account.
             $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
             $full  = implode(' ', array_filter(array_map('trim', [$this->aFn, $this->aMn, $this->aLn, $this->aSfx])));
             $email = trim($this->aEmail);
@@ -1746,9 +1734,12 @@ new class extends Component {
                 $this->flash('error', 'Cannot activate: there is already an active Registrar. Deactivate them first.');
                 return;
             }
-            // Same "only one active" rule as Create Admin.
-            if ($this->tRole==='admin' && $s==='ACTIVE' && $this->activeAdminExists($this->tId)) {
-                $this->flash('error', 'Cannot activate: there is already an active Admin. Deactivate them first.');
+            // Admin has no "only one active" rule anymore — any number of
+            // Admins can be ACTIVE at once. The one thing still blocked is
+            // an Admin deactivating the very account they are currently
+            // logged in as, which would lock them out of this panel.
+            if ($this->tRole==='admin' && $this->isSelfAdmin($this->tId)) {
+                $this->flash('error', 'You cannot activate or deactivate your own Admin account.');
                 return;
             }
             if ($this->tRole==='director')  DB::table('director')->where('user_id',$this->tId)->update(['status'=>$s,'updated_at'=>now()]);
@@ -2870,7 +2861,15 @@ select.mu-filter-input.mu-active {
     $isReg    = $vRole === 'registrar';
     $isAdmin  = $vRole === 'admin';
     $canPhoto = in_array($vRole, ['director', 'organizer']);
-    $canToggle= in_array($vRole, ['director', 'organizer', 'registrar', 'admin']);
+
+    // Admin has no "only one active account" rule — any number of Admins
+    // can be active at once, and the account can be opened/viewed like
+    // any other. The only thing hidden is the Activate/Deactivate button
+    // on the Admin's OWN row (the one currently logged into this panel),
+    // so an Admin can never lock themselves out. Admin accounts created
+    // via "Create Admin" are never "self", so they always keep the button.
+    $isSelfAdmin = $isAdmin && $this->isSelfAdmin($vd['id']);
+    $canToggle   = in_array($vRole, ['director', 'organizer', 'registrar', 'admin']) && !$isSelfAdmin;
 
     // Only ONE active Director / Registrar system-wide (same rule enforced
     // server-side in executeToggle()). If this account is inactive and
@@ -2886,9 +2885,6 @@ select.mu-filter-input.mu-active {
         } elseif ($isReg && $this->activeRegistrarExists($vd['id'])) {
             $blockActivate = true;
             $blockActivateReason = 'Another Registrar is already active. Deactivate them first before activating this one.';
-        } elseif ($isAdmin && $this->activeAdminExists($vd['id'])) {
-            $blockActivate = true;
-            $blockActivateReason = 'Another Admin is already active. Deactivate them first before activating this one.';
         }
     }
 
@@ -3096,7 +3092,6 @@ select.mu-filter-input.mu-active {
 
                 $aluPhoto = $this->photoUrl($vd['photo'] ?? '');
                 $aluEmail = (!empty($vd['record_email']) && !str_contains($vd['record_email'], '@pending.local')) ? $vd['record_email'] : null;
-                $aluComplete = $vStatus === 'VERIFIED';
             @endphp
 
             <div class="mua-body-grid">
@@ -3253,12 +3248,6 @@ select.mu-filter-input.mu-active {
                                 <span class="mua-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;font-size:.8rem;">{{ $vd['course_code'] ?: '—' }}</span>
                                 <span style="color:#CCCCCC;font-size:.8rem;">•</span>
                                 <span class="mua-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;font-size:.8rem;">Batch {{ $vd['batch'] ?: '—' }}</span>
-                                <span style="color:#CCCCCC;font-size:.8rem;">•</span>
-                                @if($aluComplete)
-                                    <span class="mua-info-chip" style="background:#ECFDF5;color:#059669;border:1px solid #6ee7b7;">Complete</span>
-                                @else
-                                    <span class="mua-info-chip" style="background:#FFFBEB;color:#D97706;border:1px solid #fcd34d;">Incomplete</span>
-                                @endif
                             </div>
                             <p style="font-size:.78rem;color:#444444;font-weight:500;word-break:break-all;">{{ $aluEmail ?: '—' }}</p>
                         </div>
@@ -4608,20 +4597,6 @@ select.mu-filter-input.mu-active {
             @endif
 
             @if(!$aOk)
-            {{-- Only ONE active Admin allowed. The admin can still register a
-                 new Admin while one is active — this is just a heads-up that
-                 doing so will automatically set the current active Admin to
-                 Inactive, since only one can be active at a time. The Create
-                 button is no longer locked. --}}
-            @if($this->hasActiveAdmin)
-            <div class="mb-5 p-4 rounded-xl bg-amber-50 border border-amber-300 flex items-start gap-3">
-                <i class="fas fa-triangle-exclamation text-amber-600 text-base mt-0.5 shrink-0"></i>
-                <div>
-                    <p class="text-base font-bold text-amber-800 leading-snug">There is already an active Admin.</p>
-                    <p class="text-sm text-amber-700 mt-0.5 leading-relaxed">Only one Admin can be active at a time. If you register a new one now, the current active Admin will automatically be set to <strong>Inactive</strong>.</p>
-                </div>
-            </div>
-            @endif
             {{-- Full-form loading overlay — appears the instant the button is clicked,
                  before Livewire's round-trip even starts. Covers the whole scroll area
                  so the user gets immediate visual feedback while Mail::send() runs. --}}

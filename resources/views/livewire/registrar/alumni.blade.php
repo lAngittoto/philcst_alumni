@@ -2782,8 +2782,6 @@ new class extends Component {
 
     $hasCustomPhoto = !empty($viewingProfile['profile_photo'])
         && !str_contains($viewingProfile['profile_photo'], 'default.png');
-
-    $profileIsComplete = $this->isProfileComplete($viewingProfile);
 @endphp
 
 <div class="fixed inset-0 z-[9998]"
@@ -3055,12 +3053,6 @@ compressImage(file, maxW, maxH, quality) {
                             <span class="ar-info-chip" style="background:transparent;color:#333333;border:none;padding-left:0;padding-right:0;font-size:.8rem;">
                                 Batch {{ $viewingProfile['batch'] ?? '—' }}
                             </span>
-                            <span style="color:#CCCCCC;font-size:.8rem;">•</span>
-                            @if($profileIsComplete)
-                                <span class="ar-info-chip" style="background:#ECFDF5;color:#059669;border:1px solid #6ee7b7;">Complete</span>
-                            @else
-                                <span class="ar-info-chip" style="background:#FFFBEB;color:#D97706;border:1px solid #fcd34d;">Incomplete</span>
-                            @endif
                         </div>
                         <p style="font-size:.78rem;color:#444444;font-weight:500;word-break:break-all;">
                             {{ $viewingProfile['email'] ?? '—' }}

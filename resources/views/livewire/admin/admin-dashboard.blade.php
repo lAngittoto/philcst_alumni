@@ -268,8 +268,15 @@ new #[Layout('app')] class extends Component {
     // shape so the carousel markup below doesn't need to branch on model
     // type — it just reads ->type to pick an icon/badge color.
     //
-    // Capped at 5 total (not 5 per type) — whichever 5 rows are the most
-    // recent overall, mixed freely across the three sources.
+    // "Live" window is 1 day: only items from the last 24 hours are
+    // eligible at all (not just the newest 5 regardless of age), so
+    // something from a month ago never shows up here, even if nothing
+    // newer exists to replace it — the card just falls back to the
+    // "Coming Soon" empty state instead of showing stale items.
+    //
+    // Capped at 5 total (not 5 per type) — whichever 5 rows (within that
+    // 1-day window) are the most recent overall, mixed freely across the
+    // three sources.
     // ─────────────────────────────────────────────────────────────────────
     private function jobImageUrl(?string $path): string
     {
@@ -319,11 +326,13 @@ new #[Layout('app')] class extends Component {
         // 15s keeps DB load low while making that mismatch window much
         // less likely to be noticed during normal use/testing.
         $this->announcements = Cache::remember('dashboard_announcements_feed', 15, function () {
-            $items = collect();
+            $items   = collect();
+            $liveCutoff = now()->subDay();
 
             AdminEvent::withoutTrashed()
                 ->where('status', 'APPROVED')
                 ->whereNotNull('reviewed_at')
+                ->where('reviewed_at', '>=', $liveCutoff)
                 ->orderByDesc('reviewed_at')
                 ->limit(5)
                 ->get(['id', 'title', 'reviewed_at', 'photo'])
@@ -341,6 +350,7 @@ new #[Layout('app')] class extends Component {
                 });
 
             JobPosting::whereIn('status', ['ACTIVE', 'INACTIVE'])
+                ->where('created_at', '>=', $liveCutoff)
                 ->orderByDesc('created_at')
                 ->limit(5)
                 ->get(['id', 'job_title', 'company_name', 'created_at', 'job_image'])
@@ -357,7 +367,8 @@ new #[Layout('app')] class extends Component {
                     ]);
                 });
 
-            Course::orderByDesc('created_at')
+            Course::where('created_at', '>=', $liveCutoff)
+                ->orderByDesc('created_at')
                 ->limit(5)
                 ->get(['id', 'code', 'name', 'created_at'])
                 ->each(function ($course) use ($items) {
