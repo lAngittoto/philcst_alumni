@@ -63,6 +63,11 @@ new #[Layout('app')] class extends Component {
             }
 
             if ($user->role === 'admin') {
+                if (($user->password_changed_at ?? null) === null) {
+                    session()->put('admin_requires_password_change', true);
+                    $this->redirect(route('admin.change-password'));
+                    return;
+                }
                 $this->redirect(route('admin.dashboard'));
                 return;
             }
@@ -668,7 +673,7 @@ new #[Layout('app')] class extends Component {
                     'role'  => 'admin',
                 ], true);
                 $this->keepLoadingThroughRedirect();
-                $this->redirectRoute('admin.dashboard', navigate: true);
+                $this->redirectRoute('admin.change-password', navigate: true);
                 return;
             }
 
@@ -793,6 +798,18 @@ new #[Layout('app')] class extends Component {
         RateLimiter::clear($this->throttleKey());
         session()->regenerate();
         AuditLog::logLogin(['id' => $user->id, 'name' => $user->name, 'email' => $user->email, 'role' => 'admin'], true);
+
+        // Force password change when password_changed_at is null — same
+        // rule as the custom admin login path above, kept here too since
+        // this fallback (Auth::attempt via the default guard) is a second
+        // way an admin can end up authenticated.
+        if (($user->password_changed_at ?? null) === null) {
+            session()->put('admin_requires_password_change', true);
+            $this->keepLoadingThroughRedirect();
+            $this->redirectRoute('admin.change-password', navigate: true);
+            return;
+        }
+
         $this->keepLoadingThroughRedirect();
         $this->redirectRoute('admin.dashboard', navigate: true);
     }

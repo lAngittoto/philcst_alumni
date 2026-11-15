@@ -82,6 +82,9 @@ new class extends Component {
     public string $cpNew    = '', $cpConfirm = '';
     public array  $cpErrs   = [];
     public bool   $cpSave   = false;
+    public string $cpOk     = '';
+    public bool   $cpShowNew     = false;
+    public bool   $cpShowConfirm = false;
 
     public ?int   $tId      = null;
     public string $tName='', $tAction='', $tRole='';
@@ -727,7 +730,8 @@ new class extends Component {
     public function closeModal(): void {
         $this->activeModal=''; $this->vData=null;
         $this->tId=null;
-        $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[];
+        $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[]; $this->cpOk='';
+        $this->cpShowNew=false; $this->cpShowConfirm=false;
         $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
         $this->vPhoto=null; $this->vPhotoSave=false; $this->vPhotoReset=false; $this->vEmployment=null;
         $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
@@ -1193,7 +1197,7 @@ new class extends Component {
             $this->ueName  = $r->name;
             $this->aeUsername = $r->name ?: explode('@', $r->email ?? '')[0];
         }
-        if ($r->role === 'registrar') {
+        if (in_array($r->role, ['registrar', 'admin'], true)) {
             $this->cpId   = $id;
             $this->cpName = $r->name;
         }
@@ -1733,7 +1737,7 @@ new class extends Component {
     }
 
     public function saveChangePassword(): void {
-        $this->cpErrs = []; $this->cpSave = true;
+        $this->cpErrs = []; $this->cpOk = ''; $this->cpSave = true;
         try {
             if (strlen(trim($this->cpNew)) < 8) throw new \Exception('Password must be at least 8 characters long.');
             if ($this->cpNew !== $this->cpConfirm) throw new \Exception('Passwords do not match. Please re-enter and try again.');
@@ -1747,7 +1751,9 @@ new class extends Component {
                 default     => null,
             };
             $this->cpNew = $this->cpConfirm = '';
-            $this->flash('success', "Password updated for {$this->cpName}. They will be required to change it on next login.");
+            $this->cpShowNew = $this->cpShowConfirm = false;
+            $this->cpOk = "Password updated for {$this->cpName}. They will be required to change it on next login.";
+            $this->flash('success', $this->cpOk);
             $this->dispatch('mu-save-done');
         } catch (\Exception $e) {
             $this->cpErrs = ['general' => [$e->getMessage()]];
@@ -3038,7 +3044,7 @@ select.mu-filter-input.mu-active {
             {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
-            <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4 {{ $isAdmin ? 'mu-pro-span' : '' }}">
+            <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4 {{ $isAdmin ? 'mu-pro-span mb-1' : '' }}">
                 @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0">
                     <div class="relative">
@@ -3087,7 +3093,7 @@ select.mu-filter-input.mu-active {
                 </div>
                 @endunless
 
-                <div class="min-w-0 flex-1">
+                <div class="min-w-0 flex-1 space-y-1.5">
                     <p class="text-xl font-bold uppercase leading-tight" style="color:#333333;">{{ $headerName }}</p>
 
                     @if($isAlumni)
@@ -3102,7 +3108,7 @@ select.mu-filter-input.mu-active {
                             </span>
                         </div>
                     @else
-                        <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                        <div class="flex flex-wrap items-center gap-1.5">
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border {{ $this->roleBadge($vRole) }}">
                                 {{ $this->roleLabel($vRole) }}
                             </span>
@@ -3112,9 +3118,9 @@ select.mu-filter-input.mu-active {
                         </div>
                     @endif
 
-                    <p class="text-lg mt-1 font-medium break-all leading-snug" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
+                    <p class="text-lg font-medium break-all leading-snug" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
 
-                    <p class="text-base font-semibold mt-1" style="color:#333333;">
+                    <p class="text-base font-semibold" style="color:#333333;">
                         <i class="fa-regular fa-calendar mr-1"></i>
                         Joined {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
                     </p>
@@ -3533,30 +3539,30 @@ select.mu-filter-input.mu-active {
                 <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-sm font-bold uppercase tracking-widest" style="color:#7a3f91;">Admin Account</p>
                 </div>
-                <div class="mu-pro-infogrid p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 content-center">
+                <div class="mu-pro-infogrid p-3 grid grid-cols-2 sm:grid-cols-4 gap-2.5 content-center">
                     @foreach([
                         ['First Name',     $vd['reg_first_name']  ?? ''],
                         ['Middle Initial', $vd['reg_middle_name'] ?? ''],
                         ['Last Name',      $vd['reg_last_name']   ?? ''],
                         ['Suffix',         $vd['reg_suffix']      ?? ''],
                     ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
+                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center min-h-[4.25rem]">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">{{ $lbl }}</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-4">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Username / Display Name</p>
+                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-4 min-h-[4.25rem]">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">Username / Display Name</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '') ?: '—' }}</p>
                     </div>
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Login Email</p>
+                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2 min-h-[4.25rem]">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">Login Email</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">
                             {{ (!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : '—' }}
                         </p>
                     </div>
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Registered</p>
+                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2 min-h-[4.25rem]">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">Registered</p>
                         <p class="text-base font-semibold" style="color:#333333;">
                             {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A') }}
                         </p>
@@ -3877,7 +3883,7 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- ADMIN: Update Email + Update Username (replaces Change Password) --}}
+            {{-- ADMIN: Update Email --}}
             @if($isAdmin)
 
             {{-- Update Email --}}
@@ -3977,6 +3983,84 @@ select.mu-filter-input.mu-active {
                             <span wire:loading wire:target="saveUpdateUsername">Saving…</span>
                         </button>
                     </div>
+                </div>
+            </div>
+
+            @endif
+
+            {{-- ADMIN: Change Password — kept as its own standalone card,
+                 separate from Update Email / Update Username above (same
+                 pattern as Director/Registrar's separate Account Status
+                 card below), instead of being grouped inside one block. --}}
+            @if($isAdmin)
+            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
+                <div class="px-5 py-3 border-b border-[#E8E0F0] flex items-center gap-2" style="background:#F9F7FC;">
+                    <i class="fa-solid fa-lock text-sm" style="color:#7A3F91;"></i>
+                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Change Password</p>
+                </div>
+                <div class="p-4">
+                    @if($cpOk)
+                    <div x-init="saving = false"></div>
+                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
+                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $cpOk }}</p>
+                    </div>
+                    @endif
+                    @if(count($cpErrs))
+                    <div x-init="saving = false"></div>
+                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
+                        @foreach($cpErrs as $msgs)
+                            @foreach((array) $msgs as $msg)
+                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
+                            @endforeach
+                        @endforeach
+                    </div>
+                    @endif
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">New Password</label>
+                            <div class="relative">
+                                <i class="fas fa-key absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
+                                <input wire:model.defer="cpNew" type="{{ $cpShowNew ? 'text' : 'password' }}"
+                                       placeholder="Enter new password…" autocomplete="new-password"
+                                       class="mu-filter-input w-full text-base" style="padding-left:2.25rem;padding-right:2.5rem;">
+                                <button type="button" wire:click="$toggle('cpShowNew')"
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
+                                    <i class="fa-solid {{ $cpShowNew ? 'fa-eye-slash' : 'fa-eye' }} text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Confirm Password</label>
+                            <div class="relative">
+                                <i class="fas fa-key absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
+                                <input wire:model.defer="cpConfirm" type="{{ $cpShowConfirm ? 'text' : 'password' }}"
+                                       placeholder="Re-enter new password…" autocomplete="new-password"
+                                       class="mu-filter-input w-full text-base" style="padding-left:2.25rem;padding-right:2.5rem;">
+                                <button type="button" wire:click="$toggle('cpShowConfirm')"
+                                        class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
+                                    <i class="fa-solid {{ $cpShowConfirm ? 'fa-eye-slash' : 'fa-eye' }} text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 p-2.5 rounded-xl flex items-start gap-2" style="background:#fffbeb;border:1px solid #fde68a;">
+                        <i class="fas fa-circle-info text-amber-500 text-sm mt-0.5 shrink-0"></i>
+                        <p class="text-xs font-semibold leading-snug" style="color:#92400e;">Must be at least 8 characters. This admin will be required to change it again on next login.</p>
+                    </div>
+
+                    <button wire:click="saveChangePassword"
+                            @click="saving = true"
+                            wire:loading.attr="disabled" wire:target="saveChangePassword"
+                            class="w-full mt-3 px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5"
+                            style="background:#7A3F91;">
+                        <span wire:loading wire:target="saveChangePassword"><i class="fas fa-spinner animate-spin text-sm"></i></span>
+                        <span wire:loading.remove wire:target="saveChangePassword"><i class="fas fa-lock text-sm"></i></span>
+                        <span wire:loading.remove wire:target="saveChangePassword">Update Password</span>
+                        <span wire:loading wire:target="saveChangePassword">Saving…</span>
+                    </button>
                 </div>
             </div>
 
