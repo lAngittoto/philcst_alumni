@@ -612,7 +612,11 @@ new class extends Component {
                     $v . '@director.internal',
                     $v . '@registrar.internal',
                     $v . '@admin.internal',
-                ])->exists();
+                ])->exists()
+                    // Admin accounts now store the username directly in `name`
+                    // (real email as login email — see createAdmin()), so check
+                    // for a collision there too.
+                    || DB::table('users')->where('role', 'admin')->where('name', $v)->exists();
                 return $taken ? 'That username is already taken. Please choose a different one.' : null;
 
             case 'email':
@@ -834,31 +838,36 @@ new class extends Component {
             }
             if (!empty($fieldErrors)) { $this->aErrs = $fieldErrors; return; }
 
-            $uname      = trim($this->aUsername);
-            $loginEmail = $uname.'@admin.internal';
-
-            // Admin is NOT a "one active account" role like Director /
-            // Registrar — any number of Admins can be ACTIVE at the same
-            // time, so registering a new one no longer touches the
-            // status of any existing Admin account.
-            $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
-            $full  = implode(' ', array_filter(array_map('trim', [$this->aFn, $this->aMn, $this->aLn, $this->aSfx])));
+            $uname = trim($this->aUsername);
             $email = trim($this->aEmail);
 
+            // FIX: Admin accounts must log in with their REAL email, stored
+            // directly in users.email — exactly like every existing working
+            // admin account. The rest of the Admin lifecycle already assumes
+            // this: saveUpdateEmail()'s 'admin' branch writes the typed email
+            // straight into users.email ("Admin uses their real email as
+            // login email"), and the View Profile "Login Email" box hides
+            // any address ending in ".internal". Previously this function
+            // instead saved a generated "username@admin.internal" address
+            // (copying the Director/Registrar convention), which made new
+            // admins impossible to log into and left their profile showing
+            // "Login Email: —" / "Current Email: Not set" since the real
+            // email they typed was only ever saved to a separate
+            // contact_email column that nothing else here reads as the
+            // login identifier. Storing the username in `name` keeps it
+            // working as the login username, same as existing admins.
+            $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
+            $full  = implode(' ', array_filter(array_map('trim', [$this->aFn, $this->aMn, $this->aLn, $this->aSfx])));
+
             $admRow = [
-                'name'        => $full,
-                'email'       => $loginEmail,
+                'name'        => $uname,
+                'email'       => $email,
                 'role'        => 'admin',
                 'password'    => Hash::make($autoPassword),
                 'user_status' => 'ACTIVE',
                 'created_at'  => now(),
                 'updated_at'  => now(),
             ];
-            // Keep the email the credentials were sent to, same column
-            // Registrar uses (reused here since it's just a users.contact_email check).
-            if ($this->registrarContactColExists()) {
-                $admRow['contact_email'] = $email;
-            }
             $uid = DB::table('users')->insertGetId($admRow);
 
             // Send credential email synchronously (->send) so it fires immediately

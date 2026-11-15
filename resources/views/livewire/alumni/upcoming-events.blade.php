@@ -671,34 +671,22 @@ new class extends Component {
     #ev-content-block select.filter-input { font-size: 16px !important; min-height: 2.5rem; }
 }
 
-/* Event list — single column, Seek-style rows (list on the left, detail panel on the right from lg up) */
-.ev-card-grid { display: flex; flex-direction: column; gap: 0; }
+/* Event list — responsive card grid, same design as the Admin Events page */
+.ev-card-grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: .75rem; }
+@media (min-width: 640px)  { .ev-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .ev-card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; } }
 
-/* ── Left/right split — same shape as Job Opportunities' .jb-block ── */
+/* ── Single full-width panel (no more fixed-width sidebar list) ── */
 .ev-left-panel { width: 100%; }
-@media (min-width: 1024px) {
-    .ev-left-panel { width: 420px; flex-shrink: 0; }
-}
-@media (min-width: 1280px) {
-    .ev-left-panel { width: 460px; }
-}
 
-/* ── Below lg: the event detail is shown INSIDE the table block (in place of
-   the list). Toolbar + pagination stay visible; only this area scrolls.
-   From lg up the detail keeps living in the right-hand panel as before. ── */
-.ev-mobile-detail { display: none; }
-@media (max-width: 1023px) {
-    .ev-list-hide-mobile { display: none !important; }
-    .ev-mobile-detail {
-        display: flex; flex-direction: column;
-        flex: 1 1 0%; min-height: 0;
-    }
+/* ── The event detail is shown INSIDE the table block, in place of the
+   grid, at every screen size (same pattern as the Admin Events page).
+   Toolbar + pagination stay visible; only this area scrolls. ── */
+.ev-list-hide-mobile { display: none !important; }
+.ev-mobile-detail {
+    display: flex; flex-direction: column;
+    flex: 1 1 0%; min-height: 0;
 }
-
-.ev-list-row { background: #fff; }
-.ev-list-row:hover { background: #faf7fc; }
-.ev-list-row-active { background: #f5eef9 !important; border-left: 3px solid #7a3f91 !important; }
-.ev-list-row-active:hover { background: #f0e8f7 !important; }
 
 /* Toolbar: Search → "FILTERS" label → status dropdown → Reset (far right).
    Written as plain CSS (not Tailwind md:/lg: classes) so the layout does not
@@ -1180,11 +1168,11 @@ select.filter-input:hover { cursor: default !important; }
         </div>
     </div>
 
-    <div class="ev-block flex-1 min-h-0 flex gap-0 rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
+    <div class="ev-block flex-1 min-h-0 flex flex-col rounded-xl overflow-hidden border border-[#E8E0F0] shadow-sm relative"
          id="ev-content-block">
 
-    {{-- ── LEFT PANEL: Filter bar + List + Pagination ── --}}
-    <div class="ev-left-panel flex flex-col border-r border-[#E8E0F0] bg-white min-h-0">
+    {{-- ── Toolbar + Card Grid + Pagination (same unified block as Admin Events) ── --}}
+    <div class="ev-left-panel flex flex-col bg-white min-h-0">
 
         @php $hasActiveFilters = $search !== '' || $filterStatus !== 'upcoming'; @endphp
         <div class="bg-gray-50 border-b border-[#E8E0F0] px-3 sm:px-3.5 py-2.5 flex-shrink-0"
@@ -1297,12 +1285,12 @@ select.filter-input:hover { cursor: default !important; }
                     $hasPhoto     = !empty($evPhotoUrl);
                     $descPreview  = $event->description ? Str::limit(strip_tags($event->description), 80) : null;
                     $displaySrc   = $event->event_source === 'ADMIN' ? 'PHILCST' : null;
-                    $isActive     = $viewingEventId === $event->id;
+                    $eventDateCard = $event->event_date->setTimezone('Asia/Manila');
                 @endphp
 
-                <div wire:key="event-row-{{ $event->event_source }}-{{ $event->id }}"
-                     class="ev-list-row relative cursor-pointer select-none border-b border-gray-100 transition-colors
-                            {{ $isActive ? 'ev-list-row-active' : '' }}"
+                <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden
+                            cursor-pointer relative select-none flex flex-col group"
+                     wire:key="event-card-{{ $event->event_source }}-{{ $event->id }}"
                      data-ev-card
                      wire:click="viewEvent({{ $event->id }}, '{{ $event->event_source }}')"
                      role="button" tabindex="0"
@@ -1310,67 +1298,80 @@ select.filter-input:hover { cursor: default !important; }
 
                     <div class="ev-card-spinner"><span></span><span></span><span></span></div>
 
-                    <div class="flex gap-3 px-4 py-4">
-                        {{-- Thumbnail --}}
-                        @if($hasPhoto)
-                            <img src="{{ $evPhotoUrl }}" alt="{{ $event->title }}"
-                                 loading="lazy"
-                                 class="w-16 h-16 rounded-lg object-contain bg-gray-50 border border-gray-100 flex-shrink-0"
-                                 onerror="this.onerror=null;this.style.display='none';">
-                        @else
-                            <div class="w-16 h-16 rounded-lg flex-shrink-0 flex items-center justify-center"
-                                 style="background:linear-gradient(135deg,#7a3f91 0%,#4a1f6a 100%);">
-                                <i class="fas fa-calendar-days text-white/70 text-lg"></i>
-                            </div>
+                    @if($hasPhoto)
+                    <div class="relative w-full flex-shrink-0 bg-white" style="height:150px;">
+                        <img src="{{ $evPhotoUrl }}" alt="{{ $event->title }}"
+                             loading="lazy"
+                             class="w-full h-full object-contain"
+                             onerror="this.onerror=null;this.style.display='none';">
+                        <div class="absolute top-2.5 right-2.5">
+                            @if($isCompleted)
+                                <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Done</span>
+                            @else
+                                <span class="badge-card-upcoming"><i class="fas fa-calendar-check text-[11px]"></i> Upcoming</span>
+                            @endif
+                        </div>
+                    </div>
+                    @else
+                    <div class="relative w-full flex items-center justify-center flex-shrink-0"
+                         style="height:100px; background:linear-gradient(135deg,#7a3f91 0%,#4a1f6a 100%);">
+                        <i class="fas fa-calendar-days text-white/20 text-3xl"></i>
+                        <div class="absolute top-2.5 right-2.5">
+                            @if($isCompleted)
+                                <span class="badge-card-completed"><i class="fas fa-circle-check text-[11px]"></i> Done</span>
+                            @else
+                                <span class="badge-card-upcoming"><i class="fas fa-calendar-check text-[11px]"></i> Upcoming</span>
+                            @endif
+                        </div>
+                    </div>
+                    @endif
+
+                    <div class="flex flex-col flex-1 p-3.5 gap-2">
+
+                        <h3 class="font-semibold text-[15px] leading-snug line-clamp-2 text-[#7a3f91]">{!! $this->highlightMatch($event->title) !!}</h3>
+
+                        @if($event->target_participants)
+                        <p class="text-[13px] text-gray-600 truncate flex items-center gap-1.5">
+                            <i class="fas fa-users text-[11px]" style="color:#999;"></i>{{ Str::limit($event->target_participants, 40) }}
+                        </p>
                         @endif
 
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-start justify-between gap-2">
-                                <h3 class="font-bold text-[15px] leading-snug line-clamp-1 text-[#7a3f91]">{!! $this->highlightMatch($event->title) !!}</h3>
-                                @if($isCompleted)
-                                    <span class="badge-card-completed shrink-0"><i class="fas fa-circle-check text-[11px]"></i> Done</span>
-                                @else
-                                    <span class="badge-card-upcoming shrink-0"><i class="fas fa-calendar-check text-[11px]"></i> Upcoming</span>
-                                @endif
-                            </div>
+                        <p class="text-[13px] text-gray-600 truncate flex items-center gap-1.5">
+                            <i class="fas fa-calendar-day text-[11px]" style="color:#999;"></i>
+                            {{ $eventDateCard->format('M d, Y · g:i A') }}
+                        </p>
 
-                            @if($event->target_participants)
-                            <p class="text-[13px] text-gray-600 mt-0.5 line-clamp-1 flex items-center gap-1.5">
-                                <i class="fas fa-users text-[11px]" style="color:#999;"></i>{{ Str::limit($event->target_participants, 40) }}
-                            </p>
-                            @endif
+                        @if($descPreview)
+                        <p class="text-[13px] text-gray-500 line-clamp-2 leading-relaxed">{{ $descPreview }}</p>
+                        @endif
 
-                            @if($descPreview)
-                            <p class="text-[13px] text-gray-500 mt-0.5 line-clamp-1">{{ $descPreview }}</p>
-                            @endif
-
-                            <div class="flex items-center justify-between mt-2">
+                        <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-auto gap-2">
+                            <div class="flex flex-col gap-0.5 min-w-0">
                                 <span class="text-[12px] text-gray-400">{{ $postedAgo }}</span>
-                                <div class="flex items-center gap-2">
-                                    <span class="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-600">
-                                        <i class="fas fa-circle-check text-[9px]"></i>
-                                        {{ $event->confirmed_count }}
-                                    </span>
-                                    <button type="button"
-                                            data-ev-share
-                                            wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
-                                            wire:loading.attr="disabled"
-                                            wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
-                                            class="card-share-btn"
-                                            x-data="{spinning:false}"
-                                            @click.stop="spinning=true"
-                                            x-on:share-modal-opened.window="spinning=false"
-                                            x-on:flash-message.window="spinning=false">
-                                        <span x-show="!spinning">
-                                            <i class="fas fa-share-nodes text-[11px]"></i>
-                                        </span>
-                                        <span x-show="spinning" x-cloak>
-                                            <i class="fas fa-spinner fa-spin text-[11px]" style="color:#1d4ed8;"></i>
-                                        </span>
-                                        <span class="tip">Share</span>
-                                    </button>
-                                </div>
+                                <span class="inline-flex items-center gap-1 text-[12px] font-semibold text-emerald-600">
+                                    <i class="fas fa-circle-check text-[9px]"></i>
+                                    {{ $event->confirmed_count }} attending
+                                </span>
                             </div>
+
+                            <button type="button"
+                                    data-ev-share
+                                    wire:click.stop="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
+                                    wire:loading.attr="disabled"
+                                    wire:target="openShareModal({{ $event->id }}, '{{ $event->event_source }}')"
+                                    class="card-share-btn"
+                                    x-data="{spinning:false}"
+                                    @click.stop="spinning=true"
+                                    x-on:share-modal-opened.window="spinning=false"
+                                    x-on:flash-message.window="spinning=false">
+                                <span x-show="!spinning">
+                                    <i class="fas fa-share-nodes text-[11px]"></i>
+                                </span>
+                                <span x-show="spinning" x-cloak>
+                                    <i class="fas fa-spinner fa-spin text-[11px]" style="color:#1d4ed8;"></i>
+                                </span>
+                                <span class="tip">Share</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1397,10 +1398,11 @@ select.filter-input:hover { cursor: default !important; }
             @endif
         </div>
 
-        {{-- ══ EVENT DETAIL — below lg only: rendered INSIDE the table block, in place
-             of the list. Toolbar above and pagination below stay visible; only this
-             area scrolls. X / Esc / search / filters / pagination / reset all go back
-             to the list. (From lg up the detail lives in the right-hand panel.) ══ --}}
+        {{-- ══ EVENT DETAIL — rendered INSIDE the card-grid block, in place of the
+             grid, at every screen size (same pattern as the Admin Events page).
+             Toolbar above and pagination below stay visible; only this area
+             scrolls. X / Esc / search / filters / pagination / reset all go
+             back to the grid. ══ --}}
         @if($showViewModal && $this->viewingEvent)
         @php
             $event        = $this->viewingEvent;
@@ -1707,7 +1709,7 @@ select.filter-input:hover { cursor: default !important; }
                  sends it back to the list (desktop keeps its right-hand panel open). --}}
             <div class="flex items-center gap-1 flex-wrap">
                 <button wire:click="previousPage"
-                        @click="if (window.innerWidth < 1024) $wire.dismissView()"
+                        @click="$wire.dismissView()"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
@@ -1717,7 +1719,7 @@ select.filter-input:hover { cursor: default !important; }
 
                 @if($pgStart > 1)
                     <button wire:click="$set('page', 1)"
-                            @click="if (window.innerWidth < 1024) $wire.dismissView()"
+                            @click="$wire.dismissView()"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">1</button>
                     @if($pgStart > 2)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
@@ -1729,7 +1731,7 @@ select.filter-input:hover { cursor: default !important; }
                                      bg-white text-[#7a3f91] border border-white">{{ $p }}</span>
                     @else
                         <button wire:click="$set('page', {{ $p }})"
-                                @click="if (window.innerWidth < 1024) $wire.dismissView()"
+                                @click="$wire.dismissView()"
                                 class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                        bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $p }}</button>
                     @endif
@@ -1738,13 +1740,13 @@ select.filter-input:hover { cursor: default !important; }
                 @if($pgEnd < $tp)
                     @if($pgEnd < $tp - 1)<span class="text-white/55 text-sm font-semibold px-0.5">…</span>@endif
                     <button wire:click="$set('page', {{ $tp }})"
-                            @click="if (window.innerWidth < 1024) $wire.dismissView()"
+                            @click="$wire.dismissView()"
                             class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                    bg-white/15 border border-white/25 text-white hover:bg-white/28 transition">{{ $tp }}</button>
                 @endif
 
                 <button wire:click="nextPage"
-                        @click="if (window.innerWidth < 1024) $wire.dismissView()"
+                        @click="$wire.dismissView()"
                         class="inline-flex items-center justify-center min-w-[32px] h-8 px-2.5 rounded-lg text-xs font-bold
                                bg-white/15 border border-white/25 text-white
                                hover:bg-white/28 hover:border-white/50 disabled:opacity-35 disabled:cursor-not-allowed transition"
@@ -1760,300 +1762,6 @@ select.filter-input:hover { cursor: default !important; }
 
     </div>{{-- end left panel --}}
 
-    {{-- ── RIGHT PANEL: Event Detail inline (desktop only) ── --}}
-    <div class="hidden lg:flex flex-1 min-w-0 min-h-0 flex-col bg-gray-50 ev-right-panel">
-    @if($showViewModal && $this->viewingEvent)
-    @php
-    $event        = $this->viewingEvent;
-    $eventDate    = $event->event_date->setTimezone('Asia/Manila');
-    $eventEndDate = $event->event_end_date?->setTimezone('Asia/Manila');
-    $isCompleted  = ($event->event_end_date && $event->event_end_date <= now('UTC')) ||
-                    (!$event->event_end_date && $event->event_date <= now('UTC'));
-    $alumniRsvp   = $this->alumniRsvp;
-    $evPhotoUrl   = $this->eventPhotoUrl($event);
-    $hasPhoto     = !empty($evPhotoUrl);
-    $timeDisplay  = $eventDate->format('g:i A') . ($eventEndDate ? ' – ' . $eventEndDate->format('g:i A') : '');
-    $createdPH    = \Carbon\Carbon::parse($event->created_at)->setTimezone('Asia/Manila');
-    $rsvpLabel    = 'Not responded';
-    $rsvpColor    = 'text-gray-900 font-semibold';
-    if ($alumniRsvp) {
-        $rsvpLabel = $alumniRsvp->response;
-        $rsvpColor = match($alumniRsvp->response) {
-            'CONFIRMED' => 'text-emerald-700 font-bold',
-            'DECLINED'  => 'text-red-600 font-bold',
-            'TENTATIVE' => 'text-amber-600 font-bold',
-            default     => 'text-gray-900 font-semibold'
-        };
-    }
-    $hasDesc     = !empty($event->description);
-    $hasNotes    = !empty($event->notes);
-    $hasContact  = $event->contact_person || $event->contact_email || $event->contact_phone;
-    $isPhilcst   = $event->event_source === 'ADMIN';
-    $displaySrc  = $isPhilcst ? 'PHILCST' : ($event->event_source === 'ORGANIZER' ? 'Organizer' : null);
-    $rsvpLocked  = $this->rsvpIsLocked;
-@endphp
-
-{{-- Right panel top bar --}}
-<div class="flex items-center justify-between px-5 h-[48px] bg-gradient-to-r from-[#7a3f91] to-[#9b59b6] flex-shrink-0 gap-3">
-    <span class="text-white font-semibold text-base truncate">{{ $event->title }}</span>
-    <div class="flex items-center gap-1.5 flex-shrink-0">
-        <button type="button" wire:click="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
-                wire:loading.attr="disabled"
-                wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')"
-                class="detail-top-btn share-btn" aria-label="Share">
-            <span wire:loading.remove wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')">
-                <i class="fas fa-share-nodes text-[13px] text-white"></i>
-            </span>
-            <span wire:loading wire:target="openShareModal({{ $event->id }}, '{{ $viewingEventType }}')">
-                <i class="fas fa-spinner fa-spin text-[13px] text-white"></i>
-            </span>
-            <span class="tip">Share</span>
-        </button>
-        @if(!$isCompleted && !$rsvpLocked)
-        <button type="button" wire:click="openRsvpModal"
-                wire:loading.attr="disabled"
-                wire:target="openRsvpModal"
-                class="detail-top-btn rsvp-btn" aria-label="{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}">
-            <span wire:loading.remove wire:target="openRsvpModal">
-                <i class="fas fa-calendar-plus text-[13px] text-white"></i>
-            </span>
-            <span wire:loading wire:target="openRsvpModal">
-                <i class="fas fa-spinner fa-spin text-[13px] text-white"></i>
-            </span>
-            <span class="tip">{{ $alumniRsvp ? 'Update RSVP' : 'RSVP' }}</span>
-        </button>
-        @endif
-        <button type="button" wire:click="closeViewModal"
-                wire:loading.attr="disabled"
-                wire:target="closeViewModal"
-                class="detail-top-btn close-btn" aria-label="Close">
-            <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg" wire:loading.remove wire:target="closeViewModal">
-                <path d="M2 2L12 12M12 2L2 12"/>
-            </svg>
-            <i class="fas fa-spinner fa-spin text-[13px] text-white" wire:loading wire:target="closeViewModal"></i>
-            <span class="tip">Close</span>
-        </button>
-    </div>
-</div>
-
-{{-- Right panel scrollable content --}}
-<div class="flex-1 min-h-0 overflow-y-auto scroll-thin px-5 py-5 flex flex-col gap-4 bg-white">
-
-                @if(!$isCompleted)
-                    @if($rsvpLocked)
-                    <div class="bg-gray-50 border border-gray-200 border-l-4 border-l-gray-400 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
-                        This event has already <strong>started</strong>, so RSVP responses are now closed. If you had submitted a response earlier, it has been kept on record as your final answer.
-                    </div>
-                    @elseif(!$alumniRsvp)
-                    <div class="bg-blue-50 border border-blue-200 border-l-4 border-l-blue-600 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
-                        This event is <strong class="text-blue-700">upcoming</strong>. We'd appreciate it if you could take a moment to let us know whether you'll be joining — your response helps the organizers plan seating, materials, and refreshments accordingly.
-                        <button wire:click="openRsvpModal" class="font-semibold text-[#7a3f91] hover:underline cursor-pointer">RSVP now →</button>
-                        You're welcome to update your response at any time before the event begins.
-                    </div>
-                    @else
-                    <div class="bg-blue-50 border border-blue-200 border-l-4 border-l-blue-600 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
-                        This event is <strong class="text-blue-700">upcoming</strong>. Thank you for letting us know you're planning to attend — we look forward to seeing you there. Should your plans change, feel free to update or remove your RSVP anytime before the event starts.
-                    </div>
-                    @endif
-                @else
-                    <div class="bg-emerald-50 border border-emerald-200 border-l-4 border-l-emerald-600 rounded-lg px-5 py-3 text-base text-gray-900 leading-relaxed">
-                        This event has officially <strong class="text-emerald-700">concluded</strong>. Thank you to everyone who took part and helped make it a memorable one — the moments and memories from this event will stay with us. We hope to see you again at the next gathering!
-                    </div>
-                @endif
-
-                <div class="border-t border-gray-100"></div>
-
-                {{-- Top section: photo + event title/tags side-by-side --}}
-                <div class="grid grid-cols-1 {{ $hasPhoto ? 'lg:grid-cols-[320px_1fr]' : '' }} gap-5 items-start">
-                    @if($hasPhoto)
-                        <img src="{{ $evPhotoUrl }}" alt="{{ $event->title }}"
-                             class="w-full h-56 object-cover bg-white border border-gray-100 rounded-xl self-start"
-                             onerror="this.onerror=null;this.style.display='none';this.parentElement.classList.remove('lg:grid-cols-[320px_1fr]');">
-                    @endif
-
-                    <div class="flex flex-col gap-2.5 min-w-0">
-                        @if($isPhilcst)
-                            <span class="philcst-post-ribbon self-start"><i class="fas fa-school text-[11px]"></i> Official PHILCST Event</span>
-                        @endif
-
-                        <div>
-                            <p class="detail-side-label mb-1">Event Title</p>
-                            <h2 class="text-2xl font-bold leading-snug mb-1" style="color:#333333;">{{ $event->title }}</h2>
-                            @if($displaySrc)
-                            <p class="text-sm font-semibold uppercase tracking-[.08em]" style="color:#333333;">{{ $displaySrc }}</p>
-                            @endif
-                        </div>
-
-                        {{-- Status + course tags — right below title --}}
-                        <div class="flex flex-wrap gap-2 mt-1">
-                            @if($isCompleted)
-                                <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-green-200 bg-white text-green-700">
-                                    <i class="fas fa-circle-check mr-1.5 text-xs"></i>Completed
-                                </span>
-                            @else
-                                <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-blue-200 bg-white text-blue-700">
-                                    <i class="fas fa-calendar-check mr-1.5 text-xs"></i>Upcoming
-                                </span>
-                            @endif
-                            @if($event->target_participants && !str_starts_with($event->target_participants, 'All Colleges'))
-                                @foreach(explode(',', $event->target_participants) as $part)
-                                    @foreach(explode(' · ', $part) as $sub)
-                                        @if(trim($sub) !== '')
-                                            <span class="inline-flex items-center text-sm font-medium px-3 py-1.5 rounded border border-gray-200 bg-white" style="color:#333333;">{{ trim($sub) }}</span>
-                                        @endif
-                                    @endforeach
-                                @endforeach
-                            @endif
-                        </div>
-
-                        {{-- Venue / Date & Time / Open For --}}
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3 mt-2.5 pt-2.5 border-t border-gray-100">
-                            <div class="detail-side-item">
-                                <span class="detail-side-icon"><i class="fas fa-location-dot"></i></span>
-                                <div class="min-w-0">
-                                    <p class="detail-side-label">Venue</p>
-                                    <p class="detail-side-value">{{ $event->venue ?: '—' }}</p>
-                                    @if($event->venue_address)
-                                        <p class="detail-side-sub">{{ $event->venue_address }}</p>
-                                    @endif
-                                </div>
-                            </div>
-                            <div class="detail-side-item">
-                                <span class="detail-side-icon"><i class="fas fa-calendar-days"></i></span>
-                                <div class="min-w-0">
-                                    <p class="detail-side-label">Date &amp; Time</p>
-                                    <p class="detail-side-value">{{ $eventDate->format('M d, Y') }}</p>
-                                    <p class="detail-side-sub">{{ $timeDisplay }}</p>
-                                </div>
-                            </div>
-                            <div class="detail-side-item">
-                                <span class="detail-side-icon"><i class="fas fa-users"></i></span>
-                                <div class="min-w-0">
-                                    <p class="detail-side-label">Open For</p>
-                                    <p class="detail-side-value">{{ $event->target_participants ? str_replace('·', ' · ', $event->target_participants) : '—' }}</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        {{-- Responses / Your RSVP / Posted — aligned below Venue/Date/OpenFor --}}
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-3 pt-2.5 border-t border-gray-100">
-                            <div class="detail-side-item">
-                                <span class="detail-side-icon"><i class="fas fa-clipboard-check"></i></span>
-                                <div class="min-w-0">
-                                    <p class="detail-side-label">Responses</p>
-                                    <p class="detail-side-value text-emerald-600">{{ $event->confirmed_count }} Attending</p>
-                                    <p class="detail-side-sub">{{ $event->tentative_count }} Maybe · {{ $event->declined_count }} No</p>
-                                </div>
-                            </div>
-                            <div class="detail-side-item">
-                                <span class="detail-side-icon"><i class="fas fa-calendar-check"></i></span>
-                                <div class="min-w-0">
-                                    <p class="detail-side-label">Your RSVP</p>
-                                    <p class="detail-side-value {{ $rsvpColor }}">{{ $rsvpLabel }}</p>
-                                    @if(!$isCompleted && !$rsvpLocked)
-                                        <button wire:click="openRsvpModal"
-                                                class="text-sm font-semibold text-[#7a3f91] hover:underline cursor-pointer mt-0.5">
-                                            {{ $alumniRsvp ? 'Change →' : 'RSVP now →' }}
-                                        </button>
-                                    @elseif(!$isCompleted && $rsvpLocked)
-                                        <p class="text-xs text-gray-400 mt-0.5">RSVP closed</p>
-                                    @endif
-                                </div>
-                            </div>
-                            <div class="detail-side-item">
-                                <span class="detail-side-icon"><i class="fas fa-clock-rotate-left"></i></span>
-                                <div class="min-w-0">
-                                    <p class="detail-side-label">Posted</p>
-                                    <p class="detail-side-value">{{ $createdPH->format('M d, Y') }}</p>
-                                    <p class="detail-side-sub">{{ $createdPH->diffForHumans() }}</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                @if($hasDesc || $hasNotes || $hasContact)
-                <div class="border-t border-gray-100"></div>
-
-                {{-- ═══ Description / Notes / Contact Info ═══ --}}
-                <div class="grid grid-cols-1 {{ ($hasNotes || $hasContact) ? 'lg:grid-cols-2' : '' }} gap-5">
-
-                    @if($hasDesc)
-                    <div class="border border-gray-200 rounded-xl px-5 py-4">
-                        @if($isPhilcst)
-                            <p class="text-base font-bold" style="color:#333333;">📢 {{ strtoupper($event->title) }}</p>
-                            <p class="text-sm mt-1 mb-3 leading-relaxed" style="color:#333333;">
-                                The Philippine College of Science and Technology invites you to join this event! ✨
-                            </p>
-                            <div class="pre-wrap text-base leading-relaxed" style="color:#000000;">{{ trim($event->description) }}</div>
-                            <p class="text-sm font-semibold mt-3" style="color:#333333;">
-                                🗓️ {{ $eventDate->format('F d, Y') }} · {{ $timeDisplay }} &nbsp;•&nbsp; 📍 {{ $event->venue ?: 'TBA' }}
-                            </p>
-                        @else
-                            <p class="detail-side-label mb-2.5 flex items-center gap-1.5">
-                                <i class="fas fa-align-left text-[#7a3f91] text-xs"></i> <span class="text-black">About This Event</span>
-                            </p>
-                            <div class="pre-wrap text-base leading-relaxed" style="color:#000000;">{{ $event->description }}</div>
-                        @endif
-                    </div>
-                    @endif
-
-                    @if($hasNotes || $hasContact)
-                    <div class="flex flex-col gap-4">
-                        @if($hasNotes)
-                        <div class="border border-gray-200 rounded-xl px-5 py-4">
-                            <p class="detail-side-label flex items-center gap-1.5 mb-2.5">
-                                <i class="fas fa-note-sticky text-[#7a3f91] text-xs"></i> <span class="text-black">Additional Notes</span>
-                            </p>
-                            <div class="pre-wrap text-base leading-relaxed" style="color:#000000;">{{ $event->notes }}</div>
-                        </div>
-                        @endif
-
-                        @if($hasContact)
-                        <div class="bg-emerald-50/60 border border-emerald-100 rounded-xl px-5 py-4">
-                            <p class="text-base font-bold text-emerald-800 mb-2.5 flex items-center gap-1.5">
-                                <i class="fas fa-address-card text-xs"></i> Contact Information
-                            </p>
-                            <div class="flex flex-col gap-2">
-                                @if($event->contact_person)
-                                    <p class="text-base font-semibold flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-user text-sm" style="color:#999;"></i>{{ $event->contact_person }}
-                                    </p>
-                                @endif
-                                @if($event->contact_email)
-                                    <p class="text-base flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-envelope text-sm" style="color:#999;"></i>{{ $event->contact_email }}
-                                    </p>
-                                @endif
-                                @if($event->contact_phone)
-                                    <p class="text-base flex items-center gap-2" style="color:#333333;">
-                                        <i class="fas fa-phone text-sm" style="color:#999;"></i>{{ $event->contact_phone }}
-                                    </p>
-                                @endif
-                            </div>
-                        </div>
-                        @endif
-                    </div>
-                    @endif
-
-                </div>
-                @endif
-
-                <p class="text-center text-sm" style="color:#333333;">Posted {{ $createdPH->format('M d, Y \a\t g:i A') }}</p>
-    </div>{{-- end right panel scrollable content --}}
-    @else
-    {{-- No event selected placeholder --}}
-    <div class="flex flex-col items-center justify-center h-full gap-4 text-center px-8">
-        <div class="w-20 h-20 rounded-3xl flex items-center justify-center bg-gradient-to-br from-[#f5eef9] to-[#ede1f5] shadow-sm">
-            <i class="fas fa-calendar-days text-3xl text-[#7a3f91]/50"></i>
-        </div>
-        <div>
-            <p class="font-bold text-lg text-gray-700">Select an event</p>
-            <p class="text-sm text-gray-400 mt-1">Click any event on the left to view details here</p>
-        </div>
-    </div>
-    @endif
-    </div>{{-- end right panel --}}
 
     </div>{{-- end content-block --}}
 </div>
