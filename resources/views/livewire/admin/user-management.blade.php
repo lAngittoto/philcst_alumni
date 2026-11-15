@@ -868,6 +868,17 @@ new class extends Component {
             if ($this->registrarContactColExists()) {
                 $admRow['contact_email'] = $email;
             }
+            // Save First/Middle/Last/Suffix as their own columns too (same
+            // users.first_name/middle_name/last_name/suffix columns Registrar
+            // uses) — without this, View Details has nothing to show even
+            // though the fields were typed in on the Create Admin form,
+            // since `name` only ever stores the already-combined full name.
+            if ($this->registrarNameColsExist()) {
+                $admRow['first_name']  = trim($this->aFn);
+                $admRow['middle_name'] = trim($this->aMn);
+                $admRow['last_name']   = trim($this->aLn);
+                $admRow['suffix']      = trim($this->aSfx);
+            }
             $uid = DB::table('users')->insertGetId($admRow);
 
             // Send credential email synchronously (->send) so it fires immediately
@@ -3486,42 +3497,31 @@ select.mu-filter-input.mu-active {
                 </div>
                 <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
                     @php
-                        // Only show First/Middle/Last/Suffix if this admin actually
-                        // has at least one of those saved — older admins (created
-                        // before name fields existed, e.g. PHILCST_2026_ADMIN) have
-                        // none of these set, so the row is skipped for them instead
-                        // of showing a wall of "—".
-                        $admHasName = trim(($vd['reg_first_name'] ?? '').($vd['reg_middle_name'] ?? '').($vd['reg_last_name'] ?? '').($vd['reg_suffix'] ?? '')) !== '';
+                        // Only include First/Middle/Last/Suffix if this admin
+                        // actually has at least one of those saved — older admins
+                        // (created before name fields existed, e.g.
+                        // PHILCST_2026_ADMIN) have none of these set, so the
+                        // fields are skipped for them instead of showing a wall
+                        // of "—".
+                        $admHasName  = trim(($vd['reg_first_name'] ?? '').($vd['reg_middle_name'] ?? '').($vd['reg_last_name'] ?? '').($vd['reg_suffix'] ?? '')) !== '';
+                        $admLoginEmail = (!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : '—';
+                        $admRegistered = \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A');
+                        $admFields = $admHasName ? [
+                            ['First Name',     $vd['reg_first_name']  ?? ''],
+                            ['Middle Initial', $vd['reg_middle_name'] ?? ''],
+                            ['Last Name',      $vd['reg_last_name']   ?? ''],
+                            ['Suffix',         $vd['reg_suffix']      ?? ''],
+                        ] : [];
+                        $admFields[] = ['Username / Display Name', $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')];
+                        $admFields[] = ['Login Email', $admLoginEmail];
+                        $admFields[] = ['Registered', $admRegistered];
                     @endphp
-                    @if($admHasName)
-                    @foreach([
-                        ['First Name',     $vd['reg_first_name']  ?? ''],
-                        ['Middle Initial', $vd['reg_middle_name'] ?? ''],
-                        ['Last Name',      $vd['reg_last_name']   ?? ''],
-                        ['Suffix',         $vd['reg_suffix']      ?? ''],
-                    ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center">
+                    @foreach($admFields as [$lbl,$val])
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center {{ in_array($lbl, ['Username / Display Name','Login Email','Registered']) ? 'col-span-2' : '' }}">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
-                    @endif
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Username / Display Name</p>
-                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '') ?: '—' }}</p>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Login Email</p>
-                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">
-                            {{ (!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : '—' }}
-                        </p>
-                    </div>
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Registered</p>
-                        <p class="text-base font-semibold" style="color:#333333;">
-                            {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A') }}
-                        </p>
-                    </div>
                 </div>
             </div>
             @endif
