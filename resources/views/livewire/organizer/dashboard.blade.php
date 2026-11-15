@@ -925,13 +925,6 @@ new class extends Component {
                     <span class="org-info-value">{{ $this->organizerName }}</span>
                 </div>
 
-                <div class="org-info-row">
-                    <span class="org-info-label">Teacher ID</span>
-                    <span class="org-info-value font-mono tracking-widest text-[#7A3F91]">
-                        {{ $this->organizerTeacherId ?: '—' }}
-                    </span>
-                </div>
-
                 <div class="org-info-row" style="align-items:flex-start;" x-data="{ toast: false }" @email-updated.window="toast = true; setTimeout(() => toast = false, 2500)">
                     <span class="org-info-label" style="margin-top:2px;">Email</span>
 

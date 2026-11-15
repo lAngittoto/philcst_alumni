@@ -743,20 +743,12 @@ new class extends Component {
             ? (json_decode($this->modalData['career_path'], true) ?? []) : [];
 
         $this->showModal = true;
-
-        // Close any open mobile sidebar the moment the modal opens, so the
-        // modal is never fighting with an overlay drawer for the screen.
-        // The layout's sidebar component/Alpine store should listen for
-        // this browser event (e.g. `x-on:close-sidebar.window="open = false"`
-        // or `@close-sidebar.window="sidebarOpen = false"`).
-        $this->dispatch('close-sidebar');
     }
 
     public function closeModal(): void
     {
         $this->showModal = false;
         $this->modalData = [];
-        $this->dispatch('open-sidebar');
     }
 
 }; ?>
@@ -1972,7 +1964,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                                 <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555]">Alumni</th>
                                 <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555]">Program</th>
                                 <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[660px]:table-cell">Batch</th>
-                                <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[860px]:table-cell">Job Title</th>
                                 <th class="px-4 py-3 text-left text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[1120px]:table-cell">Email Address</th>
                                 <th class="px-4 py-3 text-center text-sm font-semibold uppercase tracking-widest text-[#555555] hidden @[980px]:table-cell">Status</th>
                             </tr>
@@ -2051,18 +2042,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
 
                                 <td class="px-4 py-3.5 text-base font-semibold hidden @[660px]:table-cell text-[#333333]">
                                     <span>{{ $row->batch ?? '—' }}</span>
-                                </td>
-
-                                <td class="px-4 py-3.5 hidden @[860px]:table-cell">
-                                    @if($row->job_title)
-                                        <p class="font-semibold text-base leading-snug uppercase text-[#333333]">{!! $this->highlight($row->job_title, $this->search) !!}</p>
-                                    @elseif($row->employment_status === 'unemployed')
-                                        <span class="text-base italic text-[#999999]">
-                                            {{ ['seeking_employment' => 'Seeking Employment', 'not_looking' => 'Not Looking'][$row->unemployment_status ?? ''] ?? '—' }}
-                                        </span>
-                                    @else
-                                        <span class="text-base italic text-[#cccccc]">No data yet</span>
-                                    @endif
                                 </td>
 
                                 <td class="px-4 py-3.5 hidden @[1120px]:table-cell">
@@ -2335,7 +2314,6 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
              this.isClosing = true;
              this.open = false;
              this.unlockBody();
-             window.dispatchEvent(new CustomEvent('open-sidebar'));
              setTimeout(() => $wire.closeModal(), 180);
          }
      }"
@@ -2396,10 +2374,11 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
         {{-- Body — scrollable only if content overflows, otherwise fits naturally --}}
         <div class="overflow-y-auto flex-1 min-h-0 p-5 sm:p-6 lg:p-8 [scrollbar-width:thin] [scrollbar-color:#d9c9e8_#F9F7FC]">
 
-            {{-- Two-column grid on sm+: Student Info left, Employment right --}}
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-5 lg:gap-7">
+            {{-- Vertical / profile-style layout: sections stack top to bottom
+                 instead of sitting side-by-side. --}}
+            <div class="flex flex-col gap-5 lg:gap-7">
 
-                {{-- LEFT: Student Information --}}
+                {{-- Student Information --}}
                 <div class="border border-[#E8E0F0] rounded-xl p-4 lg:p-6 bg-white">
                     <p class="text-sm font-bold text-[#7a3f91] uppercase tracking-widest mb-3.5">Student Information</p>
                     <div class="space-y-2.5">
@@ -2424,7 +2403,7 @@ div.ae-row-busy > *:not(.ae-row-spinner) { filter: blur(1px); opacity: .3; trans
                     </div>
                 </div>
 
-                {{-- RIGHT: Employment Information --}}
+                {{-- Employment Information --}}
                 <div class="border border-[#E8E0F0] rounded-xl p-4 lg:p-6 bg-white">
                     {{-- Heading + Status badge (beside the title) + updated --}}
                     <div class="flex items-center gap-x-5 gap-y-1.5 mb-3.5 flex-wrap">

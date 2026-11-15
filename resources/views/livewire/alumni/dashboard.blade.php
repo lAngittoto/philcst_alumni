@@ -632,7 +632,6 @@ new class extends Component {
                            style="text-shadow:0 1px 5px rgba(0,0,0,.6);">
                             {{ $alumniName ?: '—' }}
                         </p>
-                        <p class="font-mono text-[0.78rem] sm:text-[0.8rem]" style="color:rgba(255,255,255,.65);">{{ $alumniStudentId ?: 'No student ID' }}</p>
                     </div>
                 </div>
 
