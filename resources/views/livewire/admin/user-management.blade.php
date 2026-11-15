@@ -344,6 +344,14 @@ new class extends Component {
                 ELSE 'ACTIVE'
             END)";
 
+            // Registrar contact email (same reasoning as director_email below):
+            // the registrar's login email is a generated @registrar.internal
+            // address, so the table row — like the View Details modal — must
+            // show users.contact_email instead when that migration has run.
+            $regEmailExpr = $this->registrarContactColExists()
+                ? DB::raw("COALESCE(users.contact_email,'') as reg_contact_email")
+                : DB::raw("'' as reg_contact_email");
+
             $q = DB::table('users')
                 ->select([
                     'users.id','users.name','users.email','users.role','users.created_at',
@@ -352,6 +360,7 @@ new class extends Component {
                     DB::raw("COALESCE(al.student_id,'')          as student_id"),
                     DB::raw("COALESCE(al.email,'')               as record_email"),
                     DB::raw("COALESCE(dir.email,'')               as director_email"),
+                    $regEmailExpr,
                     DB::raw("COALESCE(org.id_number,'')          as id_number"),
                     DB::raw("COALESCE(org.department,'')         as department"),
                     DB::raw("COALESCE(NULLIF(al.profile_photo,''), NULLIF(org.profile_photo,''), NULLIF(dir.profile_photo,'')) as photo"),
@@ -2684,9 +2693,10 @@ select.mu-filter-input.mu-active {
                             $roleDisplay = $this->roleLabel($u->role);
                             $roleCss     = $this->roleBadge($u->role);
                             $rowEmail = match($u->role) {
-                                'alumni'   => (!empty($u->record_email) && !str_contains($u->record_email, '@pending.local')) ? $u->record_email : $u->email,
-                                'director' => $u->director_email ?: $u->email,
-                                default    => $u->email,
+                                'alumni'    => (!empty($u->record_email) && !str_contains($u->record_email, '@pending.local')) ? $u->record_email : $u->email,
+                                'director'  => $u->director_email ?: $u->email,
+                                'registrar' => ($u->reg_contact_email ?? '') ?: $u->email,
+                                default     => $u->email,
                             };
                         @endphp
                         <tr class="mu-tbl-row" wire:click="showProfile({{ $u->id }})"
@@ -3475,6 +3485,27 @@ select.mu-filter-input.mu-active {
                     <p class="text-sm font-bold uppercase tracking-widest" style="color:#7a3f91;">Admin Account</p>
                 </div>
                 <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
+                    @php
+                        // Only show First/Middle/Last/Suffix if this admin actually
+                        // has at least one of those saved — older admins (created
+                        // before name fields existed, e.g. PHILCST_2026_ADMIN) have
+                        // none of these set, so the row is skipped for them instead
+                        // of showing a wall of "—".
+                        $admHasName = trim(($vd['reg_first_name'] ?? '').($vd['reg_middle_name'] ?? '').($vd['reg_last_name'] ?? '').($vd['reg_suffix'] ?? '')) !== '';
+                    @endphp
+                    @if($admHasName)
+                    @foreach([
+                        ['First Name',     $vd['reg_first_name']  ?? ''],
+                        ['Middle Initial', $vd['reg_middle_name'] ?? ''],
+                        ['Last Name',      $vd['reg_last_name']   ?? ''],
+                        ['Suffix',         $vd['reg_suffix']      ?? ''],
+                    ] as [$lbl,$val])
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
+                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
+                    </div>
+                    @endforeach
+                    @endif
                     <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Username / Display Name</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '') ?: '—' }}</p>
