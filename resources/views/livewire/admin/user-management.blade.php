@@ -1,4 +1,4 @@
-{{-- resources/views/livewire/ADMIN/manage-users.blade.php --}}
+\{{-- resources/views/livewire/ADMIN/manage-users.blade.php --}}
 
 <?php
 
@@ -364,6 +364,21 @@ new class extends Component {
                     DB::raw("COALESCE(dir.middle_name,'')        as dir_middle_name"),
                     DB::raw("COALESCE(dir.last_name,'')          as dir_last_name"),
                     DB::raw("COALESCE(dir.suffix,'')              as dir_suffix"),
+                    // Admin's real name — same users.first_name/middle_name/
+                    // last_name/suffix columns Registrar already uses, now
+                    // that createAdmin() actually saves into them.
+                    $this->registrarNameColsExist()
+                        ? DB::raw("COALESCE(users.first_name,'')  as admin_first_name")
+                        : DB::raw("'' as admin_first_name"),
+                    $this->registrarNameColsExist()
+                        ? DB::raw("COALESCE(users.middle_name,'') as admin_middle_name")
+                        : DB::raw("'' as admin_middle_name"),
+                    $this->registrarNameColsExist()
+                        ? DB::raw("COALESCE(users.last_name,'')   as admin_last_name")
+                        : DB::raw("'' as admin_last_name"),
+                    $this->registrarNameColsExist()
+                        ? DB::raw("COALESCE(users.suffix,'')      as admin_suffix")
+                        : DB::raw("'' as admin_suffix"),
                 ])
                 ->leftJoin('alumni as al', fn($j) => $j->on('al.user_id','=','users.id')->whereNull('al.deleted_at'))
                 ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
@@ -652,6 +667,19 @@ new class extends Component {
                 ->exists();
         }
 
+        // Admin: `users.name` holds the USERNAME (see createAdmin()), never
+        // the full name, so comparing against it here always missed. Check
+        // the real name columns instead — same columns Create Registrar
+        // already saves into and the same guard it uses.
+        if ($role === 'admin' && $this->registrarNameColsExist()) {
+            return DB::table('users')->where('role', 'admin')
+                ->whereRaw('LOWER(TRIM(first_name)) = ?', [$fn])
+                ->whereRaw('LOWER(TRIM(last_name)) = ?', [$ln])
+                ->whereRaw("LOWER(TRIM(COALESCE(middle_name,''))) = ?", [$mn])
+                ->whereRaw("LOWER(TRIM(COALESCE(suffix,''))) = ?", [$sfx])
+                ->exists();
+        }
+
         $full = implode(' ', array_filter([$fn, $mn, $ln, $sfx]));
         return DB::table('users')->where('role', $role)
             ->whereRaw('LOWER(TRIM(name)) = ?', [$full])
@@ -860,14 +888,31 @@ new class extends Component {
             $full  = implode(' ', array_filter(array_map('trim', [$this->aFn, $this->aMn, $this->aLn, $this->aSfx])));
 
             $admRow = [
-                'name'        => $uname,
-                'email'       => $email,
-                'role'        => 'admin',
-                'password'    => Hash::make($autoPassword),
-                'user_status' => 'ACTIVE',
-                'created_at'  => now(),
-                'updated_at'  => now(),
+                'name'                => $uname,
+                'email'               => $email,
+                'role'                => 'admin',
+                'password'            => Hash::make($autoPassword),
+                'user_status'         => 'ACTIVE',
+                // Explicit, not left to the column default — guarantees the
+                // temp password sent by email always forces a change on the
+                // admin's first login (login.blade.php's `password_changed_at
+                // === null` check), matching how every email-update/reset
+                // flow in this file nulls it out on purpose.
+                'password_changed_at' => null,
+                'created_at'          => now(),
+                'updated_at'          => now(),
             ];
+            // FIX: these were being typed into the form (aFn/aMn/aLn/aSfx) but
+            // never saved anywhere — `name` only ever held the username, so
+            // every Admin's real name was lost at creation. Same columns and
+            // same guard Create Registrar already uses, so View Profile's
+            // "Admin Account" card (and the table row name) can show it.
+            if ($this->registrarNameColsExist()) {
+                $admRow['first_name']  = trim($this->aFn);
+                $admRow['middle_name'] = trim($this->aMn);
+                $admRow['last_name']   = trim($this->aLn);
+                $admRow['suffix']      = trim($this->aSfx) ?: null;
+            }
             $uid = DB::table('users')->insertGetId($admRow);
 
             // Send credential email synchronously (->send) so it fires immediately
@@ -2687,7 +2732,7 @@ select.mu-filter-input.mu-active {
                                 'alumni'    => trim(implode(' ', array_filter([$u->alumni_first_name, $u->alumni_middle_name, $u->alumni_last_name]))) ?: $u->name,
                                 'organizer' => trim(implode(' ', array_filter([$u->org_first_name, $u->org_last_name]))) ?: $u->name,
                                 'director'  => trim(implode(' ', array_filter([$u->dir_first_name, $u->dir_middle_name, $u->dir_last_name, $u->dir_suffix]))) ?: $u->name,
-                                'admin'     => $this->adminUsername($u->email, $u->name),
+                                'admin'     => trim(implode(' ', array_filter([$u->admin_first_name, $u->admin_middle_name, $u->admin_last_name, $u->admin_suffix]))) ?: $this->adminUsername($u->email, $u->name),
                                 default     => $u->name,
                             };
                             $roleDisplay = $this->roleLabel($u->role);
@@ -2904,7 +2949,7 @@ select.mu-filter-input.mu-active {
     elseif ($isReg)
         $headerName = implode(' ', array_filter([$vd['reg_first_name']??'', $vd['reg_middle_name']??'', $vd['reg_last_name']??'', $vd['reg_suffix']??''])) ?: $vd['name'];
     elseif ($isAdmin)
-        $headerName = $this->adminUsername($vd['email'], $vd['name']);
+        $headerName = trim(implode(' ', array_filter([$vd['reg_first_name']??'', $vd['reg_middle_name']??'', $vd['reg_last_name']??'', $vd['reg_suffix']??'']))) ?: $this->adminUsername($vd['email'], $vd['name']);
     else
         $headerName = $vd['name'];
 
@@ -3477,17 +3522,26 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- ADMIN INFO --}}
+            {{-- ADMIN INFO — same card design as Director Information, plus the
+                 admin-only Login Email / Registered rows below the name grid. --}}
             @if($isAdmin)
             <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-sm font-bold uppercase tracking-widest" style="color:#7a3f91;">Admin Account</p>
                 </div>
                 <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Username / Display Name</p>
-                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '') ?: '—' }}</p>
+                    @foreach([
+                        ['First Name',     $vd['reg_first_name']  ?? ''],
+                        ['Middle Initial', $vd['reg_middle_name'] ?? ''],
+                        ['Last Name',      $vd['reg_last_name']   ?? ''],
+                        ['Suffix',         $vd['reg_suffix']      ?? ''],
+                        ['Username / Display Name', $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
+                    ] as [$lbl,$val])
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center {{ $lbl === 'Username / Display Name' ? 'col-span-2' : '' }}">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
+                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
+                    @endforeach
                     <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Login Email</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">

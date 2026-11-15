@@ -1,4 +1,4 @@
-{{-- resources/views/livewire/auth/login.blade.php --}}
+]{{-- resources/views/livewire/auth/login.blade.php --}}
 
 <?php
 
@@ -586,12 +586,18 @@ new #[Layout('app')] class extends Component {
 
         // ── Admin login ────────────────────────────────────────────────────
         // Admins now log in with their real email address (users.email) or
-        // their display name (users.name). Try email first, then name.
+        // their display name/username (users.name). Try email first, then
+        // name — matched case-insensitively and trimmed, because the
+        // username/email the admin copies out of the credentials email
+        // (or just retypes from memory) can easily differ in case from
+        // what was typed at Create Admin time; a case-sensitive match
+        // would reject perfectly correct credentials.
+        $adminLoginInput = trim($this->name);
         $adminUser = DB::table('users')
             ->where('role', 'admin')
-            ->where(function ($q) {
-                $q->where('email', trim($this->name))
-                  ->orWhere('name',  trim($this->name));
+            ->where(function ($q) use ($adminLoginInput) {
+                $q->whereRaw('LOWER(email) = ?', [Str::lower($adminLoginInput)])
+                  ->orWhereRaw('LOWER(name) = ?', [Str::lower($adminLoginInput)]);
             })
             ->first();
 
@@ -622,6 +628,26 @@ new #[Layout('app')] class extends Component {
                 $this->addError('invalid',
                     'Username/ID or password is invalid. '
                     . "{$remaining} attempt" . ($remaining !== 1 ? 's' : '') . ' remaining before lockout.'
+                );
+                return;
+            }
+
+            // Password correct — check account status before logging in.
+            // Same rule as Director/Registrar: NULL user_status counts as
+            // ACTIVE (never explicitly set on older admins), so this only
+            // blocks an admin that was actually deactivated via Account
+            // Status in User Management.
+            if (($adminUser->user_status ?? 'ACTIVE') !== 'ACTIVE') {
+                AuditLog::logLogin([
+                    'id'    => $adminUser->id,
+                    'name'  => $adminUser->name,
+                    'email' => $adminUser->email,
+                    'role'  => 'admin',
+                ], false, 'Account inactive');
+
+                $this->password = '';
+                $this->addError('invalid',
+                    'Your account is ' . strtolower($adminUser->user_status) . '. Please contact another administrator.'
                 );
                 return;
             }

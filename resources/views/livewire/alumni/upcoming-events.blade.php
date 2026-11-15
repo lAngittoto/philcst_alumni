@@ -1172,7 +1172,7 @@ select.filter-input:hover { cursor: default !important; }
          id="ev-content-block">
 
     {{-- ── Toolbar + Card Grid + Pagination (same unified block as Admin Events) ── --}}
-    <div class="ev-left-panel flex flex-col bg-white min-h-0">
+    <div class="ev-left-panel flex-1 flex flex-col bg-white min-h-0">
 
         @php $hasActiveFilters = $search !== '' || $filterStatus !== 'upcoming'; @endphp
         <div class="bg-gray-50 border-b border-[#E8E0F0] px-3 sm:px-3.5 py-2.5 flex-shrink-0"

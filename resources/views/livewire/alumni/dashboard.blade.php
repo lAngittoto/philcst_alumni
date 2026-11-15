@@ -638,11 +638,6 @@ new class extends Component {
                 <div class="px-4 py-3 flex flex-col divide-y divide-[#F3F4F6] flex-1">
 
                     <div class="flex items-center justify-between gap-2 py-2.5">
-                        <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Student ID</span>
-                        <span class="text-[0.83rem] font-semibold font-mono text-gray-900">{{ $alumniStudentId ?: '—' }}</span>
-                    </div>
-
-                    <div class="flex items-center justify-between gap-2 py-2.5">
                         <span class="text-[0.7rem] font-bold uppercase tracking-[0.07em] text-[#333333] shrink-0">Program</span>
                         <span class="text-[0.88rem] font-bold font-mono text-gray-900">{{ $alumniCourseCode ?: '—' }}</span>
                     </div>
