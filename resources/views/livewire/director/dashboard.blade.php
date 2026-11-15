@@ -763,15 +763,11 @@ new class extends Component {
                      }
                  }">
 
-                <div class="relative w-full overflow-hidden h-[420px] sm:h-[270px]"
-                     style="background:linear-gradient(135deg,#7A3F91,#9b59b6);"
+                <div class="relative w-full overflow-hidden h-[420px] sm:h-[270px] bg-[#EDE0F5]"
                      @pointerenter.once="warmUp()">
-                    <div x-show="previewSrc.includes('default.png')"
-                         class="w-full h-full flex items-center justify-center font-black text-white text-[4.5rem] sm:text-[3.6rem]"
-                         style="background:rgba(255,255,255,0.16);">
-                        <i class="fas fa-user-shield"></i>
-                    </div>
-                    <img x-show="!previewSrc.includes('default.png')" :src="previewSrc"
+                    {{-- Always render the photo (default.png when no custom photo),
+                         same as the Coordinator dashboard — no more icon placeholder. --}}
+                    <img :src="previewSrc"
                          alt="{{ $directorName }}"
                          draggable="false"
                          class="w-full h-full object-cover object-top"

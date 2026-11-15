@@ -1148,13 +1148,14 @@ new class extends Component {
             $this->ueId    = $id;
             $this->ueName  = trim(implode(' ', array_filter([$r->org_first_name, $r->org_last_name]))) ?: $r->name;
         } elseif ($r->role === 'admin') {
-            // Admin: ueEmail = login email (real email, not internal), falling
-            // back to the contact email saved at creation time (same column
-            // Registrar uses) when the login is still the internal address.
+            // Admin now works exactly like Registrar: the email field holds
+            // the CONTACT email typed in Create Admin (users.contact_email);
+            // the login username is shown read-only in Admin Information.
+            // Older admins that log in with a real email (no .internal) fall
+            // back to that login email when no contact email was ever saved.
             // aeUsername = users.name
-            $this->ueEmail = (!empty($r->email) && !str_ends_with($r->email, '.internal'))
-                ? $r->email
-                : ($r->reg_contact_email ?? '');
+            $this->ueEmail = ($r->reg_contact_email ?? '')
+                ?: ((!empty($r->email) && !str_ends_with($r->email, '.internal')) ? $r->email : '');
             $this->ueId    = $id;
             $this->ueName  = $r->name;
             $this->aeUsername = $r->name ?: explode('@', $r->email ?? '')[0];
@@ -1532,43 +1533,87 @@ new class extends Component {
                 }
                 $this->bustUserListCache();
             } elseif ($role === 'admin') {
-                // Admin uses their real email as login email (stored in users.email).
-                $duplicate = DB::table('users')->where('email', $email)->where('id', '!=', $this->ueId)->exists();
-                if ($duplicate) {
-                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another account."]]; return;
-                }
-
                 $adminUser = DB::table('users')->where('id', $this->ueId)->first();
                 if (!$adminUser) {
                     $this->ueErrors = ['general' => ['Admin account not found.']]; return;
                 }
 
-                // Generate a fresh temp password; force change on next login.
+                $hasContactCol = $this->registrarContactColExists();
+                // Admins created via "Create Admin" log in with an
+                // <username>@admin.internal address, so — same as Registrar —
+                // the email typed here is the CONTACT email (users.contact_email)
+                // and the login username stays untouched. Older admins that
+                // log in with a real email keep the previous behaviour.
+                $internalLogin = str_ends_with((string) $adminUser->email, '.internal');
+
+                if ($internalLogin && !$hasContactCol) {
+                    $this->ueErrors = ['general' => ['Admin email is not set up yet. Please run the latest database migration (php artisan migrate), then try again.']]; return;
+                }
+
+                $duplicate = DB::table('users')->where('id', '!=', $this->ueId)
+                    ->where(function ($q) use ($email, $hasContactCol) {
+                        $q->where('email', $email);
+                        if ($hasContactCol) $q->orWhere('contact_email', $email);
+                    })->exists();
+                if ($duplicate) {
+                    $this->ueErrors = ['general' => ["The email \"{$email}\" is already registered to another account."]]; return;
+                }
+
+                // Fresh temp password; force change on next login.
                 $newTempPassword = Str::upper(Str::random(3)) . rand(100, 999) . Str::random(4) . '!';
 
-                DB::table('users')->where('id', $this->ueId)->update([
-                    'email'               => $email,
+                $upd = [
                     'email_updated_at'    => now(),
                     'password'            => Hash::make($newTempPassword),
                     'password_changed_at' => null,
                     'updated_at'          => now(),
-                ]);
+                ];
+                if ($hasContactCol) $upd['contact_email'] = $email;
+                if (!$internalLogin) $upd['email'] = $email;
+                DB::table('users')->where('id', $this->ueId)->update($upd);
+
+                $admUsername = $internalLogin ? explode('@', $adminUser->email)[0] : $email;
 
                 // Send credentials to the new email address.
                 try {
-                    \Mail::to($email)->send(new \App\Mail\DirectorRegistered(
-                        fullName:     $adminUser->name,
-                        username:     $email,
-                        tempPassword: $newTempPassword,
-                        email:        $email,
-                        type:         'email_updated',
-                    ));
-                } catch (\Exception $mailEx) {
+                    $sent = false;
+                    if ($internalLogin) {
+                        // Same approach as Registrar: use the 'email_updated'
+                        // variant when AdminRegistered supports it.
+                        try {
+                            $ctor = (new \ReflectionClass(\App\Mail\AdminRegistered::class))->getConstructor();
+                            $hasType = false;
+                            foreach ($ctor ? $ctor->getParameters() : [] as $p) {
+                                if ($p->getName() === 'type') { $hasType = true; }
+                            }
+                            if ($hasType) {
+                                \Mail::to($email)->send(new \App\Mail\AdminRegistered(
+                                    fullName:     $adminUser->name,
+                                    username:     $admUsername,
+                                    tempPassword: $newTempPassword,
+                                    email:        $email,
+                                    type:         'email_updated',
+                                ));
+                                $sent = true;
+                            }
+                        } catch (\Throwable $e) { /* fall through to the generic mailable */ }
+                    }
+                    if (!$sent) {
+                        \Mail::to($email)->send(new \App\Mail\DirectorRegistered(
+                            fullName:     $adminUser->name,
+                            username:     $admUsername,
+                            tempPassword: $newTempPassword,
+                            email:        $email,
+                            type:         'email_updated',
+                        ));
+                    }
+                } catch (\Throwable $mailEx) {
                     \Illuminate\Support\Facades\Log::warning('Admin email-update mail failed: ' . $mailEx->getMessage());
                 }
 
                 if ($this->vData) {
-                    $this->vData['email'] = $email;
+                    $this->vData['reg_contact_email'] = $email;
+                    if (!$internalLogin) $this->vData['email'] = $email;
                     $this->vData['email_updated_at'] = now();
                 }
                 $this->bustUserListCache();
@@ -2698,7 +2743,8 @@ select.mu-filter-input.mu-active {
                                 'alumni'    => trim(implode(' ', array_filter([$u->alumni_first_name, $u->alumni_middle_name, $u->alumni_last_name]))) ?: $u->name,
                                 'organizer' => trim(implode(' ', array_filter([$u->org_first_name, $u->org_last_name]))) ?: $u->name,
                                 'director'  => trim(implode(' ', array_filter([$u->dir_first_name, $u->dir_middle_name, $u->dir_last_name, $u->dir_suffix]))) ?: $u->name,
-                                'admin'     => $this->adminUsername($u->email, $u->name),
+                                // Admin rows read like Registrar rows: full name, no photo.
+                                'admin'     => $u->name ?: $this->adminUsername($u->email, $u->name),
                                 default     => $u->name,
                             };
                             $roleDisplay = $this->roleLabel($u->role);
@@ -2707,6 +2753,7 @@ select.mu-filter-input.mu-active {
                                 'alumni'    => (!empty($u->record_email) && !str_contains($u->record_email, '@pending.local')) ? $u->record_email : $u->email,
                                 'director'  => $u->director_email ?: $u->email,
                                 'registrar' => ($u->reg_contact_email ?? '') ?: $u->email,
+                                'admin'     => ($u->reg_contact_email ?? '') ?: (str_ends_with((string) $u->email, '.internal') ? '' : $u->email),
                                 default     => $u->email,
                             };
                         @endphp
@@ -2715,7 +2762,7 @@ select.mu-filter-input.mu-active {
                             wire:loading.class="opacity-60 pointer-events-none" wire:target="showProfile({{ $u->id }})">
                             <td class="px-3 sm:px-4 py-3.5 min-w-0">
                                 <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-                                    @unless($u->role === 'registrar')
+                                    @unless(in_array($u->role, ['registrar', 'admin'], true))
                                     <img src="{{ $this->photoUrl($u->photo ?? '') }}" alt="{{ $rowDisplayName }}"
                                          class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover flex-shrink-0 shadow ring-1 ring-[#E8E0F0]">
                                     @endunless
@@ -2916,7 +2963,7 @@ select.mu-filter-input.mu-active {
     elseif ($isReg)
         $headerName = implode(' ', array_filter([$vd['reg_first_name']??'', $vd['reg_middle_name']??'', $vd['reg_last_name']??'', $vd['reg_suffix']??''])) ?: $vd['name'];
     elseif ($isAdmin)
-        $headerName = $this->adminUsername($vd['email'], $vd['name']);
+        $headerName = implode(' ', array_filter([$vd['reg_first_name']??'', $vd['reg_middle_name']??'', $vd['reg_last_name']??'', $vd['reg_suffix']??''])) ?: ($vd['name'] ?: $this->adminUsername($vd['email'], $vd['name']));
     else
         $headerName = $vd['name'];
 
@@ -2927,6 +2974,8 @@ select.mu-filter-input.mu-active {
         $headerSub = $vd['director_email'];
     elseif ($isReg)
         $headerSub = $vd['reg_contact_email'] ?? '';
+    elseif ($isAdmin)
+        $headerSub = ($vd['reg_contact_email'] ?? '') ?: (!str_ends_with($vd['email']??'','.internal') ? ($vd['email'] ?? '') : '');
     elseif (!str_ends_with($vd['email']??'','.internal'))
         $headerSub = $vd['email'];
 @endphp
@@ -2964,7 +3013,7 @@ select.mu-filter-input.mu-active {
             </div>
             @else
             <div class="flex items-center gap-3 min-w-0">
-                @unless($isReg)
+                @unless($isReg || $isAdmin)
                     @if($vPhoto)
                         <img src="{{ $vPhoto->temporaryUrl() }}" alt="Preview"
                              class="w-10 h-10 rounded-xl object-cover flex-shrink-0 ring-2 ring-white/30">
@@ -3006,7 +3055,7 @@ select.mu-filter-input.mu-active {
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
             <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
-                @unless($isReg)
+                @unless($isReg || $isAdmin)
                 <div class="flex flex-col items-center gap-1.5 shrink-0">
                     <div class="relative">
                         @if($vPhotoReset)
@@ -3489,35 +3538,26 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- ADMIN INFO --}}
+            {{-- ADMIN INFO — same card as Registrar Information; older admins that never had
+                 name parts saved just show the Username tile instead of a wall of "—" --}}
             @if($isAdmin)
+            @php
+                $admHasName = trim(($vd['reg_first_name'] ?? '').($vd['reg_middle_name'] ?? '').($vd['reg_last_name'] ?? '').($vd['reg_suffix'] ?? '')) !== '';
+                $admFields  = $admHasName ? [
+                    ['First Name',     $vd['reg_first_name']  ?? ''],
+                    ['Middle Initial', $vd['reg_middle_name'] ?? ''],
+                    ['Last Name',      $vd['reg_last_name']   ?? ''],
+                    ['Suffix',         $vd['reg_suffix']      ?? ''],
+                ] : [];
+                $admFields[] = ['Username', $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')];
+            @endphp
             <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-sm font-bold uppercase tracking-widest" style="color:#7a3f91;">Admin Account</p>
+                    <p class="text-sm font-bold uppercase tracking-widest" style="color:#333333;">Admin Information</p>
                 </div>
                 <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
-                    @php
-                        // Only include First/Middle/Last/Suffix if this admin
-                        // actually has at least one of those saved — older admins
-                        // (created before name fields existed, e.g.
-                        // PHILCST_2026_ADMIN) have none of these set, so the
-                        // fields are skipped for them instead of showing a wall
-                        // of "—".
-                        $admHasName  = trim(($vd['reg_first_name'] ?? '').($vd['reg_middle_name'] ?? '').($vd['reg_last_name'] ?? '').($vd['reg_suffix'] ?? '')) !== '';
-                        $admLoginEmail = (!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : '—';
-                        $admRegistered = \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A');
-                        $admFields = $admHasName ? [
-                            ['First Name',     $vd['reg_first_name']  ?? ''],
-                            ['Middle Initial', $vd['reg_middle_name'] ?? ''],
-                            ['Last Name',      $vd['reg_last_name']   ?? ''],
-                            ['Suffix',         $vd['reg_suffix']      ?? ''],
-                        ] : [];
-                        $admFields[] = ['Username / Display Name', $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')];
-                        $admFields[] = ['Login Email', $admLoginEmail];
-                        $admFields[] = ['Registered', $admRegistered];
-                    @endphp
                     @foreach($admFields as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center {{ in_array($lbl, ['Username / Display Name','Login Email','Registered']) ? 'col-span-2' : '' }}">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center {{ $lbl === 'Username' ? 'col-span-2' : '' }}">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
@@ -3767,19 +3807,21 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- UPDATE EMAIL — Director + Registrar (alumni + coordinator have their own cards above) --}}
-            @if($isDir || $isReg)
+            {{-- UPDATE EMAIL — Director + Registrar + Admin (alumni + coordinator have their own cards above) --}}
+            @if($isDir || $isReg || $isAdmin)
             @php
                 $ueCurrent = $isAlumni
                     ? ((!empty($vd['record_email']) && !str_contains($vd['record_email'],'@pending.local')) ? $vd['record_email'] : null)
-                    : ($isOrg ? ($vd['organizer_email'] ?: null) : ($isReg ? (($vd['reg_contact_email'] ?? '') ?: null) : ($vd['director_email'] ?: null)));
+                    : ($isOrg ? ($vd['organizer_email'] ?: null) : (($isReg || $isAdmin) ? (($vd['reg_contact_email'] ?? '') ?: ((!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : null)) : ($vd['director_email'] ?: null)));
                 $ueNote = $isOrg
                     ? 'A new temporary password will be generated and emailed to the new address. The coordinator must change it on next login.'
                     : ($isReg
                     ? 'Updating the email will reset this registrar\'s password. A new temporary password will be generated and emailed to the new address, and the registrar must change it on next login.'
+                    : ($isAdmin
+                    ? 'Updating the email will reset this admin\'s password. A new temporary password will be generated and emailed to the new address, and the admin must change it on next login.'
                     : ($isDir
                     ? 'Updating the email will reset this director\'s password. A new temporary password will be generated and emailed to the new address, and the director must change it on next login.'
-                    : 'Updating the email will require the account to reset their password on next login.'));
+                    : 'Updating the email will require the account to reset their password on next login.')));
             @endphp
             <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
                 <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
@@ -3836,111 +3878,6 @@ select.mu-filter-input.mu-active {
                     </div>
                 </div>
             </div>
-            @endif
-
-            {{-- ADMIN: Update Email + Update Username (replaces Change Password) --}}
-            @if($isAdmin)
-
-            {{-- Update Email --}}
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
-                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Email Address</p>
-                </div>
-                <div class="p-4">
-                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0] mb-3">
-                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Current Email</p>
-                        <p class="text-lg font-semibold break-all" style="color:#333333;">
-                            @if(!empty($vd['email']) && !str_ends_with($vd['email'], '.internal'))
-                                {{ $vd['email'] }}
-                            @else
-                                <span class="italic" style="color:#555555;">Not set</span>
-                            @endif
-                        </p>
-                    </div>
-                    @if($ueSuccess)
-                    <div x-init="saving = false"></div>
-                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
-                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $ueSuccess }}</p>
-                    </div>
-                    @endif
-                    @if(count($ueErrors))
-                    <div x-init="saving = false"></div>
-                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
-                        @foreach($ueErrors as $msgs)
-                            @foreach($msgs as $msg)
-                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
-                            @endforeach
-                        @endforeach
-                    </div>
-                    @endif
-                    <div class="flex flex-col gap-2">
-                        <div class="relative w-full">
-                            <i class="fas fa-envelope absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                            <input wire:model.defer="ueEmail" type="email" name="ue_email_field" id="ue_email_field" autocomplete="off" data-lpignore="true" data-form-type="other" placeholder="New email address…"
-                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;">
-                        </div>
-                        <button wire:click="saveUpdateEmail"
-                                @click="saving = true"
-                                wire:loading.attr="disabled" wire:target="saveUpdateEmail"
-                                class="w-full px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center justify-center gap-1.5 flex-shrink-0"
-                                style="background:#7A3F91;">
-                            <span wire:loading wire:target="saveUpdateEmail"><i class="fas fa-spinner animate-spin text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail"><i class="fas fa-check text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateEmail">Update Email</span>
-                            <span wire:loading wire:target="saveUpdateEmail">Saving…</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            {{-- Update Username --}}
-            <div class="bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
-                <div class="px-5 py-3 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
-                    <p class="text-base font-bold uppercase tracking-widest" style="color:#333333;">Update Username</p>
-                </div>
-                <div class="p-4">
-                    <div class="bg-gray-50 rounded-xl px-4 py-3 border border-[#E8E0F0] mb-3">
-                        <p class="text-sm font-semibold uppercase tracking-wide mb-1.5" style="color:#333333;">Current Username / Display Name</p>
-                        <p class="text-lg font-bold font-mono" style="color:#333333;">{{ $vd['name'] ?: '—' }}</p>
-                    </div>
-                    @if($aeUsernameSuccess)
-                    <div x-init="saving = false"></div>
-                    <div class="mb-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-start gap-2">
-                        <i class="fas fa-circle-check text-emerald-600 text-sm mt-0.5 shrink-0"></i>
-                        <p class="text-sm font-semibold text-emerald-800 leading-snug">{{ $aeUsernameSuccess }}</p>
-                    </div>
-                    @endif
-                    @if(count($aeUsernameErrors))
-                    <div x-init="saving = false"></div>
-                    <div class="mb-2.5 p-2.5 rounded-xl bg-red-50 border border-red-200 space-y-1">
-                        @foreach($aeUsernameErrors as $msgs)
-                            @foreach($msgs as $msg)
-                            <p class="text-sm text-red-700 flex items-start gap-2"><i class="fas fa-circle-exclamation shrink-0 mt-0.5 text-xs"></i><span>{{ $msg }}</span></p>
-                            @endforeach
-                        @endforeach
-                    </div>
-                    @endif
-                    <div class="flex gap-2">
-                        <div class="relative flex-1">
-                            <i class="fas fa-user absolute left-3 top-1/2 -translate-y-1/2 text-[#7A3F91] text-xs pointer-events-none"></i>
-                            <input wire:model.defer="aeUsername" type="text" placeholder="New username…"
-                                   class="mu-filter-input w-full text-base" style="padding-left:2.25rem;" autocomplete="off" maxlength="80">
-                        </div>
-                        <button wire:click="saveUpdateUsername"
-                                @click="saving = true"
-                                wire:loading.attr="disabled" wire:target="saveUpdateUsername"
-                                class="px-5 py-2.5 rounded-lg text-sm font-bold text-white transition hover:opacity-90 flex items-center gap-1.5 flex-shrink-0"
-                                style="background:#7A3F91;">
-                            <span wire:loading wire:target="saveUpdateUsername"><i class="fas fa-spinner animate-spin text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateUsername"><i class="fas fa-check text-sm"></i></span>
-                            <span wire:loading.remove wire:target="saveUpdateUsername">Update</span>
-                            <span wire:loading wire:target="saveUpdateUsername">Saving…</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-
             @endif
 
             {{-- ACTIVATE / DEACTIVATE (coordinator has its own compact card above) --}}
