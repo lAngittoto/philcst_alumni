@@ -1,4 +1,4 @@
-\{{-- resources/views/livewire/ADMIN/manage-users.blade.php --}}
+{{-- resources/views/livewire/ADMIN/manage-users.blade.php --}}
 
 <?php
 
@@ -3038,7 +3038,7 @@ select.mu-filter-input.mu-active {
             {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
-            <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
+            <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4 {{ $isAdmin ? 'mu-pro-span' : '' }}">
                 @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0">
                     <div class="relative">
@@ -3522,33 +3522,40 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- ADMIN INFO — same card design as Director Information, plus the
-                 admin-only Login Email / Registered rows below the name grid. --}}
+            {{-- ADMIN INFO — full-width (mu-pro-span): it has more rows than
+                 Director's card (name grid + Username + Login Email +
+                 Registered), so squeezing it into the 2-col grid beside the
+                 summary card height-locked it to that shorter card's height
+                 and clipped the bottom rows. Full width removes that limit
+                 and gives the name fields room to sit in one clean row. --}}
             @if($isAdmin)
-            <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
+            <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
                 <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-sm font-bold uppercase tracking-widest" style="color:#7a3f91;">Admin Account</p>
                 </div>
-                <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
+                <div class="mu-pro-infogrid p-3 grid grid-cols-2 sm:grid-cols-4 gap-2 content-center">
                     @foreach([
                         ['First Name',     $vd['reg_first_name']  ?? ''],
                         ['Middle Initial', $vd['reg_middle_name'] ?? ''],
                         ['Last Name',      $vd['reg_last_name']   ?? ''],
                         ['Suffix',         $vd['reg_suffix']      ?? ''],
-                        ['Username / Display Name', $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '')],
                     ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center {{ $lbl === 'Username / Display Name' ? 'col-span-2' : '' }}">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">{{ $lbl }}</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
                     </div>
                     @endforeach
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-4">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Username / Display Name</p>
+                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '') ?: '—' }}</p>
+                    </div>
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Login Email</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">
                             {{ (!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : '—' }}
                         </p>
                     </div>
-                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2">
                         <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Registered</p>
                         <p class="text-base font-semibold" style="color:#333333;">
                             {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A') }}

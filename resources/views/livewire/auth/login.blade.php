@@ -1,4 +1,4 @@
-]{{-- resources/views/livewire/auth/login.blade.php --}}
+{{-- resources/views/livewire/auth/login.blade.php --}}
 
 <?php
 
