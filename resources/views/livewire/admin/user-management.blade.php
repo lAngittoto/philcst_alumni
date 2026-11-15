@@ -82,9 +82,6 @@ new class extends Component {
     public string $cpNew    = '', $cpConfirm = '';
     public array  $cpErrs   = [];
     public bool   $cpSave   = false;
-    public string $cpOk     = '';
-    public bool   $cpShowNew     = false;
-    public bool   $cpShowConfirm = false;
 
     public ?int   $tId      = null;
     public string $tName='', $tAction='', $tRole='';
@@ -367,21 +364,6 @@ new class extends Component {
                     DB::raw("COALESCE(dir.middle_name,'')        as dir_middle_name"),
                     DB::raw("COALESCE(dir.last_name,'')          as dir_last_name"),
                     DB::raw("COALESCE(dir.suffix,'')              as dir_suffix"),
-                    // Admin's real name — same users.first_name/middle_name/
-                    // last_name/suffix columns Registrar already uses, now
-                    // that createAdmin() actually saves into them.
-                    $this->registrarNameColsExist()
-                        ? DB::raw("COALESCE(users.first_name,'')  as admin_first_name")
-                        : DB::raw("'' as admin_first_name"),
-                    $this->registrarNameColsExist()
-                        ? DB::raw("COALESCE(users.middle_name,'') as admin_middle_name")
-                        : DB::raw("'' as admin_middle_name"),
-                    $this->registrarNameColsExist()
-                        ? DB::raw("COALESCE(users.last_name,'')   as admin_last_name")
-                        : DB::raw("'' as admin_last_name"),
-                    $this->registrarNameColsExist()
-                        ? DB::raw("COALESCE(users.suffix,'')      as admin_suffix")
-                        : DB::raw("'' as admin_suffix"),
                 ])
                 ->leftJoin('alumni as al', fn($j) => $j->on('al.user_id','=','users.id')->whereNull('al.deleted_at'))
                 ->leftJoin('organizer as org', fn($j) => $j->on('org.user_id','=','users.id')->whereNull('org.deleted_at'))
@@ -630,11 +612,7 @@ new class extends Component {
                     $v . '@director.internal',
                     $v . '@registrar.internal',
                     $v . '@admin.internal',
-                ])->exists()
-                    // Admin accounts now store the username directly in `name`
-                    // (real email as login email — see createAdmin()), so check
-                    // for a collision there too.
-                    || DB::table('users')->where('role', 'admin')->where('name', $v)->exists();
+                ])->exists();
                 return $taken ? 'That username is already taken. Please choose a different one.' : null;
 
             case 'email':
@@ -663,19 +641,6 @@ new class extends Component {
 
         if ($role === 'director') {
             return DB::table('director')->whereNull('deleted_at')
-                ->whereRaw('LOWER(TRIM(first_name)) = ?', [$fn])
-                ->whereRaw('LOWER(TRIM(last_name)) = ?', [$ln])
-                ->whereRaw("LOWER(TRIM(COALESCE(middle_name,''))) = ?", [$mn])
-                ->whereRaw("LOWER(TRIM(COALESCE(suffix,''))) = ?", [$sfx])
-                ->exists();
-        }
-
-        // Admin: `users.name` holds the USERNAME (see createAdmin()), never
-        // the full name, so comparing against it here always missed. Check
-        // the real name columns instead — same columns Create Registrar
-        // already saves into and the same guard it uses.
-        if ($role === 'admin' && $this->registrarNameColsExist()) {
-            return DB::table('users')->where('role', 'admin')
                 ->whereRaw('LOWER(TRIM(first_name)) = ?', [$fn])
                 ->whereRaw('LOWER(TRIM(last_name)) = ?', [$ln])
                 ->whereRaw("LOWER(TRIM(COALESCE(middle_name,''))) = ?", [$mn])
@@ -730,8 +695,7 @@ new class extends Component {
     public function closeModal(): void {
         $this->activeModal=''; $this->vData=null;
         $this->tId=null;
-        $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[]; $this->cpOk='';
-        $this->cpShowNew=false; $this->cpShowConfirm=false;
+        $this->cpId=null; $this->cpNew=$this->cpConfirm=''; $this->cpErrs=[];
         $this->ueId=null; $this->ueName=$this->ueEmail=''; $this->ueErrors=[]; $this->ueSuccess='';
         $this->vPhoto=null; $this->vPhotoSave=false; $this->vPhotoReset=false; $this->vEmployment=null;
         $this->rFn=$this->rMn=$this->rLn=$this->rSfx=$this->rUsername=$this->rEmail=''; $this->rErrs=[]; $this->rOk='';
@@ -870,52 +834,30 @@ new class extends Component {
             }
             if (!empty($fieldErrors)) { $this->aErrs = $fieldErrors; return; }
 
-            $uname = trim($this->aUsername);
-            $email = trim($this->aEmail);
+            $uname      = trim($this->aUsername);
+            $loginEmail = $uname.'@admin.internal';
 
-            // FIX: Admin accounts must log in with their REAL email, stored
-            // directly in users.email — exactly like every existing working
-            // admin account. The rest of the Admin lifecycle already assumes
-            // this: saveUpdateEmail()'s 'admin' branch writes the typed email
-            // straight into users.email ("Admin uses their real email as
-            // login email"), and the View Profile "Login Email" box hides
-            // any address ending in ".internal". Previously this function
-            // instead saved a generated "username@admin.internal" address
-            // (copying the Director/Registrar convention), which made new
-            // admins impossible to log into and left their profile showing
-            // "Login Email: —" / "Current Email: Not set" since the real
-            // email they typed was only ever saved to a separate
-            // contact_email column that nothing else here reads as the
-            // login identifier. Storing the username in `name` keeps it
-            // working as the login username, same as existing admins.
+            // Admin is NOT a "one active account" role like Director /
+            // Registrar — any number of Admins can be ACTIVE at the same
+            // time, so registering a new one no longer touches the
+            // status of any existing Admin account.
             $autoPassword = Str::upper(Str::random(3)) . rand(100,999) . Str::random(4) . '!';
             $full  = implode(' ', array_filter(array_map('trim', [$this->aFn, $this->aMn, $this->aLn, $this->aSfx])));
+            $email = trim($this->aEmail);
 
             $admRow = [
-                'name'                => $uname,
-                'email'               => $email,
-                'role'                => 'admin',
-                'password'            => Hash::make($autoPassword),
-                'user_status'         => 'ACTIVE',
-                // Explicit, not left to the column default — guarantees the
-                // temp password sent by email always forces a change on the
-                // admin's first login (login.blade.php's `password_changed_at
-                // === null` check), matching how every email-update/reset
-                // flow in this file nulls it out on purpose.
-                'password_changed_at' => null,
-                'created_at'          => now(),
-                'updated_at'          => now(),
+                'name'        => $full,
+                'email'       => $loginEmail,
+                'role'        => 'admin',
+                'password'    => Hash::make($autoPassword),
+                'user_status' => 'ACTIVE',
+                'created_at'  => now(),
+                'updated_at'  => now(),
             ];
-            // FIX: these were being typed into the form (aFn/aMn/aLn/aSfx) but
-            // never saved anywhere — `name` only ever held the username, so
-            // every Admin's real name was lost at creation. Same columns and
-            // same guard Create Registrar already uses, so View Profile's
-            // "Admin Account" card (and the table row name) can show it.
-            if ($this->registrarNameColsExist()) {
-                $admRow['first_name']  = trim($this->aFn);
-                $admRow['middle_name'] = trim($this->aMn);
-                $admRow['last_name']   = trim($this->aLn);
-                $admRow['suffix']      = trim($this->aSfx) ?: null;
+            // Keep the email the credentials were sent to, same column
+            // Registrar uses (reused here since it's just a users.contact_email check).
+            if ($this->registrarContactColExists()) {
+                $admRow['contact_email'] = $email;
             }
             $uid = DB::table('users')->insertGetId($admRow);
 
@@ -1737,7 +1679,7 @@ new class extends Component {
     }
 
     public function saveChangePassword(): void {
-        $this->cpErrs = []; $this->cpOk = ''; $this->cpSave = true;
+        $this->cpErrs = []; $this->cpSave = true;
         try {
             if (strlen(trim($this->cpNew)) < 8) throw new \Exception('Password must be at least 8 characters long.');
             if ($this->cpNew !== $this->cpConfirm) throw new \Exception('Passwords do not match. Please re-enter and try again.');
@@ -1751,9 +1693,7 @@ new class extends Component {
                 default     => null,
             };
             $this->cpNew = $this->cpConfirm = '';
-            $this->cpShowNew = $this->cpShowConfirm = false;
-            $this->cpOk = "Password updated for {$this->cpName}. They will be required to change it on next login.";
-            $this->flash('success', $this->cpOk);
+            $this->flash('success', "Password updated for {$this->cpName}. They will be required to change it on next login.");
             $this->dispatch('mu-save-done');
         } catch (\Exception $e) {
             $this->cpErrs = ['general' => [$e->getMessage()]];
@@ -2738,7 +2678,7 @@ select.mu-filter-input.mu-active {
                                 'alumni'    => trim(implode(' ', array_filter([$u->alumni_first_name, $u->alumni_middle_name, $u->alumni_last_name]))) ?: $u->name,
                                 'organizer' => trim(implode(' ', array_filter([$u->org_first_name, $u->org_last_name]))) ?: $u->name,
                                 'director'  => trim(implode(' ', array_filter([$u->dir_first_name, $u->dir_middle_name, $u->dir_last_name, $u->dir_suffix]))) ?: $u->name,
-                                'admin'     => trim(implode(' ', array_filter([$u->admin_first_name, $u->admin_middle_name, $u->admin_last_name, $u->admin_suffix]))) ?: $this->adminUsername($u->email, $u->name),
+                                'admin'     => $this->adminUsername($u->email, $u->name),
                                 default     => $u->name,
                             };
                             $roleDisplay = $this->roleLabel($u->role);
@@ -2955,7 +2895,7 @@ select.mu-filter-input.mu-active {
     elseif ($isReg)
         $headerName = implode(' ', array_filter([$vd['reg_first_name']??'', $vd['reg_middle_name']??'', $vd['reg_last_name']??'', $vd['reg_suffix']??''])) ?: $vd['name'];
     elseif ($isAdmin)
-        $headerName = trim(implode(' ', array_filter([$vd['reg_first_name']??'', $vd['reg_middle_name']??'', $vd['reg_last_name']??'', $vd['reg_suffix']??'']))) ?: $this->adminUsername($vd['email'], $vd['name']);
+        $headerName = $this->adminUsername($vd['email'], $vd['name']);
     else
         $headerName = $vd['name'];
 
@@ -3044,7 +2984,7 @@ select.mu-filter-input.mu-active {
             {{-- SUMMARY CARD: photo + name + role/batch line + email --}}
             {{-- Coordinators have their own two-panel layout below — skip this generic card for them --}}
             @if(!$isOrg && !$isAlumni)
-            <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4 {{ $isAdmin ? 'mu-pro-span mb-1' : '' }}">
+            <div class="mu-pro-summary bg-white rounded-xl border border-[#E8E0F0] p-4 flex items-start gap-4">
                 @unless($isReg)
                 <div class="flex flex-col items-center gap-1.5 shrink-0">
                     <div class="relative">
@@ -3093,7 +3033,7 @@ select.mu-filter-input.mu-active {
                 </div>
                 @endunless
 
-                <div class="min-w-0 flex-1 space-y-1.5">
+                <div class="min-w-0 flex-1">
                     <p class="text-xl font-bold uppercase leading-tight" style="color:#333333;">{{ $headerName }}</p>
 
                     @if($isAlumni)
@@ -3108,7 +3048,7 @@ select.mu-filter-input.mu-active {
                             </span>
                         </div>
                     @else
-                        <div class="flex flex-wrap items-center gap-1.5">
+                        <div class="flex flex-wrap items-center gap-1.5 mt-1">
                             <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border {{ $this->roleBadge($vRole) }}">
                                 {{ $this->roleLabel($vRole) }}
                             </span>
@@ -3118,9 +3058,9 @@ select.mu-filter-input.mu-active {
                         </div>
                     @endif
 
-                    <p class="text-lg font-medium break-all leading-snug" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
+                    <p class="text-lg mt-1 font-medium break-all leading-snug" style="color:#333333;">{{ $headerSub ?: '—' }}</p>
 
-                    <p class="text-base font-semibold" style="color:#333333;">
+                    <p class="text-base font-semibold mt-1" style="color:#333333;">
                         <i class="fa-regular fa-calendar mr-1"></i>
                         Joined {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y') }}
                     </p>
@@ -3528,41 +3468,25 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- ADMIN INFO — full-width (mu-pro-span): it has more rows than
-                 Director's card (name grid + Username + Login Email +
-                 Registered), so squeezing it into the 2-col grid beside the
-                 summary card height-locked it to that shorter card's height
-                 and clipped the bottom rows. Full width removes that limit
-                 and gives the name fields room to sit in one clean row. --}}
+            {{-- ADMIN INFO --}}
             @if($isAdmin)
-            <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden mu-pro-span">
+            <div class="mu-pro-infocard bg-white rounded-xl border border-[#E8E0F0] overflow-hidden">
                 <div class="px-4 py-2.5 border-b border-[#E8E0F0]" style="background:#F9F7FC;">
                     <p class="text-sm font-bold uppercase tracking-widest" style="color:#7a3f91;">Admin Account</p>
                 </div>
-                <div class="mu-pro-infogrid p-3 grid grid-cols-2 sm:grid-cols-4 gap-2.5 content-center">
-                    @foreach([
-                        ['First Name',     $vd['reg_first_name']  ?? ''],
-                        ['Middle Initial', $vd['reg_middle_name'] ?? ''],
-                        ['Last Name',      $vd['reg_last_name']   ?? ''],
-                        ['Suffix',         $vd['reg_suffix']      ?? ''],
-                    ] as [$lbl,$val])
-                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center min-h-[4.25rem]">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">{{ $lbl }}</p>
-                        <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $val ?: '—' }}</p>
-                    </div>
-                    @endforeach
-                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-4 min-h-[4.25rem]">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">Username / Display Name</p>
+                <div class="mu-pro-infogrid p-3 grid grid-cols-2 gap-2 content-center">
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Username / Display Name</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">{{ $this->adminUsername($vd['email'] ?? '', $vd['name'] ?? '') ?: '—' }}</p>
                     </div>
-                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2 min-h-[4.25rem]">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">Login Email</p>
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Login Email</p>
                         <p class="text-base font-semibold break-words leading-snug" style="color:#333333;">
                             {{ (!empty($vd['email']) && !str_ends_with($vd['email'], '.internal')) ? $vd['email'] : '—' }}
                         </p>
                     </div>
-                    <div class="bg-gray-50 rounded-lg px-3 py-3 border border-[#E8E0F0] flex flex-col justify-center col-span-2 sm:col-span-2 min-h-[4.25rem]">
-                        <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#333333;">Registered</p>
+                    <div class="bg-gray-50 rounded-lg px-3 py-2.5 border border-[#E8E0F0] flex flex-col justify-center col-span-2">
+                        <p class="text-xs font-semibold uppercase tracking-wide mb-0.5" style="color:#333333;">Registered</p>
                         <p class="text-base font-semibold" style="color:#333333;">
                             {{ \Carbon\Carbon::parse($vd['created_at'])->timezone('Asia/Manila')->format('M d, Y \a\t g:i A') }}
                         </p>
@@ -3883,7 +3807,7 @@ select.mu-filter-input.mu-active {
             </div>
             @endif
 
-            {{-- ADMIN: Update Email --}}
+            {{-- ADMIN: Update Email + Update Username (replaces Change Password) --}}
             @if($isAdmin)
 
             {{-- Update Email --}}
